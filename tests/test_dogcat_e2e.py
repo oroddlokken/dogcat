@@ -22,7 +22,7 @@ class TestCompleteWorkflow:
         # Initialize repo
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create an issue
@@ -103,7 +103,7 @@ class TestCompleteWorkflow:
 
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create tasks with different priorities
@@ -149,7 +149,7 @@ class TestCompleteWorkflow:
 
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create main feature task
@@ -240,7 +240,7 @@ class TestCompleteWorkflow:
 
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create multiple issues
@@ -282,7 +282,7 @@ class TestCompleteWorkflow:
 
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create diverse set of issues
@@ -368,7 +368,7 @@ class TestErrorHandling:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Show nonexistent
@@ -404,7 +404,7 @@ class TestErrorHandling:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Priority out of range should fail gracefully (or be handled)
@@ -432,7 +432,7 @@ class TestDataPersistence:
 
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create an issue
@@ -463,7 +463,7 @@ class TestDataPersistence:
 
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         create_result = runner.invoke(

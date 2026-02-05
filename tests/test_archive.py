@@ -15,7 +15,7 @@ def init_repo(dogcats_dir: Path) -> None:
     """Initialize a dogcat repo for testing."""
     runner.invoke(
         app,
-        ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+        ["init", "--dogcats-dir", str(dogcats_dir)],
     )
 
 

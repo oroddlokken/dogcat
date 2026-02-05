@@ -18,7 +18,7 @@ class TestCLIInit:
         dogcats_dir = tmp_path / ".dogcats"
         result = runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
         assert dogcats_dir.exists()
@@ -29,7 +29,7 @@ class TestCLIInit:
         dogcats_dir = tmp_path / ".dogcats"
         result = runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
         assert "Dogcat repository initialized" in result.stdout
 
@@ -42,7 +42,7 @@ class TestCLICreate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         result = runner.invoke(
@@ -65,7 +65,7 @@ class TestCLICreate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         result = runner.invoke(
@@ -92,7 +92,7 @@ class TestCLICreate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         result = runner.invoke(
@@ -115,7 +115,7 @@ class TestCLICreate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         result = runner.invoke(
@@ -139,7 +139,7 @@ class TestCLICreate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         result = runner.invoke(
@@ -161,7 +161,7 @@ class TestCLICreate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         result = runner.invoke(
@@ -185,7 +185,7 @@ class TestCLICreate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         result = runner.invoke(
@@ -199,7 +199,7 @@ class TestCLICreate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         result = runner.invoke(
@@ -222,7 +222,7 @@ class TestCLICreate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Test bug shorthand
@@ -292,7 +292,7 @@ class TestCLICreate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Shorthand says priority 1, but explicit option says 3 - should error
@@ -319,7 +319,7 @@ class TestCLICreate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Shorthand says type bug, but explicit option says feature - should error
@@ -343,7 +343,7 @@ class TestCLICreate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Priority shorthand before title
@@ -378,7 +378,7 @@ class TestCLICreate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Priority and type shorthand together
@@ -424,7 +424,7 @@ class TestCLICreate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # 'p' is not a valid shorthand
@@ -440,7 +440,7 @@ class TestCLICreate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # 'b 0 b' is ambiguous - second 'b' would become title
@@ -472,7 +472,7 @@ class TestCLICreate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create with in_progress status
@@ -514,7 +514,7 @@ class TestCLICreate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create parent issue
@@ -557,7 +557,7 @@ class TestCLICreate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Try to create issue with nonexistent dependency
@@ -592,7 +592,7 @@ class TestCLICreate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Try to create issue with nonexistent blocks target
@@ -624,7 +624,7 @@ class TestCLICreate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create issue that will be blocked
@@ -661,7 +661,7 @@ class TestCLICreate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create parent issue
@@ -706,7 +706,7 @@ class TestCLICreate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create parent issue
@@ -749,7 +749,7 @@ class TestCLICreate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         result = runner.invoke(
@@ -771,7 +771,7 @@ class TestCLICreate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         result = runner.invoke(
@@ -797,7 +797,7 @@ class TestCLICreate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         result = runner.invoke(
@@ -823,7 +823,7 @@ class TestCLICreate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         result = runner.invoke(
@@ -841,7 +841,7 @@ class TestCLICreate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         result = runner.invoke(
@@ -871,7 +871,7 @@ class TestCLIList:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         result = runner.invoke(
@@ -886,7 +886,7 @@ class TestCLIList:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         runner.invoke(
@@ -911,7 +911,7 @@ class TestCLIList:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         create_result = runner.invoke(
@@ -944,7 +944,7 @@ class TestCLIList:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         runner.invoke(
@@ -966,7 +966,7 @@ class TestCLIList:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create open and closed issues
@@ -1001,7 +1001,7 @@ class TestCLIList:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create open and closed issues
@@ -1035,7 +1035,7 @@ class TestCLIList:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create and close an issue
@@ -1078,7 +1078,7 @@ class TestCLIList:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create and close an issue
@@ -1133,7 +1133,7 @@ class TestCLIList:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create normal issue
@@ -1175,7 +1175,7 @@ class TestCLIList:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create parent issue
@@ -1224,7 +1224,7 @@ class TestCLIList:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create a blocker issue
@@ -1281,7 +1281,7 @@ class TestCLIList:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create a blocker issue
@@ -1334,7 +1334,7 @@ class TestCLIList:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create a blocker issue
@@ -1394,7 +1394,7 @@ class TestCLIShow:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         create_result = runner.invoke(
@@ -1416,7 +1416,7 @@ class TestCLIShow:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         result = runner.invoke(
@@ -1431,7 +1431,7 @@ class TestCLIShow:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         create_result = runner.invoke(
@@ -1453,7 +1453,7 @@ class TestCLIShow:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         create_result = runner.invoke(
@@ -1481,7 +1481,7 @@ class TestCLIShow:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create parent issue
@@ -1531,7 +1531,7 @@ class TestCLIShow:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create parent issue
@@ -1576,7 +1576,7 @@ class TestCLIUpdate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         create_result = runner.invoke(
@@ -1609,7 +1609,7 @@ class TestCLIUpdate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         create_result = runner.invoke(
@@ -1636,7 +1636,7 @@ class TestCLIUpdate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         result = runner.invoke(
@@ -1657,7 +1657,7 @@ class TestCLIUpdate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         create_result = runner.invoke(
@@ -1677,7 +1677,7 @@ class TestCLIUpdate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         create_result = runner.invoke(
@@ -1706,7 +1706,7 @@ class TestCLIUpdate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create parent issue
@@ -1765,7 +1765,7 @@ class TestCLIUpdate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create parent issue
@@ -1820,7 +1820,7 @@ class TestCLIUpdate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create issue
@@ -1859,7 +1859,7 @@ class TestCLIUpdate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create original issue
@@ -1914,7 +1914,7 @@ class TestCLIUpdate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create issue
@@ -1950,7 +1950,7 @@ class TestCLIUpdate:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         create_result = runner.invoke(
@@ -1993,7 +1993,7 @@ class TestCLILabel:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         create_result = runner.invoke(
@@ -2022,7 +2022,7 @@ class TestCLILabel:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         create_result = runner.invoke(
@@ -2058,7 +2058,7 @@ class TestCLILabel:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         create_result = runner.invoke(
@@ -2093,7 +2093,7 @@ class TestCLILabel:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create issue without skip_agent
@@ -2142,7 +2142,7 @@ class TestCLIDependency:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         create1 = runner.invoke(
@@ -2177,7 +2177,7 @@ class TestCLIDependency:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         create1 = runner.invoke(
@@ -2227,7 +2227,7 @@ class TestCLIReady:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         result = runner.invoke(
@@ -2242,7 +2242,7 @@ class TestCLIReady:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         create1 = runner.invoke(
@@ -2263,7 +2263,7 @@ class TestCLIReady:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create a normal issue
@@ -2311,7 +2311,7 @@ class TestCLIClose:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         create_result = runner.invoke(
@@ -2332,7 +2332,7 @@ class TestCLIClose:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         create_result = runner.invoke(
@@ -2352,7 +2352,7 @@ class TestCLIClose:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         create_result = runner.invoke(
@@ -2374,7 +2374,7 @@ class TestCLIClose:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         create_result = runner.invoke(
@@ -2396,7 +2396,7 @@ class TestCLIClose:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         result = runner.invoke(
@@ -2410,7 +2410,7 @@ class TestCLIClose:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         create_result = runner.invoke(
@@ -2458,7 +2458,7 @@ class TestCLIClose:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         create_result = runner.invoke(
@@ -2510,7 +2510,7 @@ class TestCLIDoctor:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         result = runner.invoke(
@@ -2538,7 +2538,7 @@ class TestCLIDoctor:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         result = runner.invoke(
@@ -2587,7 +2587,7 @@ class TestCLIComments:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         create_result = runner.invoke(
@@ -2618,7 +2618,7 @@ class TestCLIComments:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Create issue and get full ID
@@ -2662,7 +2662,7 @@ class TestCLIComments:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         create_result = runner.invoke(
@@ -2714,7 +2714,7 @@ class TestCLIComments:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         create_result = runner.invoke(
@@ -2752,7 +2752,7 @@ class TestCLIComments:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         create_result = runner.invoke(
@@ -2816,7 +2816,6 @@ class TestCLIInitPrefix:
                 "myapp",
                 "--dogcats-dir",
                 str(dogcats_dir),
-                "--no-gitattributes",
             ],
         )
         assert result.exit_code == 0
@@ -2834,7 +2833,6 @@ class TestCLIInitPrefix:
                 "testprefix",
                 "--dogcats-dir",
                 str(dogcats_dir),
-                "--no-gitattributes",
             ],
         )
 
@@ -2852,7 +2850,7 @@ class TestCLIInitPrefix:
 
         result = runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
         assert "Set issue prefix: my-cool-project" in result.stdout
@@ -2868,7 +2866,6 @@ class TestCLIInitPrefix:
                 "myapp-",
                 "--dogcats-dir",
                 str(dogcats_dir),
-                "--no-gitattributes",
             ],
         )
         assert result.exit_code == 0
@@ -2885,7 +2882,6 @@ class TestCLIInitPrefix:
                 "custom",
                 "--dogcats-dir",
                 str(dogcats_dir),
-                "--no-gitattributes",
             ],
         )
 
@@ -2904,7 +2900,7 @@ class TestCLIInitPrefix:
 
         runner.invoke(
             app,
-            ["init", "--dogcats-dir", str(dogcats_dir), "--no-gitattributes"],
+            ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
         result = runner.invoke(
@@ -2925,7 +2921,6 @@ class TestCLIInitPrefix:
                 "proj",
                 "--dogcats-dir",
                 str(dogcats_dir),
-                "--no-gitattributes",
             ],
         )
 
@@ -3080,7 +3075,6 @@ class TestCLIImportBeadsPrefix:
                 "keepme",
                 "--dogcats-dir",
                 str(dogcats_dir),
-                "--no-gitattributes",
             ],
         )
 
@@ -3124,7 +3118,6 @@ class TestCLIStatus:
                 "test",
                 "--dogcats-dir",
                 str(dogcats_dir),
-                "--no-gitattributes",
             ],
         )
 
@@ -3166,7 +3159,6 @@ class TestCLIStatus:
                 "empty",
                 "--dogcats-dir",
                 str(dogcats_dir),
-                "--no-gitattributes",
             ],
         )
 
@@ -3189,7 +3181,6 @@ class TestCLIStatus:
                 "jsontest",
                 "--dogcats-dir",
                 str(dogcats_dir),
-                "--no-gitattributes",
             ],
         )
 

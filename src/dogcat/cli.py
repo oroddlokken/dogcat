@@ -325,11 +325,6 @@ def init(
         help="Issue prefix (default: auto-detect from directory name)",
     ),
     dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
-    no_gitattributes: bool = typer.Option(
-        False,
-        "--no-gitattributes",
-        help="Skip creating .gitattributes file",
-    ),
 ) -> None:
     """Initialize a new Dogcat repository.
 
@@ -348,13 +343,6 @@ def init(
         typer.echo(f"✓ Created {issues_file}")
     else:
         typer.echo(f"✓ {issues_file} already exists")
-
-    # Create .gitattributes file unless --no-gitattributes is specified
-    if not no_gitattributes:
-        gitattributes_file = dogcats_path / ".gitattributes"
-        if not gitattributes_file.exists():
-            gitattributes_file.write_text("issues.jsonl merge=union\n")
-            typer.echo(f"✓ Created {gitattributes_file}")
 
     # Determine and save the issue prefix
     if prefix is None:
