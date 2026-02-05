@@ -36,6 +36,27 @@ For a guide more suited for humans, run `dcat guide`.
 
 Also take a look at the `Issue tracking` section in [CLAUDE.MD] to see how to integrate this in your agentic workflow.
 
+### Migrating from beads
+
+If you already have a collection of issues in Beads, you can import them in dogcat. In a folder without a `.dogcats` folder run `dogcat import-beads /path/to/project/.beads/issues.jsonl`.
+
+## Screenshots
+
+Compact table view showing tasks with ID, Parent, Type, Priority, and Title columns:
+![Table View](static/dcat-list_table.png)
+
+Hierarchical tree view displaying parent-child task relationships:
+![Tree View](static/dcat-list_tree.png)
+
+Detailed list view with status indicators and full task information:
+![List View](static/dcat-list.png)
+
+Ready view showing unblocked tasks available for work:
+![Ready Tasks](static/dcat-ready.png)
+
+Detailed task view with description, acceptance criteria, and metadata:
+![Task Details](static/dcat-show-issueid.png)
+
 ## Development
 
 `dogcat` is now in a state where it can be dogfooded. Included is the issues.jsonl file containing the current issues.
