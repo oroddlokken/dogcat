@@ -1,0 +1,23 @@
+{
+    "files.exclude": {
+        "**/__pycache__": true,
+        "**/.mypy_cache": true,
+        "**/.ruff_cache": true,
+        "**/.tox": true,
+        "**/.venv": true,
+        "**/.pytest_cache": true,
+        "**/node_modules": true,        
+        "htmlcov": true,
+        ".coverage": true,
+        ".coverage.*": true,
+    },
+    "terminal.integrated.env.linux": {
+        "PYTHONPATH": "${workspaceFolder}"
+    },
+    "terminal.integrated.env.windows": {
+        "PYTHONPATH": "${workspaceFolder}"
+    },
+    "[python]": {
+        "editor.defaultFormatter": "ms-python.vscode-pylance"
+    },
+}

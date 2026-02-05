@@ -1,0 +1,139 @@
+[project]
+name = "dogcat"
+version = "0.1.0"
+description = "git-backed issue tracking for AI agents (and agents)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "typer>=0.14.0",
+    "watchdog>=4.0.0",
+    "rich>=14.3.2",
+    "toml>=0.10.2",
+    "orjson>=3.11.7",
+]
+
+[project.scripts]
+dcat = "dogcat.app:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dogcat"]
+
+[dependency-groups]
+dev = [
+    "black>=26.1.0",
+    "isort>=7.0.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov==7.0.0",
+    "pytest-xdist[psutil]",
+    "ruff>=0.14.14",
+    "pytest-xdist==3.8.0",
+    "pyright>=1.1.408",
+    "vulture>=2.14",
+]
+
+[tool.isort]
+include_trailing_comma = true
+use_parentheses = true
+ensure_newline_before_comments = true
+atomic = true
+profile = "black"
+line_length = 88
+skip_gitignore = true
+multi_line_output = 3
+force_grid_wrap = 0
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = [
+  "A",    # flake8-builtins
+  "ARG",  # flake8-unused-arguments 
+  "B",    # bugbear
+  "BLE",  # flake8-blind-except
+  "C4",   # flake8-comprehensions
+  "C90",  # McCabe complexity
+  "COM",  # flake8-commas
+  "D",    # pydocstyle
+  "DTZ",  # flake8-datetimez 
+  "E",    # pycodestyle, error
+  "EM",   # flake8-errmsg
+  "ERA",  # flake8-eradicate
+  "EXE",  # flake8-executable
+  "F",    # Pyflakes
+  "FLY",  # flynt
+  "FURB", # refurb
+  "G",    # flake8-logging-format 
+  "ICN",  # flake8-import-conventions 
+  "INP",  # flake8-no-pep420 
+  "ISC",  # flake8-implicit-str-concat
+  "LOG",  # flake8-logging
+  "N",    # pep8-naming
+  "PERF", # Perflint 
+  "PIE",  # flake8-pie
+  "PT",   # flake8-pytest-style
+  "PTH",  # flake8-use-pathlib 
+  "PYI",  # flake8-pyi
+  "Q",    # flake8-quotes
+  "RET",  # flake8-return
+  "RSE",  # flake8-raise
+  "RUF",  # Ruff
+  "SIM",  # flake8-simplify
+  "SLF",  # flake8-self 
+  "SLOT", # flake8-slots
+  "T10",  # flake8-debugger
+  "TC",   # flake8-type-checking
+  "TID",  # flake8-tidy-imports
+  "TRY",  # tryceratops
+  "UP",   # pyupgrade
+  "W",    # pycodestyle, warning
+  "YTT",  # flake8-2020
+]
+ignore = [
+  "RUF100", # Unused blanket noqa directive
+  "EXE001", # Shebang is present but file is not executable
+  "D105",   # Missing docstring in magic method
+  "D107",   # Missing docstring in __init__
+  "D203",   # 1 blank line required before class docstring
+  "D212",   # Multi-line docstring summary should start at the first line
+  "D213",   # Multi-line docstring summary should start at the second line
+  "D413",   # Missing blank line after last section ("{name}")
+  "D416",   # Section name should end with a colon ("{name}")
+  "TRY301", # Abstract raise to inner function - too pedantic for CLI code
+  "B904",   # raise ... from err - tedious for CLI exits
+  "BLE001", # Blind except - intentional for defensive TUI/CLI code
+  "C901",   # McCabe complexity - CLI commands are inherently complex
+  "SLF001", # Private member access - common pattern in this codebase
+  "TRY401", # Redundant exception in logging.exception - stylistic
+  "G004",   # Logging f-string - acceptable in this project
+]
+
+[tool.pyright]
+typeCheckingMode = "strict"
+stubPath = "./typings"
+reportMissingTypeStubs = "none" # Annoying
+reportPrivateUsage = "none"     # Ruff handles this 
+reportUnusedFunction = "none"   # Vulture handles this
+deprecateTypingAliases = true
+# basedpyright rules:
+reportUnreachable = true
+# reportIgnoreCommentWithoutRule = true
+# reportPrivateLocalImportUsage = true
+# reportImplicitRelativeImport = true
+# reportInvalidCast = true
+# reportUnsafeMultipleInheritance = true
+# reportUnusedParameter = true
+#reportImplicitAbstractClass = true
+# reportIncompatibleUnannotatedOverride = true
+# reportInvalidAbstractMethod = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+filterwarnings = [
+    "ignore:unclosed database:ResourceWarning",
+]
