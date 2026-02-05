@@ -148,7 +148,8 @@ ACCEPTANCE_TEMPLATES = [
 ]
 
 DESIGN_TEMPLATES = [
-    "## Approach\nUse existing {component} pattern.\n\n## Changes\n- Modify {file}\n- Add tests",
+    "## Approach\nUse existing {component} pattern.\n\n## Changes\n"
+    "- Modify {file}\n- Add tests",
     "Follow RFC-{rfc_num} specification.\nSee design doc: https://docs.example.com/design/{doc_id}",
     "## Architecture\n```\nClient -> API -> Service -> DB\n```\n\nNo breaking changes.",
     "Spike findings: Option B is preferred. Lower complexity, better performance.",
@@ -341,26 +342,24 @@ class DeterministicIssueGenerator:
                 metadata[key] = f"Sprint {self.rng.randint(1, 52)}"
             elif key == "component":
                 metadata[key] = self.rng.choice(
-                    ["auth", "api", "ui", "db", "infra", "core"]
+                    ["auth", "api", "ui", "db", "infra", "core"],
                 )
-            elif key == "affected_version":
-                metadata[key] = f"{self.rng.randint(1, 5)}.{self.rng.randint(0, 20)}.0"
-            elif key == "fix_version":
+            elif key == "affected_version" or key == "fix_version":
                 metadata[key] = f"{self.rng.randint(1, 5)}.{self.rng.randint(0, 20)}.0"
             elif key == "environment":
                 metadata[key] = self.rng.choice(["dev", "staging", "prod"])
             elif key == "browser":
-                metadata[key] = self.rng.choice(
-                    ["Chrome", "Firefox", "Safari", "Edge"]
-                )
+                metadata[key] = self.rng.choice(["Chrome", "Firefox", "Safari", "Edge"])
             elif key == "os":
                 metadata[key] = self.rng.choice(
-                    ["macOS", "Windows", "Linux", "iOS", "Android"]
+                    ["macOS", "Windows", "Linux", "iOS", "Android"],
                 )
             elif key == "customer_id":
                 metadata[key] = f"cust_{self.rng.randint(1000, 9999)}"
             elif key == "severity":
-                metadata[key] = self.rng.choice(["critical", "major", "minor", "trivial"])
+                metadata[key] = self.rng.choice(
+                    ["critical", "major", "minor", "trivial"],
+                )
 
         return metadata
 
@@ -372,7 +371,10 @@ class DeterministicIssueGenerator:
         return self.rng.sample(LABELS, num_labels)
 
     def _generate_comments(
-        self, issue_id: str, created_at: datetime, count: int
+        self,
+        issue_id: str,
+        created_at: datetime,
+        count: int,
     ) -> list[Comment]:
         """Generate comments for an issue.
 
@@ -390,19 +392,17 @@ class DeterministicIssueGenerator:
             template = self.rng.choice(COMMENT_TEMPLATES)
             text = template.format(
                 action=self.rng.choice(
-                    ["refactor the module", "add error handling", "update the schema"]
+                    ["refactor the module", "add error handling", "update the schema"],
                 ),
                 blocker=self.rng.choice(
-                    ["API changes", "infrastructure", "dependency upgrade"]
+                    ["API changes", "infrastructure", "dependency upgrade"],
                 ),
                 pr_num=self.rng.randint(100, 9999),
                 related_id=f"{self.prefix}-{self.rng.randint(1, 1000):04x}",
-                mention=self.rng.choice(
-                    ["alice", "bob", "carol", "david", "eve"]
-                ),
+                mention=self.rng.choice(["alice", "bob", "carol", "david", "eve"]),
                 dup_id=f"{self.prefix}-{self.rng.randint(1, 1000):04x}",
                 reason=self.rng.choice(
-                    ["test failures", "performance regression", "user reports"]
+                    ["test failures", "performance regression", "user reports"],
                 ),
                 coverage=self.rng.randint(70, 99),
             )
@@ -485,12 +485,14 @@ class DeterministicIssueGenerator:
             closed_at = updated_at + timedelta(hours=self.rng.randint(1, 24))
         elif status == Status.TOMBSTONE:
             deleted_at = updated_at + timedelta(hours=self.rng.randint(1, 24))
-            delete_reason = self.rng.choice([
-                "Duplicate of another issue",
-                "No longer relevant",
-                "Created in error",
-                "Superseded by new approach",
-            ])
+            delete_reason = self.rng.choice(
+                [
+                    "Duplicate of another issue",
+                    "No longer relevant",
+                    "Created in error",
+                    "Superseded by new approach",
+                ],
+            )
             original_type = issue_type
 
         # Generate comments (0-5, weighted toward fewer)
@@ -877,11 +879,11 @@ def run_benchmarks(
                 print(f"({file_size / 1024:.1f} KB)")
                 print(
                     f"  {num_with_parent} parents, {num_deps} deps, {num_links} links, "
-                    f"{num_duplicates} duplicates"
+                    f"{num_duplicates} duplicates",
                 )
                 print(
                     f"  {num_with_comments} issues with comments "
-                    f"({total_comments} total comments)"
+                    f"({total_comments} total comments)",
                 )
                 print(
                     f"  Running {iterations} load iterations...",
@@ -916,11 +918,11 @@ def run_benchmarks(
 
 
 def main() -> None:
-    """Main entry point."""
+    """Run the benchmark suite."""
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Benchmark dogcat storage loading performance"
+        description="Benchmark dogcat storage loading performance",
     )
     parser.add_argument(
         "--counts",

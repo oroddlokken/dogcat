@@ -11,11 +11,11 @@ var:
 
 # run formatters
 fmt:
-    black src tests dcat.py
-    isort src tests dcat.py
+    black src tests dcat.py benchmark.py
+    isort src tests dcat.py benchmark.py
 
 fmt-ruff:
-    ruff check --fix --unsafe-fixes src tests dcat.py
+    ruff check --fix --unsafe-fixes src tests dcat.py benchmark.py
 
 # run all formatters
 fmt-all:
@@ -26,13 +26,13 @@ fmt-all:
 
 # lint the code
 lint:
-    black --check --diff src tests dcat.py
-    isort --check-only --diff src tests dcat.py
-    ruff check src tests dcat.py
+    black --check --diff src tests dcat.py benchmark.py
+    isort --check-only --diff src tests dcat.py benchmark.py
+    ruff check src tests dcat.py benchmark.py
 
 # lint using pyright
 lint-pyright:
-    PYRIGHT_PYTHON_FORCE_VERSION=latest pyright src tests dcat.py
+    PYRIGHT_PYTHON_FORCE_VERSION=latest pyright src tests dcat.py benchmark.py
 
 # run all linters
 lint-all:
@@ -41,7 +41,7 @@ lint-all:
 
 # find dead code with vulture
 vulture:
-    vulture src tests dcat.py --ignore-decorators "@app.command" --ignore-names "on_modified,on_moved,RELATED,reload"
+    vulture src tests dcat.py benchmark.py --ignore-decorators "@app.command" --ignore-names "on_modified,on_moved,RELATED,reload"
 
 # run tests
 test:
