@@ -166,20 +166,23 @@ def format_issue_brief(
     return f"{base}{parent_str}{closed_str}"
 
 
-def format_issue_full(issue: Issue) -> str:
+def format_issue_full(issue: Issue, parent_title: str | None = None) -> str:
     """Format issue for full display."""
     lines = [
         f"ID: {issue.full_id}",
         f"Title: {issue.title}",
+        "",
         f"Status: {issue.status.value}",
         f"Priority: {issue.priority}",
         f"Type: {issue.issue_type.value}",
+        "",
     ]
 
     if issue.parent:
-        lines.append(f"Parent: {issue.parent}")
-    if issue.description:
-        lines.append(f"Description: {issue.description}")
+        parent_line = f"Parent: {issue.parent}"
+        if parent_title:
+            parent_line += f" ({parent_title})"
+        lines.append(parent_line)
     if issue.owner:
         lines.append(f"Owner: {issue.owner}")
     if issue.labels:
@@ -188,12 +191,28 @@ def format_issue_full(issue: Issue) -> str:
         lines.append(f"Duplicate of: {issue.duplicate_of}")
     if issue.acceptance:
         lines.append(f"Acceptance: {issue.acceptance}")
-    if issue.notes:
-        lines.append(f"Notes: {issue.notes}")
 
-    lines.append(f"Created: {issue.created_at.isoformat()}")
+    # Separate close reason from notes if present
+    notes = issue.notes or ""
+    close_reason = None
+    if "Closed: " in notes:
+        parts = notes.split("Closed: ")
+        close_reason = parts[-1].strip()
+        notes = "Closed: ".join(parts[:-1]).strip()
+
+    if notes:
+        lines.append(f"Notes: {notes}")
+
+    dt_fmt = "%Y-%m-%d %H:%M:%S"
+    lines.append(f"Created: {issue.created_at.strftime(dt_fmt)}")
     if issue.closed_at:
-        lines.append(f"Closed: {issue.closed_at.isoformat()}")
+        closed_line = f"Closed: {issue.closed_at.strftime(dt_fmt)}"
+        if close_reason:
+            closed_line += f" ({close_reason})"
+        lines.append(closed_line)
+
+    if issue.description:
+        lines.append(f"\nDescription: {issue.description}")
 
     if issue.comments:
         lines.append("\nComments:")
@@ -1101,7 +1120,14 @@ def show(
 
             typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
         else:
-            output_lines = format_issue_full(issue).split("\n")
+            parent_title = None
+            if issue.parent:
+                parent_issue = storage.get(issue.parent)
+                if parent_issue:
+                    parent_title = parent_issue.title
+            output_lines = format_issue_full(issue, parent_title=parent_title).split(
+                "\n",
+            )
 
             # Add dependencies
             deps = storage.get_dependencies(issue_id)

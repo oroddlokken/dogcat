@@ -1596,6 +1596,43 @@ class TestCLIShow:
         assert "Metadata:" in result.stdout
         assert "skip_agent: True" in result.stdout
 
+    def test_show_closed_issue_field_order(self, tmp_path: Path) -> None:
+        """Test Created before Closed, close reason next to date."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create_result = runner.invoke(
+            app,
+            ["create", "Field order test", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+
+        runner.invoke(
+            app,
+            ["close", issue_id, "--reason", "Done", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["show", issue_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        lines = result.stdout.splitlines()
+
+        created_idx = next(
+            i for i, line in enumerate(lines) if line.startswith("Created:")
+        )
+        closed_idx = next(
+            i for i, line in enumerate(lines) if line.startswith("Closed:")
+        )
+
+        # Created should appear before Closed
+        assert created_idx < closed_idx
+
+        # Close reason should be on the same line as the Closed date
+        closed_line = lines[closed_idx]
+        assert "(Done)" in closed_line
+
     def test_show_displays_children(self, tmp_path: Path) -> None:
         """Test that show displays child issues."""
         dogcats_dir = tmp_path / ".dogcats"
