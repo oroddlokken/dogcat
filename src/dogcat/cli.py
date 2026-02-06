@@ -1741,6 +1741,34 @@ def blocked(
         raise typer.Exit(1)
 
 
+@app.command("in-progress")
+def in_progress(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+) -> None:
+    """Show issues currently in progress."""
+    try:
+        storage = get_storage(dogcats_dir)
+        issues = storage.list({"status": "in_progress"})
+        issues.sort(key=lambda i: i.priority)
+
+        if json_output:
+            from dogcat.models import issue_to_dict
+
+            output = [issue_to_dict(issue) for issue in issues]
+            typer.echo(orjson.dumps(output).decode())
+        else:
+            if not issues:
+                typer.echo("No in-progress issues")
+            else:
+                for issue in issues:
+                    typer.echo(format_issue_brief(issue))
+
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+
 @app.command("recently-closed")
 def recently_closed(
     limit: int = typer.Option(10, "--limit", "-n", help="Number of issues to show"),

@@ -2460,6 +2460,92 @@ class TestCLIReady:
         assert skip_id not in result.stdout
 
 
+class TestCLIInProgress:
+    """Test in-progress command."""
+
+    def test_in_progress_no_issues(self, tmp_path: Path) -> None:
+        """Test in-progress with no in-progress issues."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["in-progress", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "No in-progress issues" in result.stdout
+
+    def test_in_progress_shows_only_in_progress(self, tmp_path: Path) -> None:
+        """Test that in-progress shows only in_progress issues."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        # Create two issues
+        create1 = runner.invoke(
+            app,
+            ["create", "Open issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+        open_id = create1.stdout.split(": ")[0].split()[-1]
+
+        create2 = runner.invoke(
+            app,
+            [
+                "create",
+                "WIP issue",
+                "--status",
+                "in_progress",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        wip_id = create2.stdout.split(": ")[0].split()[-1]
+
+        result = runner.invoke(
+            app,
+            ["in-progress", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert wip_id in result.stdout
+        assert open_id not in result.stdout
+
+    def test_in_progress_json_output(self, tmp_path: Path) -> None:
+        """Test in-progress with --json flag."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        runner.invoke(
+            app,
+            [
+                "create",
+                "WIP issue",
+                "--status",
+                "in_progress",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["in-progress", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        import json
+
+        data = json.loads(result.stdout)
+        assert len(data) == 1
+        assert data[0]["status"] == "in_progress"
+
+
 class TestCLIClose:
     """Test close command."""
 
