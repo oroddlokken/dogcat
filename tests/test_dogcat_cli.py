@@ -996,6 +996,32 @@ class TestCLIList:
         assert "Closed issue" in result.stdout
         assert "Open issue" not in result.stdout
 
+    def test_list_closed_issues_shows_closed_date(self, tmp_path: Path) -> None:
+        """Test that closed issues display the closed date in brief format."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # Create and close an issue
+        result = runner.invoke(
+            app,
+            ["create", "Will close", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issue_data = json.loads(result.stdout)
+        issue_full_id = f"{issue_data['namespace']}-{issue_data['id']}"
+
+        runner.invoke(
+            app,
+            ["close", issue_full_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        # List closed issues
+        result = runner.invoke(
+            app,
+            ["list", "--closed", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "[closed " in result.stdout, "Closed issues should show closed date"
+
     def test_list_open_issues(self, tmp_path: Path) -> None:
         """Test listing only open issues."""
         dogcats_dir = tmp_path / ".dogcats"
@@ -1215,6 +1241,100 @@ class TestCLIList:
         lines = result.stdout.split("\n")
         subtask_line = next(line for line in lines if "Subtask issue" in line)
         assert subtask_line.startswith("  "), "Subtask should be indented"
+
+    def test_list_tree_shows_closed_parent_with_open_children(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test that --tree shows closed parents when they have visible children."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # Create parent issue
+        result = runner.invoke(
+            app,
+            ["create", "Parent issue", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        parent_data = json.loads(result.stdout)
+        parent_full_id = f"{parent_data['namespace']}-{parent_data['id']}"
+
+        # Create child issue under that parent
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Child issue",
+                "--parent",
+                parent_full_id,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        # Close the parent
+        runner.invoke(
+            app,
+            ["close", parent_full_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        # In tree mode, closed parent should still appear with its open child
+        result = runner.invoke(
+            app,
+            ["list", "--tree", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert (
+            "Parent issue" in result.stdout
+        ), "Closed parent should appear in tree when it has visible children"
+        assert "Child issue" in result.stdout
+
+        # Child should be indented under the parent
+        lines = result.stdout.split("\n")
+        child_line = next(line for line in lines if "Child issue" in line)
+        assert child_line.startswith("  "), "Child should be indented under parent"
+
+    def test_list_flat_hides_closed_parent_with_open_children(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test that flat list mode still hides closed parents by default."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # Create parent and child
+        result = runner.invoke(
+            app,
+            ["create", "Parent issue", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        parent_data = json.loads(result.stdout)
+        parent_full_id = f"{parent_data['namespace']}-{parent_data['id']}"
+
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Child issue",
+                "--parent",
+                parent_full_id,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        # Close the parent
+        runner.invoke(
+            app,
+            ["close", parent_full_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        # In flat mode, closed parent should NOT appear
+        result = runner.invoke(
+            app,
+            ["list", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Parent issue" not in result.stdout
+        assert "Child issue" in result.stdout
 
     def test_list_shows_blocked_symbol_for_issues_with_open_dependencies(
         self,

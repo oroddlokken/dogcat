@@ -7,6 +7,7 @@
 #   "pydantic",
 #   "rich",
 #   "orjson",
+#   "textual",
 #   "watchdog",
 #   "toml",
 # ]

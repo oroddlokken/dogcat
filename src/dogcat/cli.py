@@ -158,9 +158,12 @@ def format_issue_brief(
     type_str = typer.style(f"[{issue.issue_type.value}]", fg=type_color)
 
     parent_str = f" [parent: {issue.parent}]" if issue.parent else ""
+    closed_str = ""
+    if issue.closed_at:
+        closed_str = f" [closed {issue.closed_at.strftime('%Y-%m-%d %H:%M')}]"
     base = f"{status_emoji} {priority_str} {issue.full_id}: {issue.title} {type_str}"
 
-    return f"{base}{parent_str}"
+    return f"{base}{parent_str}{closed_str}"
 
 
 def format_issue_full(issue: Issue) -> str:
@@ -962,12 +965,13 @@ def list_issues(
 
         # Exclude closed/tombstone issues by default (unless explicitly requested)
         # Also include closed issues when date filters are used
-        if (
+        closed_excluded_by_default = (
             not status
             and not closed
             and not all_issues
             and not (closed_after or closed_before)
-        ):
+        )
+        if closed_excluded_by_default:
             issues = [
                 i for i in issues if i.status.value not in ("closed", "tombstone")
             ]
@@ -1013,6 +1017,28 @@ def list_issues(
             except ValueError as e:
                 typer.echo(f"Error parsing date: {e}", err=True)
                 raise typer.Exit(1)
+
+        # In tree mode, re-include closed parents of visible children
+        # so the hierarchy is preserved (closed parents show with ✓ icon)
+        if tree and closed_excluded_by_default:
+            visible_ids = {i.full_id for i in issues}
+            checked: set[str] = set()
+            while True:
+                missing_parent_ids = {
+                    i.parent
+                    for i in issues
+                    if i.parent
+                    and i.parent not in visible_ids
+                    and i.parent not in checked
+                }
+                if not missing_parent_ids:
+                    break
+                for parent_id in missing_parent_ids:
+                    checked.add(parent_id)
+                    parent_issue = storage.get(parent_id)
+                    if parent_issue and not parent_issue.is_tombstone():
+                        issues.append(parent_issue)
+                        visible_ids.add(parent_issue.full_id)
 
         # Sort by priority (lower number = higher priority)
         issues = sorted(issues, key=lambda i: (i.priority, i.id))
@@ -1111,6 +1137,34 @@ def show(
 
             typer.echo("\n".join(output_lines))
 
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@app.command()
+def edit(
+    issue_id: str = typer.Argument(..., help="Issue ID"),
+    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+) -> None:
+    """Open an issue in the Textual editor for interactive editing."""
+    try:
+        storage = get_storage(dogcats_dir)
+        issue = storage.get(issue_id)
+        if issue is None:
+            typer.echo(f"Error: Issue {issue_id} not found", err=True)
+            raise typer.Exit(1)
+
+        from dogcat.edit import edit_issue
+
+        updated = edit_issue(issue_id, storage)
+        if updated is not None:
+            typer.echo(f"✓ Updated {updated.full_id}: {updated.title}")
+        else:
+            typer.echo("Edit cancelled")
+
+    except typer.Exit:
+        raise
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
@@ -1913,11 +1967,11 @@ def doctor(
     # Note: git repo is optional, so we don't set all_passed = False
 
     # Check 4: dogcat binary is in PATH
-    dogcat_in_path = bool(shutil.which("dogcat"))
+    dogcat_in_path = bool(shutil.which("dcat"))
     checks["dogcat_in_path"] = {
-        "description": "dogcat command is available in PATH",
+        "description": "dcat command is available in PATH",
         "passed": dogcat_in_path,
-        "fix": "Ensure dogcat is installed and dogcat is in your PATH",
+        "fix": "Ensure dogcat is installed and dcat is in your PATH",
     }
     if not checks["dogcat_in_path"]["passed"]:
         all_passed = False
