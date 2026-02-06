@@ -157,10 +157,15 @@ def format_issue_brief(
     type_color = TYPE_COLORS.get(issue.issue_type.value, "white")
     type_str = typer.style(f"[{issue.issue_type.value}]", fg=type_color)
 
-    parent_str = f" [parent: {issue.parent}]" if issue.parent else ""
+    parent_str = (
+        typer.style(f" [parent: {issue.parent}]", fg="bright_black")
+        if issue.parent
+        else ""
+    )
     closed_str = ""
     if issue.closed_at:
-        closed_str = f" [closed {issue.closed_at.strftime('%Y-%m-%d %H:%M')}]"
+        closed_ts = issue.closed_at.strftime("%Y-%m-%d %H:%M")
+        closed_str = typer.style(f" [closed {closed_ts}]", fg="bright_black")
     base = f"{status_emoji} {priority_str} {issue.full_id}: {issue.title} {type_str}"
 
     return f"{base}{parent_str}{closed_str}"

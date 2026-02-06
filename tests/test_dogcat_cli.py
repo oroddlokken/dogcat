@@ -3394,3 +3394,46 @@ class TestCLICommandOrder:
         assert commands == sorted(
             commands,
         ), f"Commands are not alphabetically sorted: {commands}"
+
+
+class TestFormatIssueBriefMetadataColors:
+    """Test that metadata tags in format_issue_brief are colored dim."""
+
+    def test_parent_tag_is_styled_bright_black(self) -> None:
+        """Test that [parent: ...] tag uses bright_black styling."""
+        from dogcat.cli import format_issue_brief
+        from dogcat.models import Issue
+
+        issue = Issue(id="abc1", title="Test issue", parent="dc-xyz1")
+        result = format_issue_brief(issue)
+        # bright_black ANSI code is \x1b[90m
+        assert "\x1b[90m" in result
+        assert "[parent: dc-xyz1]" in result
+
+    def test_closed_tag_is_styled_bright_black(self) -> None:
+        """Test that [closed ...] tag uses bright_black styling."""
+        from datetime import datetime, timezone
+
+        from dogcat.cli import format_issue_brief
+        from dogcat.models import Issue, Status
+
+        closed_time = datetime(2025, 6, 15, 10, 30, tzinfo=timezone.utc)
+        issue = Issue(
+            id="abc2",
+            title="Closed issue",
+            status=Status.CLOSED,
+            closed_at=closed_time,
+        )
+        result = format_issue_brief(issue)
+        assert "\x1b[90m" in result
+        assert "[closed 2025-06-15 10:30]" in result
+
+    def test_no_metadata_tags_when_absent(self) -> None:
+        """Test no metadata tags appear when parent/closed_at are None."""
+        from dogcat.cli import format_issue_brief
+        from dogcat.models import Issue
+
+        issue = Issue(id="abc3", title="Plain issue")
+        result = format_issue_brief(issue)
+        assert "[parent:" not in result
+        assert "[closed" not in result
