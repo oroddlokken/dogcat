@@ -3219,3 +3219,21 @@ class TestCLIGuide:
         assert "AI agent" not in result.stdout
         assert "--skip-agent" not in result.stdout
         assert "--exclude-skip-agent" not in result.stdout
+
+
+class TestCLICommandOrder:
+    """Test that CLI commands are listed in alphabetical order."""
+
+    def test_commands_are_alphabetically_sorted(self) -> None:
+        """Test that the app lists commands in sorted order."""
+        import click
+        import typer.main
+
+        # Get the underlying Click group from the Typer app
+        group = typer.main.get_group(app)
+        ctx = click.Context(group)
+        commands = group.list_commands(ctx)
+        assert len(commands) > 0
+        assert commands == sorted(
+            commands,
+        ), f"Commands are not alphabetically sorted: {commands}"

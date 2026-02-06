@@ -6,10 +6,11 @@ import getpass
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import orjson
 import typer
+from typer.core import TyperGroup
 
 from dogcat.config import get_issue_prefix, set_issue_prefix
 from dogcat.constants import (
@@ -25,9 +26,22 @@ from dogcat.idgen import IDGenerator
 from dogcat.models import Issue, IssueType, Status
 from dogcat.storage import JSONLStorage
 
+if TYPE_CHECKING:
+    import click
+
+
+class SortedGroup(TyperGroup):
+    """Typer group that lists commands in alphabetical order."""
+
+    def list_commands(self, ctx: click.Context) -> list[str]:
+        """Return commands sorted alphabetically."""
+        return sorted(super().list_commands(ctx))
+
+
 app = typer.Typer(
     help="Dogcat - Python issue tracking for Git projects",
     no_args_is_help=True,
+    cls=SortedGroup,
 )
 
 
