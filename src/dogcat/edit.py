@@ -195,29 +195,21 @@ class IssueEditorApp(App[bool]):
             self.notify("Title cannot be empty", severity="error")
             return
 
-        type_val: object = self.query_one("#type-input", Select).value
-        status_val: object = self.query_one("#status-input", Select).value
-        priority_val: object = self.query_one("#priority-input", Select).value
+        type_val = self.query_one("#type-input", Select[str]).value
+        status_val = self.query_one("#status-input", Select[str]).value
+        priority_val = self.query_one("#priority-input", Select[int]).value
         description = self.query_one("#description-input", TextArea).text.strip()
 
         updates: dict[str, Any] = {}
 
         if title != self._issue.title:
             updates["title"] = title
-        if (
-            type_val is not Select.BLANK
-            and str(type_val) != self._issue.issue_type.value
-        ):
-            updates["issue_type"] = str(type_val)
-        if (
-            status_val is not Select.BLANK
-            and str(status_val) != self._issue.status.value
-        ):
-            updates["status"] = str(status_val)
-        if priority_val is not Select.BLANK:
-            new_priority = int(str(priority_val))
-            if new_priority != self._issue.priority:
-                updates["priority"] = new_priority
+        if isinstance(type_val, str) and type_val != self._issue.issue_type.value:
+            updates["issue_type"] = type_val
+        if isinstance(status_val, str) and status_val != self._issue.status.value:
+            updates["status"] = status_val
+        if isinstance(priority_val, int) and priority_val != self._issue.priority:
+            updates["priority"] = priority_val
 
         new_owner = self.query_one("#owner-input", Input).value.strip() or None
         if new_owner != self._issue.owner:
