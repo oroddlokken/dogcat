@@ -148,16 +148,17 @@ class TestDetectCycles:
             Dependency(
                 issue_id="t-i0",
                 depends_on_id="t-i1",
-                type=DependencyType.BLOCKS,
+                dep_type=DependencyType.BLOCKS,
             ),
         )
         storage_with_issues._dependencies.append(
             Dependency(
                 issue_id="t-i1",
                 depends_on_id="t-i0",
-                type=DependencyType.BLOCKS,
+                dep_type=DependencyType.BLOCKS,
             ),
         )
+        storage_with_issues._rebuild_indexes()
 
         cycles = detect_cycles(storage_with_issues)
 
@@ -177,23 +178,24 @@ class TestDetectCycles:
             Dependency(
                 issue_id="t-i0",
                 depends_on_id="t-i1",
-                type=DependencyType.BLOCKS,
+                dep_type=DependencyType.BLOCKS,
             ),
         )
         storage_with_issues._dependencies.append(
             Dependency(
                 issue_id="t-i1",
                 depends_on_id="t-i2",
-                type=DependencyType.BLOCKS,
+                dep_type=DependencyType.BLOCKS,
             ),
         )
         storage_with_issues._dependencies.append(
             Dependency(
                 issue_id="t-i2",
                 depends_on_id="t-i0",
-                type=DependencyType.BLOCKS,
+                dep_type=DependencyType.BLOCKS,
             ),
         )
+        storage_with_issues._rebuild_indexes()
 
         cycles = detect_cycles(storage_with_issues)
 

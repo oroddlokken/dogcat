@@ -37,7 +37,7 @@ class StreamEvent:
     issue_id: str
     timestamp: datetime
     by: str | None = None
-    changes: dict[str, dict[str, Any]] = field(default_factory=dict)  # type: ignore[arg-type]
+    changes: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert event to dictionary for JSON serialization."""

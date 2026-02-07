@@ -67,7 +67,7 @@ class TestPhase1Integration:
 
         # Create dependency
         dep = storage.add_dependency(issue_id2, issue_id, "blocks")
-        assert dep.type == DependencyType.BLOCKS
+        assert dep.dep_type == DependencyType.BLOCKS
 
         # Verify dependency relationships
         deps_of_issue2 = storage.get_dependencies(issue_id2)

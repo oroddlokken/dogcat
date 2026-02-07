@@ -147,7 +147,7 @@ def migrate_issue(beads_issue: dict[str, Any]) -> tuple[Issue, list[Dependency]]
         dep = Dependency(
             issue_id=dep_dict.get("issue_id", issue_id),
             depends_on_id=dep_dict.get("depends_on_id", ""),
-            type=dep_type,
+            dep_type=dep_type,
             created_at=parse_datetime(dep_created_at_str) or datetime.now(tz=timezone.utc),  # type: ignore  # noqa: E501
             created_by=dep_dict.get("created_by"),
         )
@@ -219,7 +219,7 @@ def migrate_from_beads(
             storage.add_dependency(
                 dep.issue_id,
                 dep.depends_on_id,
-                dep.type.value,
+                dep.dep_type.value,
                 created_by=dep.created_by,
             )
         except Exception as e:  # noqa: PERF203

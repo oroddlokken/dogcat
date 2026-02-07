@@ -40,6 +40,11 @@ class JSONLStorage:
         self._issues: dict[str, Issue] = {}
         self._dependencies: list[Dependency] = []
         self._links: list[Link] = []
+        # Indexes for O(1) dependency/link lookups
+        self._deps_by_issue: dict[str, list[Dependency]] = {}
+        self._deps_by_depends_on: dict[str, list[Dependency]] = {}
+        self._links_by_from: dict[str, list[Link]] = {}
+        self._links_by_to: dict[str, list[Link]] = {}
 
         if create_dir:
             # Create .dogcats directory if it doesn't exist (used by init)
@@ -88,7 +93,7 @@ class JSONLStorage:
                             dep = Dependency(
                                 issue_id=data["issue_id"],
                                 depends_on_id=data["depends_on_id"],
-                                type=DependencyType(data["type"]),
+                                dep_type=DependencyType(data["type"]),
                                 created_at=datetime.fromisoformat(data["created_at"]),
                                 created_by=data.get("created_by"),
                             )
@@ -103,6 +108,22 @@ class JSONLStorage:
         except OSError as e:
             msg = f"Failed to read storage file: {e}"
             raise RuntimeError(msg) from e
+
+        self._rebuild_indexes()
+
+    def _rebuild_indexes(self) -> None:
+        """Rebuild dependency and link indexes from the source lists."""
+        self._deps_by_issue = {}
+        self._deps_by_depends_on = {}
+        for dep in self._dependencies:
+            self._deps_by_issue.setdefault(dep.issue_id, []).append(dep)
+            self._deps_by_depends_on.setdefault(dep.depends_on_id, []).append(dep)
+
+        self._links_by_from = {}
+        self._links_by_to = {}
+        for link in self._links:
+            self._links_by_from.setdefault(link.from_id, []).append(link)
+            self._links_by_to.setdefault(link.to_id, []).append(link)
 
     def _save(self) -> None:
         """Save all issues and dependencies to JSONL file atomically."""
@@ -127,7 +148,7 @@ class JSONLStorage:
                     dep_data = {
                         "issue_id": dep.issue_id,
                         "depends_on_id": dep.depends_on_id,
-                        "type": dep.type.value,
+                        "type": dep.dep_type.value,
                         "created_at": dep.created_at.isoformat(),
                         "created_by": dep.created_by,
                     }
@@ -426,6 +447,7 @@ class JSONLStorage:
             if link.from_id != resolved_id and link.to_id != resolved_id
         ]
 
+        self._rebuild_indexes()
         self._save()
         return issue
 
@@ -469,12 +491,11 @@ class JSONLStorage:
             msg = f"Issue {depends_on_id} not found"
             raise ValueError(msg)
 
-        # Check if dependency already exists
-        for dep in self._dependencies:
+        # Check if dependency already exists (O(1) index lookup)
+        for dep in self._deps_by_issue.get(resolved_issue_id, []):
             if (
-                dep.issue_id == resolved_issue_id
-                and dep.depends_on_id == resolved_depends_on_id
-                and dep.type.value == dep_type
+                dep.depends_on_id == resolved_depends_on_id
+                and dep.dep_type.value == dep_type
             ):
                 return dep
 
@@ -491,10 +512,14 @@ class JSONLStorage:
         dependency = Dependency(
             issue_id=resolved_issue_id,
             depends_on_id=resolved_depends_on_id,
-            type=validated_dep_type,
+            dep_type=validated_dep_type,
             created_by=created_by,
         )
         self._dependencies.append(dependency)
+        self._deps_by_issue.setdefault(resolved_issue_id, []).append(dependency)
+        self._deps_by_depends_on.setdefault(resolved_depends_on_id, []).append(
+            dependency,
+        )
         self._save()
         return dependency
 
@@ -526,6 +551,7 @@ class JSONLStorage:
                 and d.depends_on_id == resolved_depends_on_id
             )
         ]
+        self._rebuild_indexes()
         self._save()
 
     def get_dependencies(self, issue_id: str) -> list[Dependency]:
@@ -544,7 +570,7 @@ class JSONLStorage:
         if resolved_id is None:
             msg = f"Issue {issue_id} not found"
             raise ValueError(msg)
-        return [d for d in self._dependencies if d.issue_id == resolved_id]
+        return list(self._deps_by_issue.get(resolved_id, []))
 
     def get_dependents(self, issue_id: str) -> list[Dependency]:
         """Get all issues that depend on this one.
@@ -562,7 +588,7 @@ class JSONLStorage:
         if resolved_id is None:
             msg = f"Issue {issue_id} not found"
             raise ValueError(msg)
-        return [d for d in self._dependencies if d.depends_on_id == resolved_id]
+        return list(self._deps_by_depends_on.get(resolved_id, []))
 
     def add_link(
         self,
@@ -595,13 +621,9 @@ class JSONLStorage:
             msg = f"Issue {to_id} not found"
             raise ValueError(msg)
 
-        # Check if link already exists
-        for link in self._links:
-            if (
-                link.from_id == resolved_from_id
-                and link.to_id == resolved_to_id
-                and link.link_type == link_type
-            ):
+        # Check if link already exists (O(1) index lookup)
+        for link in self._links_by_from.get(resolved_from_id, []):
+            if link.to_id == resolved_to_id and link.link_type == link_type:
                 return link
 
         link = Link(
@@ -611,6 +633,8 @@ class JSONLStorage:
             created_by=created_by,
         )
         self._links.append(link)
+        self._links_by_from.setdefault(resolved_from_id, []).append(link)
+        self._links_by_to.setdefault(resolved_to_id, []).append(link)
         self._save()
         return link
 
@@ -639,6 +663,7 @@ class JSONLStorage:
             for link in self._links
             if not (link.from_id == resolved_from_id and link.to_id == resolved_to_id)
         ]
+        self._rebuild_indexes()
         self._save()
 
     def get_links(self, issue_id: str) -> list[Link]:
@@ -657,7 +682,7 @@ class JSONLStorage:
         if resolved_id is None:
             msg = f"Issue {issue_id} not found"
             raise ValueError(msg)
-        return [link for link in self._links if link.from_id == resolved_id]
+        return list(self._links_by_from.get(resolved_id, []))
 
     def get_incoming_links(self, issue_id: str) -> list[Link]:
         """Get all links pointing to an issue.
@@ -675,7 +700,7 @@ class JSONLStorage:
         if resolved_id is None:
             msg = f"Issue {issue_id} not found"
             raise ValueError(msg)
-        return [link for link in self._links if link.to_id == resolved_id]
+        return list(self._links_by_to.get(resolved_id, []))
 
     def get_children(self, issue_id: str) -> list[Issue]:
         """Get all child issues of an issue.

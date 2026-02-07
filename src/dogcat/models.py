@@ -57,7 +57,7 @@ class Dependency:
 
     issue_id: str
     depends_on_id: str
-    type: DependencyType
+    dep_type: DependencyType
     created_at: datetime = field(default_factory=lambda: datetime.now().astimezone())
     created_by: str | None = None
 
@@ -86,7 +86,7 @@ class Issue:
     issue_type: IssueType = IssueType.TASK
     owner: str | None = None
     parent: str | None = None  # Parent issue ID for subtasks
-    labels: list[str] = field(default_factory=lambda: list[str]())
+    labels: list[str] = field(default_factory=list)
     external_ref: str | None = None
     design: str | None = None
     acceptance: str | None = None
@@ -102,9 +102,9 @@ class Issue:
     deleted_by: str | None = None
     delete_reason: str | None = None
     original_type: IssueType | None = None  # For tombstones
-    comments: list[Comment] = field(default_factory=lambda: list[Comment]())
+    comments: list[Comment] = field(default_factory=list)
     duplicate_of: str | None = None  # ID of original if this is a duplicate
-    metadata: dict[str, Any] = field(default_factory=lambda: dict[str, Any]())
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def is_closed(self) -> bool:
         """Check if the issue is closed."""

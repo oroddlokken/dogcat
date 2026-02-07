@@ -647,7 +647,7 @@ class DeterministicIssueGenerator:
             dep = Dependency(
                 issue_id=issue_id,
                 depends_on_id=depends_on_id,
-                type=DependencyType.BLOCKS,
+                dep_type=DependencyType.BLOCKS,
                 created_at=self._random_datetime(self.rng.randint(0, 100)),
                 created_by=self.rng.choice(OWNERS),
             )
@@ -747,7 +747,7 @@ def write_test_jsonl(
             dep_data = {
                 "issue_id": dep.issue_id,
                 "depends_on_id": dep.depends_on_id,
-                "type": dep.type.value,
+                "type": dep.dep_type.value,
                 "created_at": dep.created_at.isoformat(),
                 "created_by": dep.created_by,
             }

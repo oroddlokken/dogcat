@@ -127,7 +127,7 @@ class TestMigrateIssue:
         assert len(deps) == 1
         assert deps[0].issue_id == "test-1"
         assert deps[0].depends_on_id == "test-2"
-        assert deps[0].type == DependencyType.BLOCKS
+        assert deps[0].dep_type == DependencyType.BLOCKS
 
     def test_migrate_tombstone_issue(self) -> None:
         """Test migrating tombstone (deleted) issue."""

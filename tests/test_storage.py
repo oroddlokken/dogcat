@@ -244,7 +244,7 @@ class TestDependencies:
         dep = storage.add_dependency("test-1", "test-2", "blocks")
         assert dep.issue_id == "test-1"
         assert dep.depends_on_id == "test-2"
-        assert dep.type == DependencyType.BLOCKS
+        assert dep.dep_type == DependencyType.BLOCKS
 
     def test_add_dependency_nonexistent_issue_raises(
         self,

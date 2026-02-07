@@ -15,16 +15,23 @@ Team members:
 - kate@example.com, liam@example.com - Junior Developers
 """
 
+from collections.abc import Iterator
+from itertools import count
+
 from dogcat.config import get_issue_prefix
 from dogcat.models import Comment, Issue, IssueType, Status
 from dogcat.storage import JSONLStorage
 
 
-def _make_comment(counter: list[int], issue_id: str, author: str, text: str) -> Comment:
+def _make_comment(
+    counter: Iterator[int],
+    issue_id: str,
+    author: str,
+    text: str,
+) -> Comment:
     """Create a comment with auto-incremented ID."""
-    counter[0] += 1
     return Comment(
-        id=f"comment-{counter[0]}",
+        id=f"comment-{next(counter)}",
         issue_id=issue_id,
         author=author,
         text=text,
@@ -46,14 +53,13 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         List of created issue IDs
     """
     namespace = get_issue_prefix(dogcats_dir)
-    counter = [0]
+    id_counter = count(1)
     created_issues: list[str] = []
-    comment_counter = [0]
+    comment_counter = count(1)
 
     def next_id() -> str:
         """Generate the next sequential issue ID (hash part only)."""
-        counter[0] += 1
-        return f"{counter[0]:04d}"
+        return f"{next(id_counter):04d}"
 
     def make_comment(issue_id: str, author: str, text: str) -> Comment:
         return _make_comment(comment_counter, issue_id, author, text)

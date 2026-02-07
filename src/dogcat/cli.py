@@ -1353,7 +1353,9 @@ def show(
             if deps:
                 output_lines.append("\nDependencies:")
                 for dep in deps:
-                    output_lines.append(f"  → {dep.depends_on_id} ({dep.type.value})")
+                    output_lines.append(
+                        f"  → {dep.depends_on_id} ({dep.dep_type.value})",
+                    )
 
             # Add links
             links = storage.get_links(issue_id)
@@ -1820,7 +1822,7 @@ def dependency(
                 created_by=by,
             )
             typer.echo(
-                f"✓ Added dependency: {depends_on_id} {dep.type.value} {issue_id}",
+                f"✓ Added dependency: {depends_on_id} {dep.dep_type.value} {issue_id}",
             )
 
         elif subcommand == "remove":
@@ -1840,7 +1842,7 @@ def dependency(
                     {
                         "issue_id": dep.issue_id,
                         "depends_on_id": dep.depends_on_id,
-                        "type": dep.type.value,
+                        "type": dep.dep_type.value,
                     }
                     for dep in deps
                 ]
@@ -1848,7 +1850,7 @@ def dependency(
             else:
                 if deps:
                     for dep in deps:
-                        typer.echo(f"  → {dep.depends_on_id} ({dep.type.value})")
+                        typer.echo(f"  → {dep.depends_on_id} ({dep.dep_type.value})")
                 else:
                     typer.echo("No dependencies")
         else:
@@ -2448,7 +2450,7 @@ def export(
                 {
                     "issue_id": dep.issue_id,
                     "depends_on_id": dep.depends_on_id,
-                    "type": dep.type.value,
+                    "type": dep.dep_type.value,
                     "created_at": dep.created_at.isoformat(),
                     "created_by": dep.created_by,
                 }
@@ -3027,7 +3029,7 @@ def archive(
                     dep_data = {
                         "issue_id": dep.issue_id,
                         "depends_on_id": dep.depends_on_id,
-                        "type": dep.type.value,
+                        "type": dep.dep_type.value,
                         "created_at": dep.created_at.isoformat(),
                         "created_by": dep.created_by,
                     }

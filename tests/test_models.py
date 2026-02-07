@@ -115,12 +115,12 @@ class TestDependencyModel:
         dep = Dependency(
             issue_id="issue-1",
             depends_on_id="issue-2",
-            type=DependencyType.BLOCKS,
+            dep_type=DependencyType.BLOCKS,
             created_by="user@example.com",
         )
         assert dep.issue_id == "issue-1"
         assert dep.depends_on_id == "issue-2"
-        assert dep.type == DependencyType.BLOCKS
+        assert dep.dep_type == DependencyType.BLOCKS
         assert dep.created_by == "user@example.com"
 
     def test_dependency_created_at_default(self) -> None:
@@ -129,7 +129,7 @@ class TestDependencyModel:
         dep = Dependency(
             issue_id="issue-1",
             depends_on_id="issue-2",
-            type=DependencyType.PARENT_CHILD,
+            dep_type=DependencyType.PARENT_CHILD,
         )
         after = datetime.now(timezone.utc)
         assert before <= dep.created_at <= after
