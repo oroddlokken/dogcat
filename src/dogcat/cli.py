@@ -27,6 +27,9 @@ from dogcat.idgen import IDGenerator
 from dogcat.models import Issue, IssueType, Status
 from dogcat.storage import JSONLStorage
 
+_type_keys = "/".join(sorted(TYPE_SHORTHANDS.keys()))
+_ARG_HELP = f"Title or shorthand (0-4 for priority, {_type_keys} for type)"
+
 if TYPE_CHECKING:
     import click
 
@@ -573,6 +576,25 @@ def import_beads(
         raise typer.Exit(1)
 
 
+def _parse_priority_value(value: str) -> int:
+    """Parse a priority value that can be an int (0-4) or pINT (p0-p4).
+
+    Returns the priority as an integer.
+    Raises ValueError if the format is invalid.
+    """
+    raw = value.strip().lower()
+    raw = raw.removeprefix("p")
+    try:
+        priority = int(raw)
+    except ValueError:
+        msg = f"Invalid priority '{value}'. Use 0-4 or p0-p4."
+        raise ValueError(msg) from None
+    if priority < 0 or priority > 4:
+        msg = f"Invalid priority '{value}'. Must be 0-4."
+        raise ValueError(msg)
+    return priority
+
+
 def _is_priority_shorthand(value: str) -> bool:
     """Check if a string is a priority shorthand (single char: 0-4)."""
     return len(value) == 1 and value in PRIORITY_SHORTHANDS
@@ -644,15 +666,15 @@ def _parse_args_for_create(
 def create(
     arg1: str = typer.Argument(
         ...,
-        help="Title or shorthand (0-4 for priority, b/f/e/s for type)",
+        help=_ARG_HELP,
     ),
     arg2: str | None = typer.Argument(
         None,
-        help="Title or shorthand (0-4 for priority, b/f/e/s for type)",
+        help=_ARG_HELP,
     ),
     arg3: str | None = typer.Argument(
         None,
-        help="Title or shorthand (0-4 for priority, b/f/e/s for type)",
+        help=_ARG_HELP,
     ),
     description: str | None = typer.Option(
         None,
@@ -664,7 +686,9 @@ def create(
         None,
         "--priority",
         "-p",
-        help="Priority (0-4, default 2)",
+        help="Priority (0-4 or p0-p4, default 2)",
+        parser=_parse_priority_value,
+        metavar="PRIORITY",
     ),
     issue_type: str | None = typer.Option(None, "--type", "-t", help="Issue type"),
     status: str | None = typer.Option(
@@ -732,13 +756,16 @@ def create(
     b/f/e/s for bug/feature/epic/story) before or after the title.
 
     Examples:
-        dcat create "Fix login bug"         # Default priority 2, type task
-        dcat create "Fix login bug" 1       # Priority 1
-        dcat create 1 "Fix login bug"       # Priority 1 (shorthand first)
-        dcat create "Add feature" f         # Type feature
-        dcat create b "Fix crash"           # Type bug (shorthand first)
-        dcat create 0 b "Critical bug"      # Priority 0, type bug
-        dcat create b 1 "Important bug"     # Type bug, priority 1
+        dcat create "Fix login bug"           # Default priority 2, type task
+        dcat create "Fix login bug" 1         # Priority 1
+        dcat create 1 "Fix login bug"         # Priority 1 (shorthand first)
+        dcat create "Add feature" f           # Type feature
+        dcat create b "Fix crash"             # Type bug (shorthand first)
+        dcat create 0 b "Critical bug"        # Priority 0, type bug
+        dcat create b 1 "Important bug"       # Type bug, priority 1
+        dcat create "Fix login bug" -p 1      # Priority 1 (explicit flag)
+        dcat create "Fix login bug" -p p1     # Priority 1 (pINT notation)
+        dcat create "Add feature" -t feature  # Type feature (explicit flag)
     """
     try:
         # Parse arguments to extract title and shorthands
@@ -901,15 +928,15 @@ def create(
 def create_alias(
     arg1: str = typer.Argument(
         ...,
-        help="Title or shorthand (0-4 for priority, b/f/e/s for type)",
+        help=_ARG_HELP,
     ),
     arg2: str = typer.Argument(
         None,
-        help="Title or shorthand (0-4 for priority, b/f/e/s for type)",
+        help=_ARG_HELP,
     ),
     arg3: str = typer.Argument(
         None,
-        help="Title or shorthand (0-4 for priority, b/f/e/s for type)",
+        help=_ARG_HELP,
     ),
     description: str = typer.Option(
         None,
@@ -921,7 +948,9 @@ def create_alias(
         None,
         "--priority",
         "-p",
-        help="Priority (0-4, default 2)",
+        help="Priority (0-4 or p0-p4, default 2)",
+        parser=_parse_priority_value,
+        metavar="PRIORITY",
     ),
     issue_type: str = typer.Option(None, "--type", "-t", help="Issue type"),
     status: str = typer.Option(
@@ -1005,15 +1034,15 @@ def create_alias(
 def create_alias_add(
     arg1: str = typer.Argument(
         ...,
-        help="Title or shorthand (0-4 for priority, b/f/e/s for type)",
+        help=_ARG_HELP,
     ),
     arg2: str = typer.Argument(
         None,
-        help="Title or shorthand (0-4 for priority, b/f/e/s for type)",
+        help=_ARG_HELP,
     ),
     arg3: str = typer.Argument(
         None,
-        help="Title or shorthand (0-4 for priority, b/f/e/s for type)",
+        help=_ARG_HELP,
     ),
     description: str = typer.Option(
         None,
@@ -1025,7 +1054,9 @@ def create_alias_add(
         None,
         "--priority",
         "-p",
-        help="Priority (0-4, default 2)",
+        help="Priority (0-4 or p0-p4, default 2)",
+        parser=_parse_priority_value,
+        metavar="PRIORITY",
     ),
     issue_type: str = typer.Option(None, "--type", "-t", help="Issue type"),
     status: str = typer.Option(
@@ -1436,7 +1467,14 @@ def update(
     issue_id: str = typer.Argument(..., help="Issue ID"),
     title: str | None = typer.Option(None, "--title", help="New title"),
     status: str | None = typer.Option(None, "--status", "-s", help="New status"),
-    priority: int | None = typer.Option(None, "--priority", "-p", help="New priority"),
+    priority: int | None = typer.Option(
+        None,
+        "--priority",
+        "-p",
+        help="New priority (0-4 or p0-p4)",
+        parser=_parse_priority_value,
+        metavar="PRIORITY",
+    ),
     issue_type: str | None = typer.Option(None, "--type", "-t", help="New issue type"),
     description: str | None = typer.Option(
         None,
@@ -3141,7 +3179,7 @@ def guide() -> None:
   # Initialize by using a shared .dogcats directory from another repo:
 
     dcat init --use-existing-folder /home/me/project/.dogcats
-    
+
 
   Create your first issue:
 

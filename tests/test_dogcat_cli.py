@@ -219,6 +219,79 @@ class TestCLICreate:
         data = json.loads(result.stdout)
         assert data["priority"] == 1
 
+    def test_create_priority_pint_flag(self, tmp_path: Path) -> None:
+        """Test creating an issue with -p p1 (pINT notation)."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        # p1 notation
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "pINT test",
+                "-p",
+                "p1",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["priority"] == 1
+
+        # p0 notation
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "pINT test p0",
+                "-p",
+                "p0",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["priority"] == 0
+
+        # Bare int still works
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "bare int test",
+                "-p",
+                "3",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["priority"] == 3
+
+        # Invalid pINT
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "invalid pINT",
+                "-p",
+                "p9",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code != 0
+
     def test_create_type_shorthand(self, tmp_path: Path) -> None:
         """Test creating an issue with type shorthand (b/f/e/s)."""
         dogcats_dir = tmp_path / ".dogcats"
@@ -1930,6 +2003,75 @@ class TestCLIUpdate:
             ],
         )
         assert result.exit_code == 0
+
+    def test_update_priority_pint(self, tmp_path: Path) -> None:
+        """Test updating priority with pINT notation (e.g., -p p1)."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        create_result = runner.invoke(
+            app,
+            [
+                "create",
+                "Test issue",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        data = json.loads(create_result.stdout)
+        issue_id = f"{data['namespace']}-{data['id']}"
+
+        # Update with pINT notation
+        result = runner.invoke(
+            app,
+            [
+                "update",
+                issue_id,
+                "-p",
+                "p1",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        updated = json.loads(result.stdout)
+        assert updated["priority"] == 1
+
+        # Update with bare int
+        result = runner.invoke(
+            app,
+            [
+                "update",
+                issue_id,
+                "-p",
+                "4",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        updated = json.loads(result.stdout)
+        assert updated["priority"] == 4
+
+        # Invalid pINT
+        result = runner.invoke(
+            app,
+            [
+                "update",
+                issue_id,
+                "-p",
+                "p7",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code != 0
 
     def test_update_nonexistent_issue(self, tmp_path: Path) -> None:
         """Test updating nonexistent issue."""
