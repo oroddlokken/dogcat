@@ -122,6 +122,7 @@ def detect_cycles(storage: JSONLStorage) -> list[list[str]]:
     Returns:
         List of cycles (each cycle is a list of issue IDs)
     """
+    seen_cycles: set[tuple[str, ...]] = set()
     cycles: list[list[str]] = []
     visited: set[str] = set()
     rec_stack: set[str] = set()
@@ -144,7 +145,9 @@ def detect_cycles(storage: JSONLStorage) -> list[list[str]]:
                 # Found a cycle
                 cycle_start = path.index(neighbor)
                 cycle = [*path[cycle_start:], neighbor]
-                if cycle not in cycles:
+                cycle_key = tuple(cycle)
+                if cycle_key not in seen_cycles:
+                    seen_cycles.add(cycle_key)
                     cycles.append(cycle)
 
         rec_stack.discard(node)

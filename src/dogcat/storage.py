@@ -23,6 +23,11 @@ from dogcat.models import (
 class JSONLStorage:
     """Manages atomic JSONL storage for issues."""
 
+    # Compact when appended lines exceed this fraction of the base file size.
+    _COMPACTION_RATIO = 0.5
+    # Minimum base size before ratio-based compaction kicks in.
+    _COMPACTION_MIN_BASE = 20
+
     def __init__(
         self,
         path: str = ".dogcats/issues.jsonl",
@@ -45,6 +50,9 @@ class JSONLStorage:
         self._deps_by_depends_on: dict[str, list[Dependency]] = {}
         self._links_by_from: dict[str, list[Link]] = {}
         self._links_by_to: dict[str, list[Link]] = {}
+        # Track lines for compaction decisions
+        self._base_lines: int = 0
+        self._appended_lines: int = 0
 
         if create_dir:
             # Create .dogcats directory if it doesn't exist (used by init)
@@ -64,10 +72,21 @@ class JSONLStorage:
             self._load()
 
     def _load(self) -> None:
-        """Load issues from JSONL file into memory."""
+        """Load issues from JSONL file into memory.
+
+        Replays the append-only log: later issue records override earlier ones
+        (last-write-wins by ID).  Dependency and link records may carry an
+        ``"op"`` field (``"add"`` or ``"remove"``); the default is ``"add"``
+        for backwards compatibility with files written before append-only mode.
+        """
         self._issues.clear()
         self._dependencies.clear()
         self._links.clear()
+
+        # Use sets keyed by identity tuple for efficient add/remove replay
+        dep_map: dict[tuple[str, str, str], Dependency] = {}
+        link_map: dict[tuple[str, str, str], Link] = {}
+        line_count = 0
 
         try:
             with self.path.open("rb") as f:
@@ -76,30 +95,52 @@ class JSONLStorage:
                     if not line:
                         continue
 
+                    line_count += 1
+
                     try:
                         data = orjson.loads(line)
                         if "from_id" in data and "to_id" in data:
-                            # This is a link record
-                            link = Link(
-                                from_id=data["from_id"],
-                                to_id=data["to_id"],
-                                link_type=data.get("link_type", "relates_to"),
-                                created_at=datetime.fromisoformat(data["created_at"]),
-                                created_by=data.get("created_by"),
+                            op = data.get("op", "add")
+                            key = (
+                                data["from_id"],
+                                data["to_id"],
+                                data.get("link_type", "relates_to"),
                             )
-                            self._links.append(link)
+                            if op == "remove":
+                                link_map.pop(key, None)
+                            else:
+                                link = Link(
+                                    from_id=data["from_id"],
+                                    to_id=data["to_id"],
+                                    link_type=data.get("link_type", "relates_to"),
+                                    created_at=datetime.fromisoformat(
+                                        data["created_at"],
+                                    ),
+                                    created_by=data.get("created_by"),
+                                )
+                                link_map[key] = link
                         elif "issue_id" in data and "depends_on_id" in data:
-                            # This is a dependency record
-                            dep = Dependency(
-                                issue_id=data["issue_id"],
-                                depends_on_id=data["depends_on_id"],
-                                dep_type=DependencyType(data["type"]),
-                                created_at=datetime.fromisoformat(data["created_at"]),
-                                created_by=data.get("created_by"),
+                            op = data.get("op", "add")
+                            key = (
+                                data["issue_id"],
+                                data["depends_on_id"],
+                                data["type"],
                             )
-                            self._dependencies.append(dep)
+                            if op == "remove":
+                                dep_map.pop(key, None)
+                            else:
+                                dep = Dependency(
+                                    issue_id=data["issue_id"],
+                                    depends_on_id=data["depends_on_id"],
+                                    dep_type=DependencyType(data["type"]),
+                                    created_at=datetime.fromisoformat(
+                                        data["created_at"],
+                                    ),
+                                    created_by=data.get("created_by"),
+                                )
+                                dep_map[key] = dep
                         else:
-                            # This is an issue record
+                            # Issue record — last-write-wins
                             issue = dict_to_issue(data)
                             self._issues[issue.full_id] = issue
                     except (orjson.JSONDecodeError, ValueError, KeyError) as e:
@@ -109,6 +150,10 @@ class JSONLStorage:
             msg = f"Failed to read storage file: {e}"
             raise RuntimeError(msg) from e
 
+        self._dependencies = list(dep_map.values())
+        self._links = list(link_map.values())
+        self._base_lines = line_count
+        self._appended_lines = 0
         self._rebuild_indexes()
 
     def _rebuild_indexes(self) -> None:
@@ -126,7 +171,11 @@ class JSONLStorage:
             self._links_by_to.setdefault(link.to_id, []).append(link)
 
     def _save(self) -> None:
-        """Save all issues and dependencies to JSONL file atomically."""
+        """Compact: rewrite the entire file with only current state.
+
+        Eliminates superseded issue records, removed dependencies/links,
+        and resets the append counter.
+        """
         # Write to temporary file first
         with tempfile.NamedTemporaryFile(
             mode="wb",
@@ -137,11 +186,13 @@ class JSONLStorage:
             tmp_path = Path(tmp_file.name)
 
             try:
+                line_count = 0
                 # Write all issues
                 for issue in self._issues.values():
                     data = issue_to_dict(issue)
                     tmp_file.write(orjson.dumps(data))
                     tmp_file.write(b"\n")
+                    line_count += 1
 
                 # Write all dependencies
                 for dep in self._dependencies:
@@ -154,6 +205,7 @@ class JSONLStorage:
                     }
                     tmp_file.write(orjson.dumps(dep_data))
                     tmp_file.write(b"\n")
+                    line_count += 1
 
                 # Write all links
                 for link in self._links:
@@ -166,6 +218,7 @@ class JSONLStorage:
                     }
                     tmp_file.write(orjson.dumps(link_data))
                     tmp_file.write(b"\n")
+                    line_count += 1
 
                 tmp_file.flush()
             except Exception as e:
@@ -180,6 +233,69 @@ class JSONLStorage:
             tmp_path.unlink(missing_ok=True)
             msg = f"Failed to write storage file: {e}"
             raise RuntimeError(msg) from e
+
+        self._base_lines = line_count
+        self._appended_lines = 0
+
+    def _append(self, records: list[dict[str, Any]]) -> None:
+        """Append records to the JSONL file without rewriting it.
+
+        Args:
+            records: List of dicts to serialize and append as JSONL lines.
+        """
+        try:
+            with self.path.open("ab") as f:
+                for record in records:
+                    f.write(orjson.dumps(record))
+                    f.write(b"\n")
+                f.flush()
+        except OSError as e:
+            msg = f"Failed to append to storage file: {e}"
+            raise RuntimeError(msg) from e
+
+        self._appended_lines += len(records)
+        self._maybe_compact()
+
+    def _maybe_compact(self) -> None:
+        """Compact the file if appended lines exceed the threshold."""
+        if (
+            self._base_lines >= self._COMPACTION_MIN_BASE
+            and self._appended_lines > self._base_lines * self._COMPACTION_RATIO
+        ):
+            self._save()
+
+    @staticmethod
+    def _issue_record(issue: Issue) -> dict[str, Any]:
+        """Serialize an issue to a dict for appending."""
+        return issue_to_dict(issue)
+
+    @staticmethod
+    def _dep_record(dep: Dependency, *, op: str = "add") -> dict[str, Any]:
+        """Serialize a dependency to a dict for appending."""
+        d: dict[str, Any] = {
+            "issue_id": dep.issue_id,
+            "depends_on_id": dep.depends_on_id,
+            "type": dep.dep_type.value,
+            "created_at": dep.created_at.isoformat(),
+            "created_by": dep.created_by,
+        }
+        if op != "add":
+            d["op"] = op
+        return d
+
+    @staticmethod
+    def _link_record(link: Link, *, op: str = "add") -> dict[str, Any]:
+        """Serialize a link to a dict for appending."""
+        d: dict[str, Any] = {
+            "from_id": link.from_id,
+            "to_id": link.to_id,
+            "link_type": link.link_type,
+            "created_at": link.created_at.isoformat(),
+            "created_by": link.created_by,
+        }
+        if op != "add":
+            d["op"] = op
+        return d
 
     def create(self, issue: Issue) -> Issue:
         """Create a new issue.
@@ -206,7 +322,7 @@ class JSONLStorage:
         validate_priority(issue.priority)
 
         self._issues[issue.full_id] = issue
-        self._save()
+        self._append([self._issue_record(issue)])
         return issue
 
     def resolve_id(self, partial_id: str) -> str | None:
@@ -373,7 +489,7 @@ class JSONLStorage:
         # Update timestamp
         issue.updated_at = datetime.now().astimezone()
 
-        self._save()
+        self._append([self._issue_record(issue)])
         return issue
 
     def close(self, issue_id: str, reason: str | None = None) -> Issue:
@@ -403,7 +519,7 @@ class JSONLStorage:
         if reason:
             issue.close_reason = reason
 
-        self._save()
+        self._append([self._issue_record(issue)])
         return issue
 
     def delete(self, issue_id: str, reason: str | None = None) -> Issue:
@@ -520,7 +636,7 @@ class JSONLStorage:
         self._deps_by_depends_on.setdefault(resolved_depends_on_id, []).append(
             dependency,
         )
-        self._save()
+        self._append([self._dep_record(dependency)])
         return dependency
 
     def remove_dependency(self, issue_id: str, depends_on_id: str) -> None:
@@ -543,6 +659,13 @@ class JSONLStorage:
             msg = f"Issue {depends_on_id} not found"
             raise ValueError(msg)
 
+        # Collect removed deps for append-only removal records
+        removed = [
+            d
+            for d in self._dependencies
+            if d.issue_id == resolved_issue_id
+            and d.depends_on_id == resolved_depends_on_id
+        ]
         self._dependencies = [
             d
             for d in self._dependencies
@@ -552,7 +675,8 @@ class JSONLStorage:
             )
         ]
         self._rebuild_indexes()
-        self._save()
+        if removed:
+            self._append([self._dep_record(d, op="remove") for d in removed])
 
     def get_dependencies(self, issue_id: str) -> list[Dependency]:
         """Get all dependencies of an issue.
@@ -635,7 +759,7 @@ class JSONLStorage:
         self._links.append(link)
         self._links_by_from.setdefault(resolved_from_id, []).append(link)
         self._links_by_to.setdefault(resolved_to_id, []).append(link)
-        self._save()
+        self._append([self._link_record(link)])
         return link
 
     def remove_link(self, from_id: str, to_id: str) -> None:
@@ -658,13 +782,20 @@ class JSONLStorage:
             msg = f"Issue {to_id} not found"
             raise ValueError(msg)
 
+        # Collect removed links for append-only removal records
+        removed = [
+            link
+            for link in self._links
+            if link.from_id == resolved_from_id and link.to_id == resolved_to_id
+        ]
         self._links = [
             link
             for link in self._links
             if not (link.from_id == resolved_from_id and link.to_id == resolved_to_id)
         ]
         self._rebuild_indexes()
-        self._save()
+        if removed:
+            self._append([self._link_record(lnk, op="remove") for lnk in removed])
 
     def get_links(self, issue_id: str) -> list[Link]:
         """Get all links from an issue.

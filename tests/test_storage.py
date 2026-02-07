@@ -614,3 +614,141 @@ class TestCloseDeleteUpdatedAt:
         deleted = storage.delete("issue-1", reason="Dup")
         assert deleted.updated_at > original_time
         assert deleted.updated_at >= deleted.deleted_at
+
+
+class TestAppendOnlyStorage:
+    """Test that mutations append instead of rewriting the entire file."""
+
+    def test_create_appends_single_line(self, temp_workspace: Path) -> None:
+        """Test that creating an issue appends one line rather than rewriting."""
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+
+        storage.create(Issue(id="issue-1", title="First"))
+        lines_after_first = _count_lines(storage_path)
+
+        storage.create(Issue(id="issue-2", title="Second"))
+        lines_after_second = _count_lines(storage_path)
+
+        # Should have added exactly one line
+        assert lines_after_second == lines_after_first + 1
+
+    def test_update_appends_single_line(self, temp_workspace: Path) -> None:
+        """Test that updating an issue appends one line."""
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+
+        storage.create(Issue(id="issue-1", title="Original"))
+        lines_before = _count_lines(storage_path)
+
+        storage.update("issue-1", {"title": "Updated"})
+        lines_after = _count_lines(storage_path)
+
+        assert lines_after == lines_before + 1
+
+    def test_update_persists_through_reload(self, temp_workspace: Path) -> None:
+        """Test that appended updates are correctly loaded by a new instance."""
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+
+        storage.create(Issue(id="issue-1", title="Original"))
+        storage.update("issue-1", {"title": "Updated"})
+
+        # Reload from disk
+        storage2 = JSONLStorage(str(storage_path))
+        loaded = storage2.get("issue-1")
+        assert loaded is not None
+        assert loaded.title == "Updated"
+
+    def test_add_dependency_appends(self, temp_workspace: Path) -> None:
+        """Test that adding a dependency appends one line."""
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+
+        storage.create(Issue(id="a", namespace="t", title="A"))
+        storage.create(Issue(id="b", namespace="t", title="B"))
+        lines_before = _count_lines(storage_path)
+
+        storage.add_dependency("t-a", "t-b", "blocks")
+        lines_after = _count_lines(storage_path)
+
+        assert lines_after == lines_before + 1
+
+    def test_remove_dependency_appends_removal(self, temp_workspace: Path) -> None:
+        """Test that removing a dep appends a removal record and reloads correctly."""
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+
+        storage.create(Issue(id="a", namespace="t", title="A"))
+        storage.create(Issue(id="b", namespace="t", title="B"))
+        storage.add_dependency("t-a", "t-b", "blocks")
+        assert len(storage.get_dependencies("t-a")) == 1
+
+        storage.remove_dependency("t-a", "t-b")
+        assert len(storage.get_dependencies("t-a")) == 0
+
+        # Reload and verify removal is persisted
+        storage2 = JSONLStorage(str(storage_path))
+        assert len(storage2.get_dependencies("t-a")) == 0
+
+    def test_add_link_appends(self, temp_workspace: Path) -> None:
+        """Test that adding a link appends one line."""
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+
+        storage.create(Issue(id="a", namespace="t", title="A"))
+        storage.create(Issue(id="b", namespace="t", title="B"))
+        lines_before = _count_lines(storage_path)
+
+        storage.add_link("t-a", "t-b")
+        lines_after = _count_lines(storage_path)
+
+        assert lines_after == lines_before + 1
+
+    def test_remove_link_appends_removal(self, temp_workspace: Path) -> None:
+        """Test that removing a link appends a removal record and reloads correctly."""
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+
+        storage.create(Issue(id="a", namespace="t", title="A"))
+        storage.create(Issue(id="b", namespace="t", title="B"))
+        storage.add_link("t-a", "t-b")
+        assert len(storage.get_links("t-a")) == 1
+
+        storage.remove_link("t-a", "t-b")
+        assert len(storage.get_links("t-a")) == 0
+
+        # Reload and verify removal is persisted
+        storage2 = JSONLStorage(str(storage_path))
+        assert len(storage2.get_links("t-a")) == 0
+
+    def test_compaction_reduces_file_size(self, temp_workspace: Path) -> None:
+        """Test that compaction eliminates superseded records."""
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+
+        # Create an issue and update it several times
+        storage.create(Issue(id="issue-1", title="v0"))
+        for i in range(1, 6):
+            storage.update("issue-1", {"title": f"v{i}"})
+
+        # File should have 1 + 5 = 6 lines (original + 5 updates)
+        assert _count_lines(storage_path) == 6
+
+        # Force compaction
+        storage._save()
+
+        # After compaction, only 1 line (current state)
+        assert _count_lines(storage_path) == 1
+
+        # Data still correct after compaction
+        storage2 = JSONLStorage(str(storage_path))
+        loaded = storage2.get("issue-1")
+        assert loaded is not None
+        assert loaded.title == "v5"
+
+
+def _count_lines(path: Path) -> int:
+    """Count non-empty lines in a file."""
+    with path.open() as f:
+        return sum(1 for line in f if line.strip())

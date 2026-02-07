@@ -201,6 +201,34 @@ class TestDetectCycles:
 
         assert len(cycles) > 0
 
+    def test_no_duplicate_cycles(
+        self,
+        storage_with_issues: JSONLStorage,
+    ) -> None:
+        """Test that detect_cycles returns no duplicate cycle entries."""
+        # Create a simple 2-node cycle: t-i0 <-> t-i1
+        storage_with_issues._dependencies.append(
+            Dependency(
+                issue_id="t-i0",
+                depends_on_id="t-i1",
+                dep_type=DependencyType.BLOCKS,
+            ),
+        )
+        storage_with_issues._dependencies.append(
+            Dependency(
+                issue_id="t-i1",
+                depends_on_id="t-i0",
+                dep_type=DependencyType.BLOCKS,
+            ),
+        )
+        storage_with_issues._rebuild_indexes()
+
+        cycles = detect_cycles(storage_with_issues)
+
+        # Convert to tuples for set-based dedup check
+        cycle_tuples = [tuple(c) for c in cycles]
+        assert len(cycle_tuples) == len(set(cycle_tuples))
+
 
 class TestWouldCreateCycle:
     """Test circular dependency prevention."""
