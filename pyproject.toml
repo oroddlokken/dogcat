@@ -58,6 +58,7 @@ force_grid_wrap = 0
 
 [tool.ruff]
 line-length = 88
+exclude = ["src/dogcat/_version.py"]
 
 [tool.ruff.lint]
 select = [

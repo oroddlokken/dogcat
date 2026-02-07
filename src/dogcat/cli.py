@@ -43,7 +43,8 @@ class SortedGroup(TyperGroup):
 
 
 app = typer.Typer(
-    help="dogcat - lightweight, file-based issue tracking and memory upgrade for AI agents (and humans!)",
+    help="dogcat - lightweight, file-based issue tracking "
+    "and memory upgrade for AI agents (and humans!)",
     no_args_is_help=True,
     cls=SortedGroup,
 )
