@@ -59,7 +59,9 @@ Remember to run "$PROJECT_FOLDER/.venv/bin/activate &&" before running any comma
 
 Run `just fmt-all` every now and then to format all the files
 
-Always write tests for new features or when change functionality
+Always write tests for new features or when changing functionality.
+
+We are using uv for dependency management. Never call out to pip.
 
 ## Rules
 

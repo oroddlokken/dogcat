@@ -5,9 +5,10 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from textual.widgets import Collapsible, Input, Static, TextArea
+from rich.text import Text
+from textual.widgets import Collapsible, Input, OptionList, Select, Static, TextArea
 
-from dogcat.edit import IssueEditorApp
+from dogcat.edit import IssueEditorApp, IssuePickerApp
 from dogcat.models import Issue
 
 
@@ -340,3 +341,226 @@ class TestCreateMode:
 
         storage.update.assert_not_called()
         storage.create.assert_called_once()
+
+
+class TestParentPicker:
+    """Test interactive parent issue picker."""
+
+    def _make_storage_with_issues(self) -> MagicMock:
+        """Create mock storage with a set of issues for parent selection."""
+        storage = _make_storage()
+        parent_issue = _make_issue(id="par1", title="Parent issue")
+        other_issue = _make_issue(id="oth1", title="Other issue")
+        child_issue = _make_issue(id="ch1", title="Child issue", parent="dc-test")
+        storage.list.return_value = [
+            _make_issue(id="test", title="Current issue"),
+            parent_issue,
+            other_issue,
+            child_issue,
+        ]
+        storage.get_children.return_value = [child_issue]
+        return storage
+
+    @pytest.mark.asyncio
+    async def test_parent_select_renders(self) -> None:
+        """Parent Select widget is rendered in the form."""
+        issue = _make_issue()
+        storage = _make_storage()
+        storage.list.return_value = []
+        storage.get_children.return_value = []
+        app = IssueEditorApp(issue, storage)
+
+        async with app.run_test() as pilot:  # noqa: F841
+            parent_select = app.query_one("#parent-input", Select)
+            assert parent_select is not None
+
+    @pytest.mark.asyncio
+    async def test_parent_shows_current_value(self) -> None:
+        """Parent Select shows the current parent issue."""
+        issue = _make_issue(parent="dc-par1")
+        storage = _make_storage()
+        parent_issue = _make_issue(id="par1", title="Parent issue")
+        storage.list.return_value = [parent_issue]
+        storage.get_children.return_value = []
+        app = IssueEditorApp(issue, storage)
+
+        async with app.run_test() as pilot:  # noqa: F841
+            parent_select = app.query_one("#parent-input", Select)
+            assert parent_select.value == "dc-par1"
+
+    @pytest.mark.asyncio
+    async def test_parent_blank_when_no_parent(self) -> None:
+        """Parent Select is blank when issue has no parent."""
+        issue = _make_issue(parent=None)
+        storage = _make_storage()
+        storage.list.return_value = []
+        storage.get_children.return_value = []
+        app = IssueEditorApp(issue, storage)
+
+        async with app.run_test() as pilot:  # noqa: F841
+            parent_select = app.query_one("#parent-input", Select)
+            assert parent_select.value == Select.BLANK
+
+    @pytest.mark.asyncio
+    async def test_excludes_self_from_options(self) -> None:
+        """Current issue is excluded from parent options."""
+        issue = _make_issue(id="test", title="Current")
+        storage = self._make_storage_with_issues()
+        app = IssueEditorApp(issue, storage)
+
+        async with app.run_test() as pilot:  # noqa: F841
+            parent_select = app.query_one("#parent-input", Select)
+            option_values = [opt[1] for opt in parent_select._options]
+            assert "dc-test" not in option_values
+            assert "dc-par1" in option_values
+            assert "dc-oth1" in option_values
+
+    @pytest.mark.asyncio
+    async def test_excludes_descendants_from_options(self) -> None:
+        """Descendants of current issue are excluded from parent options."""
+        issue = _make_issue(id="test", title="Current")
+        storage = self._make_storage_with_issues()
+        app = IssueEditorApp(issue, storage)
+
+        async with app.run_test() as pilot:  # noqa: F841
+            parent_select = app.query_one("#parent-input", Select)
+            option_values = [opt[1] for opt in parent_select._options]
+            assert "dc-ch1" not in option_values
+
+    @pytest.mark.asyncio
+    async def test_save_captures_parent_change(self) -> None:
+        """Changing the parent is captured on save."""
+        issue = _make_issue(parent=None)
+        storage = _make_storage()
+        storage.list.return_value = [_make_issue(id="par1", title="New parent")]
+        storage.get_children.return_value = []
+        storage.update.return_value = _make_issue(parent="dc-par1")
+        app = IssueEditorApp(issue, storage)
+
+        async with app.run_test() as pilot:
+            app.query_one("#parent-input", Select).value = "dc-par1"
+            await pilot.press("ctrl+s")
+
+        storage.update.assert_called_once()
+        updates = storage.update.call_args[0][1]
+        assert updates["parent"] == "dc-par1"
+
+    @pytest.mark.asyncio
+    async def test_save_clears_parent(self) -> None:
+        """Clearing the parent sets it to None on save."""
+        issue = _make_issue(parent="dc-par1")
+        storage = _make_storage()
+        storage.list.return_value = [_make_issue(id="par1", title="Parent")]
+        storage.get_children.return_value = []
+        storage.update.return_value = _make_issue(parent=None)
+        app = IssueEditorApp(issue, storage)
+
+        async with app.run_test() as pilot:
+            app.query_one("#parent-input", Select).value = Select.BLANK
+            await pilot.press("ctrl+s")
+
+        storage.update.assert_called_once()
+        updates = storage.update.call_args[0][1]
+        assert updates["parent"] is None
+
+    @pytest.mark.asyncio
+    async def test_unchanged_parent_not_in_updates(self) -> None:
+        """Unchanged parent is not included in updates."""
+        issue = _make_issue(parent="dc-par1")
+        storage = _make_storage()
+        storage.list.return_value = [_make_issue(id="par1", title="Parent")]
+        storage.get_children.return_value = []
+        storage.update.return_value = _make_issue(title="New title")
+        app = IssueEditorApp(issue, storage)
+
+        async with app.run_test() as pilot:
+            app.query_one("#title-input", Input).value = "New title"
+            await pilot.press("ctrl+s")
+
+        storage.update.assert_called_once()
+        updates = storage.update.call_args[0][1]
+        assert "parent" not in updates
+
+
+def _make_picker_issues() -> list[tuple[Text, str]]:
+    """Create test issue labels for the picker."""
+    issues = []
+    for id_, type_, title in [
+        ("dc-abc1", "bug", "Fix login crash"),
+        ("dc-def2", "feature", "Add dark mode"),
+        ("dc-ghi3", "task", "Update docs"),
+    ]:
+        label = Text()
+        label.append(f"[{type_}] ", style="white")
+        label.append(f"{id_} {title}")
+        issues.append((label, id_))
+    return issues
+
+
+class TestIssuePicker:
+    """Test the Textual issue picker."""
+
+    @pytest.mark.asyncio
+    async def test_picker_renders_issues(self) -> None:
+        """Picker shows all issues in the option list."""
+        issues = _make_picker_issues()
+        app = IssuePickerApp(issues)
+
+        async with app.run_test() as pilot:  # noqa: F841
+            option_list = app.query_one("#picker-list", OptionList)
+            assert option_list.option_count == 3
+
+    @pytest.mark.asyncio
+    async def test_picker_cancel_returns_none(self) -> None:
+        """Pressing escape returns None."""
+        issues = _make_picker_issues()
+        app = IssuePickerApp(issues)
+
+        async with app.run_test() as pilot:
+            await pilot.press("escape")
+
+        assert app.selected_id is None
+
+    @pytest.mark.asyncio
+    async def test_picker_filter_narrows_options(self) -> None:
+        """Typing in the search input filters the option list."""
+        issues = _make_picker_issues()
+        app = IssuePickerApp(issues)
+
+        async with app.run_test() as pilot:
+            search = app.query_one("#picker-search", Input)
+            search.value = "login"
+            await pilot.pause()
+
+            option_list = app.query_one("#picker-list", OptionList)
+            assert option_list.option_count == 1
+
+    @pytest.mark.asyncio
+    async def test_picker_filter_by_id(self) -> None:
+        """Filtering by issue ID works."""
+        issues = _make_picker_issues()
+        app = IssuePickerApp(issues)
+
+        async with app.run_test() as pilot:
+            search = app.query_one("#picker-search", Input)
+            search.value = "def2"
+            await pilot.pause()
+
+            option_list = app.query_one("#picker-list", OptionList)
+            assert option_list.option_count == 1
+
+    @pytest.mark.asyncio
+    async def test_picker_empty_filter_shows_all(self) -> None:
+        """Clearing the filter shows all issues again."""
+        issues = _make_picker_issues()
+        app = IssuePickerApp(issues)
+
+        async with app.run_test() as pilot:
+            search = app.query_one("#picker-search", Input)
+            search.value = "login"
+            await pilot.pause()
+            search.value = ""
+            await pilot.pause()
+
+            option_list = app.query_one("#picker-list", OptionList)
+            assert option_list.option_count == 3

@@ -1286,12 +1286,24 @@ def show(
 
 @app.command()
 def edit(
-    issue_id: str = typer.Argument(..., help="Issue ID"),
+    issue_id: str | None = typer.Argument(
+        None,
+        help="Issue ID (opens picker if omitted)",
+    ),
     dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
 ) -> None:
     """Open an issue in the Textual editor for interactive editing."""
     try:
         storage = get_storage(dogcats_dir)
+
+        if issue_id is None:
+            from dogcat.edit import pick_issue
+
+            issue_id = pick_issue(storage)
+            if issue_id is None:
+                typer.echo("No issue selected")
+                return
+
         issue = storage.get(issue_id)
         if issue is None:
             typer.echo(f"Error: Issue {issue_id} not found", err=True)

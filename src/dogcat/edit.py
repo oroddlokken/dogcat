@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
@@ -14,16 +15,37 @@ from textual.widgets import (
     Footer,
     Input,
     Label,
+    OptionList,
     Select,
     Static,
     TextArea,
 )
 
-from dogcat.constants import PRIORITY_OPTIONS, STATUS_OPTIONS, TYPE_OPTIONS
+from dogcat.constants import (
+    PRIORITY_COLORS,
+    PRIORITY_OPTIONS,
+    STATUS_OPTIONS,
+    TYPE_COLORS,
+    TYPE_OPTIONS,
+)
 
 if TYPE_CHECKING:
     from dogcat.models import Issue
     from dogcat.storage import JSONLStorage
+
+
+def _make_issue_label(issue: Issue) -> Text:
+    """Build a Rich Text label for an issue."""
+    type_color = TYPE_COLORS.get(issue.issue_type.value, "white")
+    priority_color = PRIORITY_COLORS.get(issue.priority, "white")
+
+    label = Text()
+    label.append(f"{issue.get_status_emoji()} ", style="bold")
+    label.append(f"[{issue.priority}]", style=f"bold {priority_color}")
+    label.append(" ")
+    label.append(f"[{issue.issue_type.value}] ", style=type_color)
+    label.append(f"{issue.full_id} {issue.title}")
+    return label
 
 
 class IssueEditorApp(App[bool]):
@@ -82,20 +104,15 @@ class IssueEditorApp(App[bool]):
 
     .info-row {
         height: auto;
-        max-height: 3;
+        max-height: 5;
     }
 
     .info-row > Input {
         width: 1fr;
     }
 
-    #parent-display {
+    .info-row > Select {
         width: 1fr;
-        padding: 0 2;
-        content-align: left middle;
-        height: 3;
-        background: $surface;
-        color: $text-muted;
     }
 
     #description-input {
@@ -129,14 +146,30 @@ class IssueEditorApp(App[bool]):
         self.saved = False
         self.updated_issue: Issue | None = None
 
-    def _get_parent_display(self) -> str:
-        """Get display text for the parent issue."""
-        if not self._issue.parent:
-            return "Parent: None"
-        parent = self._storage.get(self._issue.parent)
-        if parent:
-            return f"Parent: {parent.full_id} {parent.title}"
-        return f"Parent: {self._issue.parent}"
+    def _get_descendants(self, issue_id: str) -> set[str]:
+        """Recursively collect all descendant IDs of an issue."""
+        descendants: set[str] = set()
+        stack = [issue_id]
+        while stack:
+            current = stack.pop()
+            for child in self._storage.get_children(current):
+                if child.full_id not in descendants:
+                    descendants.add(child.full_id)
+                    stack.append(child.full_id)
+        return descendants
+
+    def _get_parent_options(self) -> list[tuple[Text, str]]:
+        """Build the list of valid parent options, excluding self and descendants."""
+        excluded = {self._issue.full_id}
+        if not self._create_mode and self._issue.id:
+            excluded |= self._get_descendants(self._issue.full_id)
+
+        options: list[tuple[Text, str]] = []
+        for issue in self._storage.list():
+            if issue.full_id in excluded or issue.is_tombstone():
+                continue
+            options.append((_make_issue_label(issue), issue.full_id))
+        return options
 
     def compose(self) -> ComposeResult:
         """Compose the editor form."""
@@ -178,7 +211,13 @@ class IssueEditorApp(App[bool]):
                     placeholder="Owner",
                     id="owner-input",
                 )
-                yield Static(self._get_parent_display(), id="parent-display")
+                yield Select(
+                    options=self._get_parent_options(),
+                    value=(self._issue.parent if self._issue.parent else Select.BLANK),
+                    prompt="Parent",
+                    allow_blank=True,
+                    id="parent-input",
+                )
                 yield Input(
                     value=self._issue.external_ref or "",
                     placeholder="External ref",
@@ -279,6 +318,9 @@ class IssueEditorApp(App[bool]):
             namespace=self._namespace,
         )
 
+        parent_val = self.query_one("#parent-input", Select).value
+        parent = parent_val if isinstance(parent_val, str) else None
+
         issue = Issue(
             id=issue_id,
             title=title,
@@ -290,6 +332,7 @@ class IssueEditorApp(App[bool]):
                 IssueType(type_val) if isinstance(type_val, str) else IssueType.TASK
             ),
             owner=self.query_one("#owner-input", Input).value.strip() or None,
+            parent=parent,
             external_ref=(
                 self.query_one("#external-ref-input", Input).value.strip() or None
             ),
@@ -338,6 +381,11 @@ class IssueEditorApp(App[bool]):
         if new_ref != self._issue.external_ref:
             updates["external_ref"] = new_ref
 
+        parent_val = self.query_one("#parent-input", Select).value
+        new_parent = parent_val if isinstance(parent_val, str) else None
+        if new_parent != self._issue.parent:
+            updates["parent"] = new_parent
+
         new_desc = description or None
         if new_desc != self._issue.description:
             updates["description"] = new_desc
@@ -367,6 +415,88 @@ class IssueEditorApp(App[bool]):
             self.exit(True)
         except Exception as e:
             self.notify(f"Save failed: {e}", severity="error")
+
+
+class IssuePickerApp(App[str | None]):
+    """Textual app for selecting an issue from a searchable list."""
+
+    TITLE = "Select Issue"
+
+    BINDINGS: ClassVar = [
+        Binding("escape", "quit", "Cancel"),
+    ]
+
+    CSS = """
+    #picker-search {
+        margin: 1 2 0 2;
+    }
+
+    #picker-list {
+        margin: 0 2 1 2;
+    }
+    """
+
+    def __init__(
+        self,
+        issues: list[tuple[Text, str]],
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self._issues = issues
+        self.selected_id: str | None = None
+
+    def compose(self) -> ComposeResult:
+        """Compose the picker UI."""
+        yield Input(placeholder="Search issues...", id="picker-search")
+        yield OptionList(*[label for label, _ in self._issues], id="picker-list")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        """Focus the search input on mount."""
+        self.query_one("#picker-search", Input).focus()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Filter the option list based on search input."""
+        query = event.value.lower()
+        option_list = self.query_one("#picker-list", OptionList)
+        option_list.clear_options()
+        for label, full_id in self._issues:
+            if query in full_id.lower() or query in label.plain.lower():
+                option_list.add_option(label)
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        """Handle issue selection."""
+        # Find the matching issue by label text
+        selected_text = event.option.prompt
+        for label, full_id in self._issues:
+            if label == selected_text:
+                self.selected_id = full_id
+                self.exit(full_id)
+                return
+
+
+def pick_issue(storage: JSONLStorage) -> str | None:
+    """Open a Textual picker to select an issue.
+
+    Args:
+        storage: The storage backend.
+
+    Returns:
+        The selected issue ID, or None if cancelled.
+    """
+    issues: list[tuple[Text, str]] = []
+    for issue in storage.list():
+        if issue.is_tombstone() or issue.is_closed():
+            continue
+        label = _make_issue_label(issue)
+        issues.append((label, issue.full_id))
+
+    if not issues:
+        return None
+
+    picker = IssuePickerApp(issues)
+    picker.run()
+    return picker.selected_id
 
 
 def edit_issue(issue_id: str, storage: JSONLStorage) -> Issue | None:
