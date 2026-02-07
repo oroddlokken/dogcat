@@ -410,7 +410,7 @@ class IssueEditorApp(App[bool]):
             return
 
         try:
-            self.updated_issue = self._storage.update(self._issue.id, updates)
+            self.updated_issue = self._storage.update(self._issue.full_id, updates)
             self.saved = True
             self.exit(True)
         except Exception as e:

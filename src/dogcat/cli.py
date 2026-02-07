@@ -1602,7 +1602,7 @@ def update(
 
             typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
         else:
-            typer.echo(f"✓ Updated {issue_id}: {issue.title}")
+            typer.echo(f"✓ Updated {issue.full_id}: {issue.title}")
 
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
@@ -1643,7 +1643,7 @@ def close(
 
             typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
         else:
-            typer.echo(f"✓ Closed {issue_id}: {issue.title}")
+            typer.echo(f"✓ Closed {issue.full_id}: {issue.title}")
 
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
@@ -1693,7 +1693,7 @@ def delete(
 
             typer.echo(orjson.dumps(issue_to_dict(deleted_issue)).decode())
         else:
-            typer.echo(f"✓ Deleted {issue_id}: {deleted_issue.title}")
+            typer.echo(f"✓ Deleted {deleted_issue.full_id}: {deleted_issue.title}")
 
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
@@ -2204,9 +2204,9 @@ def label(
                 if by:
                     updates["updated_by"] = by
                 storage.update(issue_id, updates)
-                typer.echo(f"✓ Added label '{label_name}' to {issue_id}")
+                typer.echo(f"✓ Added label '{label_name}' to {issue.full_id}")
             else:
-                typer.echo(f"Label '{label_name}' already on {issue_id}")
+                typer.echo(f"Label '{label_name}' already on {issue.full_id}")
 
         elif subcommand == "remove":
             if not label_name:
@@ -2224,9 +2224,9 @@ def label(
                 if by:
                     updates["updated_by"] = by
                 storage.update(issue_id, updates)
-                typer.echo(f"✓ Removed label '{label_name}' from {issue_id}")
+                typer.echo(f"✓ Removed label '{label_name}' from {issue.full_id}")
             else:
-                typer.echo(f"Label '{label_name}' not on {issue_id}")
+                typer.echo(f"Label '{label_name}' not on {issue.full_id}")
 
         elif subcommand == "list":
             issue = storage.get(issue_id)

@@ -99,7 +99,7 @@ def get_issue_prefix(dogcats_dir: str) -> str:
     """Get the issue prefix from config or return default.
 
     Precedence:
-    1. issue_prefix from config.yaml
+    1. issue_prefix from config.toml
     2. Auto-detect from existing issues (most common prefix)
     3. Auto-detect from directory name
     4. Default prefix ("dc")
