@@ -10,13 +10,17 @@ It also avoids some complexity by not using a daemon and/or SQL database, and on
 
 ## Installation
 
-### Requirements
+### Homebrew (macOS/Linux)
 
-Install `uv`.
+```bash
+brew install oroddlokken/tap/dogcat
+```
 
-### Run
+This installs `dcat` and handles Python and dependencies automatically via `uv`.
 
-With `uv` installed, just running `./dcat.py` should work.
+### From source
+
+Install `uv`, then run `./dcat.py`.
 
 ## Usage
 
