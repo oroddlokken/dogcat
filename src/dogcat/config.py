@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import orjson
 import toml
 
 from dogcat.constants import DOGCATRC_FILENAME
@@ -153,22 +154,20 @@ def _detect_prefix_from_issues(dogcats_dir: str) -> str | None:
         return None
 
     try:
-        import json
-
         prefix_counts: dict[str, int] = {}
 
-        with issues_path.open() as f:
+        with issues_path.open("rb") as f:
             for line in f:
                 line = line.strip()
                 if not line:
                     continue
                 try:
-                    data = json.loads(line)
+                    data = orjson.loads(line)
                     issue_id = data.get("id", "")
                     prefix = extract_prefix(issue_id)
                     if prefix:
                         prefix_counts[prefix] = prefix_counts.get(prefix, 0) + 1
-                except json.JSONDecodeError:
+                except orjson.JSONDecodeError:
                     continue
 
         if not prefix_counts:

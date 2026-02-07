@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import getpass
 import subprocess
 from datetime import datetime, timezone
@@ -50,6 +51,7 @@ app = typer.Typer(
 )
 
 
+@functools.lru_cache(maxsize=1)
 def get_default_operator() -> str:
     """Get the default operator (user identifier) for issue operations.
 
@@ -1178,6 +1180,11 @@ def list_issues(
 ) -> None:
     """List issues with optional filters."""
     try:
+        # Validate mutually exclusive options early
+        if tree and table:
+            typer.echo("Error: --tree and --table are mutually exclusive", err=True)
+            raise typer.Exit(1)
+
         storage = get_storage(dogcats_dir)
 
         # Build filters
@@ -1281,11 +1288,6 @@ def list_issues(
 
         if limit:
             issues = issues[:limit]
-
-        # Validate mutually exclusive options
-        if tree and table:
-            typer.echo("Error: --tree and --table are mutually exclusive", err=True)
-            raise typer.Exit(1)
 
         if json_output:
             from dogcat.models import issue_to_dict

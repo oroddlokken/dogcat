@@ -128,12 +128,6 @@ class StreamEmitter(FileSystemEventHandler):
                 for field, new_value in new_issue.items():
                     old_value = old_issue.get(field)
                     if old_value != new_value:
-                        # Special handling for status changes
-                        if field == "status" and new_value == "closed":
-                            event_type = "closed"
-                        else:
-                            event_type = "updated"
-
                         changes[field] = {"old": old_value, "new": new_value}
 
                 if changes:

@@ -74,6 +74,7 @@ def generate_issue_id(
     title: str,
     timestamp: datetime | None = None,
     nonce: str = "",
+    issue_count: int = 0,
 ) -> str:
     """Generate an ID hash for an issue.
 
@@ -81,6 +82,7 @@ def generate_issue_id(
         title: Issue title
         timestamp: Timestamp for issue creation (default: now)
         nonce: Optional nonce for collision handling
+        issue_count: Current number of issues, used for progressive ID length scaling
 
     Returns:
         Issue ID hash (without namespace prefix)
@@ -88,9 +90,10 @@ def generate_issue_id(
     if timestamp is None:
         timestamp = datetime.now().astimezone()
 
+    length = get_id_length_for_count(issue_count)
     # Combine title with timestamp for deterministic hashing
     input_data = f"{title}:{timestamp.isoformat()}"
-    return generate_hash_id(input_data, nonce=nonce, length=4)
+    return generate_hash_id(input_data, nonce=nonce, length=length)
 
 
 def generate_dependency_id(
