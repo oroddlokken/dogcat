@@ -3444,6 +3444,25 @@ class TestCLIStatus:
         assert data["by_status"]["open"] == 1
 
 
+class TestCLIGit:
+    """Test git integration guide command."""
+
+    def test_git_guide_output(self) -> None:
+        """Test that git command outputs the integration guide."""
+        result = runner.invoke(app, ["git"])
+        assert result.exit_code == 0
+        assert "DOGCAT + GIT INTEGRATION GUIDE" in result.stdout
+        assert "Committing .dogcats" in result.stdout
+        assert "Branching Workflows" in result.stdout
+        assert "Resolving Merge Conflicts" in result.stdout
+        assert "Best Practices" in result.stdout
+
+    def test_git_guide_covers_gitignore(self) -> None:
+        """Test that git guide includes .gitignore instructions."""
+        result = runner.invoke(app, ["git"])
+        assert ".gitignore" in result.stdout
+
+
 class TestCLIGuide:
     """Test guide command."""
 

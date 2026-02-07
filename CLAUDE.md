@@ -13,6 +13,8 @@ It is okay to work on multiple issues at the same time - just mark all of them a
 
 If the user brings up a new bug, feature or anything else that warrants changes to the code, first ask if we should create an issue for it before you start working on the code.
 
+When creating a **question** issue (type: question), always draft the title and description first and confirm them with the user before running `dcat create`. Questions capture decisions and context, so the wording matters.
+
 ### Issue Status Workflow
 
 Status progression: `open` → `in_progress` → `in_review` → `closed`

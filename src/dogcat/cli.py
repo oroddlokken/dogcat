@@ -2812,6 +2812,79 @@ def archive(
 
 
 @app.command()
+def git() -> None:
+    """Show guide for integrating dogcat with git."""
+    guide_text = """\
+╔════════════════════════════════════════════════════════════════════════════╗
+║                       DOGCAT + GIT INTEGRATION GUIDE                       ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+── Committing .dogcats ─────────────────────────────────────────────────────
+
+  The .dogcats/ directory contains your issue data. To share issues with
+  your team, commit it to your git repository:
+
+    $ git add .dogcats/
+    $ git commit -m "Add issue tracking with dogcat"
+
+  From then on, treat .dogcats/ like any other tracked directory — commit
+  changes alongside the code they relate to.
+
+── Resolving Merge Conflicts ───────────────────────────────────────────────
+
+  Dogcat stores issues in .dogcats/issues.jsonl, an append-only format.
+  Conflicts are rare, but when they happen:
+
+  1. Open the conflicted file (.dogcats/issues.jsonl)
+  2. In most cases, keep BOTH sides — each line is an independent event
+  3. Remove the conflict markers (<<<<<<, ======, >>>>>>)
+  4. Save and continue the merge
+
+  Example conflict:
+    <<<<<<< HEAD
+    {"id":"abc-1","title":"Fix login","op":"update","status":"closed"}
+    =======
+    {"id":"abc-2","title":"Add signup","op":"create","status":"open"}
+    >>>>>>> feature-branch
+
+  Resolution: keep both lines (they are separate issues).
+
+  If both sides modify the SAME issue, keep the more recent change
+  (or keep both — dogcat replays events in order, so the last one wins).
+
+── Using .gitignore ────────────────────────────────────────────────────────
+
+  If you want personal-only tracking, add it to .gitignore:
+
+    echo ".dogcats/" >> .gitignore
+
+  Scenarios where ignoring makes sense:
+    - Personal TODO tracking you don't want to share
+    - Experimenting with dogcat before adopting it team-wide
+    - Repos where issues are tracked elsewhere (e.g., GitHub Issues)
+
+── Best Practices ──────────────────────────────────────────────────────────
+
+  1. Commit issue changes with related code
+     When you close a bug, commit the fix and the issue update together.
+     This keeps your history meaningful:
+       $ git add src/fix.py .dogcats/
+       $ git commit -m "Fix login timeout bug"
+
+  2. Review .dogcats/ diffs in PRs
+     Include .dogcats/ changes in code review. They document what was
+     done and why.
+
+── Quick Reference ─────────────────────────────────────────────────────────
+
+  Commit issues:          git add .dogcats/ && git commit
+  Ignore issues:          echo ".dogcats/" >> .gitignore
+  Log issue history:      git log --oneline -- .dogcats/
+"""
+    typer.echo(guide_text)
+
+
+@app.command()
 def guide() -> None:
     """Show a human-friendly guide to using dcat.
 
