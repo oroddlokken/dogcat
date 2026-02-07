@@ -1,4 +1,4 @@
-# Dogcat - git-backed issue tracking for AI agents (and agents)
+# Dogcat - git-backed issue tracking for AI agents (and humans!)
 
 Heavily inspired by [steveyegge/beads](https://github.com/steveyegge/beads).
 
