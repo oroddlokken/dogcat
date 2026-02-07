@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from dogcat.config import (
     CONFIG_FILENAME,
     DEFAULT_PREFIX,
@@ -11,9 +13,11 @@ from dogcat.config import (
     get_config_path,
     get_issue_prefix,
     load_config,
+    parse_dogcatrc,
     save_config,
     set_issue_prefix,
 )
+from dogcat.constants import DOGCATRC_FILENAME
 
 
 class TestExtractPrefix:
@@ -450,3 +454,59 @@ class TestPrefixPrecedence:
         # Step 3: Add config -> config prefix
         set_issue_prefix(str(dogcats_dir), "config-prefix")
         assert get_issue_prefix(str(dogcats_dir)) == "config-prefix"
+
+
+class TestParseDogcatrc:
+    """Tests for parse_dogcatrc function."""
+
+    def test_absolute_path(self, tmp_path: Path) -> None:
+        """Parse .dogcatrc with absolute path."""
+        target = tmp_path / "external" / ".dogcats"
+        rc_file = tmp_path / DOGCATRC_FILENAME
+        rc_file.write_text(str(target) + "\n")
+
+        result = parse_dogcatrc(rc_file)
+        assert result == target
+
+    def test_relative_path(self, tmp_path: Path) -> None:
+        """Parse .dogcatrc with relative path resolves relative to rc file location."""
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        rc_file = project_dir / DOGCATRC_FILENAME
+        rc_file.write_text("../external/.dogcats\n")
+
+        result = parse_dogcatrc(rc_file)
+        assert result == (tmp_path / "external" / ".dogcats").resolve()
+
+    def test_relative_path_same_dir(self, tmp_path: Path) -> None:
+        """Parse .dogcatrc with relative path in same directory."""
+        rc_file = tmp_path / DOGCATRC_FILENAME
+        rc_file.write_text(".dogcats\n")
+
+        result = parse_dogcatrc(rc_file)
+        assert result == (tmp_path / ".dogcats").resolve()
+
+    def test_strips_whitespace(self, tmp_path: Path) -> None:
+        """Parse .dogcatrc strips leading/trailing whitespace."""
+        target = tmp_path / ".dogcats"
+        rc_file = tmp_path / DOGCATRC_FILENAME
+        rc_file.write_text(f"  {target}  \n\n")
+
+        result = parse_dogcatrc(rc_file)
+        assert result == target
+
+    def test_empty_file_raises(self, tmp_path: Path) -> None:
+        """Empty .dogcatrc raises ValueError."""
+        rc_file = tmp_path / DOGCATRC_FILENAME
+        rc_file.write_text("")
+
+        with pytest.raises(ValueError, match="empty"):
+            parse_dogcatrc(rc_file)
+
+    def test_whitespace_only_raises(self, tmp_path: Path) -> None:
+        """Whitespace-only .dogcatrc raises ValueError."""
+        rc_file = tmp_path / DOGCATRC_FILENAME
+        rc_file.write_text("   \n\n  ")
+
+        with pytest.raises(ValueError, match="empty"):
+            parse_dogcatrc(rc_file)

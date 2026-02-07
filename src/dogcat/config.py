@@ -7,11 +7,43 @@ from typing import Any
 
 import toml
 
+from dogcat.constants import DOGCATRC_FILENAME
+
 # Default prefix for issue IDs
 DEFAULT_PREFIX = "dc"
 
 # Config filename
 CONFIG_FILENAME = "config.toml"
+
+
+def parse_dogcatrc(rc_path: str | Path) -> Path:
+    """Parse a .dogcatrc file and return the resolved .dogcats directory path.
+
+    The file contains a single line: the path to the .dogcats directory.
+    Relative paths are resolved relative to the .dogcatrc file's parent directory.
+
+    Args:
+        rc_path: Path to the .dogcatrc file
+
+    Returns:
+        Resolved absolute Path to the .dogcats directory
+
+    Raises:
+        ValueError: If the file is empty or contains only whitespace
+    """
+    rc_path = Path(rc_path)
+    content = rc_path.read_text().strip()
+
+    if not content:
+        msg = f"{DOGCATRC_FILENAME} file is empty: {rc_path}"
+        raise ValueError(msg)
+
+    target = Path(content)
+
+    if not target.is_absolute():
+        target = rc_path.parent / target
+
+    return target.resolve()
 
 
 def get_config_path(dogcats_dir: str) -> Path:

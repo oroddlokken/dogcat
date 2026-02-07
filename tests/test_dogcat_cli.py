@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
 from dogcat.cli import app
@@ -3683,3 +3684,285 @@ class TestFormatIssueBriefMetadataColors:
         result = format_issue_brief(issue)
         assert "[parent:" not in result
         assert "[closed" not in result
+
+
+class TestFindDogcatsDirWithRc:
+    """Test find_dogcats_dir() with .dogcatrc support."""
+
+    def test_dogcatrc_in_current_dir(
+        self,
+        tmp_path: Path,
+        monkeypatch: "pytest.MonkeyPatch",
+    ) -> None:
+        """find_dogcats_dir() finds .dogcatrc in current directory."""
+        from dogcat.cli import find_dogcats_dir
+        from dogcat.constants import DOGCATRC_FILENAME
+
+        external_dir = tmp_path / "external" / ".dogcats"
+        external_dir.mkdir(parents=True)
+
+        rc_file = tmp_path / DOGCATRC_FILENAME
+        rc_file.write_text(str(external_dir) + "\n")
+
+        monkeypatch.chdir(tmp_path)
+        result = find_dogcats_dir()
+        assert result == str(external_dir)
+
+    def test_dogcatrc_in_parent_dir(
+        self,
+        tmp_path: Path,
+        monkeypatch: "pytest.MonkeyPatch",
+    ) -> None:
+        """find_dogcats_dir() finds .dogcatrc in parent directory."""
+        from dogcat.cli import find_dogcats_dir
+        from dogcat.constants import DOGCATRC_FILENAME
+
+        external_dir = tmp_path / "external" / ".dogcats"
+        external_dir.mkdir(parents=True)
+
+        rc_file = tmp_path / DOGCATRC_FILENAME
+        rc_file.write_text(str(external_dir) + "\n")
+
+        child_dir = tmp_path / "subdir"
+        child_dir.mkdir()
+
+        monkeypatch.chdir(child_dir)
+        result = find_dogcats_dir()
+        assert result == str(external_dir)
+
+    def test_dogcatrc_preferred_over_dogcats_dir(
+        self,
+        tmp_path: Path,
+        monkeypatch: "pytest.MonkeyPatch",
+    ) -> None:
+        """find_dogcats_dir() prefers .dogcatrc over .dogcats/ in same directory."""
+        from dogcat.cli import find_dogcats_dir
+        from dogcat.constants import DOGCATRC_FILENAME
+
+        # Create both .dogcats/ and .dogcatrc pointing elsewhere
+        local_dogcats = tmp_path / ".dogcats"
+        local_dogcats.mkdir()
+
+        external_dir = tmp_path / "external" / ".dogcats"
+        external_dir.mkdir(parents=True)
+
+        rc_file = tmp_path / DOGCATRC_FILENAME
+        rc_file.write_text(str(external_dir) + "\n")
+
+        monkeypatch.chdir(tmp_path)
+        result = find_dogcats_dir()
+        assert result == str(external_dir)
+
+    def test_no_dogcatrc_falls_back_to_dogcats(
+        self,
+        tmp_path: Path,
+        monkeypatch: "pytest.MonkeyPatch",
+    ) -> None:
+        """find_dogcats_dir() falls back to .dogcats/ when no .dogcatrc exists."""
+        from dogcat.cli import find_dogcats_dir
+
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+
+        monkeypatch.chdir(tmp_path)
+        result = find_dogcats_dir()
+        assert result == str(dogcats_dir)
+
+    def test_dogcatrc_nonexistent_target_exits(
+        self,
+        tmp_path: Path,
+        monkeypatch: "pytest.MonkeyPatch",
+    ) -> None:
+        """Exits with error when .dogcatrc points to nonexistent dir."""
+        from dogcat.cli import find_dogcats_dir
+        from dogcat.constants import DOGCATRC_FILENAME
+
+        rc_file = tmp_path / DOGCATRC_FILENAME
+        rc_file.write_text("/nonexistent/path/.dogcats\n")
+
+        monkeypatch.chdir(tmp_path)
+        with pytest.raises(SystemExit):
+            find_dogcats_dir()
+
+    def test_dogcatrc_empty_file_exits(
+        self,
+        tmp_path: Path,
+        monkeypatch: "pytest.MonkeyPatch",
+    ) -> None:
+        """find_dogcats_dir() exits with error when .dogcatrc is empty."""
+        from dogcat.cli import find_dogcats_dir
+        from dogcat.constants import DOGCATRC_FILENAME
+
+        rc_file = tmp_path / DOGCATRC_FILENAME
+        rc_file.write_text("")
+
+        monkeypatch.chdir(tmp_path)
+        with pytest.raises(SystemExit):
+            find_dogcats_dir()
+
+    def test_dogcatrc_with_relative_path(
+        self,
+        tmp_path: Path,
+        monkeypatch: "pytest.MonkeyPatch",
+    ) -> None:
+        """find_dogcats_dir() resolves relative paths in .dogcatrc."""
+        from dogcat.cli import find_dogcats_dir
+        from dogcat.constants import DOGCATRC_FILENAME
+
+        external_dir = tmp_path / "external" / ".dogcats"
+        external_dir.mkdir(parents=True)
+
+        rc_file = tmp_path / DOGCATRC_FILENAME
+        rc_file.write_text("external/.dogcats\n")
+
+        monkeypatch.chdir(tmp_path)
+        result = find_dogcats_dir()
+        assert result == str(external_dir.resolve())
+
+
+class TestCLIInitWithDir:
+    """Test init --dir command for .dogcatrc support."""
+
+    def test_init_with_dir_creates_dogcatrc(
+        self,
+        tmp_path: Path,
+        monkeypatch: "pytest.MonkeyPatch",
+    ) -> None:
+        """Init --dir creates .dogcatrc file in current directory."""
+        from dogcat.constants import DOGCATRC_FILENAME
+
+        monkeypatch.chdir(tmp_path)
+        external_dir = tmp_path / "external" / ".dogcats"
+
+        result = runner.invoke(
+            app,
+            ["init", "--dir", str(external_dir)],
+        )
+        assert result.exit_code == 0
+
+        rc_file = tmp_path / DOGCATRC_FILENAME
+        assert rc_file.exists()
+        assert str(external_dir) in rc_file.read_text()
+
+    def test_init_with_dir_creates_external_directory(
+        self,
+        tmp_path: Path,
+        monkeypatch: "pytest.MonkeyPatch",
+    ) -> None:
+        """Init --dir creates the .dogcats directory at the external path."""
+        monkeypatch.chdir(tmp_path)
+        external_dir = tmp_path / "external" / ".dogcats"
+
+        result = runner.invoke(
+            app,
+            ["init", "--dir", str(external_dir)],
+        )
+        assert result.exit_code == 0
+        assert external_dir.exists()
+        assert (external_dir / "issues.jsonl").exists()
+
+
+class TestCLIInitUseExistingFolder:
+    """Test init --use-existing-folder command."""
+
+    def test_creates_dogcatrc_for_existing_dir(
+        self,
+        tmp_path: Path,
+        monkeypatch: "pytest.MonkeyPatch",
+    ) -> None:
+        """Creates .dogcatrc pointing to an existing .dogcats directory."""
+        from dogcat.constants import DOGCATRC_FILENAME
+
+        # Set up an existing .dogcats directory
+        existing = tmp_path / "shared" / ".dogcats"
+        existing.mkdir(parents=True)
+        (existing / "issues.jsonl").touch()
+
+        project = tmp_path / "myproject"
+        project.mkdir()
+        monkeypatch.chdir(project)
+
+        result = runner.invoke(
+            app,
+            ["init", "--use-existing-folder", str(existing)],
+        )
+        assert result.exit_code == 0
+        assert "Linked to existing" in result.stdout
+
+        rc_file = project / DOGCATRC_FILENAME
+        assert rc_file.exists()
+        assert str(existing) in rc_file.read_text()
+
+    def test_does_not_reinitialize(
+        self,
+        tmp_path: Path,
+        monkeypatch: "pytest.MonkeyPatch",
+    ) -> None:
+        """Does not modify the existing .dogcats directory."""
+        existing = tmp_path / "shared" / ".dogcats"
+        existing.mkdir(parents=True)
+        issues = existing / "issues.jsonl"
+        issues.write_text('{"id": "test-abc", "title": "Existing"}\n')
+
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(
+            app,
+            ["init", "--use-existing-folder", str(existing)],
+        )
+        assert result.exit_code == 0
+        # Original content preserved
+        assert "Existing" in issues.read_text()
+
+    def test_errors_on_nonexistent_dir(
+        self,
+        tmp_path: Path,
+        monkeypatch: "pytest.MonkeyPatch",
+    ) -> None:
+        """Errors when the specified directory doesn't exist."""
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(
+            app,
+            ["init", "--use-existing-folder", "/nonexistent/path"],
+        )
+        assert result.exit_code != 0
+        assert "does not exist" in result.output
+
+    def test_errors_on_invalid_dogcat_dir(
+        self,
+        tmp_path: Path,
+        monkeypatch: "pytest.MonkeyPatch",
+    ) -> None:
+        """Errors when directory exists but is not a valid dogcat dir."""
+        empty_dir = tmp_path / "empty"
+        empty_dir.mkdir()
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(
+            app,
+            ["init", "--use-existing-folder", str(empty_dir)],
+        )
+        assert result.exit_code != 0
+        assert "missing issues.jsonl" in result.output
+
+    def test_mutually_exclusive_with_dir(
+        self,
+        tmp_path: Path,
+        monkeypatch: "pytest.MonkeyPatch",
+    ) -> None:
+        """--dir and --use-existing-folder are mutually exclusive."""
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(
+            app,
+            [
+                "init",
+                "--dir",
+                "/some/path",
+                "--use-existing-folder",
+                "/other/path",
+            ],
+        )
+        assert result.exit_code != 0
+        assert "mutually exclusive" in result.output

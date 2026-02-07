@@ -12,11 +12,12 @@ import orjson
 import typer
 from typer.core import TyperGroup
 
-from dogcat.config import get_issue_prefix, set_issue_prefix
+from dogcat.config import get_issue_prefix, parse_dogcatrc, set_issue_prefix
 from dogcat.constants import (
     ALL_SHORTHANDS,
     DEFAULT_PRIORITY,
     DEFAULT_TYPE,
+    DOGCATRC_FILENAME,
     PRIORITY_COLORS,
     PRIORITY_SHORTHANDS,
     TYPE_COLORS,
@@ -72,7 +73,8 @@ def get_default_operator() -> str:
 def find_dogcats_dir(start_dir: str | None = None) -> str:
     """Find .dogcats directory by searching upward from start_dir.
 
-    Similar to how git finds .git directories.
+    Checks for .dogcatrc first (external directory reference), then falls back
+    to searching for .dogcats/ directly. Similar to how git finds .git directories.
 
     Args:
         start_dir: Directory to start searching from (default: current directory)
@@ -83,6 +85,24 @@ def find_dogcats_dir(start_dir: str | None = None) -> str:
     current = Path.cwd() if start_dir is None else Path(start_dir).resolve()
 
     while True:
+        # Check for .dogcatrc first
+        rc_candidate = current / DOGCATRC_FILENAME
+        if rc_candidate.is_file():
+            try:
+                target = parse_dogcatrc(rc_candidate)
+            except ValueError as e:
+                typer.echo(f"Error: {e}", err=True)
+                raise SystemExit(1) from e
+            if not target.is_dir():
+                typer.echo(
+                    f"Error: {DOGCATRC_FILENAME} points to "
+                    f"nonexistent directory: {target}",
+                    err=True,
+                )
+                raise SystemExit(1)
+            return str(target)
+
+        # Fall back to .dogcats/ directory
         candidate = current / ".dogcats"
         if candidate.is_dir():
             return str(candidate)
@@ -366,12 +386,65 @@ def init(
         help="Issue prefix (default: auto-detect from directory name)",
     ),
     dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+    external_dir: str | None = typer.Option(
+        None,
+        "--dir",
+        help="External path for .dogcats directory (creates .dogcatrc)",
+    ),
+    use_existing: str | None = typer.Option(
+        None,
+        "--use-existing-folder",
+        help="Link to an existing .dogcats directory (creates .dogcatrc)",
+    ),
 ) -> None:
     """Initialize a new Dogcat repository.
 
     If --prefix is not specified, the prefix is auto-detected from the
     directory name (e.g., folder 'myproject' -> prefix 'myproject').
+
+    Use --dir to place the .dogcats directory at an external location.
+    This creates a .dogcatrc file in the current directory pointing to the
+    specified path.
+
+    Use --use-existing-folder to link to an existing .dogcats directory
+    without reinitializing it. Only creates the .dogcatrc file.
     """
+    if use_existing is not None and external_dir is not None:
+        typer.echo(
+            "Error: --dir and --use-existing-folder are mutually exclusive",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    if use_existing is not None:
+        existing_path = Path(use_existing)
+        if not existing_path.is_dir():
+            typer.echo(
+                f"Error: directory does not exist: {existing_path}",
+                err=True,
+            )
+            raise SystemExit(1)
+        issues_file = existing_path / "issues.jsonl"
+        if not issues_file.exists():
+            typer.echo(
+                f"Error: not a valid dogcat directory "
+                f"(missing issues.jsonl): {existing_path}",
+                err=True,
+            )
+            raise SystemExit(1)
+        rc_path = Path.cwd() / DOGCATRC_FILENAME
+        rc_path.write_text(f"{use_existing}\n")
+        typer.echo(f"✓ Created {rc_path} -> {use_existing}")
+        typer.echo(f"\n✓ Linked to existing dogcat repository at {use_existing}")
+        return
+
+    if external_dir is not None:
+        dogcats_dir = external_dir
+        # Write .dogcatrc in current directory
+        rc_path = Path.cwd() / DOGCATRC_FILENAME
+        rc_path.write_text(f"{external_dir}\n")
+        typer.echo(f"✓ Created {rc_path} -> {external_dir}")
+
     dogcats_path = Path(dogcats_dir)
 
     # Use storage with create_dir=True to initialize the directory
@@ -3063,12 +3136,19 @@ def guide() -> None:
 
     dcat init
 
+  OR
+
+  # Initialize by using a shared .dogcats directory from another repo:
+
+    dcat init --use-existing-folder /home/me/project/.dogcats
+    
+
   Create your first issue:
 
     dcat create "Fix login page styling"
 
   Create an issue with a TUI:
-    
+
     dcat new
 
   You can set type and priority at creation time:
@@ -3272,6 +3352,18 @@ Use this to decide:
 Example: A feature with subtasks - subtasks can often be worked in parallel,
 so they should NOT depend on the parent. But if subtask B needs subtask A's
 output, add a dependency between them.
+
+## External .dogcats Directory
+
+Place .dogcats outside your repo with a .dogcatrc file:
+  echo "/path/to/.dogcats" > .dogcatrc
+
+Or use init with --dir:
+  dcat init --dir /path/to/external/.dogcats
+
+The .dogcatrc file contains a single line: the path to the .dogcats
+directory. Supports both absolute and relative paths (relative to the
+.dogcatrc file location).
 
 ## Tips & Tricks
 

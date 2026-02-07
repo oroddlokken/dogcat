@@ -82,3 +82,6 @@ ID_LENGTH_THRESHOLDS = (
     (5000, 6),
 )
 ID_LENGTH_MAX = 7
+
+# Config file for external .dogcats directory
+DOGCATRC_FILENAME = ".dogcatrc"

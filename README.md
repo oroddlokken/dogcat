@@ -23,6 +23,8 @@ With `uv` installed, just running `./dcat.py` should work.
 Run `dcat init` to initialize the program. Then you can run `dcat prime` to see the information an AI agent should use.  
 For a guide more suited for humans, run `dcat guide`.
 
+Alternatively, you can run `dcat init --use-existing-folder /home/me/project/.dogcats` to use a shared dogcat database.
+
 **Command cheat sheet**:
 
 | Command | Action |
