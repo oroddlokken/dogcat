@@ -1428,6 +1428,18 @@ def edit(
         raise typer.Exit(1)
 
 
+@app.command(name="e", hidden=True)
+def edit_alias(
+    issue_id: str | None = typer.Argument(
+        None,
+        help="Issue ID (opens picker if omitted)",
+    ),
+    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+) -> None:
+    """Open an issue in the Textual editor (alias for 'edit' command)."""
+    edit(issue_id=issue_id, dogcats_dir=dogcats_dir)
+
+
 @app.command(name="new")
 def new_issue_cmd(
     dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
@@ -1460,6 +1472,15 @@ def new_issue_cmd(
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
+
+
+@app.command(name="n", hidden=True)
+def new_issue_alias(
+    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+) -> None:
+    """Open a Textual form to create a new issue (alias for 'new')."""
+    new_issue_cmd(dogcats_dir=dogcats_dir, json_output=json_output)
 
 
 @app.command()

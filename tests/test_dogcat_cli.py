@@ -982,6 +982,51 @@ class TestCLICreate:
         assert data["issue_type"] == "feature"
 
 
+class TestEditAlias:
+    """Test 'e' alias for edit command."""
+
+    def test_e_alias_routes_to_edit(self, tmp_path: Path) -> None:
+        """Test that 'e' command is an alias for 'edit'."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # Create an issue to edit
+        result = runner.invoke(
+            app,
+            ["create", "Test issue", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        issue_id = json.loads(result.stdout)["id"]
+
+        mock_issue = MagicMock()
+        mock_issue.full_id = issue_id
+        mock_issue.title = "Edited title"
+
+        with patch("dogcat.edit.edit_issue", return_value=mock_issue) as mock_edit:
+            result = runner.invoke(
+                app,
+                ["e", issue_id, "--dogcats-dir", str(dogcats_dir)],
+            )
+            assert result.exit_code == 0
+            mock_edit.assert_called_once_with(issue_id, mock_edit.call_args[0][1])
+            assert "Updated" in result.stdout
+
+    def test_e_alias_nonexistent_issue(self, tmp_path: Path) -> None:
+        """Test that 'e' alias shows error for nonexistent issue."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["e", "nonexistent", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 1
+        assert (
+            "not found" in result.stdout.lower()
+            or "not found" in (result.stderr or "").lower()
+        )
+
+
 class TestCLICreateEditor:
     """Test create --editor flag."""
 
