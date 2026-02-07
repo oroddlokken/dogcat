@@ -9,6 +9,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
 from textual.widgets import (
     Button,
+    Collapsible,
     Footer,
     Input,
     Label,
@@ -100,6 +101,12 @@ class IssueEditorApp(App[bool]):
         min-height: 8;
         max-height: 20;
     }
+
+    .collapsible-textarea {
+        height: auto;
+        min-height: 5;
+        max-height: 8;
+    }
     """
 
     def __init__(
@@ -163,12 +170,47 @@ class IssueEditorApp(App[bool]):
                     id="owner-input",
                 )
                 yield Static(self._get_parent_display(), id="parent-display")
+                yield Input(
+                    value=self._issue.external_ref or "",
+                    placeholder="External ref",
+                    id="external-ref-input",
+                )
 
             yield Label("Description", classes="field-label")
             yield TextArea(
                 self._issue.description or "",
                 id="description-input",
             )
+
+            with Collapsible(
+                title="Notes",
+                collapsed=not self._issue.notes,
+            ):
+                yield TextArea(
+                    self._issue.notes or "",
+                    id="notes-input",
+                    classes="collapsible-textarea",
+                )
+
+            with Collapsible(
+                title="Acceptance Criteria",
+                collapsed=not self._issue.acceptance,
+            ):
+                yield TextArea(
+                    self._issue.acceptance or "",
+                    id="acceptance-input",
+                    classes="collapsible-textarea",
+                )
+
+            with Collapsible(
+                title="Design",
+                collapsed=not self._issue.design,
+            ):
+                yield TextArea(
+                    self._issue.design or "",
+                    id="design-input",
+                    classes="collapsible-textarea",
+                )
 
         yield Footer()
 
@@ -215,9 +257,29 @@ class IssueEditorApp(App[bool]):
         if new_owner != self._issue.owner:
             updates["owner"] = new_owner
 
+        new_ref = (
+            self.query_one("#external-ref-input", Input).value.strip() or None
+        )
+        if new_ref != self._issue.external_ref:
+            updates["external_ref"] = new_ref
+
         new_desc = description or None
         if new_desc != self._issue.description:
             updates["description"] = new_desc
+
+        new_notes = self.query_one("#notes-input", TextArea).text.strip() or None
+        if new_notes != self._issue.notes:
+            updates["notes"] = new_notes
+
+        new_acceptance = (
+            self.query_one("#acceptance-input", TextArea).text.strip() or None
+        )
+        if new_acceptance != self._issue.acceptance:
+            updates["acceptance"] = new_acceptance
+
+        new_design = self.query_one("#design-input", TextArea).text.strip() or None
+        if new_design != self._issue.design:
+            updates["design"] = new_design
 
         if not updates:
             self.notify("No changes to save")
