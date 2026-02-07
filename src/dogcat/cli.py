@@ -824,7 +824,7 @@ def create(
         raise typer.Exit(1)
 
 
-@app.command(name="c")
+@app.command(name="c", hidden=True)
 def create_alias(
     arg1: str = typer.Argument(
         ...,
@@ -905,6 +905,196 @@ def create_alias(
         dcat c "Fix login bug" 1         # Priority 1
         dcat c 0 b "Critical bug"        # Priority 0, type bug
     """
+    create(
+        arg1=arg1,
+        arg2=arg2,
+        arg3=arg3,
+        description=description,
+        priority=priority,
+        issue_type=issue_type,
+        status=status,
+        owner=owner,
+        labels=labels,
+        acceptance=acceptance,
+        notes=notes,
+        depends_on=depends_on,
+        blocks=blocks,
+        parent=parent,
+        json_output=json_output,
+        created_by=created_by,
+        no_agent=no_agent,
+        editor=False,
+        dogcats_dir=dogcats_dir,
+    )
+
+
+@app.command(name="add", hidden=True)
+def create_alias_add(
+    arg1: str = typer.Argument(
+        ...,
+        help="Title or shorthand (0-4 for priority, b/f/e/s for type)",
+    ),
+    arg2: str = typer.Argument(
+        None,
+        help="Title or shorthand (0-4 for priority, b/f/e/s for type)",
+    ),
+    arg3: str = typer.Argument(
+        None,
+        help="Title or shorthand (0-4 for priority, b/f/e/s for type)",
+    ),
+    description: str = typer.Option(
+        None,
+        "--description",
+        "-d",
+        help="Issue description",
+    ),
+    priority: int = typer.Option(
+        None,
+        "--priority",
+        "-p",
+        help="Priority (0-4, default 2)",
+    ),
+    issue_type: str = typer.Option(None, "--type", "-t", help="Issue type"),
+    status: str = typer.Option(
+        None,
+        "--status",
+        "-s",
+        help="Initial status (open, in_progress, blocked, deferred)",
+    ),
+    owner: str = typer.Option(None, "--owner", "-o", help="Issue owner"),
+    labels: str = typer.Option(None, "--labels", "-l", help="Comma-separated labels"),
+    acceptance: str = typer.Option(
+        None,
+        "--acceptance",
+        "-a",
+        help="Acceptance criteria",
+    ),
+    notes: str = typer.Option(
+        None,
+        "--notes",
+        "-n",
+        help="Notes for the issue",
+    ),
+    depends_on: str = typer.Option(
+        None,
+        "--depends-on",
+        help="Issue ID this depends on (this issue is blocked by the other)",
+    ),
+    blocks: str = typer.Option(
+        None,
+        "--blocks",
+        help="Issue ID this blocks (the other issue is blocked by this one)",
+    ),
+    parent: str = typer.Option(
+        None,
+        "--parent",
+        help="Parent issue ID (makes this a subtask)",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    created_by: str = typer.Option(None, "--created-by", help="Who is creating this"),
+    no_agent: bool = typer.Option(
+        False,
+        "--no-agent",
+        help="Mark issue as not for agents",
+    ),
+    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+) -> None:
+    """Create a new issue (alias for 'create' command)."""
+    create(
+        arg1=arg1,
+        arg2=arg2,
+        arg3=arg3,
+        description=description,
+        priority=priority,
+        issue_type=issue_type,
+        status=status,
+        owner=owner,
+        labels=labels,
+        acceptance=acceptance,
+        notes=notes,
+        depends_on=depends_on,
+        blocks=blocks,
+        parent=parent,
+        json_output=json_output,
+        created_by=created_by,
+        no_agent=no_agent,
+        editor=False,
+        dogcats_dir=dogcats_dir,
+    )
+
+
+@app.command(name="new", hidden=True)
+def create_alias_new(
+    arg1: str = typer.Argument(
+        ...,
+        help="Title or shorthand (0-4 for priority, b/f/e/s for type)",
+    ),
+    arg2: str = typer.Argument(
+        None,
+        help="Title or shorthand (0-4 for priority, b/f/e/s for type)",
+    ),
+    arg3: str = typer.Argument(
+        None,
+        help="Title or shorthand (0-4 for priority, b/f/e/s for type)",
+    ),
+    description: str = typer.Option(
+        None,
+        "--description",
+        "-d",
+        help="Issue description",
+    ),
+    priority: int = typer.Option(
+        None,
+        "--priority",
+        "-p",
+        help="Priority (0-4, default 2)",
+    ),
+    issue_type: str = typer.Option(None, "--type", "-t", help="Issue type"),
+    status: str = typer.Option(
+        None,
+        "--status",
+        "-s",
+        help="Initial status (open, in_progress, blocked, deferred)",
+    ),
+    owner: str = typer.Option(None, "--owner", "-o", help="Issue owner"),
+    labels: str = typer.Option(None, "--labels", "-l", help="Comma-separated labels"),
+    acceptance: str = typer.Option(
+        None,
+        "--acceptance",
+        "-a",
+        help="Acceptance criteria",
+    ),
+    notes: str = typer.Option(
+        None,
+        "--notes",
+        "-n",
+        help="Notes for the issue",
+    ),
+    depends_on: str = typer.Option(
+        None,
+        "--depends-on",
+        help="Issue ID this depends on (this issue is blocked by the other)",
+    ),
+    blocks: str = typer.Option(
+        None,
+        "--blocks",
+        help="Issue ID this blocks (the other issue is blocked by this one)",
+    ),
+    parent: str = typer.Option(
+        None,
+        "--parent",
+        help="Parent issue ID (makes this a subtask)",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    created_by: str = typer.Option(None, "--created-by", help="Who is creating this"),
+    no_agent: bool = typer.Option(
+        False,
+        "--no-agent",
+        help="Mark issue as not for agents",
+    ),
+    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+) -> None:
+    """Create a new issue (alias for 'create' command)."""
     create(
         arg1=arg1,
         arg2=arg2,
