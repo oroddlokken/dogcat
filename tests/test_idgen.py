@@ -1,6 +1,6 @@
 """Tests for ID generation module."""
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from dogcat.idgen import (
     IDGenerator,
@@ -128,22 +128,22 @@ class TestGenerateIssueId:
 
     def test_issue_id_deterministic(self) -> None:
         """Test that issue ID is deterministic with same timestamp."""
-        timestamp = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+        timestamp = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
         hash1 = generate_issue_id("Test issue", timestamp=timestamp)
         hash2 = generate_issue_id("Test issue", timestamp=timestamp)
         assert hash1 == hash2
 
     def test_different_timestamps_different_ids(self) -> None:
         """Test that different timestamps produce different IDs."""
-        t1 = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
-        t2 = datetime(2026, 1, 1, 12, 0, 1, tzinfo=UTC)
+        t1 = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        t2 = datetime(2026, 1, 1, 12, 0, 1, tzinfo=timezone.utc)
         hash1 = generate_issue_id("Test issue", timestamp=t1)
         hash2 = generate_issue_id("Test issue", timestamp=t2)
         assert hash1 != hash2
 
     def test_issue_id_with_nonce(self) -> None:
         """Test issue ID generation with nonce for collisions."""
-        timestamp = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+        timestamp = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
         hash1 = generate_issue_id("Test", timestamp=timestamp, nonce="")
         hash2 = generate_issue_id("Test", timestamp=timestamp, nonce="1")
         assert hash1 != hash2
@@ -234,7 +234,7 @@ class TestIDGenerator:
 
     def test_generated_id_uses_scaled_length(self) -> None:
         """Test that generated IDs use the appropriate length."""
-        timestamp = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+        timestamp = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
         # Small database: 4 chars
         gen_small = IDGenerator(existing_ids={f"dc-{i:04d}" for i in range(100)})
@@ -256,7 +256,7 @@ class TestIDGenerator:
     def test_generate_unique_issue_id(self) -> None:
         """Test that generator produces unique IDs."""
         gen = IDGenerator()
-        timestamp = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+        timestamp = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
         # Generate multiple IDs with collision detection
         hash1 = gen.generate_issue_id("Test", timestamp=timestamp)
@@ -274,7 +274,7 @@ class TestIDGenerator:
         # Add a collision manually
         gen.add_existing_id("dc-aaaa")
 
-        timestamp = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+        timestamp = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
         new_hash = gen.generate_issue_id("Test", timestamp=timestamp)
 
         # Should get a different ID
@@ -311,7 +311,7 @@ class TestIDGenerator:
     def test_fallback_to_longer_id(self) -> None:
         """Test fallback to longer ID on max retries."""
         gen = IDGenerator()
-        timestamp = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+        timestamp = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
         # Create a collision scenario by filling the collision space
         # This is hard to trigger with short IDs, but the code should handle it
@@ -331,7 +331,7 @@ class TestIDGeneratorIntegration:
     def test_workflow_with_multiple_issues(self) -> None:
         """Test generating multiple issues with the same title."""
         gen = IDGenerator()
-        timestamp = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+        timestamp = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
         # Generate multiple issues with same title but different times
         hash1 = gen.generate_issue_id("Test issue", timestamp=timestamp)

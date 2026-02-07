@@ -1,6 +1,6 @@
 """Tests for Dogcat models."""
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 import pytest
 
@@ -96,14 +96,14 @@ class TestCommentModel:
 
     def test_comment_created_at_default(self) -> None:
         """Test that created_at is auto-set."""
-        before = datetime.now(UTC)
+        before = datetime.now(timezone.utc)
         comment = Comment(
             id="comment-1",
             issue_id="issue-1",
             author="user@example.com",
             text="Test",
         )
-        after = datetime.now(UTC)
+        after = datetime.now(timezone.utc)
         assert before <= comment.created_at <= after
 
 
@@ -125,13 +125,13 @@ class TestDependencyModel:
 
     def test_dependency_created_at_default(self) -> None:
         """Test that created_at is auto-set."""
-        before = datetime.now(UTC)
+        before = datetime.now(timezone.utc)
         dep = Dependency(
             issue_id="issue-1",
             depends_on_id="issue-2",
             type=DependencyType.PARENT_CHILD,
         )
-        after = datetime.now(UTC)
+        after = datetime.now(timezone.utc)
         assert before <= dep.created_at <= after
 
 
@@ -186,9 +186,9 @@ class TestIssueModel:
 
     def test_issue_datetime_auto_generated(self) -> None:
         """Test that created_at and updated_at are auto-generated."""
-        before = datetime.now(UTC)
+        before = datetime.now(timezone.utc)
         issue = Issue(id="issue-1", title="Test")
-        after = datetime.now(UTC)
+        after = datetime.now(timezone.utc)
 
         assert before <= issue.created_at <= after
         assert before <= issue.updated_at <= after
@@ -332,8 +332,8 @@ class TestSerialization:
             "namespace": "test",
             "id": "abc1",
             "title": "Test",
-            "created_at": datetime.now(UTC).isoformat(),
-            "updated_at": datetime.now(UTC).isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         issue = dict_to_issue(data)
 
@@ -348,8 +348,8 @@ class TestSerialization:
         data = {
             "id": "dc-xyz9",  # Old format: namespace-id combined
             "title": "Test",
-            "created_at": datetime.now(UTC).isoformat(),
-            "updated_at": datetime.now(UTC).isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         issue = dict_to_issue(data)
 
@@ -361,7 +361,7 @@ class TestSerialization:
 
     def test_dict_to_issue_with_datetimes(self) -> None:
         """Test that ISO datetime strings are deserialized correctly."""
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         data = {
             "namespace": "issue",
             "id": "1",
@@ -376,7 +376,7 @@ class TestSerialization:
 
     def test_dict_to_issue_with_comments(self) -> None:
         """Test deserializing issue with comments."""
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         data = {
             "id": "issue-1",
             "title": "Test",

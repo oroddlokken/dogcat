@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -124,9 +124,9 @@ def migrate_issue(beads_issue: dict[str, Any]) -> tuple[Issue, list[Dependency]]
         issue_type=issue_type,
         owner=owner,
         labels=labels,
-        created_at=parse_datetime(created_at_str) or datetime.now(tz=UTC),  # type: ignore
+        created_at=parse_datetime(created_at_str) or datetime.now(tz=timezone.utc),  # type: ignore
         created_by=created_by,
-        updated_at=parse_datetime(updated_at_str) or datetime.now(tz=UTC),  # type: ignore
+        updated_at=parse_datetime(updated_at_str) or datetime.now(tz=timezone.utc),  # type: ignore
         closed_at=parse_datetime(closed_at_str),
         deleted_at=parse_datetime(deleted_at_str),
         deleted_by=deleted_by,
@@ -148,7 +148,7 @@ def migrate_issue(beads_issue: dict[str, Any]) -> tuple[Issue, list[Dependency]]
             issue_id=dep_dict.get("issue_id", issue_id),
             depends_on_id=dep_dict.get("depends_on_id", ""),
             type=dep_type,
-            created_at=parse_datetime(dep_created_at_str) or datetime.now(tz=UTC),  # type: ignore
+            created_at=parse_datetime(dep_created_at_str) or datetime.now(tz=timezone.utc),  # type: ignore  # noqa: E501
             created_by=dep_dict.get("created_by"),
         )
         dependencies.append(dep)

@@ -1,7 +1,7 @@
 """Tests for event streaming and change detection."""
 
 import json
-from datetime import UTC
+from datetime import timezone
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +20,7 @@ class TestStreamEvent:
         event = StreamEvent(
             event_type="created",
             issue_id="issue-1",
-            timestamp=datetime.now(UTC),
+            timestamp=datetime.now(timezone.utc),
             by="user@example.com",
             changes={"title": {"old": None, "new": "Test"}},
         )
@@ -33,7 +33,7 @@ class TestStreamEvent:
         """Test converting event to dict."""
         from datetime import datetime
 
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         event = StreamEvent(
             event_type="updated",
             issue_id="issue-1",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import getpass
 import subprocess
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -1238,7 +1238,7 @@ def list_issues(
                             after_dt = dt.fromisoformat(closed_after)
                             # Make timezone-naive dates UTC-aware for comparison
                             if after_dt.tzinfo is None:
-                                after_dt = after_dt.replace(tzinfo=UTC)
+                                after_dt = after_dt.replace(tzinfo=timezone.utc)
                             if issue.closed_at < after_dt:
                                 should_include = False
 
@@ -1246,7 +1246,7 @@ def list_issues(
                             before_dt = dt.fromisoformat(closed_before)
                             # Make timezone-naive dates UTC-aware for comparison
                             if before_dt.tzinfo is None:
-                                before_dt = before_dt.replace(tzinfo=UTC)
+                                before_dt = before_dt.replace(tzinfo=timezone.utc)
                             if issue.closed_at > before_dt:
                                 should_include = False
 
@@ -2862,11 +2862,11 @@ def archive(
 
         # Apply age filter if specified
         if days is not None:
-            cutoff = datetime.now(UTC) - timedelta(days=days)
+            cutoff = datetime.now(timezone.utc) - timedelta(days=days)
             closed_issues = [
                 i
                 for i in closed_issues
-                if i.closed_at and i.closed_at.astimezone(UTC) <= cutoff
+                if i.closed_at and i.closed_at.astimezone(timezone.utc) <= cutoff
             ]
 
             if not closed_issues:
@@ -2995,7 +2995,7 @@ def archive(
         archive_dir.mkdir(exist_ok=True)
 
         # Generate timestamp for archive file
-        timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
         archive_filename = f"closed-{timestamp}.jsonl"
         archive_path = archive_dir / archive_filename
 

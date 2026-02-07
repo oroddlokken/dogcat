@@ -1,6 +1,6 @@
 """Integration tests for Phase 1 modules working together."""
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -30,7 +30,7 @@ class TestPhase1Integration:
     ) -> None:
         """Test a complete workflow: create -> list -> update -> close."""
         _, storage, idgen = workspace_with_storage
-        timestamp = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+        timestamp = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
         # Create issues
         issue_id = idgen.generate_issue_id("Fix login bug", timestamp=timestamp)
