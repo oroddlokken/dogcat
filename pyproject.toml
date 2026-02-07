@@ -1,7 +1,7 @@
 [project]
 name = "dogcat"
 version = "0.1.0"
-description = "git-backed issue tracking for AI agents (and agents)"
+description = "lightweight, file-based issue tracking for AI agents (and humans)"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

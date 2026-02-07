@@ -1,4 +1,4 @@
-# Dogcat - git-backed issue tracking and memory upgrade for AI agents (and humans!)
+# Dogcat - lightweight, file-based issue tracking and memory upgrade for AI agents (and humans!)
 
 `dogcat` is a memory upgrade for AI agents. You no longer need to keep track of Markdown files when developing new features or letting the agent waste precious context on progress. With a simple command line utility (and some TUI niceties!) you can create, edit, manage and display issues.
 
