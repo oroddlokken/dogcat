@@ -3067,6 +3067,10 @@ def guide() -> None:
 
     dcat create "Fix login page styling"
 
+  Create an issue with a TUI:
+    
+    dcat new
+
   You can set type and priority at creation time:
 
     dcat create "Crash on empty input" --type bug --priority 1
@@ -3122,6 +3126,9 @@ def guide() -> None:
   To find issues that are ready to work on (no blockers):
 
     dcat ready
+
+  Edit an issue with a TUI:
+    dcat edit <id>
 
 ── Dependencies & Hierarchy ────────────────────────────────────────────────
 

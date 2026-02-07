@@ -33,6 +33,8 @@ For a guide more suited for humans, run `dcat guide`.
 | `dcat close $id` | Close a task |
 | `dcat close $id -reason "Fixed the bug"` | Close a task with reason |
 | `dcat show $id` | Show full details about an issue |
+| `dcat new` | Interactive TUI for creating a new issue |
+| `dcat edit [$id]` | Interactive TUI for editing an issue |
 
 Also take a look at the `Issue tracking` section in [CLAUDE.MD] to see how to integrate this in your agentic workflow.
 
@@ -56,6 +58,15 @@ Ready view showing unblocked tasks available for work:
 
 Detailed task view with description, acceptance criteria, and metadata:
 ![Task Details](static/dcat-show-issueid.png)
+
+TUI for creating new issues (`dcat new`):
+![New issue](static/dcat-new.png)
+
+TUI for editing issues, select the one you want to edit (`dcat edit`):
+![Select issue to edit](static/dcat-edit.png)
+
+TUI for editing issues (`dcat edit $id`):
+![Edit issue](static/dcat-edit-id.png)
 
 ## Development
 
