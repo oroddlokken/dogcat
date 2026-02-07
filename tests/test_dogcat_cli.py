@@ -3812,6 +3812,18 @@ class TestCLIGuide:
         assert "--agent-only" not in result.stdout
 
 
+class TestCLIVersion:
+    """Test version command."""
+
+    def test_version_displays_version(self) -> None:
+        """Test that version command outputs the package version."""
+        from dogcat._version import version as v
+
+        result = runner.invoke(app, ["version"])
+        assert result.exit_code == 0
+        assert v in result.stdout
+
+
 class TestCLICommandOrder:
     """Test that CLI commands are listed in alphabetical order."""
 

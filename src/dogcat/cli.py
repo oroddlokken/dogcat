@@ -3497,6 +3497,14 @@ Close with answer:  dcat close <id> --reason "Use JWT tokens"
     typer.echo(guide)
 
 
+@app.command()
+def version() -> None:
+    """Show the dogcat version."""
+    from dogcat._version import version as v
+
+    typer.echo(v)
+
+
 def main() -> None:
     """Run the Dogcat CLI application."""
     app()
