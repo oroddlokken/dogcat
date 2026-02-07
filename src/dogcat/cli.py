@@ -40,7 +40,7 @@ class SortedGroup(TyperGroup):
 
 
 app = typer.Typer(
-    help="dogcat - git-backed issue tracking for AI agents (and humans!)",
+    help="dogcat - git-backed issue tracking and memory upgrade for AI agents (and humans!)",
     no_args_is_help=True,
     cls=SortedGroup,
 )
