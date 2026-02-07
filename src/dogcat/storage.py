@@ -282,6 +282,36 @@ class JSONLStorage:
 
         return issues
 
+    # Fields that callers are allowed to modify via update().
+    # Internal/identity fields (id, namespace, full_id, created_at, etc.) are excluded.
+    UPDATABLE_FIELDS: frozenset[str] = frozenset(
+        {
+            "title",
+            "description",
+            "status",
+            "priority",
+            "issue_type",
+            "owner",
+            "parent",
+            "labels",
+            "external_ref",
+            "design",
+            "acceptance",
+            "notes",
+            "close_reason",
+            "updated_by",
+            "closed_at",
+            "closed_by",
+            "deleted_at",
+            "deleted_by",
+            "delete_reason",
+            "original_type",
+            "duplicate_of",
+            "metadata",
+            "no_agent",
+        },
+    )
+
     def update(self, issue_id: str, updates: dict[str, Any]) -> Issue:
         """Update an issue.
 
@@ -293,7 +323,7 @@ class JSONLStorage:
             The updated issue
 
         Raises:
-            ValueError: If issue doesn't exist
+            ValueError: If issue doesn't exist or updates contain disallowed fields
         """
         from dogcat.models import IssueType, validate_priority
 
@@ -306,6 +336,8 @@ class JSONLStorage:
 
         # Update fields
         for key, value in updates.items():
+            if key not in self.UPDATABLE_FIELDS:
+                continue
             if hasattr(issue, key):
                 # Validate priority
                 if key == "priority":
@@ -343,10 +375,12 @@ class JSONLStorage:
 
         issue = self._issues[resolved_id]
 
+        now = datetime.now().astimezone()
         issue.status = Status.CLOSED
-        issue.closed_at = datetime.now().astimezone()
+        issue.closed_at = now
+        issue.updated_at = now
         if reason:
-            issue.notes = (issue.notes or "") + f"\n\nClosed: {reason}"
+            issue.close_reason = reason
 
         self._save()
         return issue
@@ -371,8 +405,10 @@ class JSONLStorage:
 
         issue = self._issues[resolved_id]
 
+        now = datetime.now().astimezone()
         issue.status = Status.TOMBSTONE
-        issue.deleted_at = datetime.now().astimezone()
+        issue.deleted_at = now
+        issue.updated_at = now
         issue.delete_reason = reason
         issue.original_type = issue.issue_type
 

@@ -224,7 +224,7 @@ class TestPhase1Integration:
         # Close
         closed = storage.close(issue_id, reason="Fixed in PR #123")
         assert closed.status == Status.CLOSED
-        assert "PR #123" in (closed.notes or "")
+        assert closed.close_reason == "Fixed in PR #123"
 
         # Delete (tombstone)  # noqa: ERA001
         deleted = storage.delete(issue_id, reason="Duplicate of #456")

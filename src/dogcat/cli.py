@@ -221,23 +221,15 @@ def format_issue_full(issue: Issue, parent_title: str | None = None) -> str:
     if issue.acceptance:
         lines.append(f"Acceptance: {issue.acceptance}")
 
-    # Separate close reason from notes if present
-    notes = issue.notes or ""
-    close_reason = None
-    if "Closed: " in notes:
-        parts = notes.split("Closed: ")
-        close_reason = parts[-1].strip()
-        notes = "Closed: ".join(parts[:-1]).strip()
-
-    if notes:
-        lines.append(f"Notes: {notes}")
+    if issue.notes:
+        lines.append(f"Notes: {issue.notes}")
 
     dt_fmt = "%Y-%m-%d %H:%M:%S"
     lines.append(f"Created: {issue.created_at.strftime(dt_fmt)}")
     if issue.closed_at:
         closed_line = f"Closed: {issue.closed_at.strftime(dt_fmt)}"
-        if close_reason:
-            closed_line += f" ({close_reason})"
+        if issue.close_reason:
+            closed_line += f" ({issue.close_reason})"
         lines.append(closed_line)
 
     if issue.description:
@@ -756,6 +748,9 @@ def create(
     Supports shorthand notation: use single characters (0-4 for priority,
     b/f/e/s for bug/feature/epic/story) before or after the title.
 
+    If the title starts with --, use -- to stop option parsing:
+        dcat create -- "--flag is not a flag"
+
     Examples:
         dcat create "Fix login bug"           # Default priority 2, type task
         dcat create "Fix login bug" 1         # Priority 1
@@ -767,6 +762,7 @@ def create(
         dcat create "Fix login bug" -p 1      # Priority 1 (explicit flag)
         dcat create "Fix login bug" -p p1     # Priority 1 (pINT notation)
         dcat create "Add feature" -t feature  # Type feature (explicit flag)
+        dcat create -- "--flag is not a flag"  # Title starting with dashes
     """
     try:
         # Parse arguments to extract title and shorthands
@@ -2101,14 +2097,8 @@ def recently_closed(
                         else ""
                     )
                     typer.echo(f"✓ [{closed_str}] {issue.full_id}: {issue.title}")
-                    # Extract close reason from notes if present
-                    if issue.notes and "Closed: " in issue.notes:
-                        # Find the last "Closed: " entry
-                        parts = issue.notes.split("Closed: ")
-                        if len(parts) > 1:
-                            reason = parts[-1].split("\n")[0].strip()
-                            if reason:
-                                typer.echo(f"    {reason}")
+                    if issue.close_reason:
+                        typer.echo(f"    {issue.close_reason}")
                     typer.echo()  # Blank line between issues
 
     except Exception as e:

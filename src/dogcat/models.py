@@ -91,6 +91,7 @@ class Issue:
     design: str | None = None
     acceptance: str | None = None
     notes: str | None = None
+    close_reason: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now().astimezone())
     created_by: str | None = None
     updated_at: datetime = field(default_factory=lambda: datetime.now().astimezone())
@@ -192,6 +193,7 @@ def issue_to_dict(issue: Issue) -> dict[str, Any]:
         "design": issue.design,
         "acceptance": issue.acceptance,
         "notes": issue.notes,
+        "close_reason": issue.close_reason,
         "created_at": issue.created_at.isoformat(),
         "created_by": issue.created_by,
         "updated_at": issue.updated_at.isoformat(),
@@ -215,6 +217,28 @@ def issue_to_dict(issue: Issue) -> dict[str, Any]:
         "duplicate_of": issue.duplicate_of,
         "metadata": issue.metadata,
     }
+
+
+def _migrate_close_reason(notes: str | None, close_reason: str | None) -> str | None:
+    """Extract close_reason from legacy notes if not already set."""
+    if close_reason is not None:
+        return close_reason
+    if notes and "\n\nClosed: " in notes:
+        parts = notes.split("\n\nClosed: ")
+        return parts[-1].strip() or None
+    return None
+
+
+def _migrate_notes(notes: str | None, close_reason: str | None) -> str | None:
+    """Strip legacy close reason from notes if close_reason is not yet a field."""
+    if close_reason is not None:
+        # Already migrated; notes are clean
+        return notes
+    if notes and "\n\nClosed: " in notes:
+        parts = notes.split("\n\nClosed: ")
+        cleaned = "\n\nClosed: ".join(parts[:-1]).strip()
+        return cleaned or None
+    return notes
 
 
 def dict_to_issue(data: dict[str, Any]) -> Issue:
@@ -271,7 +295,8 @@ def dict_to_issue(data: dict[str, Any]) -> Issue:
         external_ref=data.get("external_ref"),
         design=data.get("design"),
         acceptance=data.get("acceptance"),
-        notes=data.get("notes"),
+        notes=_migrate_notes(data.get("notes"), data.get("close_reason")),
+        close_reason=_migrate_close_reason(data.get("notes"), data.get("close_reason")),
         created_at=created_at,
         created_by=data.get("created_by"),
         updated_at=updated_at,

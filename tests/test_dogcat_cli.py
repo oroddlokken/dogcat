@@ -981,6 +981,60 @@ class TestCLICreate:
         assert data["priority"] == 1
         assert data["issue_type"] == "feature"
 
+    def test_create_title_starting_with_dashes_using_sentinel(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test that titles starting with -- work when using -- sentinel."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "--dogcats-dir",
+                str(dogcats_dir),
+                "--json",
+                "--",
+                "--tree and --table comparison",
+            ],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["title"] == "--tree and --table comparison"
+
+    def test_create_options_before_positional_args(self, tmp_path: Path) -> None:
+        """Test that options work when placed before positional args."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "--dogcats-dir",
+                str(dogcats_dir),
+                "--priority",
+                "1",
+                "--type",
+                "bug",
+                "--json",
+                "Important bug fix",
+            ],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["title"] == "Important bug fix"
+        assert data["priority"] == 1
+        assert data["issue_type"] == "bug"
+
 
 class TestEditAlias:
     """Test 'e' alias for edit command."""
@@ -3073,6 +3127,89 @@ class TestCLIClose:
         # deleted_by should be auto-populated
         assert deleted_data["deleted_by"] is not None
         assert deleted_data["deleted_by"] != ""
+
+    def test_close_reason_in_dedicated_field(self, tmp_path: Path) -> None:
+        """Test that close reason is stored in close_reason field, not notes."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        create_result = runner.invoke(
+            app,
+            [
+                "create",
+                "Test issue",
+                "--notes",
+                "Some notes",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        issue_data = json.loads(create_result.stdout)
+        issue_id = issue_data["id"]
+
+        runner.invoke(
+            app,
+            [
+                "close",
+                issue_id,
+                "--reason",
+                "Fixed the bug",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        show_result = runner.invoke(
+            app,
+            [
+                "show",
+                issue_id,
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        closed_data = json.loads(show_result.stdout)
+        assert closed_data["close_reason"] == "Fixed the bug"
+        assert closed_data["notes"] == "Some notes"
+        assert "Closed:" not in (closed_data["notes"] or "")
+
+    def test_show_displays_close_reason(self, tmp_path: Path) -> None:
+        """Test that show command displays close reason next to closed date."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        create_result = runner.invoke(
+            app,
+            ["create", "Test issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+
+        runner.invoke(
+            app,
+            [
+                "close",
+                issue_id,
+                "--reason",
+                "All done",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        show_result = runner.invoke(
+            app,
+            ["show", issue_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert "All done" in show_result.stdout
+        assert "Closed:" in show_result.stdout
 
 
 class TestCLIDoctor:

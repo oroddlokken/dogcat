@@ -467,3 +467,150 @@ class TestParentChildRelationships:
         children = storage.get_children("parent")
         assert len(children) == 1
         assert children[0].full_id == "dc-child"
+
+
+class TestUpdateFieldAllowlist:
+    """Test that update() only modifies allowed fields."""
+
+    def test_update_allowed_field(self, storage: JSONLStorage) -> None:
+        """Test that allowed fields can be updated."""
+        issue = Issue(id="issue-1", title="Original")
+        storage.create(issue)
+
+        updated = storage.update("issue-1", {"title": "Updated"})
+        assert updated.title == "Updated"
+
+    def test_update_ignores_id(self, storage: JSONLStorage) -> None:
+        """Test that update() cannot overwrite the id field."""
+        issue = Issue(id="issue-1", title="Test")
+        storage.create(issue)
+
+        storage.update("issue-1", {"id": "hacked"})
+        retrieved = storage.get("issue-1")
+        assert retrieved is not None
+        assert retrieved.id == "issue-1"
+
+    def test_update_ignores_namespace(self, storage: JSONLStorage) -> None:
+        """Test that update() cannot overwrite the namespace field."""
+        issue = Issue(id="issue-1", title="Test")
+        storage.create(issue)
+
+        storage.update("issue-1", {"namespace": "evil"})
+        retrieved = storage.get("issue-1")
+        assert retrieved is not None
+        assert retrieved.namespace == "dc"
+
+    def test_update_ignores_created_at(self, storage: JSONLStorage) -> None:
+        """Test that update() cannot overwrite created_at."""
+        issue = Issue(id="issue-1", title="Test")
+        storage.create(issue)
+        original_created_at = issue.created_at
+
+        from datetime import datetime
+
+        storage.update("issue-1", {"created_at": datetime(2000, 1, 1).astimezone()})
+        retrieved = storage.get("issue-1")
+        assert retrieved is not None
+        assert retrieved.created_at == original_created_at
+
+    def test_update_ignores_comments(self, storage: JSONLStorage) -> None:
+        """Test that update() cannot overwrite comments."""
+        issue = Issue(id="issue-1", title="Test")
+        storage.create(issue)
+
+        storage.update("issue-1", {"comments": [{"fake": "comment"}]})
+        retrieved = storage.get("issue-1")
+        assert retrieved is not None
+        assert retrieved.comments == []
+
+
+class TestCloseReasonField:
+    """Test that close reason uses a dedicated field instead of notes."""
+
+    def test_close_sets_close_reason(self, storage: JSONLStorage) -> None:
+        """Test that closing with a reason sets the close_reason field."""
+        issue = Issue(id="issue-1", title="Test")
+        storage.create(issue)
+
+        closed = storage.close("issue-1", reason="Fixed the bug")
+        assert closed.close_reason == "Fixed the bug"
+
+    def test_close_does_not_embed_reason_in_notes(self, storage: JSONLStorage) -> None:
+        """Test that closing does not embed the reason in notes."""
+        issue = Issue(id="issue-1", title="Test", notes="Some notes")
+        storage.create(issue)
+
+        closed = storage.close("issue-1", reason="Fixed")
+        assert closed.notes == "Some notes"
+        assert "Closed:" not in (closed.notes or "")
+
+    def test_close_without_reason(self, storage: JSONLStorage) -> None:
+        """Test closing without a reason leaves close_reason as None."""
+        issue = Issue(id="issue-1", title="Test")
+        storage.create(issue)
+
+        closed = storage.close("issue-1")
+        assert closed.close_reason is None
+
+    def test_close_reason_persists(self, temp_workspace: Path) -> None:
+        """Test that close_reason survives save/load cycle."""
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+
+        issue = Issue(id="issue-1", title="Test")
+        storage.create(issue)
+        storage.close("issue-1", reason="Done")
+
+        # Reload from disk
+        storage2 = JSONLStorage(str(storage_path))
+        loaded = storage2.get("issue-1")
+        assert loaded is not None
+        assert loaded.close_reason == "Done"
+
+    def test_legacy_close_reason_migrated_from_notes(
+        self,
+    ) -> None:
+        """Test that old issues with close reason in notes are migrated."""
+        from dogcat.models import _migrate_close_reason, _migrate_notes
+
+        notes = "User notes\n\nClosed: Legacy reason"
+        assert _migrate_close_reason(notes, None) == "Legacy reason"
+        assert _migrate_notes(notes, None) == "User notes"
+
+    def test_migration_preserves_existing_close_reason(self) -> None:
+        """Test that migration does not overwrite existing close_reason."""
+        from dogcat.models import _migrate_close_reason, _migrate_notes
+
+        notes = "Notes with\n\nClosed: something"
+        assert _migrate_close_reason(notes, "Real reason") == "Real reason"
+        assert _migrate_notes(notes, "Real reason") == notes
+
+
+class TestCloseDeleteUpdatedAt:
+    """Test that close() and delete() set updated_at."""
+
+    def test_close_sets_updated_at(self, storage: JSONLStorage) -> None:
+        """Test that close() updates the updated_at timestamp."""
+        import time
+
+        issue = Issue(id="issue-1", title="Test")
+        storage.create(issue)
+        original_time = issue.updated_at
+
+        time.sleep(0.01)
+        closed = storage.close("issue-1", reason="Done")
+        assert closed.updated_at > original_time
+        assert closed.updated_at >= closed.closed_at
+
+    def test_delete_sets_updated_at(self, storage: JSONLStorage) -> None:
+        """Test that delete() updates the updated_at timestamp."""
+        import time
+
+        issue = Issue(id="issue-1", title="Test")
+        storage.create(issue)
+        original_time = issue.updated_at
+
+        time.sleep(0.01)
+        deleted = storage.delete("issue-1", reason="Dup")
+        assert deleted.updated_at > original_time
+        assert deleted.updated_at >= deleted.deleted_at
