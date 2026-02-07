@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from textual.widgets import Collapsible, Input, TextArea
+from textual.widgets import Collapsible, Input, Static, TextArea
 
 from dogcat.edit import IssueEditorApp
 from dogcat.models import Issue
@@ -209,3 +209,134 @@ class TestExternalRefField:
         storage.update.assert_called_once()
         updates = storage.update.call_args[0][1]
         assert "external_ref" not in updates
+
+
+class TestCreateMode:
+    """Test IssueEditorApp in create mode."""
+
+    @pytest.mark.asyncio
+    async def test_shows_new_issue_label(self) -> None:
+        """Create mode shows 'New Issue' instead of issue ID."""
+        issue = _make_issue(id="", title="")
+        app = IssueEditorApp(issue, _make_storage(), create_mode=True, namespace="dc")
+
+        async with app.run_test() as pilot:  # noqa: F841
+            id_display = app.query_one("#id-display", Static)
+            assert str(id_display.render()) == "New Issue"
+
+    @pytest.mark.asyncio
+    async def test_create_mode_calls_storage_create(self) -> None:
+        """Save in create mode calls storage.create() instead of update()."""
+        issue = _make_issue(id="", title="")
+        storage = _make_storage()
+        storage.get_issue_ids.return_value = set()
+        app = IssueEditorApp(issue, storage, create_mode=True, namespace="dc")
+
+        async with app.run_test() as pilot:
+            app.query_one("#title-input", Input).value = "My new issue"
+            await pilot.press("ctrl+s")
+
+        storage.create.assert_called_once()
+        created = storage.create.call_args[0][0]
+        assert created.title == "My new issue"
+        assert created.id != ""
+
+    @pytest.mark.asyncio
+    async def test_create_mode_requires_title(self) -> None:
+        """Create mode rejects empty title."""
+        issue = _make_issue(id="", title="")
+        storage = _make_storage()
+        app = IssueEditorApp(issue, storage, create_mode=True, namespace="dc")
+
+        async with app.run_test() as pilot:
+            # Leave title empty, try to save
+            await pilot.press("ctrl+s")
+
+        storage.create.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_cancel_returns_none(self) -> None:
+        """Cancelling in create mode does not create an issue."""
+        issue = _make_issue(id="", title="")
+        storage = _make_storage()
+        app = IssueEditorApp(issue, storage, create_mode=True, namespace="dc")
+
+        async with app.run_test() as pilot:
+            await pilot.press("escape")
+
+        storage.create.assert_not_called()
+        assert app.saved is False
+
+    @pytest.mark.asyncio
+    async def test_create_captures_all_fields(self) -> None:
+        """All form fields are included when creating an issue."""
+        issue = _make_issue(id="", title="")
+        storage = _make_storage()
+        storage.get_issue_ids.return_value = set()
+        app = IssueEditorApp(issue, storage, create_mode=True, namespace="dc")
+
+        async with app.run_test() as pilot:
+            app.query_one("#title-input", Input).value = "Full issue"
+            app.query_one("#owner-input", Input).value = "alice@example.com"
+            app.query_one("#external-ref-input", Input).value = "JIRA-999"
+            app.query_one("#description-input", TextArea).load_text("A description")
+            app.query_one("#notes-input", TextArea).load_text("Some notes")
+            app.query_one("#acceptance-input", TextArea).load_text("Criteria here")
+            app.query_one("#design-input", TextArea).load_text("Design doc")
+            await pilot.press("ctrl+s")
+
+        created = storage.create.call_args[0][0]
+        assert created.title == "Full issue"
+        assert created.owner == "alice@example.com"
+        assert created.external_ref == "JIRA-999"
+        assert created.description == "A description"
+        assert created.notes == "Some notes"
+        assert created.acceptance == "Criteria here"
+        assert created.design == "Design doc"
+
+    @pytest.mark.asyncio
+    async def test_create_uses_correct_defaults(self) -> None:
+        """New issue gets correct default status, priority, and type."""
+        issue = _make_issue(id="", title="")
+        storage = _make_storage()
+        storage.get_issue_ids.return_value = set()
+        app = IssueEditorApp(issue, storage, create_mode=True, namespace="dc")
+
+        async with app.run_test() as pilot:
+            app.query_one("#title-input", Input).value = "Default test"
+            await pilot.press("ctrl+s")
+
+        created = storage.create.call_args[0][0]
+        assert created.status.value == "open"
+        assert created.priority == 2
+        assert created.issue_type.value == "task"
+
+    @pytest.mark.asyncio
+    async def test_create_uses_namespace(self) -> None:
+        """Created issue uses the provided namespace."""
+        issue = _make_issue(id="", title="", namespace="myns")
+        storage = _make_storage()
+        storage.get_issue_ids.return_value = set()
+        app = IssueEditorApp(issue, storage, create_mode=True, namespace="myns")
+
+        async with app.run_test() as pilot:
+            app.query_one("#title-input", Input).value = "Namespace test"
+            await pilot.press("ctrl+s")
+
+        created = storage.create.call_args[0][0]
+        assert created.namespace == "myns"
+
+    @pytest.mark.asyncio
+    async def test_create_does_not_call_update(self) -> None:
+        """Create mode never calls storage.update()."""
+        issue = _make_issue(id="", title="")
+        storage = _make_storage()
+        storage.get_issue_ids.return_value = set()
+        app = IssueEditorApp(issue, storage, create_mode=True, namespace="dc")
+
+        async with app.run_test() as pilot:
+            app.query_one("#title-input", Input).value = "No update"
+            await pilot.press("ctrl+s")
+
+        storage.update.assert_not_called()
+        storage.create.assert_called_once()

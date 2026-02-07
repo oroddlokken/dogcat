@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from textual.app import App, ComposeResult
@@ -113,11 +114,18 @@ class IssueEditorApp(App[bool]):
         self,
         issue: Issue,
         storage: JSONLStorage,
+        *,
+        create_mode: bool = False,
+        namespace: str = "dc",
+        existing_ids: set[str] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self._issue = issue
         self._storage = storage
+        self._create_mode = create_mode
+        self._namespace = namespace
+        self._existing_ids = existing_ids or set()
         self.saved = False
         self.updated_issue: Issue | None = None
 
@@ -133,7 +141,8 @@ class IssueEditorApp(App[bool]):
     def compose(self) -> ComposeResult:
         """Compose the editor form."""
         with Horizontal(id="title-bar"):
-            yield Static(self._issue.full_id, id="id-display")
+            id_text = "New Issue" if self._create_mode else self._issue.full_id
+            yield Static(id_text, id="id-display")
             yield Input(
                 value=self._issue.title,
                 placeholder="Title",
@@ -217,7 +226,10 @@ class IssueEditorApp(App[bool]):
     def on_mount(self) -> None:
         """Focus the title input on mount."""
         self.query_one("#title-input", Input).focus()
-        self.title = f"Edit: {self._issue.full_id} - {self._issue.title}"
+        if self._create_mode:
+            self.title = "New Issue"
+        else:
+            self.title = f"Edit: {self._issue.full_id} - {self._issue.title}"
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
@@ -242,6 +254,71 @@ class IssueEditorApp(App[bool]):
         priority_val = self.query_one("#priority-input", Select).value
         description = self.query_one("#description-input", TextArea).text.strip()
 
+        if self._create_mode:
+            self._do_create(title, type_val, status_val, priority_val, description)
+        else:
+            self._do_update(title, type_val, status_val, priority_val, description)
+
+    def _do_create(
+        self,
+        title: str,
+        type_val: Any,
+        status_val: Any,
+        priority_val: Any,
+        description: str,
+    ) -> None:
+        """Create a new issue from the form values."""
+        from dogcat.idgen import IDGenerator
+        from dogcat.models import Issue, IssueType, Status
+
+        timestamp = datetime.now().astimezone()
+        idgen = IDGenerator(existing_ids=self._existing_ids, prefix=self._namespace)
+        issue_id = idgen.generate_issue_id(
+            title,
+            timestamp=timestamp,
+            namespace=self._namespace,
+        )
+
+        issue = Issue(
+            id=issue_id,
+            title=title,
+            namespace=self._namespace,
+            description=description or None,
+            status=Status(status_val) if isinstance(status_val, str) else Status.OPEN,
+            priority=priority_val if isinstance(priority_val, int) else 2,
+            issue_type=(
+                IssueType(type_val) if isinstance(type_val, str) else IssueType.TASK
+            ),
+            owner=self.query_one("#owner-input", Input).value.strip() or None,
+            external_ref=(
+                self.query_one("#external-ref-input", Input).value.strip() or None
+            ),
+            notes=self.query_one("#notes-input", TextArea).text.strip() or None,
+            acceptance=(
+                self.query_one("#acceptance-input", TextArea).text.strip() or None
+            ),
+            design=self.query_one("#design-input", TextArea).text.strip() or None,
+            created_at=timestamp,
+            updated_at=timestamp,
+        )
+
+        try:
+            self._storage.create(issue)
+            self.updated_issue = issue
+            self.saved = True
+            self.exit(True)
+        except Exception as e:
+            self.notify(f"Create failed: {e}", severity="error")
+
+    def _do_update(
+        self,
+        title: str,
+        type_val: Any,
+        status_val: Any,
+        priority_val: Any,
+        description: str,
+    ) -> None:
+        """Update an existing issue with changed fields."""
         updates: dict[str, Any] = {}
 
         if title != self._issue.title:
@@ -307,6 +384,44 @@ def edit_issue(issue_id: str, storage: JSONLStorage) -> Issue | None:
         return None
 
     editor = IssueEditorApp(issue, storage)
+    editor.run()
+
+    if editor.saved and editor.updated_issue is not None:
+        return editor.updated_issue
+    return None
+
+
+def new_issue(
+    storage: JSONLStorage,
+    namespace: str,
+    owner: str | None = None,
+) -> Issue | None:
+    """Open the Textual editor to create a new issue.
+
+    Args:
+        storage: The storage backend.
+        namespace: The issue namespace/prefix.
+        owner: Default owner for the new issue.
+
+    Returns:
+        The created issue, or None if cancelled.
+    """
+    from dogcat.models import Issue
+
+    skeleton = Issue(
+        id="",
+        title="",
+        namespace=namespace,
+        owner=owner,
+    )
+
+    editor = IssueEditorApp(
+        skeleton,
+        storage,
+        create_mode=True,
+        namespace=namespace,
+        existing_ids=storage.get_issue_ids(),
+    )
     editor.run()
 
     if editor.saved and editor.updated_issue is not None:

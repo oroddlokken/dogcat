@@ -1312,6 +1312,40 @@ def edit(
         raise typer.Exit(1)
 
 
+@app.command(name="new")
+def new_issue_cmd(
+    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+) -> None:
+    """Open an interactive Textual form to create a new issue."""
+    try:
+        storage = get_storage(dogcats_dir)
+        namespace = get_issue_prefix(dogcats_dir)
+        owner = get_default_operator()
+
+        from dogcat.edit import new_issue
+
+        created = new_issue(storage, namespace, owner=owner)
+        if created is not None:
+            if json_output:
+                from dogcat.models import issue_to_dict
+
+                typer.echo(orjson.dumps(issue_to_dict(created)).decode())
+            else:
+                typer.echo(
+                    f"✓ Created {created.full_id}: {created.title} "
+                    f"[{created.issue_type.value}, pri {created.priority}]",
+                )
+        else:
+            typer.echo("Create cancelled")
+
+    except typer.Exit:
+        raise
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+
 @app.command()
 def update(
     issue_id: str = typer.Argument(..., help="Issue ID"),
