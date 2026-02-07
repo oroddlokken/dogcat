@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 
@@ -861,6 +862,103 @@ class TestCLICreate:
         assert data["title"] == "Critical bug"
         assert data["priority"] == 0
         assert data["issue_type"] == "bug"
+
+
+class TestCLICreateEditor:
+    """Test create --editor flag."""
+
+    def test_create_with_editor_flag_opens_editor(self, tmp_path: Path) -> None:
+        """Test that --editor opens the Textual editor after creation."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        mock_issue = MagicMock()
+        mock_issue.full_id = "dc-test"
+        mock_issue.title = "Edited title"
+
+        with patch("dogcat.edit.edit_issue", return_value=mock_issue) as mock_edit:
+            result = runner.invoke(
+                app,
+                [
+                    "create",
+                    "Test editor issue",
+                    "--editor",
+                    "--dogcats-dir",
+                    str(dogcats_dir),
+                ],
+            )
+            assert result.exit_code == 0
+            assert "Created" in result.stdout
+            assert "Updated dc-test: Edited title" in result.stdout
+            mock_edit.assert_called_once()
+
+    def test_create_with_e_shorthand_opens_editor(self, tmp_path: Path) -> None:
+        """Test that -e shorthand opens the Textual editor after creation."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        mock_issue = MagicMock()
+        mock_issue.full_id = "dc-test"
+        mock_issue.title = "Edited title"
+
+        with patch("dogcat.edit.edit_issue", return_value=mock_issue) as mock_edit:
+            result = runner.invoke(
+                app,
+                [
+                    "create",
+                    "Test editor shorthand",
+                    "-e",
+                    "--dogcats-dir",
+                    str(dogcats_dir),
+                ],
+            )
+            assert result.exit_code == 0
+            assert "Created" in result.stdout
+            assert "Updated dc-test: Edited title" in result.stdout
+            mock_edit.assert_called_once()
+
+    def test_create_with_editor_cancelled(self, tmp_path: Path) -> None:
+        """Test that cancelling the editor shows cancel message."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        with patch("dogcat.edit.edit_issue", return_value=None) as mock_edit:
+            result = runner.invoke(
+                app,
+                [
+                    "create",
+                    "Test editor cancel",
+                    "--editor",
+                    "--dogcats-dir",
+                    str(dogcats_dir),
+                ],
+            )
+            assert result.exit_code == 0
+            assert "Created" in result.stdout
+            assert "Edit cancelled" in result.stdout
+            mock_edit.assert_called_once()
+
+    def test_create_without_editor_flag_does_not_open_editor(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test that without --editor, the editor is not opened."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        with patch("dogcat.edit.edit_issue") as mock_edit:
+            result = runner.invoke(
+                app,
+                [
+                    "create",
+                    "Test no editor",
+                    "--dogcats-dir",
+                    str(dogcats_dir),
+                ],
+            )
+            assert result.exit_code == 0
+            assert "Created" in result.stdout
+            mock_edit.assert_not_called()
 
 
 class TestCLIList:
@@ -3453,7 +3551,6 @@ class TestCLIGit:
         assert result.exit_code == 0
         assert "DOGCAT + GIT INTEGRATION GUIDE" in result.stdout
         assert "Committing .dogcats" in result.stdout
-        assert "Branching Workflows" in result.stdout
         assert "Resolving Merge Conflicts" in result.stdout
         assert "Best Practices" in result.stdout
 

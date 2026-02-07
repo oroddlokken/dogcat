@@ -195,9 +195,9 @@ class IssueEditorApp(App[bool]):
             self.notify("Title cannot be empty", severity="error")
             return
 
-        type_val = self.query_one("#type-input", Select[str]).value
-        status_val = self.query_one("#status-input", Select[str]).value
-        priority_val = self.query_one("#priority-input", Select[int]).value
+        type_val = self.query_one("#type-input", Select).value
+        status_val = self.query_one("#status-input", Select).value
+        priority_val = self.query_one("#priority-input", Select).value
         description = self.query_one("#description-input", TextArea).text.strip()
 
         updates: dict[str, Any] = {}

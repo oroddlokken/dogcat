@@ -15,7 +15,7 @@ Team members:
 - kate@example.com, liam@example.com - Junior Developers
 """
 
-from dogcat.idgen import IDGenerator
+from dogcat.config import get_issue_prefix
 from dogcat.models import Comment, Issue, IssueType, Status
 from dogcat.storage import JSONLStorage
 
@@ -31,7 +31,7 @@ def _make_comment(counter: list[int], issue_id: str, author: str, text: str) -> 
     )
 
 
-def generate_demo_issues(storage: JSONLStorage) -> list[str]:
+def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
     """Generate demo issues for testing and exploration.
 
     Creates ~50 sample issues including epics, features, tasks, bugs, and stories
@@ -40,13 +40,20 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
 
     Args:
         storage: The storage instance to create issues in
+        dogcats_dir: Path to .dogcats directory (used to derive issue prefix)
 
     Returns:
         List of created issue IDs
     """
-    idgen = IDGenerator(prefix="demo")
+    namespace = get_issue_prefix(dogcats_dir)
+    counter = [0]
     created_issues: list[str] = []
     comment_counter = [0]
+
+    def next_id() -> str:
+        """Generate the next sequential issue ID (hash part only)."""
+        counter[0] += 1
+        return f"{counter[0]:04d}"
 
     def make_comment(issue_id: str, author: str, text: str) -> Comment:
         return _make_comment(comment_counter, issue_id, author, text)
@@ -54,9 +61,10 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
     # =========================================================================
     # Epic 1: Platform Modernization
     # =========================================================================
-    epic1_id = idgen.generate()
+    epic1_id = next_id()
     epic1 = Issue(
         id=epic1_id,
+        namespace=namespace,
         title="Platform Modernization Initiative",
         description=(
             "Modernize the platform architecture and infrastructure to improve "
@@ -122,9 +130,10 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
     created_issues.append(epic1_id)
 
     # Feature 1.1: Microservices migration
-    feature1_id = idgen.generate()
+    feature1_id = next_id()
     feature1 = Issue(
         id=feature1_id,
+        namespace=namespace,
         title="Migrate to microservices architecture",
         description=(
             "Break monolith into scalable microservices. This involves decomposing "
@@ -159,9 +168,10 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
     created_issues.append(feature1_id)
 
     # Task 1.1.1: Design service boundaries (CLOSED)
-    task1_id = idgen.generate()
+    task1_id = next_id()
     task1 = Issue(
         id=task1_id,
+        namespace=namespace,
         title="Design service boundaries",
         description=(
             "Define clear boundaries between services based on business domains. "
@@ -218,9 +228,10 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
     created_issues.append(task1_id)
 
     # Task 1.1.2: Implement API gateway (IN_PROGRESS)
-    task2_id = idgen.generate()
+    task2_id = next_id()
     task2 = Issue(
         id=task2_id,
+        namespace=namespace,
         title="Implement API gateway",
         description=(
             "Set up Kong as API gateway for request routing, rate limiting, and "
@@ -270,9 +281,10 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
     created_issues.append(task2_id)
 
     # Task 1.1.3: Set up service mesh (OPEN)
-    task3_id = idgen.generate()
+    task3_id = next_id()
     task3 = Issue(
         id=task3_id,
+        namespace=namespace,
         title="Set up service mesh",
         description=(
             "Deploy Istio for service-to-service communication, traffic management, "
@@ -298,9 +310,10 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
     created_issues.append(task3_id)
 
     # Feature 1.2: CI/CD pipeline
-    feature2_id = idgen.generate()
+    feature2_id = next_id()
     feature2 = Issue(
         id=feature2_id,
+        namespace=namespace,
         title="Implement CI/CD pipeline",
         description=(
             "Automate build, test, and deployment using GitHub Actions. This will "
@@ -393,9 +406,10 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
         ext_ref,
         close_reason,
     ) in feature2_tasks:
-        task_id = idgen.generate()
+        task_id = next_id()
         task = Issue(
             id=task_id,
+            namespace=namespace,
             title=title,
             status=status,
             priority=pri,
@@ -415,9 +429,10 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
     # =========================================================================
     # Epic 2: User Experience Enhancement
     # =========================================================================
-    epic2_id = idgen.generate()
+    epic2_id = next_id()
     epic2 = Issue(
         id=epic2_id,
+        namespace=namespace,
         title="User Experience Enhancement",
         description=(
             "Improve overall user experience and accessibility. Focus areas include "
@@ -465,9 +480,10 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
     created_issues.append(epic2_id)
 
     # Feature 2.1: Dashboard redesign
-    feature3_id = idgen.generate()
+    feature3_id = next_id()
     feature3 = Issue(
         id=feature3_id,
+        namespace=namespace,
         title="Redesign dashboard interface",
         description=(
             "Modern, responsive dashboard design using latest UI frameworks. "
@@ -511,9 +527,10 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
     created_issues.append(feature3_id)
 
     # Story under feature 3
-    story1_id = idgen.generate()
+    story1_id = next_id()
     story1 = Issue(
         id=story1_id,
+        namespace=namespace,
         title="As a user, I want a customizable dashboard",
         description=(
             "Users should be able to arrange widgets to create their ideal view. "
@@ -574,9 +591,10 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
         ),
     ]
     for title, status, creator, closer, close_reason, labels, ext_ref in subtask_specs:
-        subtask_id = idgen.generate()
+        subtask_id = next_id()
         subtask = Issue(
             id=subtask_id,
+            namespace=namespace,
             title=title,
             status=status,
             priority=2,
@@ -596,9 +614,10 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
     # =========================================================================
     # Bugs
     # =========================================================================
-    bug1_id = idgen.generate()
+    bug1_id = next_id()
     bug1 = Issue(
         id=bug1_id,
+        namespace=namespace,
         title="Dashboard crashes on mobile Safari",
         description=(
             "Reproducible crash when viewing analytics on iOS Safari. Occurs when "
@@ -648,9 +667,10 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
     )
     created_issues.append(bug1_id)
 
-    bug2_id = idgen.generate()
+    bug2_id = next_id()
     bug2 = Issue(
         id=bug2_id,
+        namespace=namespace,
         title="Memory leak in WebSocket connection",
         description=(
             "Connection grows unbounded after 24h of operation. Memory usage increases "
@@ -688,9 +708,10 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
     )
     created_issues.append(bug2_id)
 
-    bug3_id = idgen.generate()
+    bug3_id = next_id()
     bug3 = Issue(
         id=bug3_id,
+        namespace=namespace,
         title="Login fails with special characters in password",
         description=(
             "Users cannot log in if their password contains certain special characters "
@@ -718,9 +739,10 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
     created_issues.append(bug3_id)
 
     # Feature 2.2: Accessibility compliance
-    feature4_id = idgen.generate()
+    feature4_id = next_id()
     feature4 = Issue(
         id=feature4_id,
+        namespace=namespace,
         title="WCAG 2.1 AA compliance",
         description=(
             "Make platform accessible to all users including those with "
@@ -791,9 +813,10 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
         ),
     ]
     for title, pri, creator, labels, ext_ref in accessibility_tasks:
-        task_id = idgen.generate()
+        task_id = next_id()
         task = Issue(
             id=task_id,
+            namespace=namespace,
             title=title,
             status=Status.OPEN,
             priority=pri,
@@ -809,9 +832,10 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
     # =========================================================================
     # Epic 3: Performance Optimization
     # =========================================================================
-    epic3_id = idgen.generate()
+    epic3_id = next_id()
     epic3 = Issue(
         id=epic3_id,
+        namespace=namespace,
         title="Performance Optimization",
         description=(
             "Improve application performance and scalability. Target: 50% reduction "
@@ -839,9 +863,10 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
     created_issues.append(epic3_id)
 
     # Feature: Database optimization
-    feature5_id = idgen.generate()
+    feature5_id = next_id()
     feature5 = Issue(
         id=feature5_id,
+        namespace=namespace,
         title="Database query optimization",
         description=(
             "Optimize slow queries and add missing indexes. Expected to reduce query "
@@ -873,9 +898,10 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
         ("Optimize N+1 queries in user listing", "PERF-405"),
     ]
     for title, ext_ref in perf_tasks:
-        task_id = idgen.generate()
+        task_id = next_id()
         task = Issue(
             id=task_id,
+            namespace=namespace,
             title=title,
             status=Status.OPEN,
             priority=2,
@@ -891,9 +917,10 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
     # =========================================================================
     # Chores
     # =========================================================================
-    chore1_id = idgen.generate()
+    chore1_id = next_id()
     chore1 = Issue(
         id=chore1_id,
+        namespace=namespace,
         title="Update dependencies to latest versions",
         description=(
             "Security and maintenance updates for all npm packages. Review changelogs "
@@ -913,9 +940,10 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
     storage.create(chore1)
     created_issues.append(chore1_id)
 
-    chore2_id = idgen.generate()
+    chore2_id = next_id()
     chore2 = Issue(
         id=chore2_id,
+        namespace=namespace,
         title="Refactor authentication middleware",
         description=(
             "Clean up technical debt in auth code. Current implementation has multiple "
@@ -1014,9 +1042,10 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
         ext_ref,
         close_reason,
     ) in standalone_tasks:
-        task_id = idgen.generate()
+        task_id = next_id()
         task = Issue(
             id=task_id,
+            namespace=namespace,
             title=title,
             status=status,
             priority=pri,
@@ -1035,9 +1064,10 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
     # =========================================================================
     # Questions
     # =========================================================================
-    question1_id = idgen.generate()
+    question1_id = next_id()
     question1 = Issue(
         id=question1_id,
+        namespace=namespace,
         title="Should we use GraphQL or REST for the new API?",
         description=(
             "Need to decide on API architecture for the new services. Both "
@@ -1087,9 +1117,10 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
     )
     created_issues.append(question1_id)
 
-    question2_id = idgen.generate()
+    question2_id = next_id()
     question2 = Issue(
         id=question2_id,
+        namespace=namespace,
         title="Which monitoring stack should we use?",
         description=(
             "Evaluating monitoring solutions for the microservices architecture.\n\n"
@@ -1130,9 +1161,10 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
     # =========================================================================
     # Tombstoned (deleted) issues
     # =========================================================================
-    tombstone1_id = idgen.generate()
+    tombstone1_id = next_id()
     tombstone1 = Issue(
         id=tombstone1_id,
+        namespace=namespace,
         title="[Deleted] Old legacy feature flag system",
         description=(
             "This feature was removed and replaced with LaunchDarkly integration."
@@ -1155,9 +1187,10 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
     )
     created_issues.append(tombstone1_id)
 
-    tombstone2_id = idgen.generate()
+    tombstone2_id = next_id()
     tombstone2 = Issue(
         id=tombstone2_id,
+        namespace=namespace,
         title="[Deleted] Duplicate: Dashboard performance issue",
         description="Marked as duplicate of PERF-400.",
         notes="This was a duplicate report of the main performance epic.",
@@ -1184,9 +1217,10 @@ def generate_demo_issues(storage: JSONLStorage) -> list[str]:
     # =========================================================================
     # Draft issue
     # =========================================================================
-    draft1_id = idgen.generate()
+    draft1_id = next_id()
     draft1 = Issue(
         id=draft1_id,
+        namespace=namespace,
         title="[Draft] Mobile app redesign",
         description=(
             "Initial thoughts on redesigning the mobile app. Not ready for dev yet."

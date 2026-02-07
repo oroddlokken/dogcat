@@ -35,6 +35,7 @@ dev = [
     "pytest-xdist==3.8.0",
     "pyright>=1.1.408",
     "vulture>=2.14",
+    "pytest-timeout>=2.4.0",
 ]
 
 [tool.isort]

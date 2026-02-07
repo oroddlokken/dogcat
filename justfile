@@ -45,4 +45,4 @@ vulture:
 
 # run tests
 test:
-    pytest -n 8 tests --cov-config=.coveragerc --cov-report=html --cov=src/dogcat
+    pytest --timeout 30 -n 8 tests --cov-config=.coveragerc --cov-report=html --cov=src/dogcat

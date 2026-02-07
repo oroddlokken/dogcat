@@ -645,6 +645,12 @@ def create(
         "--no-agent",
         help="Mark issue as not for agents",
     ),
+    editor: bool = typer.Option(
+        False,
+        "--editor",
+        "-e",
+        help="Open the Textual editor after creating the issue",
+    ),
     dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
 ) -> None:
     """Create a new issue.
@@ -799,6 +805,15 @@ def create(
                 f"[{final_type}, pri {final_priority}]",
             )
 
+        if editor:
+            from dogcat.edit import edit_issue
+
+            updated = edit_issue(issue.full_id, storage)
+            if updated is not None:
+                typer.echo(f"✓ Updated {updated.full_id}: {updated.title}")
+            else:
+                typer.echo("Edit cancelled")
+
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
@@ -908,6 +923,7 @@ def create_alias(
         json_output=json_output,
         created_by=created_by,
         no_agent=no_agent,
+        editor=False,
         dogcats_dir=dogcats_dir,
     )
 
@@ -1486,7 +1502,7 @@ def demo(
         storage = get_storage(dogcats_dir, create_dir=True)
         typer.echo("Creating demo issues...")
 
-        created_issues = generate_demo_issues(storage)
+        created_issues = generate_demo_issues(storage, dogcats_dir)
 
         typer.echo(f"\n✓ Created {len(created_issues)} demo issues")
         typer.echo("  - 3 epics (Platform, UX, Performance)")
