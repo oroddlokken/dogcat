@@ -110,8 +110,8 @@ class TestCLICreate:
         assert data["title"] == "Test issue"
         assert "id" in data
 
-    def test_create_with_skip_agent(self, tmp_path: Path) -> None:
-        """Test create with --skip-agent sets metadata."""
+    def test_create_with_no_agent(self, tmp_path: Path) -> None:
+        """Test create with --no-agent sets metadata."""
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
@@ -123,7 +123,7 @@ class TestCLICreate:
             [
                 "create",
                 "Agent skip test",
-                "--skip-agent",
+                "--no-agent",
                 "--json",
                 "--dogcats-dir",
                 str(dogcats_dir),
@@ -132,10 +132,10 @@ class TestCLICreate:
         assert result.exit_code == 0
         data = json.loads(result.stdout)
         assert data["title"] == "Agent skip test"
-        assert data["metadata"]["skip_agent"] is True
+        assert data["metadata"]["no_agent"] is True
 
-    def test_create_without_skip_agent_has_empty_metadata(self, tmp_path: Path) -> None:
-        """Test create without --skip-agent has empty metadata."""
+    def test_create_without_no_agent_has_empty_metadata(self, tmp_path: Path) -> None:
+        """Test create without --no-agent has empty metadata."""
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
@@ -1154,8 +1154,8 @@ class TestCLIList:
         assert result.exit_code == 0
         assert "No issues found" in result.stdout
 
-    def test_list_exclude_skip_agent(self, tmp_path: Path) -> None:
-        """Test list --exclude-skip-agent filters out skip_agent issues."""
+    def test_list_agent_only(self, tmp_path: Path) -> None:
+        """Test list --agent-only filters out no_agent issues."""
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
@@ -1168,13 +1168,13 @@ class TestCLIList:
             ["create", "Normal issue", "--dogcats-dir", str(dogcats_dir)],
         )
 
-        # Create skip_agent issue
+        # Create no_agent issue
         runner.invoke(
             app,
             [
                 "create",
                 "Agent skip issue",
-                "--skip-agent",
+                "--no-agent",
                 "--dogcats-dir",
                 str(dogcats_dir),
             ],
@@ -1191,7 +1191,7 @@ class TestCLIList:
         # With filter, only normal should appear
         result = runner.invoke(
             app,
-            ["list", "--exclude-skip-agent", "--dogcats-dir", str(dogcats_dir)],
+            ["list", "--agent-only", "--dogcats-dir", str(dogcats_dir)],
         )
         assert "Normal issue" in result.stdout
         assert "Agent skip issue" not in result.stdout
@@ -1581,7 +1581,7 @@ class TestCLIShow:
             [
                 "create",
                 "Issue with metadata",
-                "--skip-agent",
+                "--no-agent",
                 "--dogcats-dir",
                 str(dogcats_dir),
             ],
@@ -1594,7 +1594,7 @@ class TestCLIShow:
         )
         assert result.exit_code == 0
         assert "Metadata:" in result.stdout
-        assert "skip_agent: True" in result.stdout
+        assert "no_agent: True" in result.stdout
 
     def test_show_closed_issue_field_order(self, tmp_path: Path) -> None:
         """Test Created before Closed, close reason next to date."""
@@ -2245,15 +2245,15 @@ class TestCLILabel:
         assert "urgent" in result.stdout
         assert "backend" in result.stdout
 
-    def test_update_skip_agent(self, tmp_path: Path) -> None:
-        """Test updating issue with --skip-agent flag."""
+    def test_update_no_agent(self, tmp_path: Path) -> None:
+        """Test updating issue with --no-agent flag."""
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
             ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
-        # Create issue without skip_agent
+        # Create issue without no_agent
         create_result = runner.invoke(
             app,
             ["create", "Test issue", "--json", "--dogcats-dir", str(dogcats_dir)],
@@ -2262,33 +2262,33 @@ class TestCLILabel:
         issue_id = data["id"]
         assert data["metadata"] == {}
 
-        # Update to set skip_agent
+        # Update to set no_agent
         runner.invoke(
             app,
-            ["update", issue_id, "--skip-agent", "--dogcats-dir", str(dogcats_dir)],
+            ["update", issue_id, "--no-agent", "--dogcats-dir", str(dogcats_dir)],
         )
 
-        # Verify skip_agent is set
+        # Verify no_agent is set
         show_result = runner.invoke(
             app,
             ["show", issue_id, "--json", "--dogcats-dir", str(dogcats_dir)],
         )
         data = json.loads(show_result.stdout)
-        assert data["metadata"]["skip_agent"] is True
+        assert data["metadata"]["no_agent"] is True
 
-        # Update to remove skip_agent
+        # Update to remove no_agent
         runner.invoke(
             app,
-            ["update", issue_id, "--no-skip-agent", "--dogcats-dir", str(dogcats_dir)],
+            ["update", issue_id, "--agent", "--dogcats-dir", str(dogcats_dir)],
         )
 
-        # Verify skip_agent is removed
+        # Verify no_agent is removed
         show_result = runner.invoke(
             app,
             ["show", issue_id, "--json", "--dogcats-dir", str(dogcats_dir)],
         )
         data = json.loads(show_result.stdout)
-        assert "skip_agent" not in data["metadata"]
+        assert "no_agent" not in data["metadata"]
 
 
 class TestCLIDependency:
@@ -2415,8 +2415,8 @@ class TestCLIReady:
         assert result.exit_code == 0
         assert issue1_id in result.stdout
 
-    def test_ready_exclude_skip_agent(self, tmp_path: Path) -> None:
-        """Test that ready --exclude-skip-agent filters out skip_agent issues."""
+    def test_ready_agent_only(self, tmp_path: Path) -> None:
+        """Test that ready --agent-only filters out no_agent issues."""
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
@@ -2430,13 +2430,13 @@ class TestCLIReady:
         )
         normal_id = create1.stdout.split(": ")[0].split()[-1]
 
-        # Create an issue marked for skip_agent
+        # Create an issue marked as no_agent
         create2 = runner.invoke(
             app,
             [
                 "create",
                 "Agent skip issue",
-                "--skip-agent",
+                "--no-agent",
                 "--dogcats-dir",
                 str(dogcats_dir),
             ],
@@ -2454,7 +2454,7 @@ class TestCLIReady:
         # With filter, only normal should appear
         result = runner.invoke(
             app,
-            ["ready", "--exclude-skip-agent", "--dogcats-dir", str(dogcats_dir)],
+            ["ready", "--agent-only", "--dogcats-dir", str(dogcats_dir)],
         )
         assert normal_id in result.stdout
         assert skip_id not in result.stdout
@@ -3460,8 +3460,8 @@ class TestCLIGuide:
         """Test that guide does not include AI-agent-specific content."""
         result = runner.invoke(app, ["guide"])
         assert "AI agent" not in result.stdout
-        assert "--skip-agent" not in result.stdout
-        assert "--exclude-skip-agent" not in result.stdout
+        assert "--no-agent" not in result.stdout
+        assert "--agent-only" not in result.stdout
 
 
 class TestCLICommandOrder:

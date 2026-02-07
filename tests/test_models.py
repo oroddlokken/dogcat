@@ -442,9 +442,9 @@ class TestMetadata:
         issue = Issue(
             id="issue-1",
             title="Test",
-            metadata={"skip_agent": True, "custom_field": "value"},
+            metadata={"no_agent": True, "custom_field": "value"},
         )
-        assert issue.metadata["skip_agent"] is True
+        assert issue.metadata["no_agent"] is True
         assert issue.metadata["custom_field"] == "value"
 
     def test_issue_to_dict_includes_metadata(self) -> None:
@@ -452,10 +452,10 @@ class TestMetadata:
         issue = Issue(
             id="issue-1",
             title="Test",
-            metadata={"skip_agent": True},
+            metadata={"no_agent": True},
         )
         data = issue_to_dict(issue)
-        assert data["metadata"] == {"skip_agent": True}
+        assert data["metadata"] == {"no_agent": True}
 
     def test_issue_to_dict_empty_metadata(self) -> None:
         """Test that empty metadata is serialized as empty dict."""
@@ -470,10 +470,10 @@ class TestMetadata:
             "title": "Test",
             "created_at": "2026-02-03T12:00:00+00:00",
             "updated_at": "2026-02-03T12:00:00+00:00",
-            "metadata": {"skip_agent": True, "priority_override": 0},
+            "metadata": {"no_agent": True, "priority_override": 0},
         }
         issue = dict_to_issue(data)
-        assert issue.metadata["skip_agent"] is True
+        assert issue.metadata["no_agent"] is True
         assert issue.metadata["priority_override"] == 0
 
     def test_dict_to_issue_missing_metadata(self) -> None:
@@ -492,7 +492,7 @@ class TestMetadata:
         original = Issue(
             id="issue-1",
             title="Test",
-            metadata={"skip_agent": True, "tags": ["a", "b"], "count": 42},
+            metadata={"no_agent": True, "tags": ["a", "b"], "count": 42},
         )
         data = issue_to_dict(original)
         restored = dict_to_issue(data)

@@ -640,10 +640,10 @@ def create(
         "--created-by",
         help="Who is creating this",
     ),
-    skip_agent: bool = typer.Option(
+    no_agent: bool = typer.Option(
         False,
-        "--skip-agent",
-        help="Mark issue to be skipped by agents",
+        "--no-agent",
+        help="Mark issue as not for agents",
     ),
     dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
 ) -> None:
@@ -725,8 +725,8 @@ def create(
 
         # Build metadata
         issue_metadata: dict[str, Any] = {}
-        if skip_agent:
-            issue_metadata["skip_agent"] = True
+        if no_agent:
+            issue_metadata["no_agent"] = True
 
         # Set default operator for owner and created_by if not provided
         default_operator = get_default_operator()
@@ -873,10 +873,10 @@ def create_alias(
     ),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     created_by: str = typer.Option(None, "--created-by", help="Who is creating this"),
-    skip_agent: bool = typer.Option(
+    no_agent: bool = typer.Option(
         False,
-        "--skip-agent",
-        help="Mark issue to be skipped by agents",
+        "--no-agent",
+        help="Mark issue as not for agents",
     ),
     dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
 ) -> None:
@@ -907,7 +907,7 @@ def create_alias(
         parent=parent,
         json_output=json_output,
         created_by=created_by,
-        skip_agent=skip_agent,
+        no_agent=no_agent,
         dogcats_dir=dogcats_dir,
     )
 
@@ -946,10 +946,10 @@ def list_issues(
         help="Issues closed before date (ISO8601)",
     ),
     limit: int | None = typer.Option(None, "--limit", help="Limit results"),
-    exclude_skip_agent: bool = typer.Option(
+    agent_only: bool = typer.Option(
         False,
-        "--exclude-skip-agent",
-        help="Exclude issues marked to be skipped by agents",
+        "--agent-only",
+        help="Only show issues available for agents",
     ),
     tree: bool = typer.Option(
         False,
@@ -1004,9 +1004,9 @@ def list_issues(
         if open_issues:
             issues = [i for i in issues if i.status.value in ("open", "in_progress")]
 
-        # Filter out skip_agent issues if requested
-        if exclude_skip_agent:
-            issues = [i for i in issues if not i.metadata.get("skip_agent")]
+        # Filter out no_agent issues if requested
+        if agent_only:
+            issues = [i for i in issues if not i.metadata.get("no_agent")]
 
         # Apply date-based filtering for closed issues
         if closed_after or closed_before:
@@ -1232,10 +1232,10 @@ def update(
         "--parent",
         help="Parent issue ID (makes this a subtask)",
     ),
-    skip_agent: bool | None = typer.Option(
+    no_agent: bool | None = typer.Option(
         None,
-        "--skip-agent/--no-skip-agent",
-        help="Mark/unmark issue to be skipped by agents",
+        "--no-agent/--agent",
+        help="Mark/unmark issue as not for agents",
     ),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     updated_by: str | None = typer.Option(
@@ -1285,17 +1285,17 @@ def update(
                     typer.echo(f"Error: Parent issue {parent} not found", err=True)
                     raise typer.Exit(1)
                 updates["parent"] = resolved_parent
-        if skip_agent is not None:
+        if no_agent is not None:
             # Get current issue to preserve existing metadata
             current = storage.get(issue_id)
             if current is None:
                 typer.echo(f"Issue {issue_id} not found", err=True)
                 raise typer.Exit(1)
             new_metadata = dict(current.metadata) if current.metadata else {}
-            if skip_agent:
-                new_metadata["skip_agent"] = True
+            if no_agent:
+                new_metadata["no_agent"] = True
             else:
-                new_metadata.pop("skip_agent", None)
+                new_metadata.pop("no_agent", None)
             updates["metadata"] = new_metadata
 
         if not updates:
@@ -1668,10 +1668,10 @@ def link_command(
 @app.command()
 def ready(
     limit: int = typer.Option(None, "--limit", "-l", help="Limit results"),
-    exclude_skip_agent: bool = typer.Option(
+    agent_only: bool = typer.Option(
         False,
-        "--exclude-skip-agent",
-        help="Exclude issues marked to be skipped by agents",
+        "--agent-only",
+        help="Only show issues available for agents",
     ),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
@@ -1683,8 +1683,8 @@ def ready(
         storage = get_storage(dogcats_dir)
         ready_issues = get_ready_work(storage)
 
-        if exclude_skip_agent:
-            ready_issues = [i for i in ready_issues if not i.metadata.get("skip_agent")]
+        if agent_only:
+            ready_issues = [i for i in ready_issues if not i.metadata.get("no_agent")]
 
         if limit:
             ready_issues = ready_issues[:limit]
@@ -3047,12 +3047,12 @@ output, add a dependency between them.
 
 ## Agent Integration
 
-Use --skip-agent to mark issues that should be skipped by AI agents:
-  dcat create "Manual review needed" --skip-agent
+Use --no-agent to mark issues that are not for AI agents:
+  dcat create "Manual review needed" --no-agent
 
-Use --exclude-skip-agent in list/ready to filter out these issues:
-  dcat ready --exclude-skip-agent   # Show only agent-workable issues
-  dcat list --exclude-skip-agent    # Hide skip-agent issues
+Use --agent-only in list/ready to filter out these issues:
+  dcat ready --agent-only   # Show only agent-workable issues
+  dcat list --agent-only    # Hide no-agent issues
 
 ## Status Workflow
 
