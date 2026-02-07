@@ -257,9 +257,7 @@ class IssueEditorApp(App[bool]):
         if new_owner != self._issue.owner:
             updates["owner"] = new_owner
 
-        new_ref = (
-            self.query_one("#external-ref-input", Input).value.strip() or None
-        )
+        new_ref = self.query_one("#external-ref-input", Input).value.strip() or None
         if new_ref != self._issue.external_ref:
             updates["external_ref"] = new_ref
 

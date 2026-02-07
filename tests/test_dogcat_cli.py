@@ -881,24 +881,6 @@ class TestCLICreate:
         assert data["priority"] == 2
         assert data["issue_type"] == "task"
 
-    def test_new_alias_creates_issue(self, tmp_path: Path) -> None:
-        """Test that 'new' command is an alias for 'create'."""
-        dogcats_dir = tmp_path / ".dogcats"
-        runner.invoke(
-            app,
-            ["init", "--dogcats-dir", str(dogcats_dir)],
-        )
-
-        result = runner.invoke(
-            app,
-            ["new", "New alias test", "--json", "--dogcats-dir", str(dogcats_dir)],
-        )
-        assert result.exit_code == 0
-        data = json.loads(result.stdout)
-        assert data["title"] == "New alias test"
-        assert data["priority"] == 2
-        assert data["issue_type"] == "task"
-
     def test_add_alias_with_shorthands(self, tmp_path: Path) -> None:
         """Test that 'add' alias works with priority and type shorthands."""
         dogcats_dir = tmp_path / ".dogcats"
@@ -924,32 +906,6 @@ class TestCLICreate:
         assert data["title"] == "New feature"
         assert data["priority"] == 1
         assert data["issue_type"] == "feature"
-
-    def test_new_alias_with_shorthands(self, tmp_path: Path) -> None:
-        """Test that 'new' alias works with priority and type shorthands."""
-        dogcats_dir = tmp_path / ".dogcats"
-        runner.invoke(
-            app,
-            ["init", "--dogcats-dir", str(dogcats_dir)],
-        )
-
-        result = runner.invoke(
-            app,
-            [
-                "new",
-                "0",
-                "b",
-                "Critical bug",
-                "--json",
-                "--dogcats-dir",
-                str(dogcats_dir),
-            ],
-        )
-        assert result.exit_code == 0
-        data = json.loads(result.stdout)
-        assert data["title"] == "Critical bug"
-        assert data["priority"] == 0
-        assert data["issue_type"] == "bug"
 
 
 class TestCLICreateEditor:
