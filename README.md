@@ -16,7 +16,7 @@ It also avoids some complexity by not using a daemon and/or SQL database, and on
 brew install oroddlokken/tap/dogcat
 ```
 
-This installs `dcat` and handles Python and dependencies automatically via `uv`.
+This installs `dcat`/`dogcat` and handles Python and dependencies automatically via `uv`.
 
 ### From source
 
