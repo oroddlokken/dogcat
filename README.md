@@ -70,6 +70,18 @@ TUI for editing issues, select the one you want to edit (`dcat edit`):
 TUI for editing issues (`dcat edit $id`):
 ![Edit issue](static/dcat-edit-id.png)
 
+## Tips & tricks
+
+Personally, I use these aliases:
+
+```bash
+alias dcl="dcat list --tree"
+alias dct="dcat list --table"
+
+alias dcn="dcat new"
+alias dce="dcat edit"
+```
+
 ## Development
 
 `dogcat` is now in a state where it can be dogfooded. Included is the issues.jsonl file containing the current issues.
