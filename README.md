@@ -4,7 +4,7 @@ Heavily inspired by [steveyegge/beads](https://github.com/steveyegge/beads).
 
 Beads is great, but it is ever expanding and slowly getting more and more complicated as he is building Kubernetes for Agents.
 
-Dogcat is a simpler, more minimal version that focuses on the core functionality. The goal is to feature freeze and keep the API stable.
+Dogcat is a simpler, more minimal version that focuses on the core functionality. The goal is to keep it simple and not chase orchestration of tens of agents running at the same time.
 
 It also avoids some complexity by not using a daemon and/or SQL database, and only relying on the `issues.jsonl` file.
 
