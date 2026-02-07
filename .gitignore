@@ -6,3 +6,4 @@ htmlcov
 .coverage*
 .DS_Store
 scratch
+src/dogcat/_version.py

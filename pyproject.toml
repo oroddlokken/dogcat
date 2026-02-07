@@ -1,6 +1,6 @@
 [project]
 name = "dogcat"
-version = "0.1.0"
+dynamic = ["version"]
 description = "lightweight, file-based issue tracking for AI agents (and humans)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -17,8 +17,15 @@ dependencies = [
 dcat = "dogcat.app:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+raw-options = { version_scheme = "no-guess-dev" }
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/dogcat/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dogcat"]

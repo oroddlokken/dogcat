@@ -1,3 +1,5 @@
 """Dogcat - Python CLI for issue tracking, inspired by Beads."""
 
-__version__ = "0.1.0"
+from dogcat._version import __version__
+
+__all__ = ["__version__"]
