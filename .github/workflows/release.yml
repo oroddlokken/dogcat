@@ -98,15 +98,15 @@ jobs:
       - name: Update formula
         run: |
           cd homebrew-tap
-          sed -i 's|url ".*"|url "${{ steps.sha.outputs.url }}"|' Formula/dogcatwindowbed.rb
-          sed -i 's|sha256 ".*"|sha256 "${{ steps.sha.outputs.sha256 }}"|' Formula/dogcatwindowbed.rb
+          sed -i 's|url ".*"|url "${{ steps.sha.outputs.url }}"|' Formula/dogcat.rb
+          sed -i 's|sha256 ".*"|sha256 "${{ steps.sha.outputs.sha256 }}"|' Formula/dogcat.rb
 
       - name: Commit and push
         run: |
           cd homebrew-tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/dogcatwindowbed.rb
+          git add Formula/dogcat.rb
           git diff --cached --quiet && echo "No changes to commit" && exit 0
           git commit -m "Update dogcat to ${{ steps.meta.outputs.version }}"
           git push
