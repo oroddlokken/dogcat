@@ -5,6 +5,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
+from dogcat._version import version as _dcat_version
+
 
 class Status(str, Enum):
     """Issue status enumeration."""
@@ -179,6 +181,7 @@ def issue_to_dict(issue: Issue) -> dict[str, Any]:
     issue_type_value = issue.issue_type.value
 
     return {
+        "dcat_version": _dcat_version,
         "namespace": issue.namespace,
         "id": issue.id,
         "title": issue.title,

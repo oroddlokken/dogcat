@@ -9,6 +9,7 @@ from typing import Any
 
 import orjson
 
+from dogcat._version import version as _dcat_version
 from dogcat.models import (
     Dependency,
     DependencyType,
@@ -197,6 +198,7 @@ class JSONLStorage:
                 # Write all dependencies
                 for dep in self._dependencies:
                     dep_data = {
+                        "dcat_version": _dcat_version,
                         "issue_id": dep.issue_id,
                         "depends_on_id": dep.depends_on_id,
                         "type": dep.dep_type.value,
@@ -210,6 +212,7 @@ class JSONLStorage:
                 # Write all links
                 for link in self._links:
                     link_data = {
+                        "dcat_version": _dcat_version,
                         "from_id": link.from_id,
                         "to_id": link.to_id,
                         "link_type": link.link_type,
@@ -273,6 +276,7 @@ class JSONLStorage:
     def _dep_record(dep: Dependency, *, op: str = "add") -> dict[str, Any]:
         """Serialize a dependency to a dict for appending."""
         d: dict[str, Any] = {
+            "dcat_version": _dcat_version,
             "issue_id": dep.issue_id,
             "depends_on_id": dep.depends_on_id,
             "type": dep.dep_type.value,
@@ -287,6 +291,7 @@ class JSONLStorage:
     def _link_record(link: Link, *, op: str = "add") -> dict[str, Any]:
         """Serialize a link to a dict for appending."""
         d: dict[str, Any] = {
+            "dcat_version": _dcat_version,
             "from_id": link.from_id,
             "to_id": link.to_id,
             "link_type": link.link_type,

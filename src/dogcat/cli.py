@@ -20,6 +20,7 @@ from dogcat.constants import (
     DEFAULT_TYPE,
     DOGCATRC_FILENAME,
     PRIORITY_COLORS,
+    PRIORITY_NAMES,
     PRIORITY_SHORTHANDS,
     TYPE_COLORS,
     TYPE_SHORTHANDS,
@@ -581,17 +582,22 @@ def import_beads(
 
 
 def _parse_priority_value(value: str) -> int:
-    """Parse a priority value that can be an int (0-4) or pINT (p0-p4).
+    """Parse a priority value that can be an int (0-4), pINT (p0-p4), or a name.
+
+    Accepted names: critical (0), high (1), medium (2), low (3), minimal (4).
 
     Returns the priority as an integer.
     Raises ValueError if the format is invalid.
     """
     raw = value.strip().lower()
+    if raw in PRIORITY_NAMES:
+        return PRIORITY_NAMES[raw]
     raw = raw.removeprefix("p")
     try:
         priority = int(raw)
     except ValueError:
-        msg = f"Invalid priority '{value}'. Use 0-4 or p0-p4."
+        names = ", ".join(PRIORITY_NAMES)
+        msg = f"Invalid priority '{value}'. Use 0-4, p0-p4, or a name ({names})."
         raise ValueError(msg) from None
     if priority < 0 or priority > 4:
         msg = f"Invalid priority '{value}'. Must be 0-4."
@@ -695,7 +701,7 @@ def create(
         None,
         "--priority",
         "-p",
-        help="Priority (0-4 or p0-p4, default 2)",
+        help="Priority (0-4, p0-p4, or critical/high/medium/low/minimal)",
         parser=_parse_priority_value,
         metavar="PRIORITY",
     ),
@@ -977,7 +983,7 @@ def create_alias(
         None,
         "--priority",
         "-p",
-        help="Priority (0-4 or p0-p4, default 2)",
+        help="Priority (0-4, p0-p4, or critical/high/medium/low/minimal)",
         parser=_parse_priority_value,
         metavar="PRIORITY",
     ),
@@ -1089,7 +1095,7 @@ def create_alias_add(
         None,
         "--priority",
         "-p",
-        help="Priority (0-4 or p0-p4, default 2)",
+        help="Priority (0-4, p0-p4, or critical/high/medium/low/minimal)",
         parser=_parse_priority_value,
         metavar="PRIORITY",
     ),

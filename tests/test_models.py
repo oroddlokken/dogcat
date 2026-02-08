@@ -497,3 +497,38 @@ class TestMetadata:
         data = issue_to_dict(original)
         restored = dict_to_issue(data)
         assert restored.metadata == original.metadata
+
+    def test_issue_to_dict_includes_dcat_version(self) -> None:
+        """Test that dcat_version is included in serialized output."""
+        from dogcat._version import version
+
+        issue = Issue(id="issue-1", title="Test")
+        data = issue_to_dict(issue)
+        assert "dcat_version" in data
+        assert data["dcat_version"] == version
+
+    def test_dict_to_issue_ignores_dcat_version(self) -> None:
+        """Test that dcat_version in data is gracefully ignored on load."""
+        data = {
+            "dcat_version": "0.0.1",
+            "namespace": "test",
+            "id": "abc1",
+            "title": "Test",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        issue = dict_to_issue(data)
+        assert issue.id == "abc1"
+        assert issue.title == "Test"
+
+    def test_dict_to_issue_without_dcat_version(self) -> None:
+        """Test that old records without dcat_version still load fine."""
+        data = {
+            "namespace": "test",
+            "id": "abc1",
+            "title": "Test",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        issue = dict_to_issue(data)
+        assert issue.id == "abc1"

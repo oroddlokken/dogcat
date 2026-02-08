@@ -358,6 +358,72 @@ class TestCLICreate:
         )
         assert result.exit_code != 0
 
+    def test_create_priority_string_name(self, tmp_path: Path) -> None:
+        """Test creating an issue with -p critical/high/medium/low/minimal."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        for name, expected in [
+            ("critical", 0),
+            ("high", 1),
+            ("medium", 2),
+            ("low", 3),
+            ("minimal", 4),
+        ]:
+            result = runner.invoke(
+                app,
+                [
+                    "create",
+                    f"{name} priority issue",
+                    "-p",
+                    name,
+                    "--json",
+                    "--dogcats-dir",
+                    str(dogcats_dir),
+                ],
+            )
+            assert result.exit_code == 0, f"Failed for {name}: {result.output}"
+            data = json.loads(result.stdout)
+            assert data["priority"] == expected, f"Expected {expected} for {name}"
+
+    def test_create_priority_string_case_insensitive(self, tmp_path: Path) -> None:
+        """Test that priority string names are case-insensitive."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        for name in ["Critical", "HIGH", "Medium", "LOW", "MINIMAL"]:
+            result = runner.invoke(
+                app,
+                [
+                    "create",
+                    f"{name} case test",
+                    "-p",
+                    name,
+                    "--json",
+                    "--dogcats-dir",
+                    str(dogcats_dir),
+                ],
+            )
+            assert result.exit_code == 0, f"Failed for {name}: {result.output}"
+
+    def test_create_priority_invalid_string(self, tmp_path: Path) -> None:
+        """Test that invalid priority string names fail."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "bad priority",
+                "-p",
+                "urgent",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code != 0
+
     def test_create_type_shorthand(self, tmp_path: Path) -> None:
         """Test creating an issue with type shorthand (b/f/e/s)."""
         dogcats_dir = tmp_path / ".dogcats"
@@ -2237,6 +2303,34 @@ class TestCLIUpdate:
             ],
         )
         assert result.exit_code != 0
+
+    def test_update_priority_string_name(self, tmp_path: Path) -> None:
+        """Test updating priority with string name (e.g., -p critical)."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create_result = runner.invoke(
+            app,
+            ["create", "Test issue", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data = json.loads(create_result.stdout)
+        issue_id = f"{data['namespace']}-{data['id']}"
+
+        result = runner.invoke(
+            app,
+            [
+                "update",
+                issue_id,
+                "-p",
+                "critical",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        updated = json.loads(result.stdout)
+        assert updated["priority"] == 0
 
     def test_update_nonexistent_issue(self, tmp_path: Path) -> None:
         """Test updating nonexistent issue."""

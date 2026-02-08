@@ -64,6 +64,15 @@ PRIORITY_OPTIONS = [
     ("P4 - Minimal", 4),
 ]
 
+# String name to priority int mapping
+PRIORITY_NAMES: dict[str, int] = {
+    "critical": 0,
+    "high": 1,
+    "medium": 2,
+    "low": 3,
+    "minimal": 4,
+}
+
 STATUS_OPTIONS = [
     ("Open", "open"),
     ("In Progress", "in_progress"),
