@@ -1835,7 +1835,7 @@ class TestCLIList:
         assert dependent_line.startswith(
             "■",
         ), f"Blocked issue should show ■ symbol, got: {dependent_line}"
-        blocker_line = next(line for line in lines if blocker_id in line)
+        blocker_line = next(line for line in lines if "Blocker task" in line)
         assert blocker_line.startswith(
             "●",
         ), f"Blocker issue should show ● symbol, got: {blocker_line}"
@@ -4841,6 +4841,30 @@ class TestFormatIssueBriefMetadataColors:
         result = format_issue_brief(issue)
         assert "[parent:" not in result
         assert "[closed" not in result
+
+    def test_blocked_by_tag_shown_when_blocked(self) -> None:
+        """Test that [blocked by: ...] tag appears for blocked issues."""
+        from dogcat.cli import format_issue_brief
+        from dogcat.models import Issue
+
+        issue = Issue(id="abc4", namespace="dc", title="Blocked issue")
+        blocked_ids = {"dc-abc4"}
+        blocked_by_map = {"dc-abc4": ["dc-xyz1", "dc-xyz2"]}
+        result = format_issue_brief(issue, blocked_ids, blocked_by_map)
+        assert "[blocked by: dc-xyz1, dc-xyz2]" in result
+        # red ANSI code is \x1b[31m
+        assert "\x1b[31m" in result
+
+    def test_blocked_by_tag_absent_when_not_blocked(self) -> None:
+        """Test that [blocked by: ...] tag is absent for non-blocked issues."""
+        from dogcat.cli import format_issue_brief
+        from dogcat.models import Issue
+
+        issue = Issue(id="abc5", namespace="dc", title="Normal issue")
+        blocked_ids: set[str] = set()
+        blocked_by_map: dict[str, list[str]] = {}
+        result = format_issue_brief(issue, blocked_ids, blocked_by_map)
+        assert "[blocked by:" not in result
 
 
 class TestFindDogcatsDirWithRc:

@@ -163,12 +163,14 @@ def get_legend() -> str:
 def format_issue_brief(
     issue: Issue,
     blocked_ids: set[str] | None = None,
+    blocked_by_map: dict[str, list[str]] | None = None,
 ) -> str:
     """Format issue for brief display with color coding.
 
     Args:
         issue: The issue to format
         blocked_ids: Set of issue IDs that are blocked by dependencies
+        blocked_by_map: Mapping of issue ID to list of blocking issue IDs
 
     Returns:
         Formatted string with status emoji, priority, ID, title, and type
@@ -200,9 +202,13 @@ def format_issue_brief(
     manual_str = ""
     if issue.metadata.get("manual") or issue.metadata.get("no_agent"):
         manual_str = " " + typer.style("[manual]", fg="yellow")
+    blocked_by_str = ""
+    if blocked_by_map and issue.full_id in blocked_by_map:
+        blockers = ", ".join(blocked_by_map[issue.full_id])
+        blocked_by_str = " " + typer.style(f"[blocked by: {blockers}]", fg="red")
     base = f"{status_emoji} {priority_str} {issue.full_id}: {issue.title} {type_str}"
 
-    return f"{base}{parent_str}{labels_str}{manual_str}{closed_str}"
+    return f"{base}{parent_str}{labels_str}{manual_str}{blocked_by_str}{closed_str}"
 
 
 def format_issue_full(issue: Issue, parent_title: str | None = None) -> str:
@@ -276,6 +282,7 @@ def format_issue_tree(
     issues: list[Issue],
     _indent: int = 0,
     blocked_ids: set[str] | None = None,
+    blocked_by_map: dict[str, list[str]] | None = None,
 ) -> str:
     """Format issues as a tree based on parent-child relationships.
 
@@ -283,6 +290,7 @@ def format_issue_tree(
         issues: List of issues to format
         _indent: Current indentation level (unused, kept for compatibility)
         blocked_ids: Set of issue IDs that are blocked by dependencies
+        blocked_by_map: Mapping of issue ID to list of blocking issue IDs
 
     Returns:
         Formatted tree string
@@ -298,7 +306,7 @@ def format_issue_tree(
 
         for issue in children:
             indent_str = "  " * depth
-            formatted = format_issue_brief(issue, blocked_ids)
+            formatted = format_issue_brief(issue, blocked_ids, blocked_by_map)
             lines.append(f"{indent_str}{formatted}")
             # Recursively format children
             lines.extend(format_recursive(issue.full_id, depth + 1))
@@ -312,12 +320,14 @@ def format_issue_tree(
 def format_issue_table(
     issues: list[Issue],
     blocked_ids: set[str] | None = None,
+    blocked_by_map: dict[str, list[str]] | None = None,
 ) -> str:
     """Format issues as an aligned table with columns using Rich.
 
     Args:
         issues: List of issues to format
         blocked_ids: Set of issue IDs that are blocked by dependencies
+        blocked_by_map: Mapping of issue ID to list of blocking issue IDs
 
     Returns:
         Formatted table string (rendered by Rich)
@@ -330,6 +340,9 @@ def format_issue_table(
 
     if not issues:
         return ""
+
+    # Only add Blocked By column if there are blocked issues in the list
+    has_blocked = blocked_ids and any(issue.full_id in blocked_ids for issue in issues)
 
     # Create Rich table with column dividers
     table = Table(
@@ -348,6 +361,8 @@ def format_issue_table(
     table.add_column("Pri", width=3, no_wrap=True)
     table.add_column("Title", overflow="fold")  # Wrap long titles
     table.add_column("Labels", no_wrap=False)
+    if has_blocked:
+        table.add_column("Blocked By", no_wrap=False)
 
     # Add rows
     for issue in issues:
@@ -374,7 +389,7 @@ def format_issue_table(
             else ""
         )
 
-        table.add_row(
+        row = [
             emoji,
             issue.id,
             parent_id,
@@ -382,7 +397,13 @@ def format_issue_table(
             f"[{priority_color}]{issue.priority}[/]",
             f"{issue.title}{manual_str}",
             f"[cyan]{labels_str}[/]" if labels_str else "",
-        )
+        ]
+        if has_blocked:
+            blockers = ""
+            if blocked_by_map and issue.full_id in blocked_by_map:
+                blockers = ", ".join(blocked_by_map[issue.full_id])
+            row.append(f"[red]{blockers}[/]" if blockers else "")
+        table.add_row(*row)
 
     # Render to string
     string_io = StringIO()
@@ -1370,18 +1391,37 @@ def list_issues(
 
             blocked_issues = get_blocked_issues(storage)
             blocked_ids = {bi.issue_id for bi in blocked_issues}
+            blocked_by_map = {bi.issue_id: bi.blocking_ids for bi in blocked_issues}
 
             if not issues:
                 typer.echo("No issues found")
             elif tree:
-                typer.echo(format_issue_tree(issues, blocked_ids=blocked_ids))
+                typer.echo(
+                    format_issue_tree(
+                        issues,
+                        blocked_ids=blocked_ids,
+                        blocked_by_map=blocked_by_map,
+                    ),
+                )
                 typer.echo(get_legend())
             elif table:
-                typer.echo(format_issue_table(issues, blocked_ids=blocked_ids))
+                typer.echo(
+                    format_issue_table(
+                        issues,
+                        blocked_ids=blocked_ids,
+                        blocked_by_map=blocked_by_map,
+                    ),
+                )
                 typer.echo(get_legend())
             else:
                 for issue in issues:
-                    typer.echo(format_issue_brief(issue, blocked_ids=blocked_ids))
+                    typer.echo(
+                        format_issue_brief(
+                            issue,
+                            blocked_ids=blocked_ids,
+                            blocked_by_map=blocked_by_map,
+                        ),
+                    )
                 typer.echo(get_legend())
 
     except Exception as e:
