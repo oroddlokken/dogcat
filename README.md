@@ -97,41 +97,47 @@ There is also a `--no-agent` option that can be passed to `dcat list` that will 
 | --- | --- |
 | `dcat create "My first bug" -t bug -p 0` | Create a bug issue, with priority 0 |
 | `dcat create b 0 "My first bug"` | Same as above, but using shorthands for type and priority |
-| `dcat create "Turn off the lights" --manual` | Indicate to the agent that this is a manual task, and should be done by the user, not the agent |
-| `dcat ready` | List tasks that is not blocked by other tasks |
-| `dcat close $id` | Close a task |
-| `dcat close $id -reason "Fixed the bug"` | Close a task with reason |
+| `dcat create "Turn off the lights" --manual` | Indicate to the agent that this is a manual issue, and should be done by the user, not the agent |
+| `dcat ready` | List issues that is not blocked by other issues |
+| `dcat close $id` | Close an issue |
+| `dcat close $id -reason "Fixed the bug"` | Close an issue with reason |
 | `dcat show $id` | Show full details about an issue |
 | `dcat new` | Interactive TUI for creating a new issue |
 | `dcat edit [$id]` | Interactive TUI for editing an issue |
-| `dcat in-progress` | List tasks currently in progress |
-| `dcat in-review` | List tasks currently in review |
+| `dcat in-progress` | List issues currently in progress |
+| `dcat in-review` | List issues currently in review |
 
 ## Screenshots
 
-Compact table view showing tasks with ID, Parent, Type, Priority, and Title columns:
+Compact table view showing tasissuesks with ID, Parent, Type, Priority, and Title columns:  
 ![Table View](static/dcat-list_table.png)
 
-Hierarchical tree view displaying parent-child task relationships:
+Hierarchical tree view displaying parent-child issue relationships:  
 ![Tree View](static/dcat-list_tree.png)
 
-Detailed list view with status indicators and full task information:
+Detailed list view with status indicators and full issue information:  
 ![List View](static/dcat-list.png)
 
-Ready view showing unblocked tasks available for work:
-![Ready Tasks](static/dcat-ready.png)
+Ready view showing unblocked issues available for work:  
+![Ready issues](static/dcat-ready.png)
 
-Detailed task view with description, acceptance criteria, and metadata:
-![Task Details](static/dcat-show-issueid.png)
+Detailed issue view with description, acceptance criteria, and metadata:  
+![Issue Details](static/dcat-show-issueid.png)
 
-TUI for creating new issues (`dcat new`):
+TUI for creating new issues (`dcat new`):  
 ![New issue](static/dcat-new.png)
 
-TUI for editing issues, select the one you want to edit (`dcat edit`):
+TUI for editing issues, select the one you want to edit (`dcat edit`):  
 ![Select issue to edit](static/dcat-edit.png)
 
-TUI for editing issues (`dcat edit $id`):
+TUI for editing issues (`dcat edit $id`):  
 ![Edit issue](static/dcat-edit-id.png)
+
+List issues in progress:  
+![Issues in progress](static/dcat-in-progress.png)
+
+List issues in review:  
+![Issues in review](static/dcat-in-review.png)
 
 ## Tips & tricks
 
