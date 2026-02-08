@@ -43,9 +43,17 @@ lint-all:
 vulture:
     vulture src tests dcat.py benchmark.py --ignore-decorators "@app.command" --ignore-names "on_modified,on_moved,RELATED,reload"
 
-# run tests
+# run tests (excludes regression tests)
 test:
-    pytest --timeout 30 -n 8 tests --cov-config=.coveragerc --cov-report=html --cov=src/dogcat
+    pytest --timeout 30 -n 8 tests --ignore=tests/test_regression.py
+
+# run regression tests only
+test-regression:
+    pytest --timeout 60 -n 8 tests/test_regression.py
+
+# run all tests (including regression)
+test-all:
+    pytest --timeout 60 -n 8 tests --cov-config=.coveragerc --cov-report=html --cov=src/dogcat
 
 # generate JSONL fixture for a specific tag (or all tags)
 generate-fixture tag="":

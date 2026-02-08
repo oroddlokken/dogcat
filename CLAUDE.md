@@ -67,6 +67,8 @@ Run `just fmt-all` every now and then to format all the files
 
 Always write tests for new features or when changing functionality.
 
+Use `just test` during development for fast feedback (excludes regression tests). Run `just test-regression` once you're happy with the changes to verify nothing is broken across versions. Use `just test-all` to run everything.
+
 We are using uv for dependency management. Never call out to pip.
 
 ## Rules
