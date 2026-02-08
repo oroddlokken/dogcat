@@ -46,3 +46,7 @@ vulture:
 # run tests
 test:
     pytest --timeout 30 -n 8 tests --cov-config=.coveragerc --cov-report=html --cov=src/dogcat
+
+# generate JSONL fixture for a specific tag (or all tags)
+generate-fixture tag="":
+    python tests/generate_fixture.py {{tag}}

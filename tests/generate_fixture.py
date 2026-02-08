@@ -1,0 +1,160 @@
+"""Generate versioned JSONL fixture files for regression testing.
+
+Checks out dogcat code at each git tag, runs demo issue generation using
+that version's code, and saves the resulting issues.jsonl as a frozen
+fixture in tests/fixtures/.
+
+Usage:
+    python tests/generate_fixture.py              # All tags
+    python tests/generate_fixture.py v0.3.0       # Specific tag
+"""
+
+from __future__ import annotations
+
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
+
+
+def _get_all_tags() -> list[str]:
+    """Return all version tags sorted by version."""
+    result = subprocess.run(
+        ["git", "tag", "--list", "v*", "--sort=v:refname"],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=REPO_ROOT,
+    )
+    return [t.strip() for t in result.stdout.strip().splitlines() if t.strip()]
+
+
+def _generate_for_tag(tag: str, clone_dir: Path) -> Path:
+    """Generate a fixture file for a specific git tag.
+
+    Clones the repo (if not already cloned), checks out the tag,
+    installs the package, and runs demo generation.
+
+    Returns the path to the generated fixture file.
+    """
+    fixture_name = f"{tag}_issues.jsonl"
+    fixture_path = FIXTURES_DIR / fixture_name
+
+    if fixture_path.exists():
+        print(f"  Skipping {tag} — {fixture_name} already exists")
+        return fixture_path
+
+    # Clone if needed
+    if not (clone_dir / ".git").exists():
+        print(f"  Cloning repo to {clone_dir}")
+        subprocess.run(
+            ["git", "clone", "--quiet", str(REPO_ROOT), str(clone_dir)],
+            check=True,
+        )
+
+    # Checkout the tag
+    subprocess.run(
+        ["git", "checkout", "--quiet", tag],
+        cwd=clone_dir,
+        check=True,
+    )
+
+    # Create a venv and install the package at this tag
+    venv_dir = clone_dir / ".venv"
+    if venv_dir.exists():
+        shutil.rmtree(venv_dir)
+
+    subprocess.run(
+        ["uv", "venv", str(venv_dir), "--quiet"],
+        cwd=clone_dir,
+        check=True,
+    )
+
+    subprocess.run(
+        [
+            "uv",
+            "pip",
+            "install",
+            "--quiet",
+            "-e",
+            str(clone_dir),
+            "--python",
+            str(venv_dir / "bin" / "python"),
+        ],
+        cwd=clone_dir,
+        check=True,
+    )
+
+    python = str(venv_dir / "bin" / "python")
+
+    # Generate demo issues in a temp .dogcats dir using the tagged code
+    with tempfile.TemporaryDirectory() as tmpdir:
+        dogcats_dir = Path(tmpdir) / ".dogcats"
+        dogcats_dir.mkdir()
+        issues_path = dogcats_dir / "issues.jsonl"
+
+        script = f"""\
+import sys
+sys.path.insert(0, "{clone_dir / "src"}")
+from dogcat.storage import JSONLStorage
+from dogcat.demo import generate_demo_issues
+
+storage = JSONLStorage("{issues_path}", create_dir=True)
+ids = generate_demo_issues(storage, "{dogcats_dir}")
+print(f"Generated {{len(ids)}} issues")
+"""
+        result = subprocess.run(
+            [python, "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=clone_dir,
+        )
+
+        if result.returncode != 0:
+            print(f"  ERROR generating fixture for {tag}:")
+            print(f"    stdout: {result.stdout.strip()}")
+            print(f"    stderr: {result.stderr.strip()}")
+            msg = f"Failed to generate fixture for {tag}"
+            raise RuntimeError(msg)
+
+        print(f"  {tag}: {result.stdout.strip()}")
+
+        # Copy the generated file to fixtures
+        FIXTURES_DIR.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(issues_path, fixture_path)
+
+    return fixture_path
+
+
+def main() -> None:
+    """Generate fixtures for specified tags or all tags."""
+    tags = sys.argv[1:] if len(sys.argv) > 1 else _get_all_tags()
+
+    if not tags:
+        print("No tags found")
+        sys.exit(1)
+
+    print(f"Generating fixtures for {len(tags)} tag(s)")
+    FIXTURES_DIR.mkdir(parents=True, exist_ok=True)
+
+    clone_dir = Path("/tmp/dcat-fixture-gen")
+    if clone_dir.exists():
+        shutil.rmtree(clone_dir)
+
+    try:
+        for tag in tags:
+            print(f"Processing {tag}...")
+            _generate_for_tag(tag, clone_dir)
+    finally:
+        if clone_dir.exists():
+            shutil.rmtree(clone_dir)
+
+    print(f"\nDone. Fixtures in {FIXTURES_DIR}/")
+
+
+if __name__ == "__main__":
+    main()
