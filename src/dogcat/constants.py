@@ -1,5 +1,22 @@
 """Constants for Dogcat CLI."""
 
+from __future__ import annotations
+
+import re
+
+
+def parse_labels(raw: str) -> list[str]:
+    """Parse a labels string that may be comma-separated, space-separated, or both.
+
+    Examples:
+        "bug,fix"     -> ["bug", "fix"]
+        "bug fix"     -> ["bug", "fix"]
+        "bug, fix"    -> ["bug", "fix"]
+        ""            -> []
+    """
+    return [lbl for lbl in re.split(r"[,\s]+", raw) if lbl]
+
+
 # Default values
 DEFAULT_TYPE = "task"
 DEFAULT_PRIORITY = 2

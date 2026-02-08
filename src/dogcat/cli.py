@@ -24,6 +24,7 @@ from dogcat.constants import (
     PRIORITY_SHORTHANDS,
     TYPE_COLORS,
     TYPE_SHORTHANDS,
+    parse_labels,
 )
 from dogcat.idgen import IDGenerator
 from dogcat.models import Issue, IssueType, Status, classify_record
@@ -723,7 +724,7 @@ def create(
         None,
         "--labels",
         "-l",
-        help="Comma-separated labels",
+        help="Labels (comma or space separated)",
     ),
     acceptance: str | None = typer.Option(
         None,
@@ -844,7 +845,7 @@ def create(
         )
 
         # Parse labels
-        issue_labels = [lbl.strip() for lbl in labels.split(",")] if labels else []
+        issue_labels = parse_labels(labels) if labels else []
 
         # Determine final priority and type (explicit options override shorthand)
         final_priority = (
@@ -1001,7 +1002,12 @@ def create_alias(
         help="Initial status (open, in_progress, blocked, deferred)",
     ),
     owner: str = typer.Option(None, "--owner", "-o", help="Issue owner"),
-    labels: str = typer.Option(None, "--labels", "-l", help="Comma-separated labels"),
+    labels: str = typer.Option(
+        None,
+        "--labels",
+        "-l",
+        help="Labels (comma or space separated)",
+    ),
     acceptance: str = typer.Option(
         None,
         "--acceptance",
@@ -1113,7 +1119,12 @@ def create_alias_add(
         help="Initial status (open, in_progress, blocked, deferred)",
     ),
     owner: str = typer.Option(None, "--owner", "-o", help="Issue owner"),
-    labels: str = typer.Option(None, "--labels", "-l", help="Comma-separated labels"),
+    labels: str = typer.Option(
+        None,
+        "--labels",
+        "-l",
+        help="Labels (comma or space separated)",
+    ),
     acceptance: str = typer.Option(
         None,
         "--acceptance",
@@ -1189,7 +1200,7 @@ def list_issues(
         None,
         "--label",
         "-l",
-        help="Filter by label (comma-separated for multiple)",
+        help="Filter by label (comma or space separated)",
     ),
     owner: str | None = typer.Option(None, "--owner", "-o", help="Filter by owner"),
     closed: bool = typer.Option(False, "--closed", help="Show only closed issues"),
@@ -1254,7 +1265,7 @@ def list_issues(
         if issue_type:
             filters["type"] = issue_type
         if label:
-            labels_filter = [lbl.strip() for lbl in label.split(",") if lbl.strip()]
+            labels_filter = parse_labels(label)
             filters["label"] = labels_filter
         if owner:
             filters["owner"] = owner
@@ -1625,7 +1636,7 @@ def update(
         None,
         "--labels",
         "-l",
-        help="Comma-separated labels (replaces existing)",
+        help="Labels, comma or space separated (replaces existing)",
     ),
     manual: bool | None = typer.Option(
         None,
@@ -1681,9 +1692,7 @@ def update(
                     raise typer.Exit(1)
                 updates["parent"] = resolved_parent
         if labels is not None:
-            updates["labels"] = [
-                lbl.strip() for lbl in labels.split(",") if lbl.strip()
-            ]
+            updates["labels"] = parse_labels(labels)
         if manual is not None:
             # Get current issue to preserve existing metadata
             current = storage.get(issue_id)
@@ -1725,9 +1734,39 @@ def update(
         raise typer.Exit(1)
 
 
+def _close_one(
+    storage: object,
+    issue_id: str,
+    reason: str | None,
+    closed_by: str | None,
+    json_output: bool,
+) -> bool:
+    """Close a single issue. Returns True if an error occurred."""
+    try:
+        issue = storage.close(  # type: ignore[union-attr]
+            issue_id,
+            reason=reason,
+            closed_by=closed_by,
+        )
+
+        if json_output:
+            from dogcat.models import issue_to_dict
+
+            typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
+        else:
+            typer.echo(f"✓ Closed {issue.full_id}: {issue.title}")
+    except (ValueError, Exception) as e:
+        typer.echo(f"Error closing {issue_id}: {e}", err=True)
+        return True
+    return False
+
+
 @app.command()
 def close(
-    issue_id: str = typer.Argument(..., help="Issue ID"),
+    issue_ids: list[str] = typer.Argument(  # noqa: B008
+        ...,
+        help="Issue ID(s) to close",
+    ),
     reason: str | None = typer.Option(
         None,
         "--reason",
@@ -1742,24 +1781,24 @@ def close(
     ),
     dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
 ) -> None:
-    """Close an issue."""
-    try:
-        storage = get_storage(dogcats_dir)
-        final_closed_by = closed_by if closed_by is not None else get_default_operator()
-        issue = storage.close(issue_id, reason=reason, closed_by=final_closed_by)
+    """Close one or more issues."""
+    storage = get_storage(dogcats_dir)
+    final_closed_by = closed_by if closed_by is not None else get_default_operator()
+    has_errors = False
 
-        if json_output:
-            from dogcat.models import issue_to_dict
+    for issue_id in issue_ids:
+        has_errors = (
+            _close_one(
+                storage,
+                issue_id,
+                reason,
+                final_closed_by,
+                json_output,
+            )
+            or has_errors
+        )
 
-            typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
-        else:
-            typer.echo(f"✓ Closed {issue.full_id}: {issue.title}")
-
-    except ValueError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
-    except Exception as e:
-        typer.echo(f"Error: {e}", err=True)
+    if has_errors:
         raise typer.Exit(1)
 
 
@@ -2306,6 +2345,125 @@ def in_progress_shortcut(
         operator,
         dogcats_dir,
     )
+
+
+@app.command("deferred")
+def deferred(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+) -> None:
+    """Show issues currently deferred."""
+    try:
+        storage = get_storage(dogcats_dir)
+        issues = storage.list({"status": "deferred"})
+        issues.sort(key=lambda i: i.priority)
+
+        if json_output:
+            from dogcat.models import issue_to_dict
+
+            output = [issue_to_dict(issue) for issue in issues]
+            typer.echo(orjson.dumps(output).decode())
+        else:
+            if not issues:
+                typer.echo("No deferred issues")
+            else:
+                for issue in issues:
+                    typer.echo(format_issue_brief(issue))
+
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@app.command(name="defer", hidden=True)
+def defer_shortcut(
+    issue_id: str = typer.Argument(..., help="Issue ID"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    operator: str | None = typer.Option(
+        None,
+        "--operator",
+        help="Who is making this change",
+    ),
+    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+) -> None:
+    """Set an issue's status to deferred."""
+    _set_status(issue_id, "deferred", "Deferred", json_output, operator, dogcats_dir)
+
+
+@app.command("manual")
+def manual_list(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+) -> None:
+    """Show issues marked as manual."""
+    try:
+        storage = get_storage(dogcats_dir)
+        issues = storage.list()
+        issues = [
+            i
+            for i in issues
+            if (i.metadata.get("manual") or i.metadata.get("no_agent"))
+            and i.status.value not in ("closed", "tombstone")
+        ]
+        issues.sort(key=lambda i: i.priority)
+
+        if json_output:
+            from dogcat.models import issue_to_dict
+
+            output = [issue_to_dict(issue) for issue in issues]
+            typer.echo(orjson.dumps(output).decode())
+        else:
+            if not issues:
+                typer.echo("No manual issues")
+            else:
+                for issue in issues:
+                    typer.echo(format_issue_brief(issue))
+
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@app.command(name="mark-manual", hidden=True)
+def mark_manual_shortcut(
+    issue_id: str = typer.Argument(..., help="Issue ID"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    operator: str | None = typer.Option(
+        None,
+        "--operator",
+        help="Who is making this change",
+    ),
+    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+) -> None:
+    """Mark an issue as manual (not for agents)."""
+    try:
+        storage = get_storage(dogcats_dir)
+        final_operator = operator if operator is not None else get_default_operator()
+        current = storage.get(issue_id)
+        if current is None:
+            typer.echo(f"Error: Issue {issue_id} not found", err=True)
+            raise typer.Exit(1)
+        new_metadata = dict(current.metadata) if current.metadata else {}
+        new_metadata["manual"] = True
+        new_metadata.pop("no_agent", None)
+        issue = storage.update(
+            issue_id,
+            {"metadata": new_metadata, "operator": final_operator},
+        )
+
+        if json_output:
+            from dogcat.models import issue_to_dict
+
+            typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
+        else:
+            typer.echo(f"✓ Marked manual {issue.full_id}: {issue.title}")
+
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
 
 
 @app.command("recently-closed")

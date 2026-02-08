@@ -3356,6 +3356,307 @@ class TestCLIStatusShortcuts:
         assert data["status"] == "in_progress"
 
 
+class TestCLIDeferred:
+    """Test deferred command."""
+
+    def test_deferred_no_issues(self, tmp_path: Path) -> None:
+        """Test deferred with no deferred issues."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["deferred", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "No deferred issues" in result.stdout
+
+    def test_deferred_shows_only_deferred(self, tmp_path: Path) -> None:
+        """Test that deferred shows only deferred issues."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # Create an open issue
+        create1 = runner.invoke(
+            app,
+            ["create", "Open issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+        open_id = create1.stdout.split(": ")[0].split()[-1]
+
+        # Create a deferred issue
+        create2 = runner.invoke(
+            app,
+            [
+                "create",
+                "Deferred issue",
+                "--status",
+                "deferred",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        deferred_id = create2.stdout.split(": ")[0].split()[-1]
+
+        result = runner.invoke(
+            app,
+            ["deferred", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert deferred_id in result.stdout
+        assert open_id not in result.stdout
+
+    def test_deferred_json_output(self, tmp_path: Path) -> None:
+        """Test deferred with --json flag."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Deferred issue",
+                "--status",
+                "deferred",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["deferred", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert len(data) == 1
+        assert data[0]["status"] == "deferred"
+
+
+class TestCLIDeferShortcut:
+    """Test defer shortcut command."""
+
+    def test_defer_sets_status_to_deferred(self, tmp_path: Path) -> None:
+        """Test that 'defer' sets issue status to deferred."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create_result = runner.invoke(
+            app,
+            ["create", "Test issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+
+        result = runner.invoke(
+            app,
+            ["defer", issue_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "✓ Deferred" in result.stdout
+
+        # Verify status changed
+        show_result = runner.invoke(
+            app,
+            ["show", issue_id, "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data = json.loads(show_result.stdout)
+        assert data["status"] == "deferred"
+
+    def test_defer_json_output(self, tmp_path: Path) -> None:
+        """Test defer with --json flag."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create_result = runner.invoke(
+            app,
+            ["create", "Test issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+
+        result = runner.invoke(
+            app,
+            ["defer", issue_id, "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["status"] == "deferred"
+
+    def test_defer_nonexistent_issue(self, tmp_path: Path) -> None:
+        """Test defer with nonexistent issue."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["defer", "nonexistent", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 1
+        assert "Error" in result.stdout or "Error" in result.stderr
+
+
+class TestCLIManualList:
+    """Test manual command."""
+
+    def test_manual_no_issues(self, tmp_path: Path) -> None:
+        """Test manual with no manual issues."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["manual", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "No manual issues" in result.stdout
+
+    def test_manual_shows_only_manual(self, tmp_path: Path) -> None:
+        """Test that manual shows only manual-flagged issues."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # Create a normal issue
+        create1 = runner.invoke(
+            app,
+            ["create", "Normal issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+        normal_id = create1.stdout.split(": ")[0].split()[-1]
+
+        # Create a manual issue
+        create2 = runner.invoke(
+            app,
+            [
+                "create",
+                "Manual issue",
+                "--manual",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        manual_id = create2.stdout.split(": ")[0].split()[-1]
+
+        result = runner.invoke(
+            app,
+            ["manual", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert manual_id in result.stdout
+        assert normal_id not in result.stdout
+
+    def test_manual_excludes_closed(self, tmp_path: Path) -> None:
+        """Test that manual excludes closed manual issues."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # Create a manual issue and close it
+        create_result = runner.invoke(
+            app,
+            [
+                "create",
+                "Closed manual issue",
+                "--manual",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+        runner.invoke(
+            app,
+            ["close", issue_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["manual", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "No manual issues" in result.stdout
+
+    def test_manual_json_output(self, tmp_path: Path) -> None:
+        """Test manual with --json flag."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Manual issue",
+                "--manual",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["manual", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert len(data) == 1
+        assert data[0]["metadata"]["manual"] is True
+
+
+class TestCLIMarkManualShortcut:
+    """Test mark-manual shortcut command."""
+
+    def test_mark_manual_sets_flag(self, tmp_path: Path) -> None:
+        """Test that 'mark-manual' sets the manual metadata flag."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create_result = runner.invoke(
+            app,
+            ["create", "Test issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+
+        result = runner.invoke(
+            app,
+            ["mark-manual", issue_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "✓ Marked manual" in result.stdout
+
+        # Verify metadata changed
+        show_result = runner.invoke(
+            app,
+            ["show", issue_id, "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data = json.loads(show_result.stdout)
+        assert data["metadata"]["manual"] is True
+
+    def test_mark_manual_json_output(self, tmp_path: Path) -> None:
+        """Test mark-manual with --json flag."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create_result = runner.invoke(
+            app,
+            ["create", "Test issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+
+        result = runner.invoke(
+            app,
+            ["mark-manual", issue_id, "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["metadata"]["manual"] is True
+
+    def test_mark_manual_nonexistent_issue(self, tmp_path: Path) -> None:
+        """Test mark-manual with nonexistent issue."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["mark-manual", "nonexistent", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 1
+        assert "Error" in result.stdout or "Error" in result.stderr
+
+
 class TestCLIClose:
     """Test close command."""
 
@@ -3505,6 +3806,54 @@ class TestCLIClose:
             ["close", "nonexistent", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code != 0
+
+    def test_close_multiple_issues(self, tmp_path: Path) -> None:
+        """Test that close accepts multiple issue IDs."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        # Create three issues
+        ids = []
+        for title in ["First to close", "Second to close", "Third to close"]:
+            create_result = runner.invoke(
+                app,
+                ["create", title, "--dogcats-dir", str(dogcats_dir)],
+            )
+            ids.append(create_result.stdout.split(": ")[0].split()[-1])
+
+        # Close all three at once
+        result = runner.invoke(
+            app,
+            ["close", *ids, "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        for issue_id in ids:
+            assert issue_id in result.stdout
+
+    def test_close_multiple_with_invalid_id(self, tmp_path: Path) -> None:
+        """Test that close reports errors for invalid IDs but closes valid ones."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        create_result = runner.invoke(
+            app,
+            ["create", "Valid issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+        valid_id = create_result.stdout.split(": ")[0].split()[-1]
+
+        result = runner.invoke(
+            app,
+            ["close", valid_id, "nonexistent", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code != 0
+        assert valid_id in result.stdout
+        assert "nonexistent" in result.stderr
 
     def test_close_auto_populates_closed_by(self, tmp_path: Path) -> None:
         """Test that close auto-populates closed_by from git config."""
@@ -5074,3 +5423,121 @@ class TestMultiLabelFilter:
         assert "Backend issue" in result.stdout
         assert "Frontend issue" in result.stdout
         assert "Unrelated issue" not in result.stdout
+
+    def test_create_with_space_separated_labels(self, tmp_path: Path) -> None:
+        """Test that --labels accepts space-separated labels."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create_result = runner.invoke(
+            app,
+            [
+                "create",
+                "Space labels test",
+                "--labels",
+                "bug fix urgent",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert create_result.exit_code == 0
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+
+        show_result = runner.invoke(
+            app,
+            ["show", issue_id, "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data = json.loads(show_result.stdout)
+        assert data["labels"] == ["bug", "fix", "urgent"]
+
+    def test_update_with_space_separated_labels(self, tmp_path: Path) -> None:
+        """Test that update --labels accepts space-separated labels."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create_result = runner.invoke(
+            app,
+            [
+                "create",
+                "Update labels test",
+                "--labels",
+                "old",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+
+        result = runner.invoke(
+            app,
+            [
+                "update",
+                issue_id,
+                "--labels",
+                "new1 new2",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+
+        show_result = runner.invoke(
+            app,
+            ["show", issue_id, "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data = json.loads(show_result.stdout)
+        assert data["labels"] == ["new1", "new2"]
+
+    def test_filter_with_space_separated_labels(self, tmp_path: Path) -> None:
+        """Test that list --label accepts space-separated labels."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Backend issue",
+                "--labels",
+                "backend",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Frontend issue",
+                "--labels",
+                "frontend",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Docs issue",
+                "--labels",
+                "docs",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "list",
+                "--label",
+                "backend frontend",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Backend issue" in result.stdout
+        assert "Frontend issue" in result.stdout
+        assert "Docs issue" not in result.stdout

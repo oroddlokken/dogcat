@@ -28,6 +28,7 @@ from dogcat.constants import (
     STATUS_OPTIONS,
     TYPE_COLORS,
     TYPE_OPTIONS,
+    parse_labels,
 )
 
 if TYPE_CHECKING:
@@ -238,7 +239,7 @@ class IssueEditorApp(App[bool]):
                 )
                 yield Input(
                     value=", ".join(self._issue.labels) if self._issue.labels else "",
-                    placeholder="Labels (comma-separated)",
+                    placeholder="Labels (comma or space separated)",
                     id="labels-input",
                 )
 
@@ -359,11 +360,7 @@ class IssueEditorApp(App[bool]):
             external_ref=(
                 self.query_one("#external-ref-input", Input).value.strip() or None
             ),
-            labels=[
-                lbl.strip()
-                for lbl in self.query_one("#labels-input", Input).value.split(",")
-                if lbl.strip()
-            ],
+            labels=parse_labels(self.query_one("#labels-input", Input).value),
             notes=self.query_one("#notes-input", TextArea).text.strip() or None,
             acceptance=(
                 self.query_one("#acceptance-input", TextArea).text.strip() or None
@@ -415,11 +412,7 @@ class IssueEditorApp(App[bool]):
         if new_parent != self._issue.parent:
             updates["parent"] = new_parent
 
-        new_labels = [
-            lbl.strip()
-            for lbl in self.query_one("#labels-input", Input).value.split(",")
-            if lbl.strip()
-        ]
+        new_labels = parse_labels(self.query_one("#labels-input", Input).value)
         if new_labels != self._issue.labels:
             updates["labels"] = new_labels
 

@@ -88,7 +88,8 @@ NEVER close issues without explicit user approval. When work is complete:
 4. Only run `dcat close` after user confirms
 ``````
 
-This is only a starting point and how I use it, it's up to you to decide how dogcat fits best in your workflow!
+This is only a starting point and how I use it, it's up to you to decide how dogcat fits best in your workflow!  
+There is also a `--no-agent` option that can be passed to `dcat list` that will make your agent skip issues marked as requiring manual intervention.
 
 ### Command cheat sheet
 
@@ -143,6 +144,17 @@ alias dct="dcat list --table"
 alias dcn="dcat new"
 alias dce="dcat edit"
 ```
+
+## FAQ
+
+**What's a dogcat?**  
+¯\_(ツ)_/¯ Some cats are dog-like, and some dogs are cat-like.
+
+**Why a new project and just not use or fork beads?**  
+Dogcat started out as some tooling on top of beads, that quickly grew into its own separate project. I found it tricky to integrate against beads, and instead of trying to keep up with changes in beads, it was more fun to just build my own.
+
+**Why Python?**  
+I wanted to use [Textual](https://textual.textualize.io/), which is awesome for making TUIs with. It's also the language I am the most familiar with.
 
 ## Migrating from beads
 
