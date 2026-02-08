@@ -4,9 +4,12 @@ Checks out dogcat code at each git tag, runs demo issue generation using
 that version's code, and saves the resulting issues.jsonl as a frozen
 fixture in tests/fixtures/.
 
+Tags whose schema and demo output are identical to an earlier tag are
+skipped by default. Pass a specific tag to force generation.
+
 Usage:
-    python tests/generate_fixture.py              # All tags
-    python tests/generate_fixture.py v0.3.0       # Specific tag
+    python tests/generate_fixture.py              # Schema-changing tags only
+    python tests/generate_fixture.py v0.3.0       # Specific tag (always runs)
 """
 
 from __future__ import annotations
@@ -19,6 +22,27 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
+
+# Tags whose schema (models.py, demo.py, storage.py serialization) is
+# identical to an earlier tag. Generating fixtures for these produces
+# the same JSONL structure, so they are skipped when running without
+# arguments.  Pass the tag explicitly to force generation.
+#
+# v0.1.1–v0.1.9 — identical schema + demo to v0.1.0
+# v0.5.1–v0.5.2 — identical schema + demo to v0.5.0
+SKIP_TAGS: set[str] = {
+    "v0.1.1",
+    "v0.1.2",
+    "v0.1.3",
+    "v0.1.4",
+    "v0.1.5",
+    "v0.1.6",
+    "v0.1.7",
+    "v0.1.8",
+    "v0.1.9",
+    "v0.5.1",
+    "v0.5.2",
+}
 
 
 def _get_all_tags() -> list[str]:
@@ -132,7 +156,15 @@ print(f"Generated {{len(ids)}} issues")
 
 def main() -> None:
     """Generate fixtures for specified tags or all tags."""
-    tags = sys.argv[1:] if len(sys.argv) > 1 else _get_all_tags()
+    if len(sys.argv) > 1:
+        # Explicit tags — always honour the request
+        tags = sys.argv[1:]
+    else:
+        all_tags = _get_all_tags()
+        skipped = [t for t in all_tags if t in SKIP_TAGS]
+        tags = [t for t in all_tags if t not in SKIP_TAGS]
+        if skipped:
+            print(f"Skipping {len(skipped)} tag(s) with redundant schemas: {', '.join(skipped)}")
 
     if not tags:
         print("No tags found")
