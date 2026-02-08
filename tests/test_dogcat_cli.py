@@ -112,8 +112,8 @@ class TestCLICreate:
         assert data["title"] == "Test issue"
         assert "id" in data
 
-    def test_create_with_no_agent(self, tmp_path: Path) -> None:
-        """Test create with --no-agent sets metadata."""
+    def test_create_with_manual(self, tmp_path: Path) -> None:
+        """Test create with --manual sets metadata."""
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
@@ -125,7 +125,7 @@ class TestCLICreate:
             [
                 "create",
                 "Agent skip test",
-                "--no-agent",
+                "--manual",
                 "--json",
                 "--dogcats-dir",
                 str(dogcats_dir),
@@ -134,10 +134,10 @@ class TestCLICreate:
         assert result.exit_code == 0
         data = json.loads(result.stdout)
         assert data["title"] == "Agent skip test"
-        assert data["metadata"]["no_agent"] is True
+        assert data["metadata"]["manual"] is True
 
-    def test_create_without_no_agent_has_empty_metadata(self, tmp_path: Path) -> None:
-        """Test create without --no-agent has empty metadata."""
+    def test_create_without_manual_has_empty_metadata(self, tmp_path: Path) -> None:
+        """Test create without --manual has empty metadata."""
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
@@ -1602,7 +1602,7 @@ class TestCLIList:
         assert "No issues found" in result.stdout
 
     def test_list_agent_only(self, tmp_path: Path) -> None:
-        """Test list --agent-only filters out no_agent issues."""
+        """Test list --agent-only filters out manual issues."""
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
@@ -1615,13 +1615,13 @@ class TestCLIList:
             ["create", "Normal issue", "--dogcats-dir", str(dogcats_dir)],
         )
 
-        # Create no_agent issue
+        # Create manual issue
         runner.invoke(
             app,
             [
                 "create",
                 "Agent skip issue",
-                "--no-agent",
+                "--manual",
                 "--dogcats-dir",
                 str(dogcats_dir),
             ],
@@ -2028,7 +2028,7 @@ class TestCLIShow:
             [
                 "create",
                 "Issue with metadata",
-                "--no-agent",
+                "--manual",
                 "--dogcats-dir",
                 str(dogcats_dir),
             ],
@@ -2041,7 +2041,7 @@ class TestCLIShow:
         )
         assert result.exit_code == 0
         assert "Metadata:" in result.stdout
-        assert "no_agent: True" in result.stdout
+        assert "manual: True" in result.stdout
 
     def test_show_closed_issue_field_order(self, tmp_path: Path) -> None:
         """Test Created before Closed, close reason next to date."""
@@ -2789,15 +2789,15 @@ class TestCLILabel:
         assert "urgent" in result.stdout
         assert "backend" in result.stdout
 
-    def test_update_no_agent(self, tmp_path: Path) -> None:
-        """Test updating issue with --no-agent flag."""
+    def test_update_manual(self, tmp_path: Path) -> None:
+        """Test updating issue with --manual flag."""
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
             ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
-        # Create issue without no_agent
+        # Create issue without manual
         create_result = runner.invoke(
             app,
             ["create", "Test issue", "--json", "--dogcats-dir", str(dogcats_dir)],
@@ -2806,33 +2806,33 @@ class TestCLILabel:
         issue_id = data["id"]
         assert data["metadata"] == {}
 
-        # Update to set no_agent
+        # Update to set manual
         runner.invoke(
             app,
-            ["update", issue_id, "--no-agent", "--dogcats-dir", str(dogcats_dir)],
+            ["update", issue_id, "--manual", "--dogcats-dir", str(dogcats_dir)],
         )
 
-        # Verify no_agent is set
+        # Verify manual is set
         show_result = runner.invoke(
             app,
             ["show", issue_id, "--json", "--dogcats-dir", str(dogcats_dir)],
         )
         data = json.loads(show_result.stdout)
-        assert data["metadata"]["no_agent"] is True
+        assert data["metadata"]["manual"] is True
 
-        # Update to remove no_agent
+        # Update to remove manual
         runner.invoke(
             app,
-            ["update", issue_id, "--agent", "--dogcats-dir", str(dogcats_dir)],
+            ["update", issue_id, "--no-manual", "--dogcats-dir", str(dogcats_dir)],
         )
 
-        # Verify no_agent is removed
+        # Verify manual is removed
         show_result = runner.invoke(
             app,
             ["show", issue_id, "--json", "--dogcats-dir", str(dogcats_dir)],
         )
         data = json.loads(show_result.stdout)
-        assert "no_agent" not in data["metadata"]
+        assert "manual" not in data["metadata"]
 
 
 class TestCLIDependency:
@@ -2960,7 +2960,7 @@ class TestCLIReady:
         assert issue1_id in result.stdout
 
     def test_ready_agent_only(self, tmp_path: Path) -> None:
-        """Test that ready --agent-only filters out no_agent issues."""
+        """Test that ready --agent-only filters out manual issues."""
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
@@ -2974,13 +2974,13 @@ class TestCLIReady:
         )
         normal_id = create1.stdout.split(": ")[0].split()[-1]
 
-        # Create an issue marked as no_agent
+        # Create an issue marked as manual
         create2 = runner.invoke(
             app,
             [
                 "create",
                 "Agent skip issue",
-                "--no-agent",
+                "--manual",
                 "--dogcats-dir",
                 str(dogcats_dir),
             ],
@@ -4415,12 +4415,10 @@ class TestCLIGuide:
         assert "dcat init" in result.stdout
         assert "dcat create" in result.stdout
 
-    def test_guide_does_not_contain_agent_content(self) -> None:
-        """Test that guide does not include AI-agent-specific content."""
+    def test_guide_contains_manual_section(self) -> None:
+        """Test that guide includes the manual issues section."""
         result = runner.invoke(app, ["guide"])
-        assert "AI agent" not in result.stdout
-        assert "--no-agent" not in result.stdout
-        assert "--agent-only" not in result.stdout
+        assert "--manual" in result.stdout
 
 
 class TestCLIVersion:

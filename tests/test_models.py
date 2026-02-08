@@ -443,9 +443,9 @@ class TestMetadata:
         issue = Issue(
             id="issue-1",
             title="Test",
-            metadata={"no_agent": True, "custom_field": "value"},
+            metadata={"manual": True, "custom_field": "value"},
         )
-        assert issue.metadata["no_agent"] is True
+        assert issue.metadata["manual"] is True
         assert issue.metadata["custom_field"] == "value"
 
     def test_issue_to_dict_includes_metadata(self) -> None:
@@ -453,10 +453,10 @@ class TestMetadata:
         issue = Issue(
             id="issue-1",
             title="Test",
-            metadata={"no_agent": True},
+            metadata={"manual": True},
         )
         data = issue_to_dict(issue)
-        assert data["metadata"] == {"no_agent": True}
+        assert data["metadata"] == {"manual": True}
 
     def test_issue_to_dict_empty_metadata(self) -> None:
         """Test that empty metadata is serialized as empty dict."""
@@ -471,10 +471,10 @@ class TestMetadata:
             "title": "Test",
             "created_at": "2026-02-03T12:00:00+00:00",
             "updated_at": "2026-02-03T12:00:00+00:00",
-            "metadata": {"no_agent": True, "priority_override": 0},
+            "metadata": {"manual": True, "priority_override": 0},
         }
         issue = dict_to_issue(data)
-        assert issue.metadata["no_agent"] is True
+        assert issue.metadata["manual"] is True
         assert issue.metadata["priority_override"] == 0
 
     def test_dict_to_issue_missing_metadata(self) -> None:
@@ -493,7 +493,7 @@ class TestMetadata:
         original = Issue(
             id="issue-1",
             title="Test",
-            metadata={"no_agent": True, "tags": ["a", "b"], "count": 42},
+            metadata={"manual": True, "tags": ["a", "b"], "count": 42},
         )
         data = issue_to_dict(original)
         restored = dict_to_issue(data)

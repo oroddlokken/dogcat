@@ -38,6 +38,12 @@ If changes are needed after review, set back to in_progress:
 dcat update --status in_progress $issueId
 ```
 
+If you encounter an issue you cannot solve (e.g. requires deployment, credentials, physical access, or subjective human judgment), mark it as manual and tell the user what needs their attention:
+
+```bash
+dcat update --manual $issueId
+```
+
 ### Closing Issues - IMPORTANT
 
 NEVER close issues without explicit user approval. When work is complete:

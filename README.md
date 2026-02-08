@@ -96,12 +96,15 @@ This is only a starting point and how I use it, it's up to you to decide how dog
 | --- | --- |
 | `dcat create "My first bug" -t bug -p 0` | Create a bug issue, with priority 0 |
 | `dcat create b 0 "My first bug"` | Same as above, but using shorthands for type and priority |
+| `dcat create "Turn off the lights" --manual` | Indicate to the agent that this is a manual task, and should be done by the user, not the agent |
 | `dcat ready` | List tasks that is not blocked by other tasks |
 | `dcat close $id` | Close a task |
 | `dcat close $id -reason "Fixed the bug"` | Close a task with reason |
 | `dcat show $id` | Show full details about an issue |
 | `dcat new` | Interactive TUI for creating a new issue |
 | `dcat edit [$id]` | Interactive TUI for editing an issue |
+| `dcat in-progress` | List tasks currently in progress |
+| `dcat in-review` | List tasks currently in review |
 
 ## Screenshots
 

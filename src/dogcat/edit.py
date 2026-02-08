@@ -11,6 +11,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
 from textual.widgets import (
     Button,
+    Checkbox,
     Collapsible,
     Footer,
     Input,
@@ -45,6 +46,10 @@ def _make_issue_label(issue: Issue) -> Text:
     label.append(" ")
     label.append(f"[{issue.issue_type.value}] ", style=type_color)
     label.append(f"{issue.full_id} {issue.title}")
+    if issue.labels:
+        label.append(f" [{', '.join(issue.labels)}]", style="cyan")
+    if issue.metadata.get("manual") or issue.metadata.get("no_agent"):
+        label.append(" [manual]", style="yellow")
     return label
 
 
@@ -204,6 +209,14 @@ class IssueEditorApp(App[bool]):
                     id="priority-input",
                     allow_blank=False,
                 )
+                yield Checkbox(
+                    "Manual",
+                    value=bool(
+                        self._issue.metadata.get("manual")
+                        or self._issue.metadata.get("no_agent"),
+                    ),
+                    id="manual-input",
+                )
 
             with Horizontal(classes="info-row"):
                 yield Input(
@@ -326,6 +339,11 @@ class IssueEditorApp(App[bool]):
         parent_val = self.query_one("#parent-input", Select).value
         parent = parent_val if isinstance(parent_val, str) else None
 
+        manual_val = self.query_one("#manual-input", Checkbox).value
+        metadata: dict[str, Any] = {}
+        if manual_val:
+            metadata["manual"] = True
+
         issue = Issue(
             id=issue_id,
             title=title,
@@ -351,6 +369,7 @@ class IssueEditorApp(App[bool]):
                 self.query_one("#acceptance-input", TextArea).text.strip() or None
             ),
             design=self.query_one("#design-input", TextArea).text.strip() or None,
+            metadata=metadata,
             created_at=timestamp,
             updated_at=timestamp,
         )
@@ -421,6 +440,19 @@ class IssueEditorApp(App[bool]):
         new_design = self.query_one("#design-input", TextArea).text.strip() or None
         if new_design != self._issue.design:
             updates["design"] = new_design
+
+        manual_val = self.query_one("#manual-input", Checkbox).value
+        was_manual = bool(
+            self._issue.metadata.get("manual") or self._issue.metadata.get("no_agent"),
+        )
+        if manual_val != was_manual:
+            new_metadata = dict(self._issue.metadata) if self._issue.metadata else {}
+            if manual_val:
+                new_metadata["manual"] = True
+            else:
+                new_metadata.pop("manual", None)
+            new_metadata.pop("no_agent", None)  # migrate old key
+            updates["metadata"] = new_metadata
 
         if not updates:
             self.notify("No changes to save")

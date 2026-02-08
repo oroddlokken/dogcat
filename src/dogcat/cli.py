@@ -196,9 +196,12 @@ def format_issue_brief(
     labels_str = ""
     if issue.labels:
         labels_str = " " + typer.style(f"[{', '.join(issue.labels)}]", fg="cyan")
+    manual_str = ""
+    if issue.metadata.get("manual") or issue.metadata.get("no_agent"):
+        manual_str = " " + typer.style("[manual]", fg="yellow")
     base = f"{status_emoji} {priority_str} {issue.full_id}: {issue.title} {type_str}"
 
-    return f"{base}{parent_str}{labels_str}{closed_str}"
+    return f"{base}{parent_str}{labels_str}{manual_str}{closed_str}"
 
 
 def format_issue_full(issue: Issue, parent_title: str | None = None) -> str:
@@ -364,6 +367,11 @@ def format_issue_table(
             )
 
         labels_str = ", ".join(issue.labels) if issue.labels else ""
+        manual_str = (
+            " [yellow]\\[manual][/]"
+            if issue.metadata.get("manual") or issue.metadata.get("no_agent")
+            else ""
+        )
 
         table.add_row(
             emoji,
@@ -371,7 +379,7 @@ def format_issue_table(
             parent_id,
             f"[{type_color}]{issue_type}[/]",
             f"[{priority_color}]{issue.priority}[/]",
-            issue.title,
+            f"{issue.title}{manual_str}",
             f"[cyan]{labels_str}[/]" if labels_str else "",
         )
 
@@ -750,10 +758,10 @@ def create(
         "--created-by",
         help="Who is creating this",
     ),
-    no_agent: bool = typer.Option(
+    manual: bool = typer.Option(
         False,
-        "--no-agent",
-        help="Mark issue as not for agents",
+        "--manual",
+        help="Mark issue as manual (not for agents)",
     ),
     editor: bool = typer.Option(
         False,
@@ -859,8 +867,8 @@ def create(
 
         # Build metadata
         issue_metadata: dict[str, Any] = {}
-        if no_agent:
-            issue_metadata["no_agent"] = True
+        if manual:
+            issue_metadata["manual"] = True
 
         # Set default operator for owner and created_by if not provided
         default_operator = get_default_operator()
@@ -1023,10 +1031,10 @@ def create_alias(
     ),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     created_by: str = typer.Option(None, "--created-by", help="Who is creating this"),
-    no_agent: bool = typer.Option(
+    manual: bool = typer.Option(
         False,
-        "--no-agent",
-        help="Mark issue as not for agents",
+        "--manual",
+        help="Mark issue as manual (not for agents)",
     ),
     dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
 ) -> None:
@@ -1058,7 +1066,7 @@ def create_alias(
         parent=parent,
         json_output=json_output,
         created_by=created_by,
-        no_agent=no_agent,
+        manual=manual,
         editor=False,
         dogcats_dir=dogcats_dir,
     )
@@ -1135,10 +1143,10 @@ def create_alias_add(
     ),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     created_by: str = typer.Option(None, "--created-by", help="Who is creating this"),
-    no_agent: bool = typer.Option(
+    manual: bool = typer.Option(
         False,
-        "--no-agent",
-        help="Mark issue as not for agents",
+        "--manual",
+        help="Mark issue as manual (not for agents)",
     ),
     dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
 ) -> None:
@@ -1161,7 +1169,7 @@ def create_alias_add(
         parent=parent,
         json_output=json_output,
         created_by=created_by,
-        no_agent=no_agent,
+        manual=manual,
         editor=False,
         dogcats_dir=dogcats_dir,
     )
@@ -1270,9 +1278,13 @@ def list_issues(
         if open_issues:
             issues = [i for i in issues if i.status.value in ("open", "in_progress")]
 
-        # Filter out no_agent issues if requested
+        # Filter out manual issues if requested
         if agent_only:
-            issues = [i for i in issues if not i.metadata.get("no_agent")]
+            issues = [
+                i
+                for i in issues
+                if not (i.metadata.get("manual") or i.metadata.get("no_agent"))
+            ]
 
         # Apply date-based filtering for closed issues
         if closed_after or closed_before:
@@ -1615,10 +1627,10 @@ def update(
         "-l",
         help="Comma-separated labels (replaces existing)",
     ),
-    no_agent: bool | None = typer.Option(
+    manual: bool | None = typer.Option(
         None,
-        "--no-agent/--agent",
-        help="Mark/unmark issue as not for agents",
+        "--manual/--no-manual",
+        help="Mark/unmark issue as manual (not for agents)",
     ),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     updated_by: str | None = typer.Option(
@@ -1672,17 +1684,19 @@ def update(
             updates["labels"] = [
                 lbl.strip() for lbl in labels.split(",") if lbl.strip()
             ]
-        if no_agent is not None:
+        if manual is not None:
             # Get current issue to preserve existing metadata
             current = storage.get(issue_id)
             if current is None:
                 typer.echo(f"Issue {issue_id} not found", err=True)
                 raise typer.Exit(1)
             new_metadata = dict(current.metadata) if current.metadata else {}
-            if no_agent:
-                new_metadata["no_agent"] = True
+            if manual:
+                new_metadata["manual"] = True
+                new_metadata.pop("no_agent", None)  # migrate old key
             else:
-                new_metadata.pop("no_agent", None)
+                new_metadata.pop("manual", None)
+                new_metadata.pop("no_agent", None)  # migrate old key
             updates["metadata"] = new_metadata
 
         if not updates:
@@ -2091,7 +2105,11 @@ def ready(
         ready_issues = get_ready_work(storage)
 
         if agent_only:
-            ready_issues = [i for i in ready_issues if not i.metadata.get("no_agent")]
+            ready_issues = [
+                i
+                for i in ready_issues
+                if not (i.metadata.get("manual") or i.metadata.get("no_agent"))
+            ]
 
         if limit:
             ready_issues = ready_issues[:limit]
@@ -3469,10 +3487,10 @@ def git() -> None:
 
 @app.command()
 def guide() -> None:
-    """Show a human-friendly guide to using dcat.
+    """Show a user-friendly guide to using dcat.
 
     Displays a walkthrough of dcat's core features and workflows,
-    written for humans rather than AI agents.
+    written for users rather than AI agents.
     """
     guide_text = """\
 ╔════════════════════════════════════════════════════════════════════════════╗
@@ -3610,6 +3628,19 @@ def guide() -> None:
 
     dcat list --json
 
+── Manual Issues ────────────────────────────────────────────────────────────
+
+  Some issues require user action and can't be handled by an AI agent
+  (e.g. deploying to prod, physical hardware tasks, subjective reviews).
+  Mark these with --manual:
+
+    dcat create "Deploy v2.1 to production" --manual
+    dcat update <id> --manual       # mark existing issue as manual
+    dcat update <id> --no-manual    # remove the manual flag
+
+  AI agents using --agent-only will skip manual issues when listing work.
+  You can also toggle the Manual checkbox in the TUI editor (dcat edit).
+
 ── Questions ────────────────────────────────────────────────────────────────
 
   "question" is a special issue type for tracking decisions and
@@ -3731,12 +3762,21 @@ directory. Supports both absolute and relative paths (relative to the
 
 ## Agent Integration
 
-Use --no-agent to mark issues that are not for AI agents:
-  dcat create "Manual review needed" --no-agent
+Use --manual to mark issues that require manual action:
+  dcat create "Manual review needed" --manual
 
-Use --agent-only in list/ready to filter out these issues:
+Use --agent-only in list/ready to filter out manual issues:
   dcat ready --agent-only   # Show only agent-workable issues
-  dcat list --agent-only    # Hide no-agent issues
+  dcat list --agent-only    # Hide manual issues
+
+If you determine that an issue requires human intervention (e.g. deploying,
+physical access, subjective judgment, credentials you don't have), mark it
+as manual and tell the user it needs their attention:
+  dcat update <id> --manual
+Then notify the user: explain which issue is blocked and what user action
+is needed so they can pick it up.
+
+Do NOT attempt to work on manual issues. Leave them for the user.
 
 ## Status Workflow
 

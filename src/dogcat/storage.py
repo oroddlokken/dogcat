@@ -460,7 +460,7 @@ class JSONLStorage:
             "original_type",
             "duplicate_of",
             "metadata",
-            "no_agent",
+            "manual",
         },
     )
 
