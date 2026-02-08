@@ -3099,6 +3099,169 @@ class TestCLIInProgress:
         assert data[0]["status"] == "in_progress"
 
 
+class TestCLIInReview:
+    """Test in-review command."""
+
+    def test_in_review_no_issues(self, tmp_path: Path) -> None:
+        """Test in-review with no in-review issues."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["in-review", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "No in-review issues" in result.stdout
+
+    def test_in_review_shows_only_in_review(self, tmp_path: Path) -> None:
+        """Test that in-review shows only in_review issues."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # Create an open issue
+        create1 = runner.invoke(
+            app,
+            ["create", "Open issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+        open_id = create1.stdout.split(": ")[0].split()[-1]
+
+        # Create an in_review issue
+        create2 = runner.invoke(
+            app,
+            [
+                "create",
+                "Review issue",
+                "--status",
+                "in_review",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        review_id = create2.stdout.split(": ")[0].split()[-1]
+
+        result = runner.invoke(
+            app,
+            ["in-review", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert review_id in result.stdout
+        assert open_id not in result.stdout
+
+    def test_in_review_json_output(self, tmp_path: Path) -> None:
+        """Test in-review with --json flag."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Review issue",
+                "--status",
+                "in_review",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["in-review", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert len(data) == 1
+        assert data[0]["status"] == "in_review"
+
+
+class TestCLIStatusShortcuts:
+    """Test ir and ip status shortcut commands."""
+
+    def test_ir_sets_status_to_in_review(self, tmp_path: Path) -> None:
+        """Test that 'ir' sets issue status to in_review."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create_result = runner.invoke(
+            app,
+            ["create", "Test issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+
+        result = runner.invoke(
+            app,
+            ["ir", issue_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "✓ In review" in result.stdout
+
+        # Verify status changed
+        show_result = runner.invoke(
+            app,
+            ["show", issue_id, "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data = json.loads(show_result.stdout)
+        assert data["status"] == "in_review"
+
+    def test_ir_json_output(self, tmp_path: Path) -> None:
+        """Test ir with --json flag."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create_result = runner.invoke(
+            app,
+            ["create", "Test issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+
+        result = runner.invoke(
+            app,
+            ["ir", issue_id, "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["status"] == "in_review"
+
+    def test_ir_nonexistent_issue(self, tmp_path: Path) -> None:
+        """Test ir with nonexistent issue."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["ir", "nonexistent", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 1
+        assert "Error" in result.stdout or "Error" in result.stderr
+
+    def test_ip_sets_status_to_in_progress(self, tmp_path: Path) -> None:
+        """Test that 'ip' sets issue status to in_progress."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create_result = runner.invoke(
+            app,
+            ["create", "Test issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+
+        result = runner.invoke(
+            app,
+            ["ip", issue_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "✓ In progress" in result.stdout
+
+        # Verify status changed
+        show_result = runner.invoke(
+            app,
+            ["show", issue_id, "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data = json.loads(show_result.stdout)
+        assert data["status"] == "in_progress"
+
+
 class TestCLIClose:
     """Test close command."""
 
@@ -3186,6 +3349,54 @@ class TestCLIClose:
         assert result.exit_code == 0
         assert issue_id in result.stdout
         assert "Issue to delete" in result.stdout
+
+    def test_delete_multiple_issues(self, tmp_path: Path) -> None:
+        """Test that delete accepts multiple issue IDs."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        # Create three issues
+        ids = []
+        for title in ["First to delete", "Second to delete", "Third to delete"]:
+            create_result = runner.invoke(
+                app,
+                ["create", title, "--dogcats-dir", str(dogcats_dir)],
+            )
+            ids.append(create_result.stdout.split(": ")[0].split()[-1])
+
+        # Delete all three at once
+        result = runner.invoke(
+            app,
+            ["delete", *ids, "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        for issue_id in ids:
+            assert issue_id in result.stdout
+
+    def test_delete_multiple_with_invalid_id(self, tmp_path: Path) -> None:
+        """Test that delete reports errors for invalid IDs but deletes valid ones."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        create_result = runner.invoke(
+            app,
+            ["create", "Valid issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+        valid_id = create_result.stdout.split(": ")[0].split()[-1]
+
+        result = runner.invoke(
+            app,
+            ["delete", valid_id, "nonexistent", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code != 0
+        assert valid_id in result.stdout
+        assert "nonexistent" in result.stderr
 
     def test_close_nonexistent_issue(self, tmp_path: Path) -> None:
         """Test closing nonexistent issue."""

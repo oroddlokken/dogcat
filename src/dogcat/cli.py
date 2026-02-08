@@ -1745,9 +1745,39 @@ def close(
         raise typer.Exit(1)
 
 
+def _delete_one(
+    storage: object,
+    issue_id: str,
+    reason: str | None,
+    deleted_by: str | None,
+    json_output: bool,
+) -> bool:
+    """Delete a single issue. Returns True if an error occurred."""
+    try:
+        deleted_issue = storage.delete(  # type: ignore[union-attr]
+            issue_id,
+            reason=reason,
+            deleted_by=deleted_by,
+        )
+
+        if json_output:
+            from dogcat.models import issue_to_dict
+
+            typer.echo(orjson.dumps(issue_to_dict(deleted_issue)).decode())
+        else:
+            typer.echo(f"✓ Deleted {deleted_issue.full_id}: {deleted_issue.title}")
+    except (ValueError, Exception) as e:
+        typer.echo(f"Error deleting {issue_id}: {e}", err=True)
+        return True
+    return False
+
+
 @app.command()
 def delete(
-    issue_id: str = typer.Argument(..., help="Issue ID"),
+    issue_ids: list[str] = typer.Argument(  # noqa: B008
+        ...,
+        help="Issue ID(s) to delete",
+    ),
     reason: str | None = typer.Option(
         None,
         "--reason",
@@ -1762,36 +1792,29 @@ def delete(
     ),
     dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
 ) -> None:
-    """Delete an issue (creates tombstone).
+    """Delete one or more issues (creates tombstone).
 
-    This marks the issue as deleted (tombstone status) rather than permanently
-    removing it from the database. The issue will be hidden from normal lists
+    This marks the issue(s) as deleted (tombstone status) rather than permanently
+    removing them from the database. Issues will be hidden from normal lists
     but can still be viewed with --all flag.
     """
-    try:
-        storage = get_storage(dogcats_dir)
+    storage = get_storage(dogcats_dir)
+    final_deleted_by = deleted_by if deleted_by is not None else get_default_operator()
+    has_errors = False
 
-        final_deleted_by = (
-            deleted_by if deleted_by is not None else get_default_operator()
+    for issue_id in issue_ids:
+        has_errors = (
+            _delete_one(
+                storage,
+                issue_id,
+                reason,
+                final_deleted_by,
+                json_output,
+            )
+            or has_errors
         )
-        deleted_issue = storage.delete(
-            issue_id,
-            reason=reason,
-            deleted_by=final_deleted_by,
-        )
 
-        if json_output:
-            from dogcat.models import issue_to_dict
-
-            typer.echo(orjson.dumps(issue_to_dict(deleted_issue)).decode())
-        else:
-            typer.echo(f"✓ Deleted {deleted_issue.full_id}: {deleted_issue.title}")
-
-    except ValueError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
-    except Exception as e:
-        typer.echo(f"Error: {e}", err=True)
+    if has_errors:
         raise typer.Exit(1)
 
 
@@ -2164,6 +2187,103 @@ def in_progress(
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
+
+
+@app.command("in-review")
+def in_review(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+) -> None:
+    """Show issues currently in review."""
+    try:
+        storage = get_storage(dogcats_dir)
+        issues = storage.list({"status": "in_review"})
+        issues.sort(key=lambda i: i.priority)
+
+        if json_output:
+            from dogcat.models import issue_to_dict
+
+            output = [issue_to_dict(issue) for issue in issues]
+            typer.echo(orjson.dumps(output).decode())
+        else:
+            if not issues:
+                typer.echo("No in-review issues")
+            else:
+                for issue in issues:
+                    typer.echo(format_issue_brief(issue))
+
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+
+def _set_status(
+    issue_id: str,
+    status: str,
+    label: str,
+    json_output: bool,
+    operator: str | None,
+    dogcats_dir: str,
+) -> None:
+    """Set an issue's status."""
+    try:
+        storage = get_storage(dogcats_dir)
+        final_operator = operator if operator is not None else get_default_operator()
+        issue = storage.update(
+            issue_id,
+            {"status": status, "operator": final_operator},
+        )
+
+        if json_output:
+            from dogcat.models import issue_to_dict
+
+            typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
+        else:
+            typer.echo(f"✓ {label} {issue.full_id}: {issue.title}")
+
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@app.command(name="ir", hidden=True)
+def in_review_shortcut(
+    issue_id: str = typer.Argument(..., help="Issue ID"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    operator: str | None = typer.Option(
+        None,
+        "--operator",
+        help="Who is making this change",
+    ),
+    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+) -> None:
+    """Set an issue's status to in-review."""
+    _set_status(issue_id, "in_review", "In review", json_output, operator, dogcats_dir)
+
+
+@app.command(name="ip", hidden=True)
+def in_progress_shortcut(
+    issue_id: str = typer.Argument(..., help="Issue ID"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    operator: str | None = typer.Option(
+        None,
+        "--operator",
+        help="Who is making this change",
+    ),
+    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+) -> None:
+    """Set an issue's status to in-progress."""
+    _set_status(
+        issue_id,
+        "in_progress",
+        "In progress",
+        json_output,
+        operator,
+        dogcats_dir,
+    )
 
 
 @app.command("recently-closed")
@@ -3428,6 +3548,8 @@ def guide() -> None:
   Update an issue's status:
 
     dcat update <id> --status in_progress
+    dcat ip <id>                             # shortcut
+    dcat ir <id>                             # set to in_review
 
   Close an issue with a reason:
 
@@ -3547,6 +3669,8 @@ DOGCAT WORKFLOW GUIDE
   dcat list --closed     - Show only closed issues
   dcat list --table     - Show as formatted table
   dcat ready             - Show issues ready to work (no blockers)
+  dcat in-progress       - Show issues currently in progress
+  dcat in-review         - Show issues currently in review
   dcat recently-closed   - Show recently closed issues
 
 ### Creating & Updating
@@ -3626,6 +3750,8 @@ Status meanings:
 
 Update status:
   dcat update <id> --status in_review
+  dcat ir <id>            # Shortcut for setting status to in_review
+  dcat ip <id>            # Shortcut for setting status to in_progress
 
 ## Common Workflows
 
@@ -3635,7 +3761,8 @@ $ dcat show <issue_id>    # View issue details (includes parent, children, depen
 $ dcat update <issue_id> --status in_progress
 
 ### Submitting for Review
-$ dcat update <issue_id> --status in_review
+$ dcat ir <issue_id>                         # Shortcut command
+$ dcat update <issue_id> --status in_review  # Alternative
 
 ### Creating Related Issues
 $ dcat create "Blocker task"
