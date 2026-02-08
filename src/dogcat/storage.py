@@ -492,12 +492,18 @@ class JSONLStorage:
         self._append([self._issue_record(issue)])
         return issue
 
-    def close(self, issue_id: str, reason: str | None = None) -> Issue:
+    def close(
+        self,
+        issue_id: str,
+        reason: str | None = None,
+        closed_by: str | None = None,
+    ) -> Issue:
         """Close an issue.
 
         Args:
             issue_id: The ID of the issue to close (supports partial IDs)
             reason: Optional reason for closing
+            closed_by: Optional operator who closed the issue
 
         Returns:
             The closed issue
@@ -518,16 +524,24 @@ class JSONLStorage:
         issue.updated_at = now
         if reason:
             issue.close_reason = reason
+        if closed_by:
+            issue.closed_by = closed_by
 
         self._append([self._issue_record(issue)])
         return issue
 
-    def delete(self, issue_id: str, reason: str | None = None) -> Issue:
+    def delete(
+        self,
+        issue_id: str,
+        reason: str | None = None,
+        deleted_by: str | None = None,
+    ) -> Issue:
         """Soft delete an issue (create tombstone).
 
         Args:
             issue_id: The ID of the issue to delete (supports partial IDs)
             reason: Optional reason for deletion
+            deleted_by: Optional operator who deleted the issue
 
         Returns:
             The tombstoned issue
@@ -548,6 +562,8 @@ class JSONLStorage:
         issue.updated_at = now
         issue.delete_reason = reason
         issue.original_type = issue.issue_type
+        if deleted_by:
+            issue.deleted_by = deleted_by
 
         # Clean up dependencies pointing to or from this issue
         self._dependencies = [

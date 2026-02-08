@@ -616,6 +616,95 @@ class TestCloseDeleteUpdatedAt:
         assert deleted.updated_at >= deleted.deleted_at
 
 
+class TestCloseDeleteOperator:
+    """Test that close() and delete() accept operator parameters."""
+
+    def test_close_sets_closed_by(self, storage: JSONLStorage) -> None:
+        """Test that close() sets closed_by when provided."""
+        issue = Issue(id="issue-1", title="Test")
+        storage.create(issue)
+
+        closed = storage.close("issue-1", reason="Done", closed_by="alice")
+        assert closed.closed_by == "alice"
+
+    def test_close_without_closed_by(self, storage: JSONLStorage) -> None:
+        """Test that close() leaves closed_by as None when not provided."""
+        issue = Issue(id="issue-1", title="Test")
+        storage.create(issue)
+
+        closed = storage.close("issue-1", reason="Done")
+        assert closed.closed_by is None
+
+    def test_delete_sets_deleted_by(self, storage: JSONLStorage) -> None:
+        """Test that delete() sets deleted_by when provided."""
+        issue = Issue(id="issue-1", title="Test")
+        storage.create(issue)
+
+        deleted = storage.delete("issue-1", reason="Dup", deleted_by="bob")
+        assert deleted.deleted_by == "bob"
+
+    def test_delete_without_deleted_by(self, storage: JSONLStorage) -> None:
+        """Test that delete() leaves deleted_by as None when not provided."""
+        issue = Issue(id="issue-1", title="Test")
+        storage.create(issue)
+
+        deleted = storage.delete("issue-1", reason="Dup")
+        assert deleted.deleted_by is None
+
+    def test_close_with_closed_by_persists(self, temp_workspace: Path) -> None:
+        """Test that closed_by survives save/load cycle."""
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+
+        issue = Issue(id="issue-1", title="Test")
+        storage.create(issue)
+        storage.close("issue-1", reason="Done", closed_by="alice")
+
+        storage2 = JSONLStorage(str(storage_path))
+        loaded = storage2.get("issue-1")
+        assert loaded is not None
+        assert loaded.closed_by == "alice"
+
+    def test_close_writes_single_event(self, temp_workspace: Path) -> None:
+        """Test that close with closed_by writes only one event, not two."""
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+
+        issue = Issue(id="issue-1", title="Test")
+        storage.create(issue)
+
+        lines_before = storage_path.read_text().strip().count("\n") + 1
+        storage.close("issue-1", reason="Done", closed_by="alice")
+        lines_after = storage_path.read_text().strip().count("\n") + 1
+
+        assert lines_after - lines_before == 1
+
+    def test_delete_includes_deleted_by_in_single_record(
+        self,
+        temp_workspace: Path,
+    ) -> None:
+        """Test that delete with deleted_by includes it in the tombstone record."""
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+
+        issue = Issue(id="issue-1", title="Test")
+        storage.create(issue)
+        storage.delete("issue-1", reason="Dup", deleted_by="bob")
+
+        # After delete + _save, there should be exactly one record for this issue
+        # and it should contain deleted_by
+        import orjson
+
+        lines = storage_path.read_text().strip().split("\n")
+        issue_records = [
+            orjson.loads(line)
+            for line in lines
+            if orjson.loads(line).get("id") == "issue-1"
+        ]
+        assert len(issue_records) == 1
+        assert issue_records[0]["deleted_by"] == "bob"
+
+
 class TestAppendOnlyStorage:
     """Test that mutations append instead of rewriting the entire file."""
 

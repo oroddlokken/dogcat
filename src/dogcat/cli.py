@@ -1674,11 +1674,8 @@ def close(
     """Close an issue."""
     try:
         storage = get_storage(dogcats_dir)
-        issue = storage.close(issue_id, reason=reason)
-
-        # Set closed_by to default operator if not provided
         final_closed_by = closed_by if closed_by is not None else get_default_operator()
-        storage.update(issue_id, {"closed_by": final_closed_by})
+        issue = storage.close(issue_id, reason=reason, closed_by=final_closed_by)
 
         if json_output:
             from dogcat.models import issue_to_dict
@@ -1721,14 +1718,14 @@ def delete(
     try:
         storage = get_storage(dogcats_dir)
 
-        # Perform deletion (creates tombstone)
-        deleted_issue = storage.delete(issue_id, reason=reason)
-
-        # Set deleted_by to default operator if not provided
         final_deleted_by = (
             deleted_by if deleted_by is not None else get_default_operator()
         )
-        storage.update(issue_id, {"deleted_by": final_deleted_by})
+        deleted_issue = storage.delete(
+            issue_id,
+            reason=reason,
+            deleted_by=final_deleted_by,
+        )
 
         if json_output:
             from dogcat.models import issue_to_dict
