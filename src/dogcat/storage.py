@@ -16,6 +16,7 @@ from dogcat.models import (
     Issue,
     Link,
     Status,
+    classify_record,
     dict_to_issue,
     issue_to_dict,
 )
@@ -100,7 +101,8 @@ class JSONLStorage:
 
                     try:
                         data = orjson.loads(line)
-                        if "from_id" in data and "to_id" in data:
+                        rtype = classify_record(data)
+                        if rtype == "link":
                             op = data.get("op", "add")
                             key = (
                                 data["from_id"],
@@ -120,7 +122,7 @@ class JSONLStorage:
                                     created_by=data.get("created_by"),
                                 )
                                 link_map[key] = link
-                        elif "issue_id" in data and "depends_on_id" in data:
+                        elif rtype == "dependency":
                             op = data.get("op", "add")
                             key = (
                                 data["issue_id"],
@@ -198,6 +200,7 @@ class JSONLStorage:
                 # Write all dependencies
                 for dep in self._dependencies:
                     dep_data = {
+                        "record_type": "dependency",
                         "dcat_version": _dcat_version,
                         "issue_id": dep.issue_id,
                         "depends_on_id": dep.depends_on_id,
@@ -212,6 +215,7 @@ class JSONLStorage:
                 # Write all links
                 for link in self._links:
                     link_data = {
+                        "record_type": "link",
                         "dcat_version": _dcat_version,
                         "from_id": link.from_id,
                         "to_id": link.to_id,
@@ -276,6 +280,7 @@ class JSONLStorage:
     def _dep_record(dep: Dependency, *, op: str = "add") -> dict[str, Any]:
         """Serialize a dependency to a dict for appending."""
         d: dict[str, Any] = {
+            "record_type": "dependency",
             "dcat_version": _dcat_version,
             "issue_id": dep.issue_id,
             "depends_on_id": dep.depends_on_id,
@@ -291,6 +296,7 @@ class JSONLStorage:
     def _link_record(link: Link, *, op: str = "add") -> dict[str, Any]:
         """Serialize a link to a dict for appending."""
         d: dict[str, Any] = {
+            "record_type": "link",
             "dcat_version": _dcat_version,
             "from_id": link.from_id,
             "to_id": link.to_id,

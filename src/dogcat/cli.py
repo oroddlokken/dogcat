@@ -26,7 +26,7 @@ from dogcat.constants import (
     TYPE_SHORTHANDS,
 )
 from dogcat.idgen import IDGenerator
-from dogcat.models import Issue, IssueType, Status
+from dogcat.models import Issue, IssueType, Status, classify_record
 from dogcat.storage import JSONLStorage
 
 _type_keys = "/".join(sorted(TYPE_SHORTHANDS.keys()))
@@ -195,9 +195,7 @@ def format_issue_brief(
         closed_str = typer.style(f" [closed {closed_ts}]", fg="bright_black")
     labels_str = ""
     if issue.labels:
-        labels_str = " " + " ".join(
-            typer.style(f"[{lbl}]", fg="cyan") for lbl in issue.labels
-        )
+        labels_str = " " + typer.style(f"[{', '.join(issue.labels)}]", fg="cyan")
     base = f"{status_emoji} {priority_str} {issue.full_id}: {issue.title} {type_str}"
 
     return f"{base}{parent_str}{labels_str}{closed_str}"
@@ -3280,8 +3278,8 @@ def archive(
                     remaining_lines.append(raw_line)
                     continue
 
-                if "from_id" in data and "to_id" in data:
-                    # Link record
+                rtype = classify_record(data)
+                if rtype == "link":
                     if (
                         data["from_id"] in archivable_ids
                         and data["to_id"] in archivable_ids
@@ -3290,8 +3288,7 @@ def archive(
                         archived_link_count += 1
                     else:
                         remaining_lines.append(raw_line)
-                elif "issue_id" in data and "depends_on_id" in data:
-                    # Dependency record
+                elif rtype == "dependency":
                     if (
                         data["issue_id"] in archivable_ids
                         and data["depends_on_id"] in archivable_ids

@@ -9,6 +9,7 @@ import orjson
 import toml
 
 from dogcat.constants import DOGCATRC_FILENAME
+from dogcat.models import classify_record
 
 # Default prefix for issue IDs
 DEFAULT_PREFIX = "dc"
@@ -163,6 +164,8 @@ def _detect_prefix_from_issues(dogcats_dir: str) -> str | None:
                     continue
                 try:
                     data = orjson.loads(line)
+                    if classify_record(data) != "issue":
+                        continue
                     issue_id = data.get("id", "")
                     prefix = extract_prefix(issue_id)
                     if prefix:

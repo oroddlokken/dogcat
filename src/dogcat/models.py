@@ -181,6 +181,7 @@ def issue_to_dict(issue: Issue) -> dict[str, Any]:
     issue_type_value = issue.issue_type.value
 
     return {
+        "record_type": "issue",
         "dcat_version": _dcat_version,
         "namespace": issue.namespace,
         "id": issue.id,
@@ -316,3 +317,20 @@ def dict_to_issue(data: dict[str, Any]) -> Issue:
         duplicate_of=data.get("duplicate_of"),
         metadata=data.get("metadata", {}),
     )
+
+
+def classify_record(data: dict[str, Any]) -> str:
+    """Classify a JSONL record as 'issue', 'dependency', or 'link'.
+
+    Checks for an explicit ``record_type`` field first, then falls back to
+    field-sniffing for backward compatibility with older records.
+    """
+    explicit = data.get("record_type")
+    if explicit in ("issue", "dependency", "link"):
+        return explicit  # type: ignore[return-value]
+
+    if "from_id" in data and "to_id" in data:
+        return "link"
+    if "issue_id" in data and "depends_on_id" in data:
+        return "dependency"
+    return "issue"

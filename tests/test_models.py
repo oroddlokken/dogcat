@@ -11,6 +11,7 @@ from dogcat.models import (
     Issue,
     IssueType,
     Status,
+    classify_record,
     dict_to_issue,
     issue_to_dict,
     validate_issue,
@@ -532,3 +533,53 @@ class TestMetadata:
         }
         issue = dict_to_issue(data)
         assert issue.id == "abc1"
+
+
+class TestClassifyRecord:
+    """Test JSONL record type classification."""
+
+    def test_explicit_issue_record_type(self) -> None:
+        """Test classify_record with explicit record_type='issue'."""
+        data = {"record_type": "issue", "id": "abc1", "title": "Test"}
+        assert classify_record(data) == "issue"
+
+    def test_explicit_dependency_record_type(self) -> None:
+        """Test classify_record with explicit record_type='dependency'."""
+        data = {"record_type": "dependency", "issue_id": "a", "depends_on_id": "b"}
+        assert classify_record(data) == "dependency"
+
+    def test_explicit_link_record_type(self) -> None:
+        """Test classify_record with explicit record_type='link'."""
+        data = {"record_type": "link", "from_id": "a", "to_id": "b"}
+        assert classify_record(data) == "link"
+
+    def test_fallback_issue_without_record_type(self) -> None:
+        """Test classify_record falls back to issue for old records."""
+        data = {"id": "abc1", "title": "Test"}
+        assert classify_record(data) == "issue"
+
+    def test_fallback_dependency_without_record_type(self) -> None:
+        """Test classify_record falls back to field-sniffing for dependencies."""
+        data = {"issue_id": "a", "depends_on_id": "b", "type": "blocks"}
+        assert classify_record(data) == "dependency"
+
+    def test_fallback_link_without_record_type(self) -> None:
+        """Test classify_record falls back to field-sniffing for links."""
+        data = {"from_id": "a", "to_id": "b", "link_type": "relates_to"}
+        assert classify_record(data) == "link"
+
+    def test_explicit_type_overrides_field_sniffing(self) -> None:
+        """Test that explicit record_type takes priority over field contents."""
+        data = {"record_type": "issue", "from_id": "a", "to_id": "b"}
+        assert classify_record(data) == "issue"
+
+    def test_unknown_record_type_falls_back(self) -> None:
+        """Test that unknown record_type values trigger fallback."""
+        data = {"record_type": "unknown", "from_id": "a", "to_id": "b"}
+        assert classify_record(data) == "link"
+
+    def test_issue_to_dict_includes_record_type(self) -> None:
+        """Test that issue_to_dict includes record_type='issue'."""
+        issue = Issue(id="issue-1", title="Test")
+        data = issue_to_dict(issue)
+        assert data["record_type"] == "issue"
