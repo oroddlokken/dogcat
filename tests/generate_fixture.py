@@ -28,8 +28,8 @@ FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
 # the same JSONL structure, so they are skipped when running without
 # arguments.  Pass the tag explicitly to force generation.
 #
-# v0.1.1–v0.1.9 — identical schema + demo to v0.1.0
-# v0.5.1–v0.5.2 — identical schema + demo to v0.5.0
+# v0.1.1-v0.1.9 — identical schema + demo to v0.1.0
+# v0.5.1-v0.5.2 — identical schema + demo to v0.5.0
 SKIP_TAGS: set[str] = {
     "v0.1.1",
     "v0.1.2",
@@ -164,7 +164,10 @@ def main() -> None:
         skipped = [t for t in all_tags if t in SKIP_TAGS]
         tags = [t for t in all_tags if t not in SKIP_TAGS]
         if skipped:
-            print(f"Skipping {len(skipped)} tag(s) with redundant schemas: {', '.join(skipped)}")
+            print(
+                f"Skipping {len(skipped)} tag(s) with "
+                "redundant schemas: {', '.join(skipped)}",
+            )
 
     if not tags:
         print("No tags found")

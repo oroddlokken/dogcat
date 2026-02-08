@@ -2939,3 +2939,167 @@ class TestListLabelFilter:
         assert result.exit_code == 0
         assert "Backend" in result.stdout
         assert "Frontend" not in result.stdout
+
+
+class TestRecentlyAdded:
+    """Test the recently-added command."""
+
+    def test_recently_added_shows_issues(self, tmp_path: Path) -> None:
+        """Test that recently-added shows created issues."""
+        dogcats_dir, _ = _init_and_create(tmp_path, "Issue A", "Issue B")
+
+        result = runner.invoke(
+            app,
+            ["recently-added", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Issue A" in result.stdout
+        assert "Issue B" in result.stdout
+
+    def test_recently_added_empty(self, tmp_path: Path) -> None:
+        """Test recently-added with no issues."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["recently-added", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "No recently added" in result.stdout
+
+    def test_recently_added_json(self, tmp_path: Path) -> None:
+        """Test recently-added with JSON output."""
+        dogcats_dir, _ = _init_and_create(tmp_path, "Issue A")
+
+        result = runner.invoke(
+            app,
+            ["recently-added", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert isinstance(data, list)
+        assert len(data) == 1
+        assert data[0]["title"] == "Issue A"
+
+    def test_recently_added_with_limit(self, tmp_path: Path) -> None:
+        """Test recently-added respects --limit."""
+        dogcats_dir, _ = _init_and_create(tmp_path, "Issue A", "Issue B", "Issue C")
+
+        result = runner.invoke(
+            app,
+            [
+                "recently-added",
+                "--limit",
+                "1",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        # Should show only 1 of the 3 issues
+        lines = [line for line in result.stdout.strip().split("\n") if line.strip()]
+        assert len(lines) == 1
+
+    def test_ra_alias(self, tmp_path: Path) -> None:
+        """Test that 'ra' alias works for recently-added."""
+        dogcats_dir, _ = _init_and_create(tmp_path, "Issue A")
+
+        result = runner.invoke(
+            app,
+            ["ra", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Issue A" in result.stdout
+
+
+class TestProgressReview:
+    """Test the pr command (in-progress + in-review combined view)."""
+
+    def test_pr_shows_both_sections(self, tmp_path: Path) -> None:
+        """Test that pr shows both in-progress and in-review headers."""
+        dogcats_dir, ids = _init_and_create(tmp_path, "Task A", "Task B")
+
+        # Set one to in_progress, one to in_review
+        runner.invoke(
+            app,
+            [
+                "update",
+                ids[0],
+                "--status",
+                "in_progress",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        runner.invoke(
+            app,
+            [
+                "update",
+                ids[1],
+                "--status",
+                "in_progress",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        runner.invoke(
+            app,
+            [
+                "update",
+                ids[1],
+                "--status",
+                "in_review",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["pr", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "In Progress:" in result.stdout
+        assert "In Review:" in result.stdout
+        assert "Task A" in result.stdout
+        assert "Task B" in result.stdout
+
+    def test_pr_empty(self, tmp_path: Path) -> None:
+        """Test pr with no in-progress or in-review issues."""
+        dogcats_dir, _ = _init_and_create(tmp_path, "Open issue")
+
+        result = runner.invoke(
+            app,
+            ["pr", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "No in-progress issues" in result.stdout
+        assert "No in-review issues" in result.stdout
+
+    def test_pr_json(self, tmp_path: Path) -> None:
+        """Test pr with JSON output."""
+        dogcats_dir, ids = _init_and_create(tmp_path, "Task A")
+        runner.invoke(
+            app,
+            [
+                "update",
+                ids[0],
+                "--status",
+                "in_progress",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["pr", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert "in_progress" in data
+        assert "in_review" in data
+        assert len(data["in_progress"]) == 1
+        assert data["in_progress"][0]["title"] == "Task A"
+        assert len(data["in_review"]) == 0

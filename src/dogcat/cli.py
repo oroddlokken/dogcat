@@ -2557,6 +2557,48 @@ def recently_closed(
         raise typer.Exit(1)
 
 
+@app.command("recently-added")
+def recently_added(
+    limit: int = typer.Option(10, "--limit", "-n", help="Number of issues to show"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+) -> None:
+    """Show recently created issues in descending order (newest first).
+
+    Displays the last N issues sorted by created_at date,
+    with the most recently created issue at the top.
+    """
+    try:
+        storage = get_storage(dogcats_dir)
+        issues = [i for i in storage.list() if i.status.value != "closed"]
+
+        # Sort by created_at descending (newest first)
+        issues.sort(key=lambda i: i.created_at, reverse=True)
+
+        # Take first N (most recent)
+        recent = issues[:limit]
+
+        if json_output:
+            from dogcat.models import issue_to_dict
+
+            output = [issue_to_dict(issue) for issue in recent]
+            typer.echo(orjson.dumps(output).decode())
+        else:
+            if not recent:
+                typer.echo("No recently added issues")
+            else:
+                for issue in recent:
+                    created_str = typer.style(
+                        f"[{issue.created_at.strftime('%Y-%m-%d %H:%M')}]",
+                        fg="bright_black",
+                    )
+                    typer.echo(f"{format_issue_brief(issue)} {created_str}")
+
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+
 @app.command()
 def prune(
     dry_run: bool = typer.Option(
@@ -4203,6 +4245,58 @@ def deferred_alias(
 ) -> None:
     """Alias for deferred."""
     deferred(json_output=json_output, dogcats_dir=dogcats_dir)
+
+
+@app.command(name="ra", hidden=True)
+def recently_added_alias(
+    limit: int = typer.Option(10, "--limit", "-n", help="Number of issues to show"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+) -> None:
+    """Alias for recently-added."""
+    recently_added(limit=limit, json_output=json_output, dogcats_dir=dogcats_dir)
+
+
+@app.command(name="pr", hidden=True)
+def progress_review(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+) -> None:
+    """Show in-progress and in-review issues together."""
+    try:
+        storage = get_storage(dogcats_dir)
+        ip_issues = storage.list({"status": "in_progress"})
+        ip_issues.sort(key=lambda i: i.priority)
+        ir_issues = storage.list({"status": "in_review"})
+        ir_issues.sort(key=lambda i: i.priority)
+
+        if json_output:
+            from dogcat.models import issue_to_dict
+
+            output = {
+                "in_progress": [issue_to_dict(issue) for issue in ip_issues],
+                "in_review": [issue_to_dict(issue) for issue in ir_issues],
+            }
+            typer.echo(orjson.dumps(output).decode())
+        else:
+            typer.echo("In Progress:")
+            if not ip_issues:
+                typer.echo("  No in-progress issues")
+            else:
+                for issue in ip_issues:
+                    typer.echo(f"  {format_issue_brief(issue)}")
+
+            typer.echo()
+            typer.echo("In Review:")
+            if not ir_issues:
+                typer.echo("  No in-review issues")
+            else:
+                for issue in ir_issues:
+                    typer.echo(f"  {format_issue_brief(issue)}")
+
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
 
 
 def main() -> None:
