@@ -5565,3 +5565,166 @@ class TestMultiLabelFilter:
         assert "Backend issue" in result.stdout
         assert "Frontend issue" in result.stdout
         assert "Docs issue" not in result.stdout
+
+
+class TestCLICommandAliases:
+    """Test shorthand command aliases (l, lt, rc, b, d)."""
+
+    def test_l_alias_shows_tree(self, tmp_path: Path) -> None:
+        """Test that 'l' shows list in tree mode."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        runner.invoke(
+            app,
+            ["create", "Parent issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["l", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Parent issue" in result.stdout
+
+    def test_l_alias_passes_filters(self, tmp_path: Path) -> None:
+        """Test that 'l' passes through filter options."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Bug issue",
+                "--type",
+                "bug",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Feature issue",
+                "--type",
+                "feature",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["l", "--type", "bug", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Bug issue" in result.stdout
+        assert "Feature issue" not in result.stdout
+
+    def test_lt_alias_shows_table(self, tmp_path: Path) -> None:
+        """Test that 'lt' shows list in table mode."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        runner.invoke(
+            app,
+            ["create", "Table issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["lt", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Table issue" in result.stdout
+
+    def test_rc_alias_shows_recently_closed(self, tmp_path: Path) -> None:
+        """Test that 'rc' shows recently closed issues."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        create_result = runner.invoke(
+            app,
+            ["create", "Closed issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+        runner.invoke(
+            app,
+            [
+                "close",
+                issue_id,
+                "--reason",
+                "Done",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["rc", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Closed issue" in result.stdout
+
+    def test_rc_alias_no_closed_issues(self, tmp_path: Path) -> None:
+        """Test 'rc' with no closed issues."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["rc", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "No recently closed issues" in result.stdout
+
+    def test_b_alias_shows_blocked(self, tmp_path: Path) -> None:
+        """Test that 'b' shows blocked issues."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["b", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "No blocked issues" in result.stdout
+
+    def test_d_alias_shows_deferred(self, tmp_path: Path) -> None:
+        """Test that 'd' shows deferred issues."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["d", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "No deferred issues" in result.stdout
+
+    def test_d_alias_with_deferred_issue(self, tmp_path: Path) -> None:
+        """Test 'd' with a deferred issue."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        create_result = runner.invoke(
+            app,
+            ["create", "Deferred task", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+        runner.invoke(
+            app,
+            [
+                "update",
+                "--status",
+                "deferred",
+                issue_id,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["d", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Deferred task" in result.stdout

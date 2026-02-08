@@ -4041,6 +4041,170 @@ def version() -> None:
     typer.echo(v)
 
 
+@app.command(name="l", hidden=True)
+def list_tree_alias(
+    status: str | None = typer.Option(None, "--status", "-s", help="Filter by status"),
+    priority: int | None = typer.Option(
+        None,
+        "--priority",
+        "-p",
+        help="Filter by priority",
+    ),
+    issue_type: str | None = typer.Option(None, "--type", "-t", help="Filter by type"),
+    label: str | None = typer.Option(
+        None,
+        "--label",
+        "-l",
+        help="Filter by label (comma or space separated)",
+    ),
+    owner: str | None = typer.Option(None, "--owner", "-o", help="Filter by owner"),
+    closed: bool = typer.Option(False, "--closed", help="Show only closed issues"),
+    open_issues: bool = typer.Option(
+        False,
+        "--open",
+        help="Show only open/in-progress issues",
+    ),
+    all_issues: bool = typer.Option(
+        False,
+        "--all",
+        help="Include archived and deleted issues",
+    ),
+    closed_after: str | None = typer.Option(
+        None,
+        "--closed-after",
+        help="Issues closed after date (ISO8601)",
+    ),
+    closed_before: str | None = typer.Option(
+        None,
+        "--closed-before",
+        help="Issues closed before date (ISO8601)",
+    ),
+    limit: int | None = typer.Option(None, "--limit", help="Limit results"),
+    agent_only: bool = typer.Option(
+        False,
+        "--agent-only",
+        help="Only show issues available for agents",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+) -> None:
+    """Alias for list --tree."""
+    list_issues(
+        status=status,
+        priority=priority,
+        issue_type=issue_type,
+        label=label,
+        owner=owner,
+        closed=closed,
+        open_issues=open_issues,
+        all_issues=all_issues,
+        closed_after=closed_after,
+        closed_before=closed_before,
+        limit=limit,
+        agent_only=agent_only,
+        tree=True,
+        table=False,
+        json_output=json_output,
+        dogcats_dir=dogcats_dir,
+    )
+
+
+@app.command(name="lt", hidden=True)
+def list_table_alias(
+    status: str | None = typer.Option(None, "--status", "-s", help="Filter by status"),
+    priority: int | None = typer.Option(
+        None,
+        "--priority",
+        "-p",
+        help="Filter by priority",
+    ),
+    issue_type: str | None = typer.Option(None, "--type", "-t", help="Filter by type"),
+    label: str | None = typer.Option(
+        None,
+        "--label",
+        "-l",
+        help="Filter by label (comma or space separated)",
+    ),
+    owner: str | None = typer.Option(None, "--owner", "-o", help="Filter by owner"),
+    closed: bool = typer.Option(False, "--closed", help="Show only closed issues"),
+    open_issues: bool = typer.Option(
+        False,
+        "--open",
+        help="Show only open/in-progress issues",
+    ),
+    all_issues: bool = typer.Option(
+        False,
+        "--all",
+        help="Include archived and deleted issues",
+    ),
+    closed_after: str | None = typer.Option(
+        None,
+        "--closed-after",
+        help="Issues closed after date (ISO8601)",
+    ),
+    closed_before: str | None = typer.Option(
+        None,
+        "--closed-before",
+        help="Issues closed before date (ISO8601)",
+    ),
+    limit: int | None = typer.Option(None, "--limit", help="Limit results"),
+    agent_only: bool = typer.Option(
+        False,
+        "--agent-only",
+        help="Only show issues available for agents",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+) -> None:
+    """Alias for list --table."""
+    list_issues(
+        status=status,
+        priority=priority,
+        issue_type=issue_type,
+        label=label,
+        owner=owner,
+        closed=closed,
+        open_issues=open_issues,
+        all_issues=all_issues,
+        closed_after=closed_after,
+        closed_before=closed_before,
+        limit=limit,
+        agent_only=agent_only,
+        tree=False,
+        table=True,
+        json_output=json_output,
+        dogcats_dir=dogcats_dir,
+    )
+
+
+@app.command(name="rc", hidden=True)
+def recently_closed_alias(
+    limit: int = typer.Option(10, "--limit", "-n", help="Number of issues to show"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+) -> None:
+    """Alias for recently-closed."""
+    recently_closed(limit=limit, json_output=json_output, dogcats_dir=dogcats_dir)
+
+
+@app.command(name="b", hidden=True)
+def blocked_alias(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+) -> None:
+    """Alias for blocked."""
+    blocked(json_output=json_output, dogcats_dir=dogcats_dir)
+
+
+@app.command(name="d", hidden=True)
+def deferred_alias(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+) -> None:
+    """Alias for deferred."""
+    deferred(json_output=json_output, dogcats_dir=dogcats_dir)
+
+
 def main() -> None:
     """Run the Dogcat CLI application."""
     app()
