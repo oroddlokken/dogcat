@@ -343,6 +343,66 @@ class TestCreateMode:
         storage.create.assert_called_once()
 
 
+class TestCreateModeShorthands:
+    """Test IssueEditorApp in create mode with pre-filled shorthands."""
+
+    @pytest.mark.asyncio
+    async def test_prefilled_title(self) -> None:
+        """Pre-filled title appears in the title input."""
+        issue = _make_issue(id="", title="My bug report")
+        app = IssueEditorApp(issue, _make_storage(), create_mode=True, namespace="dc")
+
+        async with app.run_test() as pilot:  # noqa: F841
+            title_input = app.query_one("#title-input", Input)
+            assert title_input.value == "My bug report"
+
+    @pytest.mark.asyncio
+    async def test_prefilled_priority(self) -> None:
+        """Pre-filled priority is selected in the dropdown."""
+        issue = _make_issue(id="", title="", priority=0)
+        app = IssueEditorApp(issue, _make_storage(), create_mode=True, namespace="dc")
+
+        async with app.run_test() as pilot:  # noqa: F841
+            priority_select = app.query_one("#priority-input", Select)
+            assert priority_select.value == 0
+
+    @pytest.mark.asyncio
+    async def test_prefilled_type(self) -> None:
+        """Pre-filled issue type is selected in the dropdown."""
+        from dogcat.models import IssueType
+
+        issue = _make_issue(id="", title="", issue_type=IssueType.BUG)
+        app = IssueEditorApp(issue, _make_storage(), create_mode=True, namespace="dc")
+
+        async with app.run_test() as pilot:  # noqa: F841
+            type_select = app.query_one("#type-input", Select)
+            assert type_select.value == "bug"
+
+    @pytest.mark.asyncio
+    async def test_prefilled_all_shorthands_saved(self) -> None:
+        """Pre-filled title, priority, and type are persisted on save."""
+        from dogcat.models import IssueType
+
+        issue = _make_issue(
+            id="",
+            title="Critical crash",
+            priority=1,
+            issue_type=IssueType.BUG,
+        )
+        storage = _make_storage()
+        storage.get_issue_ids.return_value = set()
+        app = IssueEditorApp(issue, storage, create_mode=True, namespace="dc")
+
+        async with app.run_test() as pilot:
+            await pilot.press("ctrl+s")
+
+        storage.create.assert_called_once()
+        created = storage.create.call_args[0][0]
+        assert created.title == "Critical crash"
+        assert created.priority == 1
+        assert created.issue_type == IssueType.BUG
+
+
 class TestParentPicker:
     """Test interactive parent issue picker."""
 

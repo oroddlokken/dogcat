@@ -525,6 +525,10 @@ def new_issue(
     storage: JSONLStorage,
     namespace: str,
     owner: str | None = None,
+    *,
+    title: str = "",
+    priority: int | None = None,
+    issue_type: str | None = None,
 ) -> Issue | None:
     """Open the Textual editor to create a new issue.
 
@@ -532,18 +536,27 @@ def new_issue(
         storage: The storage backend.
         namespace: The issue namespace/prefix.
         owner: Default owner for the new issue.
+        title: Pre-filled title for the new issue.
+        priority: Pre-filled priority (0-4) for the new issue.
+        issue_type: Pre-filled issue type (e.g. "bug", "feature").
 
     Returns:
         The created issue, or None if cancelled.
     """
-    from dogcat.models import Issue
+    from dogcat.models import Issue, IssueType
 
-    skeleton = Issue(
-        id="",
-        title="",
-        namespace=namespace,
-        owner=owner,
-    )
+    kwargs: dict[str, Any] = {
+        "id": "",
+        "title": title,
+        "namespace": namespace,
+        "owner": owner,
+    }
+    if priority is not None:
+        kwargs["priority"] = priority
+    if issue_type is not None:
+        kwargs["issue_type"] = IssueType(issue_type)
+
+    skeleton = Issue(**kwargs)
 
     editor = IssueEditorApp(
         skeleton,

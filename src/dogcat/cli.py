@@ -1443,18 +1443,46 @@ def edit_alias(
 
 @app.command(name="new")
 def new_issue_cmd(
+    arg1: str | None = typer.Argument(None, help=_ARG_HELP),
+    arg2: str | None = typer.Argument(None, help=_ARG_HELP),
+    arg3: str | None = typer.Argument(None, help=_ARG_HELP),
     dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
-    """Open an interactive Textual form to create a new issue."""
+    """Open an interactive Textual form to create a new issue.
+
+    Supports shorthand notation: use single characters (0-4 for priority,
+    b/f/e/s for bug/feature/epic/story) before or after the title.
+
+    Examples:
+        dcat new                           # Empty form
+        dcat new "Fix login bug"           # Pre-filled title
+        dcat new "Fix login bug" 1         # Pre-filled title + priority 1
+        dcat new b "Fix crash"             # Pre-filled type bug + title
+        dcat new 0 b "Critical bug"        # Pre-filled priority 0 + type bug + title
+    """
     try:
+        title = ""
+        priority_sh: int | None = None
+        type_sh: str | None = None
+
+        if arg1 is not None:
+            title, priority_sh, type_sh = _parse_args_for_create([arg1, arg2, arg3])
+
         storage = get_storage(dogcats_dir)
         namespace = get_issue_prefix(dogcats_dir)
         owner = get_default_operator()
 
         from dogcat.edit import new_issue
 
-        created = new_issue(storage, namespace, owner=owner)
+        created = new_issue(
+            storage,
+            namespace,
+            owner=owner,
+            title=title,
+            priority=priority_sh,
+            issue_type=type_sh,
+        )
         if created is not None:
             if json_output:
                 from dogcat.models import issue_to_dict
@@ -1468,6 +1496,9 @@ def new_issue_cmd(
         else:
             typer.echo("Create cancelled")
 
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
     except typer.Exit:
         raise
     except Exception as e:
@@ -1477,11 +1508,20 @@ def new_issue_cmd(
 
 @app.command(name="n", hidden=True)
 def new_issue_alias(
+    arg1: str | None = typer.Argument(None, help=_ARG_HELP),
+    arg2: str | None = typer.Argument(None, help=_ARG_HELP),
+    arg3: str | None = typer.Argument(None, help=_ARG_HELP),
     dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """Open a Textual form to create a new issue (alias for 'new')."""
-    new_issue_cmd(dogcats_dir=dogcats_dir, json_output=json_output)
+    new_issue_cmd(
+        arg1=arg1,
+        arg2=arg2,
+        arg3=arg3,
+        dogcats_dir=dogcats_dir,
+        json_output=json_output,
+    )
 
 
 @app.command()
