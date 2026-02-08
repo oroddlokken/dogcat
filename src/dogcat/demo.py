@@ -4,6 +4,10 @@ Creates a realistic set of issues that look like a proper team with a PO, PM,
 and developers has worked on it. Includes descriptions, notes, acceptance
 criteria, close reasons, labels, external references, and comments.
 
+Uses the same code paths as the CLI: IDGenerator for realistic hash-based IDs,
+reference validation for parents and dependencies, and the same comment-adding
+logic as ``dcat comment add``.
+
 Team members:
 - alice@example.com - Product Owner
 - bob@example.com - Project Manager
@@ -15,27 +19,42 @@ Team members:
 - kate@example.com, liam@example.com - Junior Developers
 """
 
-from collections.abc import Iterator
-from itertools import count
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from dogcat.config import get_issue_prefix
+from dogcat.idgen import IDGenerator
 from dogcat.models import Comment, Issue, IssueType, Status
-from dogcat.storage import JSONLStorage
+
+if TYPE_CHECKING:
+    from dogcat.storage import JSONLStorage
 
 
-def _make_comment(
-    counter: Iterator[int],
+def _add_comment(
+    storage: JSONLStorage,
     issue_id: str,
     author: str,
     text: str,
-) -> Comment:
-    """Create a comment with auto-incremented ID."""
-    return Comment(
-        id=f"comment-{next(counter)}",
-        issue_id=issue_id,
+) -> None:
+    """Add a comment to an issue, mirroring the ``dcat comment add`` code path.
+
+    Uses the same comment-ID format ({issue_id}-c{n}) and append-then-update
+    logic that the CLI command uses.
+    """
+    issue = storage.get(issue_id)
+    if issue is None:
+        msg = f"Issue {issue_id} not found"
+        raise ValueError(msg)
+    n = len(issue.comments) + 1
+    new_comment = Comment(
+        id=f"{issue_id}-c{n}",
+        issue_id=issue.full_id,
         author=author,
         text=text,
     )
+    issue.comments.append(new_comment)
+    storage.update(issue_id, {"comments": issue.comments})
 
 
 def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
@@ -45,33 +64,79 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
     with various priorities, parent-child relationships, dependencies, labels,
     external references, comments, and other metadata.
 
+    Uses the same code paths as the CLI:
+    - IDGenerator for realistic hash-based IDs (not sequential)
+    - Reference validation for parents, duplicate_of, and dependency targets
+    - Comment-ID format matching ``dcat comment add`` ({issue_id}-c{n})
+    - Close/delete flows matching ``dcat close`` and ``dcat delete``
+
     Args:
         storage: The storage instance to create issues in
         dogcats_dir: Path to .dogcats directory (used to derive issue prefix)
 
     Returns:
-        List of created issue IDs
+        List of created full issue IDs
     """
     namespace = get_issue_prefix(dogcats_dir)
-    id_counter = count(1)
-    created_issues: list[str] = []
-    comment_counter = count(1)
+    idgen = IDGenerator(existing_ids=storage.get_issue_ids(), prefix=namespace)
+    created_ids: list[str] = []
 
-    def next_id() -> str:
-        """Generate the next sequential issue ID (hash part only)."""
-        return f"{next(id_counter):04d}"
+    def _create(title: str, **kwargs: Any) -> str:
+        """Create an issue with IDGenerator (same ID generation as ``dcat create``)."""
+        issue_id = idgen.generate_issue_id(title, namespace=namespace)
 
-    def make_comment(issue_id: str, author: str, text: str) -> Comment:
-        return _make_comment(comment_counter, issue_id, author, text)
+        # Validate parent reference (same as CLI)
+        if "parent" in kwargs and kwargs["parent"] is not None:
+            resolved = storage.resolve_id(kwargs["parent"])
+            if resolved is None:
+                msg = f"Parent issue {kwargs['parent']} not found"
+                raise ValueError(msg)
+            kwargs["parent"] = resolved
+
+        # Validate duplicate_of reference (same as CLI)
+        if "duplicate_of" in kwargs and kwargs["duplicate_of"] is not None:
+            resolved = storage.resolve_id(kwargs["duplicate_of"])
+            if resolved is None:
+                msg = f"Duplicate target {kwargs['duplicate_of']} not found"
+                raise ValueError(msg)
+            kwargs["duplicate_of"] = resolved
+
+        issue = Issue(id=issue_id, namespace=namespace, title=title, **kwargs)
+        storage.create(issue)
+        created_ids.append(issue.full_id)
+        return issue.full_id
+
+    def _close(issue_id: str, reason: str, *, closed_by: str) -> None:
+        """Close an issue (same as ``dcat close``)."""
+        storage.close(issue_id, reason)
+        storage.update(issue_id, {"closed_by": closed_by})
+
+    def _delete(issue_id: str, reason: str, *, deleted_by: str) -> None:
+        """Tombstone an issue (same as ``dcat delete``)."""
+        storage.delete(issue_id, reason)
+        storage.update(issue_id, {"deleted_by": deleted_by})
+
+    def _comment(issue_id: str, author: str, text: str) -> None:
+        """Add a comment (same as ``dcat comment add``)."""
+        _add_comment(storage, issue_id, author, text)
+
+    def _dep(issue_id: str, depends_on: str) -> None:
+        """Add a dependency with validation (same as ``dcat dep add``)."""
+        resolved_issue = storage.resolve_id(issue_id)
+        if resolved_issue is None:
+            msg = f"Issue {issue_id} not found"
+            raise ValueError(msg)
+        resolved_dep = storage.resolve_id(depends_on)
+        if resolved_dep is None:
+            msg = f"Dependency target {depends_on} not found"
+            raise ValueError(msg)
+        storage.add_dependency(resolved_issue, resolved_dep, "blocks")
 
     # =========================================================================
     # Epic 1: Platform Modernization
     # =========================================================================
-    epic1_id = next_id()
-    epic1 = Issue(
-        id=epic1_id,
-        namespace=namespace,
-        title="Platform Modernization Initiative",
+    epic1_id = _create(
+        "Platform Modernization Initiative",
         description=(
             "Modernize the platform architecture and infrastructure to improve "
             "scalability, maintainability, and deployment efficiency. This is a "
@@ -106,41 +171,28 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         owner="charlie@example.com",
         created_by="alice@example.com",
     )
-    storage.create(epic1)
-    storage.update(
+    storage.update(epic1_id, {"updated_by": "bob@example.com"})
+    _comment(
         epic1_id,
-        {
-            "updated_by": "bob@example.com",
-            "comments": [
-                make_comment(
-                    epic1_id,
-                    "alice@example.com",
-                    "Kickoff meeting scheduled for Monday. "
-                    "Please review the design doc beforehand.",
-                ),
-                make_comment(
-                    epic1_id,
-                    "charlie@example.com",
-                    "Design doc looks solid. I have some questions about the "
-                    "Kafka setup - let's discuss in the meeting.",
-                ),
-                make_comment(
-                    epic1_id,
-                    "bob@example.com",
-                    "Added this to the Q1 roadmap. "
-                    "Stakeholders are aligned on timeline.",
-                ),
-            ],
-        },
+        "alice@example.com",
+        "Kickoff meeting scheduled for Monday. "
+        "Please review the design doc beforehand.",
     )
-    created_issues.append(epic1_id)
+    _comment(
+        epic1_id,
+        "charlie@example.com",
+        "Design doc looks solid. I have some questions about the "
+        "Kafka setup - let's discuss in the meeting.",
+    )
+    _comment(
+        epic1_id,
+        "bob@example.com",
+        "Added this to the Q1 roadmap. Stakeholders are aligned on timeline.",
+    )
 
     # Feature 1.1: Microservices migration
-    feature1_id = next_id()
-    feature1 = Issue(
-        id=feature1_id,
-        namespace=namespace,
-        title="Migrate to microservices architecture",
+    feature1_id = _create(
+        "Migrate to microservices architecture",
         description=(
             "Break monolith into scalable microservices. This involves decomposing "
             "the application into domain-driven services that can be developed and "
@@ -165,20 +217,15 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         issue_type=IssueType.FEATURE,
         labels=["backend", "architecture", "microservices"],
         external_ref="PLAT-101",
-        parent=epic1.full_id,
+        parent=epic1_id,
         owner="charlie@example.com",
         created_by="alice@example.com",
     )
-    storage.create(feature1)
     storage.update(feature1_id, {"updated_by": "charlie@example.com"})
-    created_issues.append(feature1_id)
 
     # Task 1.1.1: Design service boundaries (CLOSED)
-    task1_id = next_id()
-    task1 = Issue(
-        id=task1_id,
-        namespace=namespace,
-        title="Design service boundaries",
+    task1_id = _create(
+        "Design service boundaries",
         description=(
             "Define clear boundaries between services based on business domains. "
             "Involves domain analysis, dependency mapping, and stakeholder alignment."
@@ -195,50 +242,40 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             "- Order and Inventory have some overlap (reservations)\n"
             "- Notifications can be fully async"
         ),
-        status=Status.CLOSED,
         priority=1,
         issue_type=IssueType.TASK,
         labels=["backend", "design", "documentation"],
         external_ref="PLAT-102",
-        parent=feature1.full_id,
+        parent=feature1_id,
         owner="charlie@example.com",
         created_by="alice@example.com",
     )
-    storage.create(task1)
-    storage.close(task1_id, "Architecture design complete. Approved in tech review.")
-    storage.update(
+    _close(
         task1_id,
-        {
-            "closed_by": "bob@example.com",
-            "updated_by": "charlie@example.com",
-            "comments": [
-                make_comment(
-                    task1_id,
-                    "charlie@example.com",
-                    "Draft design uploaded to Confluence. Ready for review.",
-                ),
-                make_comment(
-                    task1_id,
-                    "diana@example.com",
-                    "Reviewed. LGTM with one suggestion - consider event "
-                    "sourcing for Order service.",
-                ),
-                make_comment(
-                    task1_id,
-                    "charlie@example.com",
-                    "Good point Diana. Added event sourcing to Phase 2 scope.",
-                ),
-            ],
-        },
+        "Architecture design complete. Approved in tech review.",
+        closed_by="bob@example.com",
     )
-    created_issues.append(task1_id)
+    storage.update(task1_id, {"updated_by": "charlie@example.com"})
+    _comment(
+        task1_id,
+        "charlie@example.com",
+        "Draft design uploaded to Confluence. Ready for review.",
+    )
+    _comment(
+        task1_id,
+        "diana@example.com",
+        "Reviewed. LGTM with one suggestion - consider event "
+        "sourcing for Order service.",
+    )
+    _comment(
+        task1_id,
+        "charlie@example.com",
+        "Good point Diana. Added event sourcing to Phase 2 scope.",
+    )
 
     # Task 1.1.2: Implement API gateway (IN_PROGRESS)
-    task2_id = next_id()
-    task2 = Issue(
-        id=task2_id,
-        namespace=namespace,
-        title="Implement API gateway",
+    task2_id = _create(
+        "Implement API gateway",
         description=(
             "Set up Kong as API gateway for request routing, rate limiting, and "
             "protocol translation. The gateway will handle authentication and "
@@ -260,38 +297,26 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         issue_type=IssueType.TASK,
         labels=["backend", "infrastructure", "api"],
         external_ref="PLAT-103",
-        parent=feature1.full_id,
+        parent=feature1_id,
         owner="eve@example.com",
         created_by="alice@example.com",
     )
-    storage.create(task2)
-    storage.add_dependency(task2_id, task1_id, "blocks")
-    storage.update(
+    _dep(task2_id, task1_id)
+    storage.update(task2_id, {"updated_by": "eve@example.com"})
+    _comment(
         task2_id,
-        {
-            "updated_by": "eve@example.com",
-            "comments": [
-                make_comment(
-                    task2_id,
-                    "eve@example.com",
-                    "Kong deployed to staging. Working on rate limiting config.",
-                ),
-                make_comment(
-                    task2_id,
-                    "jack@example.com",
-                    "I can help with the K8s ingress config if needed.",
-                ),
-            ],
-        },
+        "eve@example.com",
+        "Kong deployed to staging. Working on rate limiting config.",
     )
-    created_issues.append(task2_id)
+    _comment(
+        task2_id,
+        "jack@example.com",
+        "I can help with the K8s ingress config if needed.",
+    )
 
     # Task 1.1.3: Set up service mesh (OPEN)
-    task3_id = next_id()
-    task3 = Issue(
-        id=task3_id,
-        namespace=namespace,
-        title="Set up service mesh",
+    task3_id = _create(
+        "Set up service mesh",
         description=(
             "Deploy Istio for service-to-service communication, traffic management, "
             "and observability. This will provide automatic service discovery "
@@ -303,24 +328,18 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             "- Traffic policies tested (circuit breaker, retry)\n"
             "- Distributed tracing operational with Jaeger"
         ),
-        status=Status.OPEN,
         priority=2,
         issue_type=IssueType.TASK,
         labels=["backend", "infrastructure", "observability"],
         external_ref="PLAT-104",
-        parent=feature1.full_id,
+        parent=feature1_id,
         created_by="alice@example.com",
     )
-    storage.create(task3)
-    storage.add_dependency(task3_id, task2_id, "blocks")
-    created_issues.append(task3_id)
+    _dep(task3_id, task2_id)
 
     # Feature 1.2: CI/CD pipeline
-    feature2_id = next_id()
-    feature2 = Issue(
-        id=feature2_id,
-        namespace=namespace,
-        title="Implement CI/CD pipeline",
+    feature2_id = _create(
+        "Implement CI/CD pipeline",
         description=(
             "Automate build, test, and deployment using GitHub Actions. This will "
             "enable faster, safer releases and reduce manual operations.\n\n"
@@ -337,23 +356,20 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             "- Deployment time < 5 minutes"
         ),
         notes="Coordinating with DevOps team. Need to plan for database migrations.",
-        status=Status.OPEN,
         priority=1,
         issue_type=IssueType.FEATURE,
         labels=["devops", "ci-cd", "automation"],
         external_ref="PLAT-110",
-        parent=epic1.full_id,
+        parent=epic1_id,
         owner="jack@example.com",
         created_by="bob@example.com",
     )
-    storage.create(feature2)
-    created_issues.append(feature2_id)
 
     # Tasks under feature 2
     feature2_tasks = [
         (
             "Set up GitHub Actions workflows",
-            Status.CLOSED,
+            True,
             1,
             "jack@example.com",
             "jack@example.com",
@@ -363,7 +379,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         ),
         (
             "Configure Docker build pipeline",
-            Status.CLOSED,
+            True,
             1,
             "jack@example.com",
             "jack@example.com",
@@ -373,7 +389,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         ),
         (
             "Add automated testing stage",
-            Status.IN_PROGRESS,
+            False,
             1,
             "igor@example.com",
             None,
@@ -383,7 +399,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         ),
         (
             "Implement blue-green deployment",
-            Status.OPEN,
+            False,
             2,
             "jack@example.com",
             None,
@@ -393,7 +409,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         ),
         (
             "Add rollback mechanism",
-            Status.OPEN,
+            False,
             2,
             "jack@example.com",
             None,
@@ -402,44 +418,48 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             None,
         ),
     ]
-    for (
+    # Map: index 2 is IN_PROGRESS, others are OPEN (unless closed)
+    feature2_statuses = [
+        Status.OPEN,
+        Status.OPEN,
+        Status.IN_PROGRESS,
+        Status.OPEN,
+        Status.OPEN,
+    ]
+    for idx, (
         title,
-        status,
+        should_close,
         pri,
         creator,
         closer,
         labels,
         ext_ref,
         close_reason,
-    ) in feature2_tasks:
-        task_id = next_id()
-        task = Issue(
-            id=task_id,
-            namespace=namespace,
-            title=title,
-            status=status,
+    ) in enumerate(feature2_tasks):
+        initial_status = Status.OPEN if should_close else feature2_statuses[idx]
+        task_id = _create(
+            title,
+            status=initial_status,
             priority=pri,
             issue_type=IssueType.TASK,
             labels=labels,
             external_ref=ext_ref,
-            parent=feature2.full_id,
-            owner=creator if status != Status.CLOSED else None,
+            parent=feature2_id,
+            owner=creator if not should_close else None,
             created_by=creator,
         )
-        storage.create(task)
-        created_issues.append(task_id)
-        if status == Status.CLOSED:
-            storage.close(task_id, close_reason or "Completed")
-            storage.update(task_id, {"closed_by": closer or creator})
+        if should_close:
+            _close(
+                task_id,
+                close_reason or "Completed",
+                closed_by=closer or creator,
+            )
 
     # =========================================================================
     # Epic 2: User Experience Enhancement
     # =========================================================================
-    epic2_id = next_id()
-    epic2 = Issue(
-        id=epic2_id,
-        namespace=namespace,
-        title="User Experience Enhancement",
+    epic2_id = _create(
+        "User Experience Enhancement",
         description=(
             "Improve overall user experience and accessibility. Focus areas include "
             "dashboard redesign, accessibility compliance, and performance "
@@ -455,7 +475,6 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             "to address. "
             "Customer satisfaction scores dropped 15% last quarter - this is priority."
         ),
-        status=Status.OPEN,
         priority=1,
         issue_type=IssueType.EPIC,
         labels=["frontend", "ux", "strategic", "q1-2026"],
@@ -463,34 +482,22 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         owner="diana@example.com",
         created_by="alice@example.com",
     )
-    storage.create(epic2)
-    storage.update(
+    storage.update(epic2_id, {"updated_by": "diana@example.com"})
+    _comment(
         epic2_id,
-        {
-            "updated_by": "diana@example.com",
-            "comments": [
-                make_comment(
-                    epic2_id,
-                    "alice@example.com",
-                    "User research report attached. Top 3 pain points identified.",
-                ),
-                make_comment(
-                    epic2_id,
-                    "diana@example.com",
-                    "Design team starting wireframes this week. ETA 2 weeks "
-                    "for initial mockups.",
-                ),
-            ],
-        },
+        "alice@example.com",
+        "User research report attached. Top 3 pain points identified.",
     )
-    created_issues.append(epic2_id)
+    _comment(
+        epic2_id,
+        "diana@example.com",
+        "Design team starting wireframes this week. ETA 2 weeks "
+        "for initial mockups.",
+    )
 
     # Feature 2.1: Dashboard redesign
-    feature3_id = next_id()
-    feature3 = Issue(
-        id=feature3_id,
-        namespace=namespace,
-        title="Redesign dashboard interface",
+    feature3_id = _create(
+        "Redesign dashboard interface",
         description=(
             "Modern, responsive dashboard design using latest UI frameworks. "
             "New design "
@@ -524,20 +531,15 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         issue_type=IssueType.FEATURE,
         labels=["frontend", "ux", "dashboard"],
         external_ref="UX-201",
-        parent=epic2.full_id,
+        parent=epic2_id,
         owner="diana@example.com",
         created_by="alice@example.com",
     )
-    storage.create(feature3)
     storage.update(feature3_id, {"updated_by": "diana@example.com"})
-    created_issues.append(feature3_id)
 
     # Story under feature 3
-    story1_id = next_id()
-    story1 = Issue(
-        id=story1_id,
-        namespace=namespace,
-        title="As a user, I want a customizable dashboard",
+    story1_id = _create(
+        "As a user, I want a customizable dashboard",
         description=(
             "Users should be able to arrange widgets to create their ideal view. "
             "This includes drag-and-drop reordering, widget selection, and "
@@ -559,18 +561,16 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         issue_type=IssueType.STORY,
         labels=["frontend", "ux", "user-story"],
         external_ref="UX-202",
-        parent=feature3.full_id,
+        parent=feature3_id,
         owner="eve@example.com",
         created_by="diana@example.com",
     )
-    storage.create(story1)
-    created_issues.append(story1_id)
 
     # Subtasks for story
     subtask_specs = [
         (
             "Design widget system",
-            Status.CLOSED,
+            True,
             "diana@example.com",
             "diana@example.com",
             "Design review approved. Figma files shared.",
@@ -579,7 +579,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         ),
         (
             "Implement drag-and-drop",
-            Status.IN_PROGRESS,
+            False,
             "eve@example.com",
             None,
             None,
@@ -588,7 +588,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         ),
         (
             "Add widget preferences API",
-            Status.OPEN,
+            False,
             "frank@example.com",
             None,
             None,
@@ -596,35 +596,40 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             "UX-205",
         ),
     ]
-    for title, status, creator, closer, close_reason, labels, ext_ref in subtask_specs:
-        subtask_id = next_id()
-        subtask = Issue(
-            id=subtask_id,
-            namespace=namespace,
-            title=title,
-            status=status,
+    subtask_statuses = [Status.OPEN, Status.IN_PROGRESS, Status.OPEN]
+    for idx, (
+        title,
+        should_close,
+        creator,
+        closer,
+        close_reason,
+        labels,
+        ext_ref,
+    ) in enumerate(subtask_specs):
+        initial_status = Status.OPEN if should_close else subtask_statuses[idx]
+        subtask_id = _create(
+            title,
+            status=initial_status,
             priority=2,
             issue_type=IssueType.SUBTASK,
             labels=labels,
             external_ref=ext_ref,
-            parent=story1.full_id,
-            owner=creator if status != Status.CLOSED else None,
+            parent=story1_id,
+            owner=creator if not should_close else None,
             created_by=creator,
         )
-        storage.create(subtask)
-        created_issues.append(subtask_id)
-        if status == Status.CLOSED:
-            storage.close(subtask_id, close_reason or "Completed")
-            storage.update(subtask_id, {"closed_by": closer or creator})
+        if should_close:
+            _close(
+                subtask_id,
+                close_reason or "Completed",
+                closed_by=closer or creator,
+            )
 
     # =========================================================================
     # Bugs
     # =========================================================================
-    bug1_id = next_id()
-    bug1 = Issue(
-        id=bug1_id,
-        namespace=namespace,
-        title="Dashboard crashes on mobile Safari",
+    bug1_id = _create(
+        "Dashboard crashes on mobile Safari",
         description=(
             "Reproducible crash when viewing analytics on iOS Safari. Occurs when "
             "scrolling rapidly through charts or when memory usage exceeds 80MB.\n\n"
@@ -639,45 +644,30 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             "Stack trace shows memory allocation failure. Likely related to chart "
             "library not cleaning up properly."
         ),
-        status=Status.OPEN,
         priority=0,
         issue_type=IssueType.BUG,
         labels=["frontend", "mobile", "critical", "customer-reported"],
         external_ref="BUG-301",
         created_by="igor@example.com",
     )
-    storage.create(bug1)
-    storage.update(
+    _comment(
         bug1_id,
-        {
-            "comments": [
-                make_comment(
-                    bug1_id,
-                    "igor@example.com",
-                    "Reproduced on iPhone 12 Pro and iPhone 13. iOS 16.x affected.",
-                ),
-                make_comment(
-                    bug1_id,
-                    "eve@example.com",
-                    "Looking into this. Suspect it's the Chart.js memory leak "
-                    "we saw before.",
-                ),
-                make_comment(
-                    bug1_id,
-                    "alice@example.com",
-                    "Customer is Enterprise tier - please prioritize. They "
-                    "have escalated.",
-                ),
-            ],
-        },
+        "igor@example.com",
+        "Reproduced on iPhone 12 Pro and iPhone 13. iOS 16.x affected.",
     )
-    created_issues.append(bug1_id)
+    _comment(
+        bug1_id,
+        "eve@example.com",
+        "Looking into this. Suspect it's the Chart.js memory leak we saw before.",
+    )
+    _comment(
+        bug1_id,
+        "alice@example.com",
+        "Customer is Enterprise tier - please prioritize. They have escalated.",
+    )
 
-    bug2_id = next_id()
-    bug2 = Issue(
-        id=bug2_id,
-        namespace=namespace,
-        title="Memory leak in WebSocket connection",
+    bug2_id = _create(
+        "Memory leak in WebSocket connection",
         description=(
             "Connection grows unbounded after 24h of operation. Memory usage increases "
             "~50MB per hour. Issue only occurs in production with real "
@@ -697,28 +687,16 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         owner="frank@example.com",
         created_by="igor@example.com",
     )
-    storage.create(bug2)
-    storage.update(
+    storage.update(bug2_id, {"updated_by": "frank@example.com"})
+    _comment(
         bug2_id,
-        {
-            "updated_by": "frank@example.com",
-            "comments": [
-                make_comment(
-                    bug2_id,
-                    "frank@example.com",
-                    "Found the leak - event listeners not being removed on "
-                    "disconnect. Fix in progress.",
-                ),
-            ],
-        },
+        "frank@example.com",
+        "Found the leak - event listeners not being removed on "
+        "disconnect. Fix in progress.",
     )
-    created_issues.append(bug2_id)
 
-    bug3_id = next_id()
-    bug3 = Issue(
-        id=bug3_id,
-        namespace=namespace,
-        title="Login fails with special characters in password",
+    bug3_id = _create(
+        "Login fails with special characters in password",
         description=(
             "Users cannot log in if their password contains certain special characters "
             "(specifically: &, <, >). Error: 'Invalid credentials' even with "
@@ -728,28 +706,22 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             "HTML encoding issue in the auth form. "
             "Password is being escaped before submission."
         ),
-        status=Status.CLOSED,
         priority=1,
         issue_type=IssueType.BUG,
         labels=["frontend", "security", "auth"],
         external_ref="BUG-303",
-        owner=None,
         created_by="igor@example.com",
     )
-    storage.create(bug3)
-    storage.close(bug3_id, "Fixed HTML encoding in auth form. Added regression test.")
-    storage.update(
+    _close(
         bug3_id,
-        {"closed_by": "eve@example.com", "updated_by": "eve@example.com"},
+        "Fixed HTML encoding in auth form. Added regression test.",
+        closed_by="eve@example.com",
     )
-    created_issues.append(bug3_id)
+    storage.update(bug3_id, {"updated_by": "eve@example.com"})
 
     # Feature 2.2: Accessibility compliance
-    feature4_id = next_id()
-    feature4 = Issue(
-        id=feature4_id,
-        namespace=namespace,
-        title="WCAG 2.1 AA compliance",
+    feature4_id = _create(
+        "WCAG 2.1 AA compliance",
         description=(
             "Make platform accessible to all users including those with "
             "visual, hearing, "
@@ -768,17 +740,14 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             "Legal requires AA compliance by end of Q2. "
             "Running full accessibility audit now."
         ),
-        status=Status.OPEN,
         priority=2,
         issue_type=IssueType.FEATURE,
         labels=["frontend", "accessibility", "compliance"],
         external_ref="UX-210",
-        parent=epic2.full_id,
+        parent=epic2_id,
         owner="grace@example.com",
         created_by="alice@example.com",
     )
-    storage.create(feature4)
-    created_issues.append(feature4_id)
 
     # Tasks under feature 4
     accessibility_tasks = [
@@ -819,30 +788,21 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         ),
     ]
     for title, pri, creator, labels, ext_ref in accessibility_tasks:
-        task_id = next_id()
-        task = Issue(
-            id=task_id,
-            namespace=namespace,
-            title=title,
-            status=Status.OPEN,
+        _create(
+            title,
             priority=pri,
             issue_type=IssueType.TASK,
             labels=labels,
             external_ref=ext_ref,
-            parent=feature4.full_id,
+            parent=feature4_id,
             created_by=creator,
         )
-        storage.create(task)
-        created_issues.append(task_id)
 
     # =========================================================================
     # Epic 3: Performance Optimization
     # =========================================================================
-    epic3_id = next_id()
-    epic3 = Issue(
-        id=epic3_id,
-        namespace=namespace,
-        title="Performance Optimization",
+    epic3_id = _create(
+        "Performance Optimization",
         description=(
             "Improve application performance and scalability. Target: 50% reduction "
             "in page load time and support 10x increase in concurrent users.\n\n"
@@ -857,7 +817,6 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             "latency at 5s, "
             "should be <500ms. APM shows DB queries as main bottleneck."
         ),
-        status=Status.OPEN,
         priority=2,
         issue_type=IssueType.EPIC,
         labels=["performance", "strategic", "q2-2026"],
@@ -865,15 +824,10 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         owner="charlie@example.com",
         created_by="bob@example.com",
     )
-    storage.create(epic3)
-    created_issues.append(epic3_id)
 
     # Feature: Database optimization
-    feature5_id = next_id()
-    feature5 = Issue(
-        id=feature5_id,
-        namespace=namespace,
-        title="Database query optimization",
+    feature5_id = _create(
+        "Database query optimization",
         description=(
             "Optimize slow queries and add missing indexes. Expected to reduce query "
             "time by 70% for analytical workloads."
@@ -885,17 +839,14 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             "- Query plans reviewed and optimized\n"
             "- Slow query log clean (<10 entries/day)"
         ),
-        status=Status.OPEN,
         priority=2,
         issue_type=IssueType.FEATURE,
         labels=["backend", "database", "performance"],
         external_ref="PERF-401",
-        parent=epic3.full_id,
+        parent=epic3_id,
         owner="frank@example.com",
         created_by="charlie@example.com",
     )
-    storage.create(feature5)
-    created_issues.append(feature5_id)
 
     perf_tasks = [
         ("Profile slow queries in production", "PERF-402"),
@@ -904,30 +855,21 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         ("Optimize N+1 queries in user listing", "PERF-405"),
     ]
     for title, ext_ref in perf_tasks:
-        task_id = next_id()
-        task = Issue(
-            id=task_id,
-            namespace=namespace,
-            title=title,
-            status=Status.OPEN,
+        _create(
+            title,
             priority=2,
             issue_type=IssueType.TASK,
             labels=["backend", "database", "performance"],
             external_ref=ext_ref,
-            parent=feature5.full_id,
+            parent=feature5_id,
             created_by="charlie@example.com",
         )
-        storage.create(task)
-        created_issues.append(task_id)
 
     # =========================================================================
     # Chores
     # =========================================================================
-    chore1_id = next_id()
-    chore1 = Issue(
-        id=chore1_id,
-        namespace=namespace,
-        title="Update dependencies to latest versions",
+    _create(
+        "Update dependencies to latest versions",
         description=(
             "Security and maintenance updates for all npm packages. Review changelogs "
             "for breaking changes and plan upgrades accordingly."
@@ -936,21 +878,15 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             "22 packages have security vulnerabilities. "
             "Some require major version bumps."
         ),
-        status=Status.OPEN,
         priority=3,
         issue_type=IssueType.CHORE,
         labels=["maintenance", "security", "dependencies"],
         external_ref="MAINT-501",
         created_by="jack@example.com",
     )
-    storage.create(chore1)
-    created_issues.append(chore1_id)
 
-    chore2_id = next_id()
-    chore2 = Issue(
-        id=chore2_id,
-        namespace=namespace,
-        title="Refactor authentication middleware",
+    chore2_id = _create(
+        "Refactor authentication middleware",
         description=(
             "Clean up technical debt in auth code. Current implementation has multiple "
             "responsibilities that should be separated."
@@ -963,25 +899,16 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         external_ref="MAINT-502",
         created_by="kate@example.com",
     )
-    storage.create(chore2)
-    storage.update(
+    _comment(
         chore2_id,
-        {
-            "comments": [
-                make_comment(
-                    chore2_id,
-                    "kate@example.com",
-                    "Deferring until API gateway is done - too much overlap.",
-                ),
-                make_comment(
-                    chore2_id,
-                    "charlie@example.com",
-                    "Agreed. Let's revisit in Q2.",
-                ),
-            ],
-        },
+        "kate@example.com",
+        "Deferring until API gateway is done - too much overlap.",
     )
-    created_issues.append(chore2_id)
+    _comment(
+        chore2_id,
+        "charlie@example.com",
+        "Agreed. Let's revisit in Q2.",
+    )
 
     # =========================================================================
     # Standalone tasks
@@ -1040,7 +967,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
     ]
     for (
         title,
-        status,
+        target_status,
         pri,
         creator,
         closer,
@@ -1048,33 +975,30 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         ext_ref,
         close_reason,
     ) in standalone_tasks:
-        task_id = next_id()
-        task = Issue(
-            id=task_id,
-            namespace=namespace,
-            title=title,
-            status=status,
+        should_close = target_status == Status.CLOSED
+        initial_status = Status.OPEN if should_close else target_status
+        task_id = _create(
+            title,
+            status=initial_status,
             priority=pri,
             issue_type=IssueType.TASK,
             labels=labels,
             external_ref=ext_ref,
-            owner=creator if status != Status.CLOSED else None,
+            owner=creator if not should_close else None,
             created_by=creator,
         )
-        storage.create(task)
-        created_issues.append(task_id)
-        if status == Status.CLOSED:
-            storage.close(task_id, close_reason or "Completed")
-            storage.update(task_id, {"closed_by": closer or creator})
+        if should_close:
+            _close(
+                task_id,
+                close_reason or "Completed",
+                closed_by=closer or creator,
+            )
 
     # =========================================================================
     # Questions
     # =========================================================================
-    question1_id = next_id()
-    question1 = Issue(
-        id=question1_id,
-        namespace=namespace,
-        title="Should we use GraphQL or REST for the new API?",
+    question1_id = _create(
+        "Should we use GraphQL or REST for the new API?",
         description=(
             "Need to decide on API architecture for the new services. Both "
             "have tradeoffs.\n\n"
@@ -1082,52 +1006,37 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             "**REST pros:** Simpler, better caching, more tooling support"
         ),
         notes="Need decision by end of sprint for planning purposes.",
-        status=Status.CLOSED,
         priority=2,
         issue_type=IssueType.QUESTION,
         labels=["architecture", "api", "decision"],
         external_ref="ARCH-701",
         created_by="charlie@example.com",
     )
-    storage.create(question1)
-    storage.close(
+    _close(
         question1_id,
         "Decision: REST for public APIs, GraphQL for internal dashboard. "
         "Rationale documented in ADR-005.",
+        closed_by="alice@example.com",
     )
-    storage.update(
+    _comment(
         question1_id,
-        {
-            "closed_by": "alice@example.com",
-            "comments": [
-                make_comment(
-                    question1_id,
-                    "diana@example.com",
-                    "GraphQL would be great for the dashboard - lots of "
-                    "flexible queries.",
-                ),
-                make_comment(
-                    question1_id,
-                    "frank@example.com",
-                    "REST is simpler for external consumers. Most of our "
-                    "customers expect REST.",
-                ),
-                make_comment(
-                    question1_id,
-                    "alice@example.com",
-                    "Let's do both - REST for public, GraphQL for internal. "
-                    "Best of both worlds.",
-                ),
-            ],
-        },
+        "diana@example.com",
+        "GraphQL would be great for the dashboard - lots of flexible queries.",
     )
-    created_issues.append(question1_id)
+    _comment(
+        question1_id,
+        "frank@example.com",
+        "REST is simpler for external consumers. Most of our customers expect REST.",
+    )
+    _comment(
+        question1_id,
+        "alice@example.com",
+        "Let's do both - REST for public, GraphQL for internal. "
+        "Best of both worlds.",
+    )
 
-    question2_id = next_id()
-    question2 = Issue(
-        id=question2_id,
-        namespace=namespace,
-        title="Which monitoring stack should we use?",
+    question2_id = _create(
+        "Which monitoring stack should we use?",
         description=(
             "Evaluating monitoring solutions for the microservices architecture.\n\n"
             "Options:\n"
@@ -1135,110 +1044,74 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             "2. Prometheus + Grafana (self-hosted, free)\n"
             "3. New Relic (managed, mid-range price)"
         ),
-        status=Status.OPEN,
         priority=2,
         issue_type=IssueType.QUESTION,
         labels=["devops", "monitoring", "decision"],
         external_ref="ARCH-702",
         created_by="jack@example.com",
     )
-    storage.create(question2)
-    storage.update(
+    _comment(
         question2_id,
-        {
-            "comments": [
-                make_comment(
-                    question2_id,
-                    "jack@example.com",
-                    "I've set up Prometheus before - it's powerful but "
-                    "requires maintenance.",
-                ),
-                make_comment(
-                    question2_id,
-                    "bob@example.com",
-                    "Budget allows for Datadog. Less operational overhead "
-                    "might be worth it.",
-                ),
-            ],
-        },
+        "jack@example.com",
+        "I've set up Prometheus before - it's powerful but requires maintenance.",
     )
-    created_issues.append(question2_id)
+    _comment(
+        question2_id,
+        "bob@example.com",
+        "Budget allows for Datadog. Less operational overhead might be worth it.",
+    )
 
     # =========================================================================
     # Tombstoned (deleted) issues
     # =========================================================================
-    tombstone1_id = next_id()
-    tombstone1 = Issue(
-        id=tombstone1_id,
-        namespace=namespace,
-        title="[Deleted] Old legacy feature flag system",
+    tombstone1_id = _create(
+        "Old legacy feature flag system",
         description=(
             "This feature was removed and replaced with LaunchDarkly integration."
         ),
         notes="Deprecated in favor of LaunchDarkly. Migration completed 2025-12-15.",
-        status=Status.TOMBSTONE,
         priority=4,
         issue_type=IssueType.FEATURE,
         labels=["deprecated"],
         external_ref="LEGACY-801",
         created_by="charlie@example.com",
     )
-    storage.create(tombstone1)
-    storage.update(
+    _delete(
         tombstone1_id,
-        {
-            "deleted_by": "alice@example.com",
-            "delete_reason": "Feature replaced with LaunchDarkly. All flags migrated.",
-        },
+        "Feature replaced with LaunchDarkly. All flags migrated.",
+        deleted_by="alice@example.com",
     )
-    created_issues.append(tombstone1_id)
 
-    tombstone2_id = next_id()
-    tombstone2 = Issue(
-        id=tombstone2_id,
-        namespace=namespace,
-        title="[Deleted] Duplicate: Dashboard performance issue",
+    tombstone2_id = _create(
+        "Duplicate: Dashboard performance issue",
         description="Marked as duplicate of PERF-400.",
         notes="This was a duplicate report of the main performance epic.",
-        status=Status.TOMBSTONE,
         priority=2,
         issue_type=IssueType.BUG,
         labels=["duplicate"],
         external_ref="BUG-802",
-        duplicate_of=epic3.full_id,
+        duplicate_of=epic3_id,
         created_by="igor@example.com",
     )
-    storage.create(tombstone2)
-    storage.update(
+    _delete(
         tombstone2_id,
-        {
-            "deleted_by": "bob@example.com",
-            "delete_reason": (
-                f"Duplicate of {epic3_id}. Consolidating discussion there."
-            ),
-        },
+        f"Duplicate of {epic3_id}. Consolidating discussion there.",
+        deleted_by="bob@example.com",
     )
-    created_issues.append(tombstone2_id)
 
     # =========================================================================
     # Draft issue
     # =========================================================================
-    draft1_id = next_id()
-    draft1 = Issue(
-        id=draft1_id,
-        namespace=namespace,
-        title="[Draft] Mobile app redesign",
+    _create(
+        "Mobile app redesign",
         description=(
             "Initial thoughts on redesigning the mobile app. Not ready for dev yet."
         ),
         notes="Still gathering requirements from stakeholders.",
-        status=Status.OPEN,
         priority=3,
         issue_type=IssueType.DRAFT,
         labels=["mobile", "ux", "draft"],
         created_by="diana@example.com",
     )
-    storage.create(draft1)
-    created_issues.append(draft1_id)
 
-    return created_issues
+    return created_ids
