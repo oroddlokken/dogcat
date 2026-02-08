@@ -192,9 +192,14 @@ def format_issue_brief(
     if issue.closed_at:
         closed_ts = issue.closed_at.strftime("%Y-%m-%d %H:%M")
         closed_str = typer.style(f" [closed {closed_ts}]", fg="bright_black")
+    labels_str = ""
+    if issue.labels:
+        labels_str = " " + " ".join(
+            typer.style(f"[{lbl}]", fg="cyan") for lbl in issue.labels
+        )
     base = f"{status_emoji} {priority_str} {issue.full_id}: {issue.title} {type_str}"
 
-    return f"{base}{parent_str}{closed_str}"
+    return f"{base}{parent_str}{labels_str}{closed_str}"
 
 
 def format_issue_full(issue: Issue, parent_title: str | None = None) -> str:
@@ -339,6 +344,7 @@ def format_issue_table(
     table.add_column("Type", no_wrap=True)
     table.add_column("Pri", width=3, no_wrap=True)
     table.add_column("Title", overflow="fold")  # Wrap long titles
+    table.add_column("Labels", no_wrap=False)
 
     # Add rows
     for issue in issues:
@@ -358,6 +364,8 @@ def format_issue_table(
                 issue.parent.split("-", 1)[-1] if "-" in issue.parent else issue.parent
             )
 
+        labels_str = ", ".join(issue.labels) if issue.labels else ""
+
         table.add_row(
             emoji,
             issue.id,
@@ -365,6 +373,7 @@ def format_issue_table(
             f"[{type_color}]{issue_type}[/]",
             f"[{priority_color}]{issue.priority}[/]",
             issue.title,
+            f"[cyan]{labels_str}[/]" if labels_str else "",
         )
 
     # Render to string
@@ -659,8 +668,8 @@ def _parse_args_for_create(
 
 @app.command()
 def create(
-    arg1: str = typer.Argument(
-        ...,
+    arg1: str | None = typer.Argument(
+        None,
         help=_ARG_HELP,
     ),
     arg2: str | None = typer.Argument(
@@ -670,6 +679,11 @@ def create(
     arg3: str | None = typer.Argument(
         None,
         help=_ARG_HELP,
+    ),
+    title_opt: str | None = typer.Option(
+        None,
+        "--title",
+        help="Issue title (alternative to positional argument)",
     ),
     description: str | None = typer.Option(
         None,
@@ -755,6 +769,7 @@ def create(
 
     Examples:
         dcat create "Fix login bug"           # Default priority 2, type task
+        dcat create --title "Fix login bug"   # Same, using --title flag
         dcat create "Fix login bug" 1         # Priority 1
         dcat create 1 "Fix login bug"         # Priority 1 (shorthand first)
         dcat create "Add feature" f           # Type feature
@@ -771,6 +786,16 @@ def create(
         title, shorthand_priority, shorthand_type = _parse_args_for_create(
             [arg1, arg2, arg3],
         )
+
+        # --title flag overrides positional title if no positional title given
+        if not title and title_opt:
+            title = title_opt
+        elif title and title_opt:
+            typer.echo(
+                "Error: Cannot use both positional title and --title flag",
+                err=True,
+            )
+            raise typer.Exit(1)
 
         # Validate that shorthands and explicit options aren't used together
         if shorthand_priority is not None and priority is not None:
@@ -925,17 +950,22 @@ def create(
 
 @app.command(name="c", hidden=True)
 def create_alias(
-    arg1: str = typer.Argument(
-        ...,
-        help=_ARG_HELP,
-    ),
-    arg2: str = typer.Argument(
+    arg1: str | None = typer.Argument(
         None,
         help=_ARG_HELP,
     ),
-    arg3: str = typer.Argument(
+    arg2: str | None = typer.Argument(
         None,
         help=_ARG_HELP,
+    ),
+    arg3: str | None = typer.Argument(
+        None,
+        help=_ARG_HELP,
+    ),
+    title_opt: str | None = typer.Option(
+        None,
+        "--title",
+        help="Issue title (alternative to positional argument)",
     ),
     description: str = typer.Option(
         None,
@@ -1010,6 +1040,7 @@ def create_alias(
         arg1=arg1,
         arg2=arg2,
         arg3=arg3,
+        title_opt=title_opt,
         description=description,
         priority=priority,
         issue_type=issue_type,
@@ -1031,17 +1062,22 @@ def create_alias(
 
 @app.command(name="add", hidden=True)
 def create_alias_add(
-    arg1: str = typer.Argument(
-        ...,
-        help=_ARG_HELP,
-    ),
-    arg2: str = typer.Argument(
+    arg1: str | None = typer.Argument(
         None,
         help=_ARG_HELP,
     ),
-    arg3: str = typer.Argument(
+    arg2: str | None = typer.Argument(
         None,
         help=_ARG_HELP,
+    ),
+    arg3: str | None = typer.Argument(
+        None,
+        help=_ARG_HELP,
+    ),
+    title_opt: str | None = typer.Option(
+        None,
+        "--title",
+        help="Issue title (alternative to positional argument)",
     ),
     description: str = typer.Option(
         None,
@@ -1107,6 +1143,7 @@ def create_alias_add(
         arg1=arg1,
         arg2=arg2,
         arg3=arg3,
+        title_opt=title_opt,
         description=description,
         priority=priority,
         issue_type=issue_type,
@@ -1136,7 +1173,12 @@ def list_issues(
         help="Filter by priority",
     ),
     issue_type: str | None = typer.Option(None, "--type", "-t", help="Filter by type"),
-    label: str | None = typer.Option(None, "--label", "-l", help="Filter by label"),
+    label: str | None = typer.Option(
+        None,
+        "--label",
+        "-l",
+        help="Filter by label (comma-separated for multiple)",
+    ),
     owner: str | None = typer.Option(None, "--owner", "-o", help="Filter by owner"),
     closed: bool = typer.Option(False, "--closed", help="Show only closed issues"),
     open_issues: bool = typer.Option(
@@ -1200,7 +1242,8 @@ def list_issues(
         if issue_type:
             filters["type"] = issue_type
         if label:
-            filters["label"] = label
+            labels_filter = [lbl.strip() for lbl in label.split(",") if lbl.strip()]
+            filters["label"] = labels_filter
         if owner:
             filters["owner"] = owner
 
@@ -1562,6 +1605,12 @@ def update(
         "--parent",
         help="Parent issue ID (makes this a subtask)",
     ),
+    labels: str | None = typer.Option(
+        None,
+        "--labels",
+        "-l",
+        help="Comma-separated labels (replaces existing)",
+    ),
     no_agent: bool | None = typer.Option(
         None,
         "--no-agent/--agent",
@@ -1615,6 +1664,10 @@ def update(
                     typer.echo(f"Error: Parent issue {parent} not found", err=True)
                     raise typer.Exit(1)
                 updates["parent"] = resolved_parent
+        if labels is not None:
+            updates["labels"] = [
+                lbl.strip() for lbl in labels.split(",") if lbl.strip()
+            ]
         if no_agent is not None:
             # Get current issue to preserve existing metadata
             current = storage.get(issue_id)
@@ -2301,6 +2354,41 @@ def label(
         else:
             typer.echo(f"Unknown subcommand: {subcommand}", err=True)
             raise typer.Exit(1)
+
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@app.command("labels")
+def labels_list(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+) -> None:
+    """List all labels used across issues with counts."""
+    try:
+        storage = get_storage(dogcats_dir)
+        issues = storage.list()
+
+        label_counts: dict[str, int] = {}
+        for issue in issues:
+            if issue.is_tombstone():
+                continue
+            for lbl in issue.labels:
+                label_counts[lbl] = label_counts.get(lbl, 0) + 1
+
+        if json_output:
+            result = [
+                {"label": lbl, "count": count}
+                for lbl, count in sorted(label_counts.items())
+            ]
+            typer.echo(orjson.dumps(result).decode())
+        else:
+            if label_counts:
+                for lbl, count in sorted(label_counts.items()):
+                    typer.echo(f"  {lbl} ({count})")
+            else:
+                typer.echo("No labels found")
 
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
@@ -3432,9 +3520,7 @@ def prime() -> None:
     This command displays guidance for effective dogcat usage and workflows.
     """
     guide = """
-╔════════════════════════════════════════════════════════════════════════════╗
-║                         DOGCAT WORKFLOW GUIDE                              ║
-╚════════════════════════════════════════════════════════════════════════════╝
+DOGCAT WORKFLOW GUIDE
 
 ## Quick Start for AI agents
 

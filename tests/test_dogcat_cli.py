@@ -196,6 +196,72 @@ class TestCLICreate:
         )
         assert result.exit_code != 0
 
+    def test_create_with_title_flag(self, tmp_path: Path) -> None:
+        """Test creating an issue using --title flag instead of positional arg."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "--title",
+                "Title from flag",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["title"] == "Title from flag"
+
+    def test_create_with_title_flag_and_shorthand(self, tmp_path: Path) -> None:
+        """Test --title flag with type/priority shorthands as positional args."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "b",
+                "1",
+                "--title",
+                "Bug from flag",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["title"] == "Bug from flag"
+        assert data["issue_type"] == "bug"
+        assert data["priority"] == 1
+
+    def test_create_with_title_flag_and_positional_title_errors(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test that using both positional title and --title flag errors."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "Positional title",
+                "--title",
+                "Flag title",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code != 0
+        assert "Cannot use both positional title and --title flag" in result.output
+
     def test_create_priority_shorthand(self, tmp_path: Path) -> None:
         """Test creating an issue with priority shorthand (0-4)."""
         dogcats_dir = tmp_path / ".dogcats"
@@ -4405,3 +4471,303 @@ class TestCLIInitUseExistingFolder:
         )
         assert result.exit_code != 0
         assert "mutually exclusive" in result.output
+
+
+class TestUpdateLabels:
+    """Test --labels option in update command."""
+
+    def test_update_labels_replaces(self, tmp_path: Path) -> None:
+        """Test that --labels replaces existing labels."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create_result = runner.invoke(
+            app,
+            [
+                "create",
+                "Test issue",
+                "--labels",
+                "old1,old2",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+
+        result = runner.invoke(
+            app,
+            [
+                "update",
+                issue_id,
+                "--labels",
+                "new1,new2",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+
+        show_result = runner.invoke(
+            app,
+            ["show", issue_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert "new1" in show_result.stdout
+        assert "new2" in show_result.stdout
+        assert "old1" not in show_result.stdout
+
+    def test_update_labels_clear(self, tmp_path: Path) -> None:
+        """Test clearing labels with empty string."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create_result = runner.invoke(
+            app,
+            [
+                "create",
+                "Test issue",
+                "--labels",
+                "urgent",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+
+        result = runner.invoke(
+            app,
+            [
+                "update",
+                issue_id,
+                "--labels",
+                "",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+
+        show_result = runner.invoke(
+            app,
+            ["show", issue_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert "urgent" not in show_result.stdout
+
+
+class TestLabelsCommand:
+    """Test dcat labels command."""
+
+    def test_labels_shows_all(self, tmp_path: Path) -> None:
+        """Test that labels command shows all labels with counts."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Issue 1",
+                "--labels",
+                "backend,urgent",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Issue 2",
+                "--labels",
+                "backend,frontend",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(app, ["labels", "--dogcats-dir", str(dogcats_dir)])
+        assert result.exit_code == 0
+        assert "backend (2)" in result.stdout
+        assert "urgent (1)" in result.stdout
+        assert "frontend (1)" in result.stdout
+
+    def test_labels_json(self, tmp_path: Path) -> None:
+        """Test labels command with --json output."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Issue 1",
+                "--labels",
+                "backend",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["labels", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        import json
+
+        data = json.loads(result.stdout)
+        assert len(data) == 1
+        assert data[0]["label"] == "backend"
+        assert data[0]["count"] == 1
+
+    def test_labels_empty(self, tmp_path: Path) -> None:
+        """Test labels command with no labels."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(app, ["labels", "--dogcats-dir", str(dogcats_dir)])
+        assert result.exit_code == 0
+        assert "No labels found" in result.stdout
+
+
+class TestLabelsInListOutput:
+    """Test that labels appear in list output."""
+
+    def test_labels_in_brief(self, tmp_path: Path) -> None:
+        """Test labels appear in brief list output."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Test issue",
+                "--labels",
+                "urgent,backend",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(app, ["list", "--dogcats-dir", str(dogcats_dir)])
+        assert result.exit_code == 0
+        assert "urgent" in result.stdout
+        assert "backend" in result.stdout
+
+    def test_labels_in_table(self, tmp_path: Path) -> None:
+        """Test labels appear in table list output."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Test issue",
+                "--labels",
+                "urgent",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["list", "--table", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "urgent" in result.stdout
+
+
+class TestMultiLabelFilter:
+    """Test multi-label filtering in dcat list."""
+
+    def test_filter_single_label(self, tmp_path: Path) -> None:
+        """Test filtering by single label still works."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Backend issue",
+                "--labels",
+                "backend",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Frontend issue",
+                "--labels",
+                "frontend",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["list", "--label", "backend", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Backend issue" in result.stdout
+        assert "Frontend issue" not in result.stdout
+
+    def test_filter_multiple_labels(self, tmp_path: Path) -> None:
+        """Test filtering by multiple comma-separated labels (OR)."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Backend issue",
+                "--labels",
+                "backend",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Frontend issue",
+                "--labels",
+                "frontend",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Unrelated issue",
+                "--labels",
+                "docs",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "list",
+                "--label",
+                "backend,frontend",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Backend issue" in result.stdout
+        assert "Frontend issue" in result.stdout
+        assert "Unrelated issue" not in result.stdout

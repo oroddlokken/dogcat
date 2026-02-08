@@ -223,6 +223,11 @@ class IssueEditorApp(App[bool]):
                     placeholder="External ref",
                     id="external-ref-input",
                 )
+                yield Input(
+                    value=", ".join(self._issue.labels) if self._issue.labels else "",
+                    placeholder="Labels (comma-separated)",
+                    id="labels-input",
+                )
 
             yield Label("Description", classes="field-label")
             yield TextArea(
@@ -336,6 +341,11 @@ class IssueEditorApp(App[bool]):
             external_ref=(
                 self.query_one("#external-ref-input", Input).value.strip() or None
             ),
+            labels=[
+                lbl.strip()
+                for lbl in self.query_one("#labels-input", Input).value.split(",")
+                if lbl.strip()
+            ],
             notes=self.query_one("#notes-input", TextArea).text.strip() or None,
             acceptance=(
                 self.query_one("#acceptance-input", TextArea).text.strip() or None
@@ -385,6 +395,14 @@ class IssueEditorApp(App[bool]):
         new_parent = parent_val if isinstance(parent_val, str) else None
         if new_parent != self._issue.parent:
             updates["parent"] = new_parent
+
+        new_labels = [
+            lbl.strip()
+            for lbl in self.query_one("#labels-input", Input).value.split(",")
+            if lbl.strip()
+        ]
+        if new_labels != self._issue.labels:
+            updates["labels"] = new_labels
 
         new_desc = description or None
         if new_desc != self._issue.description:

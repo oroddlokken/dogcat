@@ -410,8 +410,12 @@ class JSONLStorage:
             issues = [i for i in issues if i.issue_type.value == issue_type]
 
         if "label" in filters:
-            label = filters["label"]
-            issues = [i for i in issues if label in i.labels]
+            label_filter = filters["label"]
+            if isinstance(label_filter, list):
+                label_set: set[str] = set(label_filter)
+                issues = [i for i in issues if label_set & set(i.labels)]
+            else:
+                issues = [i for i in issues if label_filter in i.labels]
 
         if "owner" in filters:
             owner = filters["owner"]
