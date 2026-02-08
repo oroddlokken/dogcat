@@ -652,3 +652,141 @@ class TestIssuePicker:
 
             option_list = app.query_one("#picker-list", OptionList)
             assert option_list.option_count == 3
+
+
+class TestButtonHandlers:
+    """Test button press handlers."""
+
+    @pytest.mark.asyncio
+    async def test_cancel_button_exits(self) -> None:
+        """Clicking cancel button exits without saving."""
+        issue = _make_issue()
+        storage = _make_storage()
+        app = IssueEditorApp(issue, storage)
+
+        async with app.run_test() as pilot:
+            await pilot.click("#cancel-btn")
+
+        assert app.saved is False
+        storage.update.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_save_button_saves(self) -> None:
+        """Clicking save button triggers save."""
+        issue = _make_issue()
+        storage = _make_storage()
+        storage.update.return_value = _make_issue(title="Changed")
+        app = IssueEditorApp(issue, storage)
+
+        async with app.run_test() as pilot:
+            app.query_one("#title-input", Input).value = "Changed"
+            await pilot.click("#save-btn")
+
+        storage.update.assert_called_once()
+
+
+class TestManualCheckboxToggle:
+    """Test manual checkbox behavior in edit form."""
+
+    @pytest.mark.asyncio
+    async def test_manual_toggle_on(self) -> None:
+        """Toggling manual checkbox on includes metadata update."""
+        issue = _make_issue(metadata={})
+        storage = _make_storage()
+        storage.update.return_value = _make_issue(metadata={"manual": True})
+        app = IssueEditorApp(issue, storage)
+
+        async with app.run_test() as pilot:
+            from textual.widgets import Checkbox
+
+            checkbox = app.query_one("#manual-input", Checkbox)
+            checkbox.value = True
+            await pilot.press("ctrl+s")
+
+        storage.update.assert_called_once()
+        updates = storage.update.call_args[0][1]
+        assert "metadata" in updates
+        assert updates["metadata"]["manual"] is True
+
+    @pytest.mark.asyncio
+    async def test_manual_toggle_off(self) -> None:
+        """Toggling manual checkbox off removes manual from metadata."""
+        issue = _make_issue(metadata={"manual": True})
+        storage = _make_storage()
+        storage.update.return_value = _make_issue(metadata={})
+        app = IssueEditorApp(issue, storage)
+
+        async with app.run_test() as pilot:
+            from textual.widgets import Checkbox
+
+            checkbox = app.query_one("#manual-input", Checkbox)
+            checkbox.value = False
+            await pilot.press("ctrl+s")
+
+        storage.update.assert_called_once()
+        updates = storage.update.call_args[0][1]
+        assert "metadata" in updates
+        assert "manual" not in updates["metadata"]
+
+
+class TestNoChangesToSave:
+    """Test saving when no changes were made."""
+
+    @pytest.mark.asyncio
+    async def test_no_changes_exits_without_update(self) -> None:
+        """Saving with no changes exits without calling update."""
+        issue = _make_issue()
+        storage = _make_storage()
+        storage.list.return_value = []
+        storage.get_children.return_value = []
+        app = IssueEditorApp(issue, storage)
+
+        async with app.run_test() as pilot:
+            # Don't change anything, just save
+            await pilot.press("ctrl+s")
+
+        storage.update.assert_not_called()
+        assert app.saved is False
+
+
+class TestCreateModeStorageException:
+    """Test that create mode handles storage exceptions."""
+
+    @pytest.mark.asyncio
+    async def test_create_exception_shows_notification(self) -> None:
+        """Storage.create exception is handled gracefully."""
+        issue = _make_issue(id="", title="")
+        storage = _make_storage()
+        storage.get_issue_ids.return_value = set()
+        storage.create.side_effect = RuntimeError("DB error")
+        app = IssueEditorApp(issue, storage, create_mode=True, namespace="dc")
+
+        async with app.run_test() as pilot:
+            app.query_one("#title-input", Input).value = "Will fail"
+            await pilot.press("ctrl+s")
+
+        # create was called but raised
+        storage.create.assert_called_once()
+        # Should not mark as saved
+        assert app.saved is False
+
+
+class TestUpdateModeStorageException:
+    """Test that update mode handles storage exceptions."""
+
+    @pytest.mark.asyncio
+    async def test_update_exception_shows_notification(self) -> None:
+        """Storage.update exception is handled gracefully."""
+        issue = _make_issue()
+        storage = _make_storage()
+        storage.list.return_value = []
+        storage.get_children.return_value = []
+        storage.update.side_effect = RuntimeError("DB error")
+        app = IssueEditorApp(issue, storage)
+
+        async with app.run_test() as pilot:
+            app.query_one("#title-input", Input).value = "Changed title"
+            await pilot.press("ctrl+s")
+
+        storage.update.assert_called_once()
+        assert app.saved is False
