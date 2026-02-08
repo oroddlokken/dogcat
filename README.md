@@ -106,6 +106,8 @@ There is also a `--no-agent` option that can be passed to `dcat list` that will 
 | `dcat edit [$id]` | Interactive TUI for editing an issue |
 | `dcat in-progress` | List issues currently in progress |
 | `dcat in-review` | List issues currently in review |
+| `dcat pr` | List issues currently in progress and in progress |
+| `dcat recently-added` | List recently added issues |
 
 ## Screenshots
 
