@@ -3033,22 +3033,60 @@ def archive(
         archive_filename = f"closed-{timestamp}.jsonl"
         archive_path = archive_dir / archive_filename
 
-        # Collect dependencies and links that should be archived
-        # (both sides are in archivable_ids)
-        from dogcat.models import issue_to_dict
+        # Split raw JSONL lines into archive vs keep buckets to preserve
+        # the full append-only event history for both sets of issues.
+        archived_lines: list[bytes] = []
+        remaining_lines: list[bytes] = []
+        archived_dep_count = 0
+        archived_link_count = 0
 
-        archived_deps = [
-            dep
-            for dep in storage._dependencies
-            if dep.issue_id in archivable_ids and dep.depends_on_id in archivable_ids
-        ]
-        archived_links = [
-            link
-            for link in storage._links
-            if link.from_id in archivable_ids and link.to_id in archivable_ids
-        ]
+        with storage.path.open("rb") as f:
+            for raw_line in f:
+                stripped = raw_line.strip()
+                if not stripped:
+                    continue
 
-        # Write to archive file atomically
+                try:
+                    data = orjson.loads(stripped)
+                except orjson.JSONDecodeError:
+                    remaining_lines.append(raw_line)
+                    continue
+
+                if "from_id" in data and "to_id" in data:
+                    # Link record
+                    if (
+                        data["from_id"] in archivable_ids
+                        and data["to_id"] in archivable_ids
+                    ):
+                        archived_lines.append(raw_line)
+                        archived_link_count += 1
+                    else:
+                        remaining_lines.append(raw_line)
+                elif "issue_id" in data and "depends_on_id" in data:
+                    # Dependency record
+                    if (
+                        data["issue_id"] in archivable_ids
+                        and data["depends_on_id"] in archivable_ids
+                    ):
+                        archived_lines.append(raw_line)
+                        archived_dep_count += 1
+                    else:
+                        remaining_lines.append(raw_line)
+                else:
+                    # Issue record — resolve full_id from raw dict
+                    if "namespace" in data:
+                        full_id = f"{data['namespace']}-{data['id']}"
+                    elif "-" in str(data.get("id", "")):
+                        full_id = data["id"]
+                    else:
+                        full_id = f"dc-{data['id']}"
+
+                    if full_id in archivable_ids:
+                        archived_lines.append(raw_line)
+                    else:
+                        remaining_lines.append(raw_line)
+
+        # Write archived lines to archive file atomically
         with tempfile.NamedTemporaryFile(
             mode="wb",
             dir=archive_dir,
@@ -3058,36 +3096,8 @@ def archive(
             tmp_path = Path(tmp_file.name)
 
             try:
-                # Write issues
-                for issue in archivable:
-                    data = issue_to_dict(issue)
-                    tmp_file.write(orjson.dumps(data))
-                    tmp_file.write(b"\n")
-
-                # Write dependencies
-                for dep in archived_deps:
-                    dep_data = {
-                        "issue_id": dep.issue_id,
-                        "depends_on_id": dep.depends_on_id,
-                        "type": dep.dep_type.value,
-                        "created_at": dep.created_at.isoformat(),
-                        "created_by": dep.created_by,
-                    }
-                    tmp_file.write(orjson.dumps(dep_data))
-                    tmp_file.write(b"\n")
-
-                # Write links
-                for link in archived_links:
-                    link_data = {
-                        "from_id": link.from_id,
-                        "to_id": link.to_id,
-                        "link_type": link.link_type,
-                        "created_at": link.created_at.isoformat(),
-                        "created_by": link.created_by,
-                    }
-                    tmp_file.write(orjson.dumps(link_data))
-                    tmp_file.write(b"\n")
-
+                for line in archived_lines:
+                    tmp_file.write(line if line.endswith(b"\n") else line + b"\n")
                 tmp_file.flush()
             except Exception as e:
                 tmp_path.unlink(missing_ok=True)
@@ -3102,11 +3112,35 @@ def archive(
             msg = f"Failed to create archive file: {e}"
             raise RuntimeError(msg) from e
 
-        # Remove archived issues from storage
+        # Rewrite main file with only remaining lines (preserving history)
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=storage.dogcats_dir,
+            delete=False,
+            suffix=".jsonl",
+        ) as tmp_file:
+            tmp_main_path = Path(tmp_file.name)
+
+            try:
+                for line in remaining_lines:
+                    tmp_file.write(line if line.endswith(b"\n") else line + b"\n")
+                tmp_file.flush()
+            except Exception as e:
+                tmp_main_path.unlink(missing_ok=True)
+                msg = f"Failed to rewrite storage file: {e}"
+                raise RuntimeError(msg) from e
+
+        try:
+            tmp_main_path.replace(storage.path)
+        except OSError as e:
+            tmp_main_path.unlink(missing_ok=True)
+            msg = f"Failed to write storage file: {e}"
+            raise RuntimeError(msg) from e
+
+        # Update in-memory state
         for issue in archivable:
             del storage._issues[issue.full_id]
 
-        # Remove archived dependencies
         storage._dependencies = [
             dep
             for dep in storage._dependencies
@@ -3114,21 +3148,21 @@ def archive(
             or dep.depends_on_id not in archivable_ids
         ]
 
-        # Remove archived links
         storage._links = [
             link
             for link in storage._links
             if link.from_id not in archivable_ids or link.to_id not in archivable_ids
         ]
 
-        # Save the updated storage
-        storage._save()
+        storage._rebuild_indexes()
+        storage._base_lines = len(remaining_lines)
+        storage._appended_lines = 0
 
         typer.echo(f"\n✓ Archived {len(archivable)} issue(s) to {archive_path}")
-        if archived_deps:
-            typer.echo(f"  Including {len(archived_deps)} dependency record(s)")
-        if archived_links:
-            typer.echo(f"  Including {len(archived_links)} link record(s)")
+        if archived_dep_count:
+            typer.echo(f"  Including {archived_dep_count} dependency record(s)")
+        if archived_link_count:
+            typer.echo(f"  Including {archived_link_count} link record(s)")
 
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)

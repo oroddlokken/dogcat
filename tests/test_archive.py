@@ -131,13 +131,15 @@ class TestArchiveBasic:
         archive_files = list(archive_dir.glob("closed-*.jsonl"))
         assert len(archive_files) == 1
 
-        # Read and verify content
+        # Read and verify content — archive preserves full event history,
+        # so there may be multiple lines (create + status updates).
+        # The last issue record should be the final closed state.
         with archive_files[0].open("rb") as f:
             lines = f.readlines()
-            assert len(lines) == 1
-            data = orjson.loads(lines[0])
-            assert data["title"] == "Test issue"
-            assert data["status"] == "closed"
+            assert len(lines) >= 1
+            last_record = orjson.loads(lines[-1])
+            assert last_record["title"] == "Test issue"
+            assert last_record["status"] == "closed"
 
 
 class TestArchiveOlderThan:
@@ -447,3 +449,107 @@ class TestArchiveAbort:
         # Verify no archive was created
         archive_dir = dogcats_dir / "archive"
         assert not archive_dir.exists() or len(list(archive_dir.glob("*.jsonl"))) == 0
+
+
+class TestArchivePreservesHistory:
+    """Test that archive preserves the full append-only event history."""
+
+    def test_archive_preserves_issue_event_history(self, tmp_path: Path) -> None:
+        """Archived issues retain all intermediate records (create, update, close)."""
+        dogcats_dir = tmp_path / ".dogcats"
+        init_repo(dogcats_dir)
+        issue_id = create_issue(dogcats_dir, "History issue")
+
+        # Update priority to create an extra append-only record
+        runner.invoke(
+            app,
+            [
+                "update",
+                issue_id,
+                "--priority",
+                "1",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        close_issue(dogcats_dir, issue_id)
+
+        # Count raw lines in the main file before archive
+        main_path = dogcats_dir / "issues.jsonl"
+        pre_lines = [ln for ln in main_path.read_bytes().splitlines() if ln.strip()]
+        # Should have at least create + update + close records
+        assert len(pre_lines) >= 3
+
+        runner.invoke(
+            app,
+            ["archive", "--confirm", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        archive_dir = dogcats_dir / "archive"
+        archive_files = list(archive_dir.glob("closed-*.jsonl"))
+        assert len(archive_files) == 1
+
+        archived_lines = [
+            ln for ln in archive_files[0].read_bytes().splitlines() if ln.strip()
+        ]
+        # Archive must have all the original raw records, not just a snapshot
+        assert len(archived_lines) >= 3
+
+        # Verify first record is the initial create (status=open)
+        first = orjson.loads(archived_lines[0])
+        assert first["status"] == "open"
+
+        # Verify last record is the final closed state
+        last = orjson.loads(archived_lines[-1])
+        assert last["status"] == "closed"
+
+    def test_archive_preserves_remaining_issue_history(self, tmp_path: Path) -> None:
+        """Open issues that stay in the main file keep their event history."""
+        dogcats_dir = tmp_path / ".dogcats"
+        init_repo(dogcats_dir)
+
+        # Create an issue that will stay open (with updates to generate history)
+        open_id = create_issue(dogcats_dir, "Staying open")
+        runner.invoke(
+            app,
+            [
+                "update",
+                open_id,
+                "--priority",
+                "1",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        # Create and close another issue to be archived
+        closed_id = create_issue(dogcats_dir, "Going away")
+        close_issue(dogcats_dir, closed_id)
+
+        # Count raw lines for the open issue before archive
+        main_path = dogcats_dir / "issues.jsonl"
+        pre_lines = [ln for ln in main_path.read_bytes().splitlines() if ln.strip()]
+        open_issue_pre_count = sum(
+            1
+            for ln in pre_lines
+            if open_id.split("-")[-1] in ln.decode()
+            and b"depends_on_id" not in ln
+            and b"from_id" not in ln
+        )
+        assert open_issue_pre_count >= 2  # create + update
+
+        runner.invoke(
+            app,
+            ["archive", "--confirm", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        # Verify open issue still has all its history in the main file
+        post_lines = [ln for ln in main_path.read_bytes().splitlines() if ln.strip()]
+        open_issue_post_count = sum(
+            1
+            for ln in post_lines
+            if open_id.split("-")[-1] in ln.decode()
+            and b"depends_on_id" not in ln
+            and b"from_id" not in ln
+        )
+        assert open_issue_post_count == open_issue_pre_count
