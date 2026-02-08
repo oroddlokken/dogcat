@@ -2844,6 +2844,109 @@ class TestCLIReady:
         assert skip_id not in result.stdout
 
 
+class TestCLIBlocked:
+    """Test blocked command."""
+
+    def test_blocked_no_issues(self, tmp_path: Path) -> None:
+        """Test blocked with no blocked issues."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["blocked", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "No blocked issues" in result.stdout
+
+    def test_blocked_shows_issue_details(self, tmp_path: Path) -> None:
+        """Test blocked output includes title, type, and priority."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # Create blocker issue
+        create1 = runner.invoke(
+            app,
+            ["create", "Blocker task", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data1 = json.loads(create1.stdout)
+        blocker_id = f"{data1['namespace']}-{data1['id']}"
+
+        # Create blocked issue with dependency
+        create2 = runner.invoke(
+            app,
+            [
+                "create",
+                "Blocked task",
+                "--type",
+                "bug",
+                "--priority",
+                "1",
+                "--depends-on",
+                blocker_id,
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        data2 = json.loads(create2.stdout)
+        blocked_id = f"{data2['namespace']}-{data2['id']}"
+
+        result = runner.invoke(
+            app,
+            ["blocked", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert blocked_id in result.stdout
+        assert "Blocked task" in result.stdout
+        assert "bug" in result.stdout
+        assert blocker_id in result.stdout
+        assert "Blocker task" in result.stdout
+        assert "blocked by" in result.stdout
+
+    def test_blocked_uses_format_issue_brief(self, tmp_path: Path) -> None:
+        """Blocked uses format_issue_brief for both issues.
+
+        Ensures blocked output stays in sync with list when
+        format_issue_brief is updated.
+        """
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create1 = runner.invoke(
+            app,
+            ["create", "Blocker", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data1 = json.loads(create1.stdout)
+        blocker_id = f"{data1['namespace']}-{data1['id']}"
+
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Blocked",
+                "--depends-on",
+                blocker_id,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        with patch(
+            "dogcat.cli.format_issue_brief",
+            wraps=__import__(
+                "dogcat.cli",
+                fromlist=["format_issue_brief"],
+            ).format_issue_brief,
+        ) as mock_fmt:
+            runner.invoke(
+                app,
+                ["blocked", "--dogcats-dir", str(dogcats_dir)],
+            )
+            # Called for both the blocked issue and the blocker
+            assert mock_fmt.call_count == 2
+
+
 class TestCLIInProgress:
     """Test in-progress command."""
 

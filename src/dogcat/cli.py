@@ -2060,8 +2060,25 @@ def blocked(
                 typer.echo("No blocked issues")
             else:
                 for bi in blocked_issues:
-                    blocker_list = ", ".join(bi.blocking_ids)
-                    typer.echo(f"  {bi.issue_id}: blocked by {blocker_list}")
+                    issue = storage.get(bi.issue_id)
+                    if issue:
+                        typer.echo(format_issue_brief(issue))
+                    else:
+                        typer.echo(f"  {bi.issue_id}")
+                    for blocker_id in bi.blocking_ids:
+                        blocker = storage.get(blocker_id)
+                        if blocker:
+                            typer.echo(
+                                typer.style("    blocked by ", fg="bright_black")
+                                + format_issue_brief(blocker),
+                            )
+                        else:
+                            typer.echo(
+                                typer.style(
+                                    f"    blocked by {blocker_id}",
+                                    fg="bright_black",
+                                ),
+                            )
 
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
