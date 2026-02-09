@@ -286,12 +286,11 @@ DOGCAT WORKFLOW GUIDE
 
 1. Create an issue:
    $ dcat create "My first issue" --type bug --priority 1 -d "Description"
-   # All options from 0b above can be used here.
 
 2. List issues:
    $ dcat list              - Show all open issues
-   $ dcat list --closed     - Show only closed issues
    $ dcat ready             - Show issues ready to work (no blockers)
+   $ dcat blocked           - Show all blocked issues
 
 3. Update an issue:
    $ dcat update <issue_id> --status in_progress
@@ -301,92 +300,43 @@ DOGCAT WORKFLOW GUIDE
 
 ## Essential Commands
 
-### Creating & Updating
   dcat create <title>                       - Create a new issue
-  dcat create <title> --status in_progress  - Create with status
   dcat create <title> --depends-on <id>     - Create with dependency
-  dcat update <id>                          - Update an issue
-  dcat update <id> --depends-on <other_id>  - Add dependency via update
-  dcat update <id> --editor                 - Update then open editor
+  dcat create <title> --blocks <id>         - Create issue that blocks another
+  dcat update <id> --depends-on <other_id>  - Add dependency to existing issue
+  dcat update <id> --blocks <other_id>      - Mark issue as blocking another
+  dcat show <id>                            - View issue details
   dcat close <id>                           - Mark issue as closed
-
-### Managing Dependencies
-  dcat dep <id> add --depends-on <other_id> - Add dependency
-  dcat dep <id> list                        - Show dependencies
-  dcat blocked                              - Show all blocked issues
 
 ## Parent-Child vs Dependencies
 
 Parent-child relationships are **organizational** (grouping), not **blocking**.
 Child issues appear in `dcat ready` even when their parent is still open.
 
-Use this to decide:
 - Can this child task be started independently? → Keep as parent-child only
 - Must the parent complete first? → Add explicit dependency:
-    dcat dep <child_id> add --depends-on <parent_id>
-
-Example: A feature with subtasks - subtasks can often be worked in parallel,
-so they should NOT depend on the parent. But if subtask B needs subtask A's
-output, add a dependency between them.
+    dcat update <child_id> --depends-on <parent_id>
 
 ## Agent Integration
-
-Use --manual to mark issues that require manual action:
-  dcat create "Manual review needed" --manual
 
 Use --agent-only in list/ready to filter out manual issues:
   dcat ready --agent-only   # Show only agent-workable issues
   dcat list --agent-only    # Hide manual issues
 
-If you determine that an issue requires human intervention (e.g. deploying,
-physical access, subjective judgment, credentials you don't have), mark it
-as manual and tell the user it needs their attention:
+If an issue requires human intervention (e.g. deploying, credentials),
+mark it as manual and tell the user:
   dcat update <id> --manual
-Then notify the user: explain which issue is blocked and what user action
-is needed so they can pick it up.
 
 Do NOT attempt to work on manual issues. Leave them for the user.
 
 ## Status Workflow
 
-Issues progress through these statuses:
   open -> in_progress -> in_review -> closed
-
-Update status:
-  dcat update <id> --status in_review
-
-## Common Workflows
-
-### Starting Work on an Issue
-$ dcat ready              # Check available work
-$ dcat show <issue_id>    # View issue details (includes parent, children, dependencies)
-$ dcat update <issue_id> --status in_progress
-
-### Submitting for Review
-$ dcat update <issue_id> --status in_review  # Alternative
-
-### Creating Related Issues
-$ dcat create "Blocker task"
-$ dcat create "Dependent task" --depends-on <blocker_id>
-
-### Closing Issues
-$ dcat close <issue_id> --reason "Explanation"
-
-### Tracking Dependencies
-$ dcat blocked                                       # See what's blocked
-$ dcat dep <new_task> add --depends-on <blocker_id>
 
 ## Questions
 
-Questions (type: question, shorthand: q) are special issues used to track
-questions that need answers, NOT tasks to work on. Use them to:
-- Document technical questions that need research
-- Track decisions that need to be made
-- Record questions for team discussion
-
-## Need Help?
-  dcat --help            - Show all commands
-  dcat <command> --help  - Get help for a specific command
+Questions (type: question) are used to track questions that need answers,
+NOT tasks to work on.
 """
         typer.echo(guide)
 
