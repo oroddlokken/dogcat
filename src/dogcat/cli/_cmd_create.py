@@ -13,6 +13,13 @@ from dogcat.constants import DEFAULT_PRIORITY, DEFAULT_TYPE, parse_labels
 from dogcat.idgen import IDGenerator
 from dogcat.models import Issue, IssueType, Status
 
+from ._completions import (
+    complete_issue_ids,
+    complete_labels,
+    complete_priorities,
+    complete_statuses,
+    complete_types,
+)
 from ._helpers import (
     _ARG_HELP,
     _make_alias,
@@ -58,13 +65,21 @@ def register(app: typer.Typer) -> None:
             help="Priority (0-4, p0-p4, or critical/high/medium/low/minimal)",
             parser=_parse_priority_value,
             metavar="PRIORITY",
+            autocompletion=complete_priorities,
         ),
-        issue_type: str | None = typer.Option(None, "--type", "-t", help="Issue type"),
+        issue_type: str | None = typer.Option(
+            None,
+            "--type",
+            "-t",
+            help="Issue type",
+            autocompletion=complete_types,
+        ),
         status: str | None = typer.Option(
             None,
             "--status",
             "-s",
             help="Initial status (open, in_progress, blocked, deferred)",
+            autocompletion=complete_statuses,
         ),
         owner: str | None = typer.Option(None, "--owner", "-o", help="Issue owner"),
         labels: str | None = typer.Option(
@@ -72,6 +87,7 @@ def register(app: typer.Typer) -> None:
             "--labels",
             "-l",
             help="Labels (comma or space separated)",
+            autocompletion=complete_labels,
         ),
         acceptance: str | None = typer.Option(
             None,
@@ -89,16 +105,19 @@ def register(app: typer.Typer) -> None:
             None,
             "--depends-on",
             help="Issue ID this depends on (this issue is blocked by the other)",
+            autocompletion=complete_issue_ids,
         ),
         blocks: str | None = typer.Option(
             None,
             "--blocks",
             help="Issue ID this blocks (the other issue is blocked by this one)",
+            autocompletion=complete_issue_ids,
         ),
         parent: str | None = typer.Option(
             None,
             "--parent",
             help="Parent issue ID (makes this a subtask)",
+            autocompletion=complete_issue_ids,
         ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         created_by: str | None = typer.Option(
@@ -116,6 +135,7 @@ def register(app: typer.Typer) -> None:
             None,
             "--duplicate-of",
             help="Original issue ID if duplicate",
+            autocompletion=complete_issue_ids,
         ),
         manual: bool = typer.Option(
             False,

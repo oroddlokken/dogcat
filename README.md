@@ -2,6 +2,14 @@
 
 `dogcat` is a memory upgrade for AI agents. You no longer need to keep track of Markdown files when developing new features or letting the agent waste precious context on progress. With a simple command line utility (and some TUI niceties!) you can create, edit, manage and display issues.
 
+- [Installation](#installation)
+- [Usage](#usage)
+  - [Telling your agent to use dogcat](#telling-your-agent-to-use-dogcat)
+  - [Command cheat sheet](#command-cheat-sheet)
+- [Screenshots](#screenshots)
+- [Tips & tricks](#tips--tricks)
+- [FAQ](#faq)
+
 ## Relation to Beads
 
 Heavily inspired by [steveyegge/beads](https://github.com/steveyegge/beads).
@@ -27,9 +35,11 @@ This installs `dcat`/`dogcat` and handles Python and dependencies automatically 
 Install `uv`, then run `./dcat.py`.
 
 ### Using uvx
-By installing [uv](https://docs.astral.sh/uv/) and adding `alias dcat="uvx -p 3.13 --from git+https://github.com/oroddlokken/dogcat dcat"` to your `~/.zshrc` or `~/.bashrc` you can run it without installing it. 
+
+By installing [uv](https://docs.astral.sh/uv/) and adding `alias dcat="uvx -p 3.13 --from git+https://github.com/oroddlokken/dogcat dcat"` to your `~/.zshrc` or `~/.bashrc` you can run it without installing it.
 
 ### Other platforms
+
 I hope to have something better in place soon that doesnt require on uv!
 
 ## Usage

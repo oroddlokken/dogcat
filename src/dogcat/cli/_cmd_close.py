@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import orjson
 import typer
 
+from ._completions import complete_issue_ids
 from ._helpers import get_default_operator, get_storage
 
 if TYPE_CHECKING:
@@ -47,6 +48,7 @@ def register(app: typer.Typer) -> None:
         issue_ids: list[str] = typer.Argument(  # noqa: B008
             ...,
             help="Issue ID(s) to close",
+            autocompletion=complete_issue_ids,
         ),
         reason: str | None = typer.Option(
             None,
@@ -113,6 +115,7 @@ def register(app: typer.Typer) -> None:
         issue_ids: list[str] = typer.Argument(  # noqa: B008
             ...,
             help="Issue ID(s) to delete",
+            autocompletion=complete_issue_ids,
         ),
         reason: str | None = typer.Option(
             None,
@@ -157,7 +160,11 @@ def register(app: typer.Typer) -> None:
 
     @app.command(name="remove")
     def remove_cmd(
-        issue_id: str = typer.Argument(..., help="Issue ID"),
+        issue_id: str = typer.Argument(
+            ...,
+            help="Issue ID",
+            autocompletion=complete_issue_ids,
+        ),
         reason: str = typer.Option(None, "--reason", "-r", help="Reason for deletion"),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         deleted_by: str = typer.Option(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import orjson
 import typer
 
+from ._completions import complete_issue_ids
 from ._helpers import get_storage
 
 
@@ -13,13 +14,18 @@ def register(app: typer.Typer) -> None:
 
     @app.command("dep")
     def dependency(
-        issue_id: str = typer.Argument(..., help="Issue ID"),
+        issue_id: str = typer.Argument(
+            ...,
+            help="Issue ID",
+            autocompletion=complete_issue_ids,
+        ),
         subcommand: str = typer.Argument(..., help="add, remove, or list"),
         depends_on_id: str = typer.Option(
             None,
             "--depends-on",
             "-d",
             help="Issue ID it depends on",
+            autocompletion=complete_issue_ids,
         ),
         dep_type: str = typer.Option("blocks", "--type", "-t", help="Dependency type"),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
@@ -88,13 +94,18 @@ def register(app: typer.Typer) -> None:
 
     @app.command("link")
     def link_command(
-        issue_id: str = typer.Argument(..., help="Issue ID"),
+        issue_id: str = typer.Argument(
+            ...,
+            help="Issue ID",
+            autocompletion=complete_issue_ids,
+        ),
         subcommand: str = typer.Argument(..., help="add, remove, or list"),
         related_id: str = typer.Option(
             None,
             "--related",
             "-r",
             help="Issue ID to link to",
+            autocompletion=complete_issue_ids,
         ),
         link_type: str = typer.Option("relates_to", "--type", "-t", help="Link type"),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),

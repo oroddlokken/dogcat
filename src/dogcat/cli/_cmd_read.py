@@ -10,6 +10,13 @@ import typer
 
 from dogcat.constants import parse_labels
 
+from ._completions import (
+    complete_issue_ids,
+    complete_labels,
+    complete_priorities,
+    complete_statuses,
+    complete_types,
+)
 from ._formatting import (
     format_issue_brief,
     format_issue_full,
@@ -33,24 +40,28 @@ def register(app: typer.Typer) -> None:
             "--status",
             "-s",
             help="Filter by status",
+            autocompletion=complete_statuses,
         ),
         priority: int | None = typer.Option(
             None,
             "--priority",
             "-p",
             help="Filter by priority",
+            autocompletion=complete_priorities,
         ),
         issue_type: str | None = typer.Option(
             None,
             "--type",
             "-t",
             help="Filter by type",
+            autocompletion=complete_types,
         ),
         label: str | None = typer.Option(
             None,
             "--label",
             "-l",
             help="Filter by label (comma or space separated)",
+            autocompletion=complete_labels,
         ),
         owner: str | None = typer.Option(None, "--owner", "-o", help="Filter by owner"),
         closed: bool = typer.Option(False, "--closed", help="Show only closed issues"),
@@ -262,7 +273,11 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     def show(
-        issue_id: str = typer.Argument(..., help="Issue ID"),
+        issue_id: str = typer.Argument(
+            ...,
+            help="Issue ID",
+            autocompletion=complete_issue_ids,
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
@@ -339,6 +354,7 @@ def register(app: typer.Typer) -> None:
         issue_id: str | None = typer.Argument(
             None,
             help="Issue ID (opens picker if omitted)",
+            autocompletion=complete_issue_ids,
         ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
@@ -378,6 +394,7 @@ def register(app: typer.Typer) -> None:
         issue_id: str | None = typer.Argument(
             None,
             help="Issue ID (opens picker if omitted)",
+            autocompletion=complete_issue_ids,
         ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:

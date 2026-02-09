@@ -9,6 +9,13 @@ import typer
 
 from dogcat.constants import parse_labels
 
+from ._completions import (
+    complete_issue_ids,
+    complete_labels,
+    complete_priorities,
+    complete_statuses,
+    complete_types,
+)
 from ._helpers import _parse_priority_value, get_default_operator, get_storage
 
 
@@ -17,9 +24,19 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     def update(
-        issue_id: str = typer.Argument(..., help="Issue ID"),
+        issue_id: str = typer.Argument(
+            ...,
+            help="Issue ID",
+            autocompletion=complete_issue_ids,
+        ),
         title: str | None = typer.Option(None, "--title", help="New title"),
-        status: str | None = typer.Option(None, "--status", "-s", help="New status"),
+        status: str | None = typer.Option(
+            None,
+            "--status",
+            "-s",
+            help="New status",
+            autocompletion=complete_statuses,
+        ),
         priority: int | None = typer.Option(
             None,
             "--priority",
@@ -27,12 +44,14 @@ def register(app: typer.Typer) -> None:
             help="New priority (0-4 or p0-p4)",
             parser=_parse_priority_value,
             metavar="PRIORITY",
+            autocompletion=complete_priorities,
         ),
         issue_type: str | None = typer.Option(
             None,
             "--type",
             "-t",
             help="New issue type",
+            autocompletion=complete_types,
         ),
         description: str | None = typer.Option(
             None,
@@ -52,17 +71,20 @@ def register(app: typer.Typer) -> None:
             None,
             "--duplicate-of",
             help="Original issue ID if duplicate",
+            autocompletion=complete_issue_ids,
         ),
         parent: str | None = typer.Option(
             None,
             "--parent",
             help="Parent issue ID (makes this a subtask)",
+            autocompletion=complete_issue_ids,
         ),
         labels: str | None = typer.Option(
             None,
             "--labels",
             "-l",
             help="Labels, comma or space separated (replaces existing)",
+            autocompletion=complete_labels,
         ),
         design: str | None = typer.Option(None, "--design", help="New design notes"),
         external_ref: str | None = typer.Option(
@@ -74,11 +96,13 @@ def register(app: typer.Typer) -> None:
             None,
             "--depends-on",
             help="Issue ID this depends on (this issue is blocked by the other)",
+            autocompletion=complete_issue_ids,
         ),
         blocks: str | None = typer.Option(
             None,
             "--blocks",
             help="Issue ID this blocks (the other issue is blocked by this one)",
+            autocompletion=complete_issue_ids,
         ),
         manual: bool | None = typer.Option(
             None,

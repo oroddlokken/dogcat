@@ -5,6 +5,7 @@ from __future__ import annotations
 import orjson
 import typer
 
+from ._completions import complete_issue_ids
 from ._formatting import format_issue_brief
 from ._helpers import get_default_operator, get_storage
 
@@ -196,7 +197,11 @@ def register(app: typer.Typer) -> None:
 
     @app.command(name="ir", hidden=True)
     def in_review_shortcut(
-        issue_id: str = typer.Argument(..., help="Issue ID"),
+        issue_id: str = typer.Argument(
+            ...,
+            help="Issue ID",
+            autocompletion=complete_issue_ids,
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         operator: str | None = typer.Option(
             None,
@@ -217,7 +222,11 @@ def register(app: typer.Typer) -> None:
 
     @app.command(name="ip", hidden=True)
     def in_progress_shortcut(
-        issue_id: str = typer.Argument(..., help="Issue ID"),
+        issue_id: str = typer.Argument(
+            ...,
+            help="Issue ID",
+            autocompletion=complete_issue_ids,
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         operator: str | None = typer.Option(
             None,
@@ -265,7 +274,11 @@ def register(app: typer.Typer) -> None:
 
     @app.command(name="defer", hidden=True)
     def defer_shortcut(
-        issue_id: str = typer.Argument(..., help="Issue ID"),
+        issue_id: str = typer.Argument(
+            ...,
+            help="Issue ID",
+            autocompletion=complete_issue_ids,
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         operator: str | None = typer.Option(
             None,
@@ -319,7 +332,11 @@ def register(app: typer.Typer) -> None:
 
     @app.command(name="mark-manual", hidden=True)
     def mark_manual_shortcut(
-        issue_id: str = typer.Argument(..., help="Issue ID"),
+        issue_id: str = typer.Argument(
+            ...,
+            help="Issue ID",
+            autocompletion=complete_issue_ids,
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         operator: str | None = typer.Option(
             None,
