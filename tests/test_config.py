@@ -167,7 +167,12 @@ class TestLoadSaveConfig:
 
     def test_config_file_is_valid_toml(self, tmp_path: Path) -> None:
         """Saved config file is valid TOML."""
-        import toml
+        import sys
+
+        if sys.version_info >= (3, 11):
+            import tomllib
+        else:
+            import tomli as tomllib
 
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
@@ -175,8 +180,8 @@ class TestLoadSaveConfig:
         save_config(str(dogcats_dir), {"issue_prefix": "test"})
 
         # Should not raise
-        with (dogcats_dir / CONFIG_FILENAME).open() as f:
-            parsed = toml.load(f)
+        with (dogcats_dir / CONFIG_FILENAME).open("rb") as f:
+            parsed = tomllib.load(f)
         assert parsed["issue_prefix"] == "test"
 
 

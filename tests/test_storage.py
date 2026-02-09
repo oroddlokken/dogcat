@@ -944,6 +944,354 @@ class TestUpdatableFieldsAllowlist:
         assert retrieved.status == Status.IN_PROGRESS
 
 
+class TestRemoveArchived:
+    """Test remove_archived() method."""
+
+    def test_remove_archived_removes_issues(self, storage: JSONLStorage) -> None:
+        """Test that archived issue IDs are removed from _issues."""
+        storage.create(Issue(id="a", namespace="t", title="A"))
+        storage.create(Issue(id="b", namespace="t", title="B"))
+        storage.create(Issue(id="c", namespace="t", title="C"))
+
+        storage.remove_archived({"t-a", "t-c"}, remaining_lines=1)
+
+        assert storage.get("t-a") is None
+        assert storage.get("t-b") is not None
+        assert storage.get("t-c") is None
+
+    def test_remove_archived_filters_dependencies_both_archived(
+        self,
+        storage: JSONLStorage,
+    ) -> None:
+        """Test that deps are removed when both sides are archived."""
+        storage.create(Issue(id="a", namespace="t", title="A"))
+        storage.create(Issue(id="b", namespace="t", title="B"))
+        storage.create(Issue(id="c", namespace="t", title="C"))
+        storage.add_dependency("t-a", "t-b", "blocks")
+        storage.add_dependency("t-b", "t-c", "blocks")
+
+        # Archive both a and b; dep t-a -> t-b should be filtered
+        # (both issue_id AND depends_on_id are in archived_ids)
+        storage.remove_archived({"t-a", "t-b"}, remaining_lines=1)
+
+        # Only t-b -> t-c dep remains (t-b is archived but t-c is not)
+        remaining_deps = storage.all_dependencies
+        assert len(remaining_deps) == 1
+        assert remaining_deps[0].issue_id == "t-b"
+        assert remaining_deps[0].depends_on_id == "t-c"
+
+    def test_remove_archived_keeps_deps_with_one_non_archived(
+        self,
+        storage: JSONLStorage,
+    ) -> None:
+        """Test that deps are kept when only one side is archived."""
+        storage.create(Issue(id="a", namespace="t", title="A"))
+        storage.create(Issue(id="b", namespace="t", title="B"))
+        storage.add_dependency("t-a", "t-b", "blocks")
+
+        # Archive only a; dep should remain because t-b is not archived
+        storage.remove_archived({"t-a"}, remaining_lines=1)
+
+        remaining_deps = storage.all_dependencies
+        assert len(remaining_deps) == 1
+
+    def test_remove_archived_filters_links_both_archived(
+        self,
+        storage: JSONLStorage,
+    ) -> None:
+        """Test that links are removed when both sides are archived."""
+        storage.create(Issue(id="a", namespace="t", title="A"))
+        storage.create(Issue(id="b", namespace="t", title="B"))
+        storage.create(Issue(id="c", namespace="t", title="C"))
+        storage.add_link("t-a", "t-b")
+        storage.add_link("t-b", "t-c")
+
+        # Archive both a and b; link t-a -> t-b should be filtered
+        storage.remove_archived({"t-a", "t-b"}, remaining_lines=1)
+
+        remaining_links = storage.all_links
+        assert len(remaining_links) == 1
+        assert remaining_links[0].from_id == "t-b"
+        assert remaining_links[0].to_id == "t-c"
+
+    def test_remove_archived_keeps_links_with_one_non_archived(
+        self,
+        storage: JSONLStorage,
+    ) -> None:
+        """Test that links are kept when only one side is archived."""
+        storage.create(Issue(id="a", namespace="t", title="A"))
+        storage.create(Issue(id="b", namespace="t", title="B"))
+        storage.add_link("t-a", "t-b")
+
+        # Archive only a; link should remain because t-b is not archived
+        storage.remove_archived({"t-a"}, remaining_lines=1)
+
+        remaining_links = storage.all_links
+        assert len(remaining_links) == 1
+
+    def test_remove_archived_rebuilds_indexes(self, storage: JSONLStorage) -> None:
+        """Test that indexes are rebuilt after removing archived issues."""
+        storage.create(
+            Issue(id="parent", namespace="t", title="Parent"),
+        )
+        storage.create(
+            Issue(id="child", namespace="t", title="Child", parent="t-parent"),
+        )
+
+        # Archive child
+        storage.remove_archived({"t-child"}, remaining_lines=1)
+
+        # Children index should be rebuilt without the archived child
+        children = storage.get_children("t-parent")
+        assert len(children) == 0
+
+    def test_remove_archived_updates_line_counts(self, storage: JSONLStorage) -> None:
+        """Test that _base_lines and _appended_lines are updated."""
+        storage.create(Issue(id="a", namespace="t", title="A"))
+        storage.create(Issue(id="b", namespace="t", title="B"))
+
+        storage.remove_archived({"t-a"}, remaining_lines=42)
+
+        assert storage._base_lines == 42
+        assert storage._appended_lines == 0
+
+    def test_remove_archived_no_ids(self, storage: JSONLStorage) -> None:
+        """Test remove_archived with empty set does not remove anything."""
+        storage.create(Issue(id="a", namespace="t", title="A"))
+
+        storage.remove_archived(set(), remaining_lines=1)
+
+        assert storage.get("t-a") is not None
+
+
+class TestAllDependenciesAndLinksProperties:
+    """Test all_dependencies and all_links properties."""
+
+    def test_all_dependencies_returns_copy(self, storage: JSONLStorage) -> None:
+        """Test that all_dependencies returns a copy of the internal list."""
+        storage.create(Issue(id="a", namespace="t", title="A"))
+        storage.create(Issue(id="b", namespace="t", title="B"))
+        storage.add_dependency("t-a", "t-b", "blocks")
+
+        deps = storage.all_dependencies
+        assert len(deps) == 1
+        assert deps[0].issue_id == "t-a"
+        assert deps[0].depends_on_id == "t-b"
+
+        # Modifying the returned list should not affect internal state
+        deps.clear()
+        assert len(storage.all_dependencies) == 1
+
+    def test_all_dependencies_empty(self, storage: JSONLStorage) -> None:
+        """Test all_dependencies returns empty list when no deps exist."""
+        storage.create(Issue(id="a", namespace="t", title="A"))
+
+        assert storage.all_dependencies == []
+
+    def test_all_links_returns_copy(self, storage: JSONLStorage) -> None:
+        """Test that all_links returns a copy of the internal list."""
+        storage.create(Issue(id="a", namespace="t", title="A"))
+        storage.create(Issue(id="b", namespace="t", title="B"))
+        storage.add_link("t-a", "t-b")
+
+        links = storage.all_links
+        assert len(links) == 1
+        assert links[0].from_id == "t-a"
+        assert links[0].to_id == "t-b"
+
+        # Modifying the returned list should not affect internal state
+        links.clear()
+        assert len(storage.all_links) == 1
+
+    def test_all_links_empty(self, storage: JSONLStorage) -> None:
+        """Test all_links returns empty list when no links exist."""
+        storage.create(Issue(id="a", namespace="t", title="A"))
+
+        assert storage.all_links == []
+
+
+class TestCheckIdUniqueness:
+    """Test check_id_uniqueness() method."""
+
+    def test_check_id_uniqueness_returns_true(self, storage: JSONLStorage) -> None:
+        """Test that check_id_uniqueness always returns True."""
+        assert storage.check_id_uniqueness() is True
+
+    def test_check_id_uniqueness_with_issues(self, storage: JSONLStorage) -> None:
+        """Test check_id_uniqueness with populated storage."""
+        storage.create(Issue(id="a", namespace="t", title="A"))
+        storage.create(Issue(id="b", namespace="t", title="B"))
+
+        assert storage.check_id_uniqueness() is True
+
+    def test_check_id_uniqueness_empty_storage(self, storage: JSONLStorage) -> None:
+        """Test check_id_uniqueness with empty storage."""
+        assert storage.check_id_uniqueness() is True
+
+
+class TestFindDanglingDependencies:
+    """Test find_dangling_dependencies() method."""
+
+    def test_no_dangling_deps(self, storage: JSONLStorage) -> None:
+        """Test that no dangling deps found when all issues exist."""
+        storage.create(Issue(id="a", namespace="t", title="A"))
+        storage.create(Issue(id="b", namespace="t", title="B"))
+        storage.add_dependency("t-a", "t-b", "blocks")
+
+        dangling = storage.find_dangling_dependencies()
+        assert dangling == []
+
+    def test_dangling_dep_issue_id_missing(self, storage: JSONLStorage) -> None:
+        """Test finding deps where issue_id no longer exists."""
+        storage.create(Issue(id="a", namespace="t", title="A"))
+        storage.create(Issue(id="b", namespace="t", title="B"))
+        storage.add_dependency("t-a", "t-b", "blocks")
+
+        # Simulate that t-a was removed from _issues (e.g. by external manipulation)
+        del storage._issues["t-a"]
+
+        dangling = storage.find_dangling_dependencies()
+        assert len(dangling) == 1
+        assert dangling[0].issue_id == "t-a"
+
+    def test_dangling_dep_depends_on_id_missing(self, storage: JSONLStorage) -> None:
+        """Test finding deps where depends_on_id no longer exists."""
+        storage.create(Issue(id="a", namespace="t", title="A"))
+        storage.create(Issue(id="b", namespace="t", title="B"))
+        storage.add_dependency("t-a", "t-b", "blocks")
+
+        # Simulate that t-b was removed
+        del storage._issues["t-b"]
+
+        dangling = storage.find_dangling_dependencies()
+        assert len(dangling) == 1
+        assert dangling[0].depends_on_id == "t-b"
+
+    def test_no_dangling_when_no_deps(self, storage: JSONLStorage) -> None:
+        """Test that empty list returned when there are no dependencies."""
+        storage.create(Issue(id="a", namespace="t", title="A"))
+
+        dangling = storage.find_dangling_dependencies()
+        assert dangling == []
+
+
+class TestRemoveDependencies:
+    """Test remove_dependencies() method."""
+
+    def test_remove_specific_dependencies(self, storage: JSONLStorage) -> None:
+        """Test removing specific dependency records."""
+        storage.create(Issue(id="a", namespace="t", title="A"))
+        storage.create(Issue(id="b", namespace="t", title="B"))
+        storage.create(Issue(id="c", namespace="t", title="C"))
+        dep1 = storage.add_dependency("t-a", "t-b", "blocks")
+        storage.add_dependency("t-a", "t-c", "blocks")
+
+        storage.remove_dependencies([dep1])
+
+        remaining = storage.all_dependencies
+        assert len(remaining) == 1
+        assert remaining[0].depends_on_id == "t-c"
+
+    def test_remove_dependencies_rebuilds_indexes(self, storage: JSONLStorage) -> None:
+        """Test that indexes are rebuilt after removing dependencies."""
+        storage.create(Issue(id="a", namespace="t", title="A"))
+        storage.create(Issue(id="b", namespace="t", title="B"))
+        dep = storage.add_dependency("t-a", "t-b", "blocks")
+
+        storage.remove_dependencies([dep])
+
+        # Index-based lookup should reflect the removal
+        assert len(storage.get_dependencies("t-a")) == 0
+        assert len(storage.get_dependents("t-b")) == 0
+
+    def test_remove_dependencies_persists(self, temp_workspace: Path) -> None:
+        """Test that remove_dependencies rewrites storage file."""
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+
+        storage.create(Issue(id="a", namespace="t", title="A"))
+        storage.create(Issue(id="b", namespace="t", title="B"))
+        dep = storage.add_dependency("t-a", "t-b", "blocks")
+
+        storage.remove_dependencies([dep])
+
+        # Reload from disk
+        storage2 = JSONLStorage(str(storage_path))
+        assert len(storage2.all_dependencies) == 0
+
+    def test_remove_empty_list(self, storage: JSONLStorage) -> None:
+        """Test removing empty list of dependencies is a no-op."""
+        storage.create(Issue(id="a", namespace="t", title="A"))
+        storage.create(Issue(id="b", namespace="t", title="B"))
+        storage.add_dependency("t-a", "t-b", "blocks")
+
+        storage.remove_dependencies([])
+
+        assert len(storage.all_dependencies) == 1
+
+
+class TestFileLock:
+    """Test _file_lock() for concurrent write safety."""
+
+    def test_file_lock_creates_lock_file(self, temp_workspace: Path) -> None:
+        """Test that file lock creates a lock file."""
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+
+        with storage._file_lock():
+            assert storage._lock_path.exists()
+
+    def test_file_lock_is_reentrant_safe(self, temp_workspace: Path) -> None:
+        """Test that sequential lock acquisitions work correctly."""
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+
+        # Acquire and release lock twice in sequence
+        with storage._file_lock():
+            pass
+        with storage._file_lock():
+            pass
+
+    def test_concurrent_writes_dont_corrupt(self, temp_workspace: Path) -> None:
+        """Test that concurrent writes under lock don't corrupt data."""
+        import threading
+
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        JSONLStorage(str(storage_path), create_dir=True)
+
+        errors: list[Exception] = []
+
+        def create_issues(start: int, count: int) -> None:
+            try:
+                local_storage = JSONLStorage(str(storage_path))
+                for i in range(start, start + count):
+                    local_storage.create(Issue(id=f"issue-{i}", title=f"Issue {i}"))
+            except Exception as e:
+                errors.append(e)
+
+        # Create issues from two threads
+        t1 = threading.Thread(target=create_issues, args=(0, 10))
+        t2 = threading.Thread(target=create_issues, args=(100, 10))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        # Reload and verify data integrity
+        final_storage = JSONLStorage(str(storage_path))
+        all_issues = final_storage.list()
+
+        # Should not have any errors (though duplicate IDs might if threads overlap)
+        # The important thing is no corruption - all existing issues can be loaded
+        assert len(all_issues) > 0
+        # Each line in the file should be valid JSON
+        with storage_path.open() as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    json.loads(line)  # Should not raise
+
+
 def _count_lines(path: Path) -> int:
     """Count non-empty lines in a file."""
     with path.open() as f:

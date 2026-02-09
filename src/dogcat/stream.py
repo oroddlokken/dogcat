@@ -71,6 +71,7 @@ class StreamEmitter(FileSystemEventHandler):
         self.by = by
         self.on_event = on_event
         self.current_state: dict[str, Any] = {}
+        self._file_position: int = 0
         self._load_current_state()
 
     def _load_current_state(self) -> None:
@@ -81,10 +82,12 @@ class StreamEmitter(FileSystemEventHandler):
                 storage = JSONLStorage(str(self.storage_path))
                 for issue in storage.list():
                     self.current_state[issue.full_id] = issue_to_dict(issue)
+                # Record file position so subsequent changes only parse new lines
+                self._file_position = self.storage_path.stat().st_size
             except (ValueError, RuntimeError, OSError):
                 # If we can't load (corrupted file, permission issues, etc.),
                 # start fresh
-                pass
+                self._file_position = 0
 
     def _compute_diff(
         self,
@@ -187,31 +190,98 @@ class StreamEmitter(FileSystemEventHandler):
     def _handle_file_change(self) -> None:
         """Load new state and emit events for any changes.
 
-        Uses retries with small delays to handle race conditions when the file
-        is being written by another process (atomic write in progress).
+        Uses incremental parsing when possible: only reads bytes appended since
+        the last known file position.  Falls back to a full reload when the file
+        has been replaced (e.g. after compaction) or when incremental parsing
+        fails.  Retries with small delays handle race conditions during atomic
+        writes.
         """
-        # Load the new state with retries
-        new_state: dict[str, Any] = {}
+        last_error: Exception | None = None
+
+        for attempt in range(_RETRY_ATTEMPTS):
+            try:
+                current_size = self.storage_path.stat().st_size
+                break
+            except OSError as e:
+                last_error = e
+                if attempt < _RETRY_ATTEMPTS - 1:
+                    time.sleep(_RETRY_DELAY_MS / 1000)
+        else:
+            return  # file disappeared or unreadable
+
+        # If the file shrank, it was compacted/replaced — full reload needed
+        if current_size < self._file_position:
+            self._full_reload()
+            return
+
+        # If the file hasn't changed, nothing to do
+        if current_size == self._file_position:
+            return
+
+        # Try incremental parse of only the new bytes
+        new_state = dict(self.current_state)
         last_error = None
+
+        for attempt in range(_RETRY_ATTEMPTS):
+            try:
+                with self.storage_path.open("rb") as f:
+                    f.seek(self._file_position)
+                    new_bytes = f.read()
+
+                for line in new_bytes.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    data = orjson.loads(line)
+                    from dogcat.models import classify_record, dict_to_issue
+
+                    rtype = classify_record(data)
+                    if rtype == "issue":
+                        issue = dict_to_issue(data)
+                        new_state[issue.full_id] = issue_to_dict(issue)
+
+                self._file_position = current_size
+                last_error = None
+                break
+            except (orjson.JSONDecodeError, ValueError, RuntimeError, OSError) as e:
+                last_error = e
+                if attempt < _RETRY_ATTEMPTS - 1:
+                    time.sleep(_RETRY_DELAY_MS / 1000)
+
+        if last_error is not None:
+            # Incremental parse failed — fall back to full reload
+            self._full_reload()
+            return
+
+        # Compute diff and emit events
+        events = self._compute_diff(self.current_state, new_state)
+        self.current_state = new_state
+
+        for event_obj in events:
+            if self.on_event:
+                self.on_event(event_obj)
+
+    def _full_reload(self) -> None:
+        """Full reload: re-parse the entire file and emit events."""
+        new_state: dict[str, Any] = {}
+        last_error: Exception | None = None
 
         for attempt in range(_RETRY_ATTEMPTS):
             try:
                 storage = JSONLStorage(str(self.storage_path))
                 for issue in storage.list():
                     new_state[issue.full_id] = issue_to_dict(issue)
+                self._file_position = self.storage_path.stat().st_size
                 last_error = None
-                break  # Success
+                break
             except (ValueError, RuntimeError, OSError) as e:
                 last_error = e
                 if attempt < _RETRY_ATTEMPTS - 1:
-                    # Wait before retry (file may still be in atomic write)
                     time.sleep(_RETRY_DELAY_MS / 1000)
 
         if last_error is not None:
-            # All retries failed - skip this change event
             return
 
-        # Compute diff and emit events
         events = self._compute_diff(self.current_state, new_state)
         self.current_state = new_state
 

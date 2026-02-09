@@ -2,17 +2,22 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import orjson
 import typer
 
 from ._helpers import get_default_operator, get_storage
+
+if TYPE_CHECKING:
+    from dogcat.storage import JSONLStorage
 
 
 def register(app: typer.Typer) -> None:
     """Register close, delete, and remove commands."""
 
     def _close_one(
-        storage: object,
+        storage: JSONLStorage,
         issue_id: str,
         reason: str | None,
         closed_by: str | None,
@@ -20,7 +25,7 @@ def register(app: typer.Typer) -> None:
     ) -> bool:
         """Close a single issue. Returns True if an error occurred."""
         try:
-            issue = storage.close(  # type: ignore[union-attr]
+            issue = storage.close(
                 issue_id,
                 reason=reason,
                 closed_by=closed_by,
@@ -78,7 +83,7 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(1)
 
     def _delete_one(
-        storage: object,
+        storage: JSONLStorage,
         issue_id: str,
         reason: str | None,
         deleted_by: str | None,
@@ -86,7 +91,7 @@ def register(app: typer.Typer) -> None:
     ) -> bool:
         """Delete a single issue. Returns True if an error occurred."""
         try:
-            deleted_issue = storage.delete(  # type: ignore[union-attr]
+            deleted_issue = storage.delete(
                 issue_id,
                 reason=reason,
                 deleted_by=deleted_by,
@@ -170,7 +175,7 @@ def register(app: typer.Typer) -> None:
         """
         # Just call delete with the same parameters
         delete(
-            issue_id=issue_id,
+            issue_ids=[issue_id],
             reason=reason,
             json_output=json_output,
             deleted_by=deleted_by,

@@ -267,9 +267,7 @@ def register(app: typer.Typer) -> None:
         if issues_file.exists() and issues_valid:
             try:
                 storage = get_storage(dogcats_dir)
-                issue_ids = list(storage._issues.keys())
-                if len(issue_ids) != len(set(issue_ids)):
-                    issue_ids_unique = False
+                issue_ids_unique = storage.check_id_uniqueness()
             except Exception:
                 issue_ids_unique = False
 
@@ -287,13 +285,9 @@ def register(app: typer.Typer) -> None:
         if issues_file.exists() and issues_valid:
             try:
                 storage = get_storage(dogcats_dir)
-                for dep in storage._dependencies:
-                    if (
-                        dep.issue_id not in storage._issues
-                        or dep.depends_on_id not in storage._issues
-                    ):
-                        deps_ok = False
-                        dangling_deps.append(dep)
+                dangling_deps = storage.find_dangling_dependencies()
+                if dangling_deps:
+                    deps_ok = False
             except Exception:
                 deps_ok = False
 
@@ -301,9 +295,7 @@ def register(app: typer.Typer) -> None:
         if fix and not deps_ok and dangling_deps:
             try:
                 storage = get_storage(dogcats_dir)
-                for dep in dangling_deps:
-                    storage._dependencies.remove(dep)
-                storage._save()
+                storage.remove_dependencies(dangling_deps)
                 deps_ok = True
                 typer.echo(
                     f"Fixed: Removed {len(dangling_deps)} "
@@ -384,32 +376,27 @@ def register(app: typer.Typer) -> None:
 
             from dogcat.models import issue_to_dict
 
-            # Get all dependencies and links
-            all_deps: list[dict[str, Any]] = []
-            all_links: list[dict[str, Any]] = []
-            for issue in issues:
-                deps = storage.get_dependencies(issue.full_id)
-                all_deps.extend(
-                    {
-                        "issue_id": dep.issue_id,
-                        "depends_on_id": dep.depends_on_id,
-                        "type": dep.dep_type.value,
-                        "created_at": dep.created_at.isoformat(),
-                        "created_by": dep.created_by,
-                    }
-                    for dep in deps
-                )
-                links = storage.get_links(issue.full_id)
-                all_links.extend(
-                    {
-                        "from_id": link.from_id,
-                        "to_id": link.to_id,
-                        "link_type": link.link_type,
-                        "created_at": link.created_at.isoformat(),
-                        "created_by": link.created_by,
-                    }
-                    for link in links
-                )
+            # Get all dependencies and links directly (avoids per-issue iteration dups)
+            all_deps: list[dict[str, Any]] = [
+                {
+                    "issue_id": dep.issue_id,
+                    "depends_on_id": dep.depends_on_id,
+                    "type": dep.dep_type.value,
+                    "created_at": dep.created_at.isoformat(),
+                    "created_by": dep.created_by,
+                }
+                for dep in storage.all_dependencies
+            ]
+            all_links: list[dict[str, Any]] = [
+                {
+                    "from_id": link.from_id,
+                    "to_id": link.to_id,
+                    "link_type": link.link_type,
+                    "created_at": link.created_at.isoformat(),
+                    "created_by": link.created_by,
+                }
+                for link in storage.all_links
+            ]
 
             if format_type == "json":
                 # table-printed JSON object with all data

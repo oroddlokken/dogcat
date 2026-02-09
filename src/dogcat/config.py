@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any
 
 import orjson
-import toml
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
+
+import tomli_w
 
 from dogcat.constants import DOGCATRC_FILENAME
 from dogcat.models import classify_record
@@ -88,9 +95,9 @@ def load_config(dogcats_dir: str) -> dict[str, Any]:
         return {}
 
     try:
-        with config_path.open() as f:
-            return toml.load(f)
-    except (toml.TomlDecodeError, OSError):
+        with config_path.open("rb") as f:
+            return tomllib.load(f)
+    except (tomllib.TOMLDecodeError, OSError):
         return {}
 
 
@@ -106,8 +113,8 @@ def save_config(dogcats_dir: str, config: dict[str, Any]) -> None:
     # Ensure directory exists
     config_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with config_path.open("w") as f:
-        toml.dump(config, f)
+    with config_path.open("wb") as f:
+        tomli_w.dump(config, f)
 
 
 def get_issue_prefix(dogcats_dir: str) -> str:

@@ -214,6 +214,7 @@ def format_issue_table(
 
     from rich import box
     from rich.console import Console
+    from rich.markup import escape
     from rich.table import Table
 
     if not issues:
@@ -260,7 +261,9 @@ def format_issue_table(
                 issue.parent.split("-", 1)[-1] if "-" in issue.parent else issue.parent
             )
 
-        labels_str = ", ".join(issue.labels) if issue.labels else ""
+        labels_str = (
+            ", ".join(escape(lbl) for lbl in issue.labels) if issue.labels else ""
+        )
         manual_str = (
             " [yellow]\\[manual][/]"
             if issue.metadata.get("manual") or issue.metadata.get("no_agent")
@@ -273,7 +276,7 @@ def format_issue_table(
             parent_id,
             f"[{type_color}]{issue_type}[/]",
             f"[{priority_color}]{issue.priority}[/]",
-            f"{issue.title}{manual_str}",
+            f"{escape(issue.title)}{manual_str}",
             f"[cyan]{labels_str}[/]" if labels_str else "",
         ]
         if has_blocked:

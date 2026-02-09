@@ -327,26 +327,7 @@ def register(app: typer.Typer) -> None:
                 raise RuntimeError(msg) from e
 
             # Update in-memory state
-            for issue in archivable:
-                del storage._issues[issue.full_id]
-
-            storage._dependencies = [
-                dep
-                for dep in storage._dependencies
-                if dep.issue_id not in archivable_ids
-                or dep.depends_on_id not in archivable_ids
-            ]
-
-            storage._links = [
-                link
-                for link in storage._links
-                if link.from_id not in archivable_ids
-                or link.to_id not in archivable_ids
-            ]
-
-            storage._rebuild_indexes()
-            storage._base_lines = len(remaining_lines)
-            storage._appended_lines = 0
+            storage.remove_archived(archivable_ids, len(remaining_lines))
 
             typer.echo(f"\n✓ Archived {len(archivable)} issue(s) to {archive_path}")
             if archived_dep_count:

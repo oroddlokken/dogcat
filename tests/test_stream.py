@@ -277,3 +277,153 @@ class TestStreamIntegration:
 
         assert len(events) > 0
         assert events[0].by == "user@example.com"
+
+
+class TestStreamEmitterIncrementalParsing:
+    """Test incremental parsing in StreamEmitter._handle_file_change()."""
+
+    def test_incremental_parse_on_append(self, temp_dogcats_dir: Path) -> None:
+        """Test that appending to the file triggers incremental parse."""
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path))
+        storage.create(Issue(id="issue-1", title="First"))
+
+        # Create emitter (loads initial state and records file position)
+        captured_events: list[StreamEvent] = []
+        emitter = StreamEmitter(
+            str(storage_path),
+            on_event=lambda e: captured_events.append(e),
+        )
+        initial_position = emitter._file_position
+
+        # Append a new issue to the file
+        storage.create(Issue(id="issue-2", title="Second"))
+
+        # Trigger file change handling
+        emitter._handle_file_change()  # noqa: SLF001
+
+        # Position should have advanced (incremental parse)
+        assert emitter._file_position > initial_position
+
+        # Should detect the new issue
+        assert len(captured_events) == 1
+        assert captured_events[0].event_type == "created"
+        assert captured_events[0].issue_id == "dc-issue-2"
+
+    def test_full_reload_on_file_shrink(self, temp_dogcats_dir: Path) -> None:
+        """Test that file shrinking triggers full reload instead of incremental."""
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path))
+
+        # Create several issues to build up file size
+        storage.create(Issue(id="issue-1", title="First"))
+        storage.create(Issue(id="issue-2", title="Second"))
+        storage.create(Issue(id="issue-3", title="Third"))
+
+        # Create emitter with state for all three issues
+        captured_events: list[StreamEvent] = []
+        emitter = StreamEmitter(
+            str(storage_path),
+            on_event=lambda e: captured_events.append(e),
+        )
+
+        assert emitter._file_position > 0
+        assert len(emitter.current_state) == 3
+
+        # Simulate compaction by rewriting file with fewer lines
+        # (keeping only dc-issue-1, removing dc-issue-2 and dc-issue-3)
+        storage._issues = {
+            "dc-issue-1": storage._issues["dc-issue-1"],
+        }
+        storage._dependencies = []
+        storage._links = []
+        storage._save()
+
+        # Now file is smaller than file_position — should trigger full reload
+        emitter._handle_file_change()  # noqa: SLF001
+
+        # After full reload, state should have only dc-issue-1
+        assert len(emitter.current_state) == 1
+        assert "dc-issue-1" in emitter.current_state
+
+        # Should have emitted delete events for dc-issue-2 and dc-issue-3
+        delete_events = [e for e in captured_events if e.event_type == "deleted"]
+        assert len(delete_events) == 2
+
+    def test_no_change_when_file_unchanged(self, temp_dogcats_dir: Path) -> None:
+        """Test that no events are emitted when file size hasn't changed."""
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path))
+        storage.create(Issue(id="issue-1", title="First"))
+
+        captured_events: list[StreamEvent] = []
+        emitter = StreamEmitter(
+            str(storage_path),
+            on_event=lambda e: captured_events.append(e),
+        )
+
+        # Call handle_file_change without any actual file changes
+        emitter._handle_file_change()  # noqa: SLF001
+
+        assert len(captured_events) == 0
+
+    def test_incremental_parse_detects_update(self, temp_dogcats_dir: Path) -> None:
+        """Test that incremental parse detects issue updates."""
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path))
+        storage.create(Issue(id="issue-1", title="Original"))
+
+        captured_events: list[StreamEvent] = []
+        emitter = StreamEmitter(
+            str(storage_path),
+            on_event=lambda e: captured_events.append(e),
+        )
+
+        # Update the issue (appends new line)
+        storage.update("issue-1", {"title": "Updated"})
+
+        emitter._handle_file_change()  # noqa: SLF001
+
+        assert len(captured_events) == 1
+        assert captured_events[0].event_type == "updated"
+        assert "title" in captured_events[0].changes
+        assert captured_events[0].changes["title"]["old"] == "Original"
+        assert captured_events[0].changes["title"]["new"] == "Updated"
+
+    def test_handle_file_change_survives_missing_file(
+        self,
+        temp_dogcats_dir: Path,
+    ) -> None:
+        """Test that handle_file_change doesn't crash if file disappears."""
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path))
+        storage.create(Issue(id="issue-1", title="First"))
+
+        emitter = StreamEmitter(str(storage_path))
+
+        # Delete the file
+        storage_path.unlink()
+
+        # Should not raise
+        emitter._handle_file_change()  # noqa: SLF001
+
+    def test_callback_called_for_each_event(self, temp_dogcats_dir: Path) -> None:
+        """Test that on_event callback is called for each detected event."""
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path))
+
+        captured_events: list[StreamEvent] = []
+        emitter = StreamEmitter(
+            str(storage_path),
+            on_event=lambda e: captured_events.append(e),
+        )
+
+        # Create two issues
+        storage.create(Issue(id="issue-1", title="First"))
+        storage.create(Issue(id="issue-2", title="Second"))
+
+        emitter._handle_file_change()  # noqa: SLF001
+
+        assert len(captured_events) == 2
+        event_types = {e.event_type for e in captured_events}
+        assert event_types == {"created"}

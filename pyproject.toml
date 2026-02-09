@@ -8,9 +8,10 @@ dependencies = [
     "typer>=0.14.0",
     "watchdog>=4.0.0",
     "rich>=14.3.2",
-    "toml>=0.10.2",
     "orjson>=3.11.7",
     "textual>=7.5.0",
+    "tomli-w>=1.0.0",
+    "tomli>=2.0.0; python_version < '3.11'",
 ]
 
 [project.scripts]

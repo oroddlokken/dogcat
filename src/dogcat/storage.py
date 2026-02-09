@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import fcntl
 import tempfile
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 import orjson
 
@@ -69,6 +74,8 @@ class JSONLStorage:
             raise ValueError(
                 msg,
             )
+
+        self._lock_path = self.dogcats_dir / ".issues.lock"
 
         # Load existing issues if file exists
         if self.path.exists():
@@ -181,76 +188,88 @@ class JSONLStorage:
                     issue.full_id,
                 )
 
+    @contextmanager
+    def _file_lock(self) -> Iterator[None]:
+        """Acquire an advisory file lock for exclusive writes."""
+        lock_fd = self._lock_path.open("w")
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            lock_fd.close()
+
     def _save(self) -> None:
         """Compact: rewrite the entire file with only current state.
 
         Eliminates superseded issue records, removed dependencies/links,
         and resets the append counter.
         """
-        # Write to temporary file first
-        with tempfile.NamedTemporaryFile(
-            mode="wb",
-            dir=self.dogcats_dir,
-            delete=False,
-            suffix=".jsonl",
-        ) as tmp_file:
-            tmp_path = Path(tmp_file.name)
+        with self._file_lock():
+            # Write to temporary file first
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                dir=self.dogcats_dir,
+                delete=False,
+                suffix=".jsonl",
+            ) as tmp_file:
+                tmp_path = Path(tmp_file.name)
 
+                try:
+                    line_count = 0
+                    # Write all issues
+                    for issue in self._issues.values():
+                        data = issue_to_dict(issue)
+                        tmp_file.write(orjson.dumps(data))
+                        tmp_file.write(b"\n")
+                        line_count += 1
+
+                    # Write all dependencies
+                    for dep in self._dependencies:
+                        dep_data = {
+                            "record_type": "dependency",
+                            "dcat_version": _dcat_version,
+                            "issue_id": dep.issue_id,
+                            "depends_on_id": dep.depends_on_id,
+                            "type": dep.dep_type.value,
+                            "created_at": dep.created_at.isoformat(),
+                            "created_by": dep.created_by,
+                        }
+                        tmp_file.write(orjson.dumps(dep_data))
+                        tmp_file.write(b"\n")
+                        line_count += 1
+
+                    # Write all links
+                    for link in self._links:
+                        link_data = {
+                            "record_type": "link",
+                            "dcat_version": _dcat_version,
+                            "from_id": link.from_id,
+                            "to_id": link.to_id,
+                            "link_type": link.link_type,
+                            "created_at": link.created_at.isoformat(),
+                            "created_by": link.created_by,
+                        }
+                        tmp_file.write(orjson.dumps(link_data))
+                        tmp_file.write(b"\n")
+                        line_count += 1
+
+                    tmp_file.flush()
+                except Exception as e:
+                    tmp_path.unlink(missing_ok=True)
+                    msg = f"Failed to write to temporary file: {e}"
+                    raise RuntimeError(msg) from e
+
+            # Atomic rename to target file
             try:
-                line_count = 0
-                # Write all issues
-                for issue in self._issues.values():
-                    data = issue_to_dict(issue)
-                    tmp_file.write(orjson.dumps(data))
-                    tmp_file.write(b"\n")
-                    line_count += 1
-
-                # Write all dependencies
-                for dep in self._dependencies:
-                    dep_data = {
-                        "record_type": "dependency",
-                        "dcat_version": _dcat_version,
-                        "issue_id": dep.issue_id,
-                        "depends_on_id": dep.depends_on_id,
-                        "type": dep.dep_type.value,
-                        "created_at": dep.created_at.isoformat(),
-                        "created_by": dep.created_by,
-                    }
-                    tmp_file.write(orjson.dumps(dep_data))
-                    tmp_file.write(b"\n")
-                    line_count += 1
-
-                # Write all links
-                for link in self._links:
-                    link_data = {
-                        "record_type": "link",
-                        "dcat_version": _dcat_version,
-                        "from_id": link.from_id,
-                        "to_id": link.to_id,
-                        "link_type": link.link_type,
-                        "created_at": link.created_at.isoformat(),
-                        "created_by": link.created_by,
-                    }
-                    tmp_file.write(orjson.dumps(link_data))
-                    tmp_file.write(b"\n")
-                    line_count += 1
-
-                tmp_file.flush()
-            except Exception as e:
+                tmp_path.replace(self.path)
+            except OSError as e:
                 tmp_path.unlink(missing_ok=True)
-                msg = f"Failed to write to temporary file: {e}"
+                msg = f"Failed to write storage file: {e}"
                 raise RuntimeError(msg) from e
 
-        # Atomic rename to target file
-        try:
-            tmp_path.replace(self.path)
-        except OSError as e:
-            tmp_path.unlink(missing_ok=True)
-            msg = f"Failed to write storage file: {e}"
-            raise RuntimeError(msg) from e
-
-        self._base_lines = line_count
-        self._appended_lines = 0
+            self._base_lines = line_count
+            self._appended_lines = 0
 
     def _append(self, records: list[dict[str, Any]]) -> None:
         """Append records to the JSONL file without rewriting it.
@@ -258,15 +277,16 @@ class JSONLStorage:
         Args:
             records: List of dicts to serialize and append as JSONL lines.
         """
-        try:
-            with self.path.open("ab") as f:
-                for record in records:
-                    f.write(orjson.dumps(record))
-                    f.write(b"\n")
-                f.flush()
-        except OSError as e:
-            msg = f"Failed to append to storage file: {e}"
-            raise RuntimeError(msg) from e
+        with self._file_lock():
+            try:
+                with self.path.open("ab") as f:
+                    for record in records:
+                        f.write(orjson.dumps(record))
+                        f.write(b"\n")
+                    f.flush()
+            except OSError as e:
+                msg = f"Failed to append to storage file: {e}"
+                raise RuntimeError(msg) from e
 
         self._appended_lines += len(records)
         self._maybe_compact()
@@ -926,6 +946,84 @@ class JSONLStorage:
         This re-reads the JSONL file and updates the in-memory state.
         """
         self._load()
+
+    def remove_archived(self, archived_ids: set[str], remaining_lines: int) -> None:
+        """Remove archived issues, dependencies, and links from in-memory state.
+
+        Called after the archive command has already rewritten the JSONL files.
+        Updates indexes and bookkeeping to reflect the new file contents.
+
+        Args:
+            archived_ids: Set of issue IDs that were archived.
+            remaining_lines: Number of lines in the rewritten storage file.
+        """
+        for issue_id in archived_ids:
+            self._issues.pop(issue_id, None)
+
+        self._dependencies = [
+            dep
+            for dep in self._dependencies
+            if dep.issue_id not in archived_ids or dep.depends_on_id not in archived_ids
+        ]
+
+        self._links = [
+            link
+            for link in self._links
+            if link.from_id not in archived_ids or link.to_id not in archived_ids
+        ]
+
+        self._rebuild_indexes()
+        self._base_lines = remaining_lines
+        self._appended_lines = 0
+
+    @property
+    def all_dependencies(self) -> list[Dependency]:
+        """Return all dependency records."""
+        return list(self._dependencies)
+
+    @property
+    def all_links(self) -> list[Link]:
+        """Return all link records."""
+        return list(self._links)
+
+    def check_id_uniqueness(self) -> bool:
+        """Check if all issue IDs are unique.
+
+        Returns:
+            True if all IDs are unique (dict keys are always unique,
+            so this checks the loaded state is consistent).
+        """
+        # Since _issues is a dict, IDs are unique by construction after replay.
+        # This always returns True but provides a public API for doctor checks.
+        return True
+
+    def find_dangling_dependencies(self) -> list[Dependency]:
+        """Find dependencies that reference non-existent issues.
+
+        Returns:
+            List of dependencies where either issue_id or depends_on_id
+            is not in storage.
+        """
+        return [
+            dep
+            for dep in self._dependencies
+            if dep.issue_id not in self._issues or dep.depends_on_id not in self._issues
+        ]
+
+    def remove_dependencies(self, deps_to_remove: list[Dependency]) -> None:
+        """Remove specific dependency records and rewrite storage.
+
+        Args:
+            deps_to_remove: Dependencies to remove.
+        """
+        remove_set = {(d.issue_id, d.depends_on_id, d.dep_type) for d in deps_to_remove}
+        self._dependencies = [
+            d
+            for d in self._dependencies
+            if (d.issue_id, d.depends_on_id, d.dep_type) not in remove_set
+        ]
+        self._rebuild_indexes()
+        self._save()
 
     def prune_tombstones(self) -> list[str]:
         """Permanently remove tombstoned issues from storage.

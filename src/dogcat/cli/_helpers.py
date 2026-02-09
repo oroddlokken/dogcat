@@ -103,7 +103,9 @@ def find_dogcats_dir(start_dir: str | None = None) -> str:
     """Find .dogcats directory by searching upward from start_dir.
 
     Checks for .dogcatrc first (external directory reference), then falls back
-    to searching for .dogcats/ directly. Similar to how git finds .git directories.
+    to searching for .dogcats/ directly. If the upward walk fails, checks the
+    main git worktree root (via ``git rev-parse --git-common-dir``) so that
+    linked worktrees transparently share the main tree's .dogcats directory.
 
     Args:
         start_dir: Directory to start searching from (default: current directory)
@@ -138,9 +140,43 @@ def find_dogcats_dir(start_dir: str | None = None) -> str:
 
         parent = current.parent
         if parent == current:
-            # Reached filesystem root, not found
-            return ".dogcats"
+            # Reached filesystem root — try git worktree fallback
+            return _find_dogcats_via_worktree() or ".dogcats"
         current = parent
+
+
+def _find_dogcats_via_worktree() -> str | None:
+    """Check the main git worktree root for a .dogcats directory.
+
+    In a linked worktree, ``git rev-parse --git-common-dir`` points back to
+    the main worktree's ``.git`` directory.  We resolve the main worktree root
+    from that and look for ``.dogcats`` there.
+
+    Returns:
+        Path to .dogcats directory, or None if not found or not in a git repo.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+
+        # --git-common-dir returns the path to the shared .git directory.
+        # The main worktree root is its parent.
+        common_git_dir = Path(result.stdout.strip()).resolve()
+        main_worktree_root = common_git_dir.parent
+
+        candidate = main_worktree_root / ".dogcats"
+        if candidate.is_dir():
+            return str(candidate)
+    except (FileNotFoundError, OSError):
+        pass
+
+    return None
 
 
 def get_storage(

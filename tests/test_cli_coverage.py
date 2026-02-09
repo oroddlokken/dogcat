@@ -3103,3 +3103,91 @@ class TestProgressReview:
         assert len(data["in_progress"]) == 1
         assert data["in_progress"][0]["title"] == "Task A"
         assert len(data["in_review"]) == 0
+
+
+class TestRemoveCommand:
+    """Test the 'remove' command (alias for delete with single issue_id)."""
+
+    def test_remove_deletes_issue(self, tmp_path: Path) -> None:
+        """Test that remove command creates a tombstone for the issue."""
+        dogcats_dir, ids = _init_and_create(tmp_path, "Issue to remove")
+
+        result = runner.invoke(
+            app,
+            [
+                "remove",
+                ids[0],
+                "--reason",
+                "Not needed",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Deleted" in result.stdout
+
+    def test_remove_with_json_output(self, tmp_path: Path) -> None:
+        """Test that remove command works with JSON output."""
+        dogcats_dir, ids = _init_and_create(tmp_path, "JSON remove test")
+
+        result = runner.invoke(
+            app,
+            [
+                "remove",
+                ids[0],
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["status"] == "tombstone"
+
+    def test_remove_nonexistent_issue(self, tmp_path: Path) -> None:
+        """Test that remove on a nonexistent issue fails."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            [
+                "remove",
+                "nonexistent",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 1
+
+    def test_remove_with_deleted_by(self, tmp_path: Path) -> None:
+        """Test that remove passes deleted_by correctly."""
+        dogcats_dir, ids = _init_and_create(tmp_path, "Remove by user")
+
+        result = runner.invoke(
+            app,
+            [
+                "remove",
+                ids[0],
+                "--deleted-by",
+                "alice",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+
+        # Verify via JSON show
+        result = runner.invoke(
+            app,
+            [
+                "show",
+                ids[0],
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["deleted_by"] == "alice"
