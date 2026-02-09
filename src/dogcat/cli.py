@@ -3853,8 +3853,6 @@ questions that need answers, NOT tasks to work on. Use them to:
 - Track decisions that need to be made
 - Record questions for team discussion
 
-Close with answer: dcat close <id> --reason "Use JWT tokens"
-
 ## Need Help?
   dcat --help            - Show all commands
   dcat <command> --help  - Get help for a specific command

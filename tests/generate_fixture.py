@@ -136,11 +136,7 @@ print(f"Generated {{len(ids)}} issues")
 
 def main() -> None:
     """Generate fixtures for specified tags or all tags."""
-    if len(sys.argv) > 1:
-        # Explicit tags — always honour the request
-        tags = sys.argv[1:]
-    else:
-        tags = list(SCHEMA_TAGS)
+    tags = sys.argv[1:] if len(sys.argv) > 1 else list(SCHEMA_TAGS)
 
     if not tags:
         print("No tags found")
