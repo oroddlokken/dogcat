@@ -471,6 +471,7 @@ class JSONLStorage:
             "duplicate_of",
             "metadata",
             "manual",
+            "comments",
         },
     )
 
@@ -499,20 +500,19 @@ class JSONLStorage:
         # Track old parent for index maintenance
         old_parent = issue.parent
 
-        # Update fields
+        # Update fields — only UPDATABLE_FIELDS are allowed
         for key, value in updates.items():
             if key not in self.UPDATABLE_FIELDS:
                 continue
-            if hasattr(issue, key):
-                # Validate priority
-                if key == "priority":
-                    validate_priority(value)
-                # Convert string values to proper enums
-                if key == "status" and isinstance(value, str):
-                    value = Status(value)
-                elif key == "issue_type" and isinstance(value, str):
-                    value = IssueType(value)
-                setattr(issue, key, value)
+            # Validate priority
+            if key == "priority":
+                validate_priority(value)
+            # Convert string values to proper enums
+            if key == "status" and isinstance(value, str):
+                value = Status(value)
+            elif key == "issue_type" and isinstance(value, str):
+                value = IssueType(value)
+            setattr(issue, key, value)
 
         # Maintain parent-child index if parent changed
         if issue.parent != old_parent:

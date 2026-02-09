@@ -349,6 +349,34 @@ class TestGetDependencyChain:
         assert "t-i1" in chain
         assert "t-i2" in chain
 
+    def test_chain_with_cycle_does_not_recurse_infinitely(
+        self,
+        storage_with_issues: JSONLStorage,
+    ) -> None:
+        """Dependency chain with a cycle terminates instead of infinite recursion."""
+        # Inject a cycle directly (bypassing add_dependency's cycle guard)
+        storage_with_issues._dependencies.append(
+            Dependency(
+                issue_id="t-i0",
+                depends_on_id="t-i1",
+                dep_type=DependencyType.BLOCKS,
+            ),
+        )
+        storage_with_issues._dependencies.append(
+            Dependency(
+                issue_id="t-i1",
+                depends_on_id="t-i0",
+                dep_type=DependencyType.BLOCKS,
+            ),
+        )
+        storage_with_issues._rebuild_indexes()
+
+        # Should terminate without RecursionError
+        chain = get_dependency_chain(storage_with_issues, "t-i0")
+
+        assert "t-i0" in chain
+        assert "t-i1" in chain
+
 
 class TestIntegrationDeps:
     """Integration tests for dependencies."""

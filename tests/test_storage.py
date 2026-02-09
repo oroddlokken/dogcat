@@ -572,15 +572,19 @@ class TestUpdateFieldAllowlist:
         assert retrieved is not None
         assert retrieved.created_at == original_created_at
 
-    def test_update_ignores_comments(self, storage: JSONLStorage) -> None:
-        """Test that update() cannot overwrite comments."""
+    def test_update_allows_comments(self, storage: JSONLStorage) -> None:
+        """Test that update() can set comments via UPDATABLE_FIELDS."""
+        from dogcat.models import Comment
+
         issue = Issue(id="issue-1", title="Test")
         storage.create(issue)
 
-        storage.update("issue-1", {"comments": [{"fake": "comment"}]})
+        comment = Comment(id="c1", issue_id="issue-1", author="alice", text="hello")
+        storage.update("issue-1", {"comments": [comment]})
         retrieved = storage.get("issue-1")
         assert retrieved is not None
-        assert retrieved.comments == []
+        assert len(retrieved.comments) == 1
+        assert retrieved.comments[0].text == "hello"
 
 
 class TestCloseReasonField:
@@ -894,6 +898,50 @@ class TestAppendOnlyStorage:
         loaded = storage2.get("issue-1")
         assert loaded is not None
         assert loaded.title == "v5"
+
+
+class TestUpdatableFieldsAllowlist:
+    """Test that storage.update() enforces UPDATABLE_FIELDS allowlist."""
+
+    def test_disallowed_field_is_ignored(self, storage: JSONLStorage) -> None:
+        """Fields not in UPDATABLE_FIELDS are silently skipped."""
+        issue = Issue(id="issue-1", title="Test")
+        storage.create(issue)
+
+        original_id = issue.id
+        storage.update("issue-1", {"id": "hacked", "title": "Updated"})
+
+        retrieved = storage.get("issue-1")
+        assert retrieved is not None
+        assert retrieved.id == original_id
+        assert retrieved.title == "Updated"
+
+    def test_comments_in_updatable_fields(self, storage: JSONLStorage) -> None:
+        """Comments field is in UPDATABLE_FIELDS and can be updated."""
+        from dogcat.models import Comment
+
+        issue = Issue(id="issue-1", title="Test")
+        storage.create(issue)
+
+        comment = Comment(id="c1", issue_id="issue-1", author="alice", text="hello")
+        storage.update("issue-1", {"comments": [comment]})
+
+        retrieved = storage.get("issue-1")
+        assert retrieved is not None
+        assert len(retrieved.comments) == 1
+        assert retrieved.comments[0].text == "hello"
+
+    def test_updated_by_in_updatable_fields(self, storage: JSONLStorage) -> None:
+        """updated_by field is in UPDATABLE_FIELDS and gets persisted."""
+        issue = Issue(id="issue-1", title="Test")
+        storage.create(issue)
+
+        storage.update("issue-1", {"status": "in_progress", "updated_by": "alice"})
+
+        retrieved = storage.get("issue-1")
+        assert retrieved is not None
+        assert retrieved.updated_by == "alice"
+        assert retrieved.status == Status.IN_PROGRESS
 
 
 def _count_lines(path: Path) -> int:

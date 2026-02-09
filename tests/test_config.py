@@ -473,10 +473,10 @@ class TestParseDogcatrc:
         project_dir = tmp_path / "project"
         project_dir.mkdir()
         rc_file = project_dir / DOGCATRC_FILENAME
-        rc_file.write_text("../external/.dogcats\n")
+        rc_file.write_text("subdir/.dogcats\n")
 
         result = parse_dogcatrc(rc_file)
-        assert result == (tmp_path / "external" / ".dogcats").resolve()
+        assert result == (project_dir / "subdir" / ".dogcats").resolve()
 
     def test_relative_path_same_dir(self, tmp_path: Path) -> None:
         """Parse .dogcatrc with relative path in same directory."""
@@ -510,3 +510,33 @@ class TestParseDogcatrc:
 
         with pytest.raises(ValueError, match="empty"):
             parse_dogcatrc(rc_file)
+
+    def test_path_traversal_raises(self, tmp_path: Path) -> None:
+        """Path traversal escaping project boundary raises ValueError."""
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        rc_file = project_dir / DOGCATRC_FILENAME
+        rc_file.write_text("../../../../etc/something")
+
+        with pytest.raises(ValueError, match="escapes project boundary"):
+            parse_dogcatrc(rc_file)
+
+    def test_absolute_path_outside_project_raises(self, tmp_path: Path) -> None:
+        """Absolute path outside project boundary raises ValueError."""
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        rc_file = project_dir / DOGCATRC_FILENAME
+        rc_file.write_text("/tmp/evil/.dogcats")
+
+        with pytest.raises(ValueError, match="escapes project boundary"):
+            parse_dogcatrc(rc_file)
+
+    def test_relative_path_within_project_works(self, tmp_path: Path) -> None:
+        """Relative path within project boundary succeeds."""
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        rc_file = project_dir / DOGCATRC_FILENAME
+        rc_file.write_text("subdir/.dogcats")
+
+        result = parse_dogcatrc(rc_file)
+        assert result == (project_dir / "subdir" / ".dogcats").resolve()

@@ -2253,7 +2253,7 @@ def _set_status(
         final_operator = operator if operator is not None else get_default_operator()
         issue = storage.update(
             issue_id,
-            {"status": status, "operator": final_operator},
+            {"status": status, "updated_by": final_operator},
         )
 
         if json_output:

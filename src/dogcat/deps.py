@@ -222,20 +222,32 @@ def would_create_cycle(
     return can_reach(depends_on_id, issue_id)
 
 
-def get_dependency_chain(storage: JSONLStorage, issue_id: str) -> list[str]:
+def get_dependency_chain(
+    storage: JSONLStorage,
+    issue_id: str,
+    _visited: set[str] | None = None,
+) -> list[str]:
     """Get the dependency chain for an issue.
 
     Args:
         storage: The storage instance
         issue_id: The issue to trace
+        _visited: Internal set to prevent infinite recursion on cycles
 
     Returns:
         List of issue IDs in the dependency chain
     """
+    if _visited is None:
+        _visited = set()
+
+    if issue_id in _visited:
+        return []
+
+    _visited.add(issue_id)
     chain = [issue_id]
     deps = storage.get_dependencies(issue_id)
 
     for dep in deps:
-        chain.extend(get_dependency_chain(storage, dep.depends_on_id))
+        chain.extend(get_dependency_chain(storage, dep.depends_on_id, _visited))
 
     return list(dict.fromkeys(chain))  # Remove duplicates while preserving order

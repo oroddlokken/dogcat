@@ -31,7 +31,8 @@ def parse_dogcatrc(rc_path: str | Path) -> Path:
         Resolved absolute Path to the .dogcats directory
 
     Raises:
-        ValueError: If the file is empty or contains only whitespace
+        ValueError: If the file is empty, contains only whitespace, or the
+            resolved path escapes the project boundary
     """
     rc_path = Path(rc_path)
     content = rc_path.read_text().strip()
@@ -45,7 +46,20 @@ def parse_dogcatrc(rc_path: str | Path) -> Path:
     if not target.is_absolute():
         target = rc_path.parent / target
 
-    return target.resolve()
+    resolved = target.resolve()
+    project_root = rc_path.parent.resolve()
+
+    # Ensure the resolved path stays within the project boundary
+    try:
+        resolved.relative_to(project_root)
+    except ValueError:
+        msg = (
+            f"{DOGCATRC_FILENAME} path escapes project boundary: "
+            f"'{content}' resolves to '{resolved}' which is outside '{project_root}'"
+        )
+        raise ValueError(msg) from None
+
+    return resolved
 
 
 def get_config_path(dogcats_dir: str) -> Path:
