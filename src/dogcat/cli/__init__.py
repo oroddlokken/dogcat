@@ -20,9 +20,11 @@ from . import (  # noqa: E402
     _cmd_demo,
     _cmd_dep,
     _cmd_docs,
+    _cmd_features,
     _cmd_init,
     _cmd_maintenance,
     _cmd_read,
+    _cmd_tui,
     _cmd_update,
     _cmd_workflow,
 )
@@ -34,9 +36,11 @@ for _mod in (
     _cmd_demo,
     _cmd_dep,
     _cmd_docs,
+    _cmd_features,
     _cmd_init,
     _cmd_maintenance,
     _cmd_read,
+    _cmd_tui,
     _cmd_update,
     _cmd_workflow,
 ):
