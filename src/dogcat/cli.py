@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import getpass
+import inspect
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,7 +35,43 @@ _type_keys = "/".join(sorted(TYPE_SHORTHANDS.keys()))
 _ARG_HELP = f"Title or shorthand (0-4 for priority, {_type_keys} for type)"
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import click
+
+
+def _make_alias(
+    source_fn: Callable[..., Any],
+    *,
+    doc: str,
+    exclude_params: frozenset[str] = frozenset(),
+    param_defaults: dict[str, Any] | None = None,
+) -> Callable[..., Any]:
+    """Create a CLI command alias by cloning a source function's signature.
+
+    Typer infers CLI parameters from function signatures. This creates a thin
+    wrapper that shares the source function's signature (minus any excluded
+    params) so parameter declarations aren't duplicated across aliases.
+    """
+    defaults = param_defaults or {}
+    sig = inspect.signature(source_fn)
+    new_params = [p for name, p in sig.parameters.items() if name not in exclude_params]
+
+    def wrapper(**kwargs: Any) -> Any:
+        kwargs.update(defaults)
+        return source_fn(**kwargs)
+
+    wrapper.__signature__ = sig.replace(parameters=new_params)  # type: ignore[attr-defined]
+    wrapper.__doc__ = doc
+    wrapper.__module__ = source_fn.__module__
+    # Copy string annotations so typing.get_type_hints() resolves them
+    # correctly (required when using `from __future__ import annotations`).
+    wrapper.__annotations__ = {
+        name: ann
+        for name, ann in source_fn.__annotations__.items()
+        if name not in exclude_params
+    }
+    return wrapper
 
 
 class SortedGroup(TyperGroup):
@@ -982,229 +1019,31 @@ def create(
         raise typer.Exit(1)
 
 
-@app.command(name="c", hidden=True)
-def create_alias(
-    arg1: str | None = typer.Argument(
-        None,
-        help=_ARG_HELP,
+app.command(name="c", hidden=True)(
+    _make_alias(
+        create,
+        doc=(
+            "Create a new issue (alias for 'create' command).\n\n"
+            "Supports shorthand notation: use single characters (0-4 for priority,\n"
+            "b/f/e/s for bug/feature/epic/story) before or after the title.\n\n"
+            "Examples:\n"
+            '    dcat c "Fix login bug"           # Default priority 2, type task\n'
+            '    dcat c "Fix login bug" 1         # Priority 1\n'
+            '    dcat c 0 b "Critical bug"        # Priority 0, type bug'
+        ),
+        exclude_params=frozenset({"editor"}),
+        param_defaults={"editor": False},
     ),
-    arg2: str | None = typer.Argument(
-        None,
-        help=_ARG_HELP,
-    ),
-    arg3: str | None = typer.Argument(
-        None,
-        help=_ARG_HELP,
-    ),
-    title_opt: str | None = typer.Option(
-        None,
-        "--title",
-        help="Issue title (alternative to positional argument)",
-    ),
-    description: str = typer.Option(
-        None,
-        "--description",
-        "-d",
-        help="Issue description",
-    ),
-    priority: int = typer.Option(
-        None,
-        "--priority",
-        "-p",
-        help="Priority (0-4, p0-p4, or critical/high/medium/low/minimal)",
-        parser=_parse_priority_value,
-        metavar="PRIORITY",
-    ),
-    issue_type: str = typer.Option(None, "--type", "-t", help="Issue type"),
-    status: str = typer.Option(
-        None,
-        "--status",
-        "-s",
-        help="Initial status (open, in_progress, blocked, deferred)",
-    ),
-    owner: str = typer.Option(None, "--owner", "-o", help="Issue owner"),
-    labels: str = typer.Option(
-        None,
-        "--labels",
-        "-l",
-        help="Labels (comma or space separated)",
-    ),
-    acceptance: str = typer.Option(
-        None,
-        "--acceptance",
-        "-a",
-        help="Acceptance criteria",
-    ),
-    notes: str = typer.Option(
-        None,
-        "--notes",
-        "-n",
-        help="Notes for the issue",
-    ),
-    depends_on: str = typer.Option(
-        None,
-        "--depends-on",
-        help="Issue ID this depends on (this issue is blocked by the other)",
-    ),
-    blocks: str = typer.Option(
-        None,
-        "--blocks",
-        help="Issue ID this blocks (the other issue is blocked by this one)",
-    ),
-    parent: str = typer.Option(
-        None,
-        "--parent",
-        help="Parent issue ID (makes this a subtask)",
-    ),
-    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-    created_by: str = typer.Option(None, "--created-by", help="Who is creating this"),
-    manual: bool = typer.Option(
-        False,
-        "--manual",
-        help="Mark issue as manual (not for agents)",
-    ),
-    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
-) -> None:
-    """Create a new issue (alias for 'create' command).
+)
 
-    Supports shorthand notation: use single characters (0-4 for priority,
-    b/f/e/s for bug/feature/epic/story) before or after the title.
-
-    Examples:
-        dcat c "Fix login bug"           # Default priority 2, type task
-        dcat c "Fix login bug" 1         # Priority 1
-        dcat c 0 b "Critical bug"        # Priority 0, type bug
-    """
-    create(
-        arg1=arg1,
-        arg2=arg2,
-        arg3=arg3,
-        title_opt=title_opt,
-        description=description,
-        priority=priority,
-        issue_type=issue_type,
-        status=status,
-        owner=owner,
-        labels=labels,
-        acceptance=acceptance,
-        notes=notes,
-        depends_on=depends_on,
-        blocks=blocks,
-        parent=parent,
-        json_output=json_output,
-        created_by=created_by,
-        manual=manual,
-        editor=False,
-        dogcats_dir=dogcats_dir,
-    )
-
-
-@app.command(name="add", hidden=True)
-def create_alias_add(
-    arg1: str | None = typer.Argument(
-        None,
-        help=_ARG_HELP,
+app.command(name="add", hidden=True)(
+    _make_alias(
+        create,
+        doc="Create a new issue (alias for 'create' command).",
+        exclude_params=frozenset({"editor"}),
+        param_defaults={"editor": False},
     ),
-    arg2: str | None = typer.Argument(
-        None,
-        help=_ARG_HELP,
-    ),
-    arg3: str | None = typer.Argument(
-        None,
-        help=_ARG_HELP,
-    ),
-    title_opt: str | None = typer.Option(
-        None,
-        "--title",
-        help="Issue title (alternative to positional argument)",
-    ),
-    description: str = typer.Option(
-        None,
-        "--description",
-        "-d",
-        help="Issue description",
-    ),
-    priority: int = typer.Option(
-        None,
-        "--priority",
-        "-p",
-        help="Priority (0-4, p0-p4, or critical/high/medium/low/minimal)",
-        parser=_parse_priority_value,
-        metavar="PRIORITY",
-    ),
-    issue_type: str = typer.Option(None, "--type", "-t", help="Issue type"),
-    status: str = typer.Option(
-        None,
-        "--status",
-        "-s",
-        help="Initial status (open, in_progress, blocked, deferred)",
-    ),
-    owner: str = typer.Option(None, "--owner", "-o", help="Issue owner"),
-    labels: str = typer.Option(
-        None,
-        "--labels",
-        "-l",
-        help="Labels (comma or space separated)",
-    ),
-    acceptance: str = typer.Option(
-        None,
-        "--acceptance",
-        "-a",
-        help="Acceptance criteria",
-    ),
-    notes: str = typer.Option(
-        None,
-        "--notes",
-        "-n",
-        help="Notes for the issue",
-    ),
-    depends_on: str = typer.Option(
-        None,
-        "--depends-on",
-        help="Issue ID this depends on (this issue is blocked by the other)",
-    ),
-    blocks: str = typer.Option(
-        None,
-        "--blocks",
-        help="Issue ID this blocks (the other issue is blocked by this one)",
-    ),
-    parent: str = typer.Option(
-        None,
-        "--parent",
-        help="Parent issue ID (makes this a subtask)",
-    ),
-    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-    created_by: str = typer.Option(None, "--created-by", help="Who is creating this"),
-    manual: bool = typer.Option(
-        False,
-        "--manual",
-        help="Mark issue as manual (not for agents)",
-    ),
-    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
-) -> None:
-    """Create a new issue (alias for 'create' command)."""
-    create(
-        arg1=arg1,
-        arg2=arg2,
-        arg3=arg3,
-        title_opt=title_opt,
-        description=description,
-        priority=priority,
-        issue_type=issue_type,
-        status=status,
-        owner=owner,
-        labels=labels,
-        acceptance=acceptance,
-        notes=notes,
-        depends_on=depends_on,
-        blocks=blocks,
-        parent=parent,
-        json_output=json_output,
-        created_by=created_by,
-        manual=manual,
-        editor=False,
-        dogcats_dir=dogcats_dir,
-    )
+)
 
 
 @app.command("list")
@@ -1616,22 +1455,12 @@ def new_issue_cmd(
         raise typer.Exit(1)
 
 
-@app.command(name="n", hidden=True)
-def new_issue_alias(
-    arg1: str | None = typer.Argument(None, help=_ARG_HELP),
-    arg2: str | None = typer.Argument(None, help=_ARG_HELP),
-    arg3: str | None = typer.Argument(None, help=_ARG_HELP),
-    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
-    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-) -> None:
-    """Open a Textual form to create a new issue (alias for 'new')."""
-    new_issue_cmd(
-        arg1=arg1,
-        arg2=arg2,
-        arg3=arg3,
-        dogcats_dir=dogcats_dir,
-        json_output=json_output,
-    )
+app.command(name="n", hidden=True)(
+    _make_alias(
+        new_issue_cmd,
+        doc="Open a Textual form to create a new issue (alias for 'new').",
+    ),
+)
 
 
 @app.command()
@@ -2512,10 +2341,10 @@ def recently_closed(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
 ) -> None:
-    """Show recently closed issues in ascending order (oldest first).
+    """Show recently closed issues in descending order (newest first).
 
     Displays the last N closed issues sorted by closed_at date,
-    with the most recently closed issue at the bottom.
+    with the most recently closed issue at the top.
     """
     try:
         storage = get_storage(dogcats_dir)
@@ -2526,11 +2355,11 @@ def recently_closed(
             i for i in issues if i.status.value == "closed" and i.closed_at
         ]
 
-        # Sort by closed_at ascending (oldest first, newest last)
-        closed_issues.sort(key=lambda i: i.closed_at)  # type: ignore[arg-type]
+        # Sort by closed_at descending (newest first)
+        closed_issues.sort(key=lambda i: i.closed_at, reverse=True)  # type: ignore[arg-type]
 
-        # Take last N (most recent)
-        recent = closed_issues[-limit:] if len(closed_issues) > limit else closed_issues
+        # Take first N (most recent)
+        recent = closed_issues[:limit]
 
         if json_output:
             from dogcat.models import issue_to_dict
@@ -4083,140 +3912,23 @@ def version() -> None:
     typer.echo(v)
 
 
-@app.command(name="l", hidden=True)
-def list_tree_alias(
-    status: str | None = typer.Option(None, "--status", "-s", help="Filter by status"),
-    priority: int | None = typer.Option(
-        None,
-        "--priority",
-        "-p",
-        help="Filter by priority",
+app.command(name="l", hidden=True)(
+    _make_alias(
+        list_issues,
+        doc="Alias for list --tree.",
+        exclude_params=frozenset({"tree", "table"}),
+        param_defaults={"tree": True, "table": False},
     ),
-    issue_type: str | None = typer.Option(None, "--type", "-t", help="Filter by type"),
-    label: str | None = typer.Option(
-        None,
-        "--label",
-        "-l",
-        help="Filter by label (comma or space separated)",
-    ),
-    owner: str | None = typer.Option(None, "--owner", "-o", help="Filter by owner"),
-    closed: bool = typer.Option(False, "--closed", help="Show only closed issues"),
-    open_issues: bool = typer.Option(
-        False,
-        "--open",
-        help="Show only open/in-progress issues",
-    ),
-    all_issues: bool = typer.Option(
-        False,
-        "--all",
-        help="Include archived and deleted issues",
-    ),
-    closed_after: str | None = typer.Option(
-        None,
-        "--closed-after",
-        help="Issues closed after date (ISO8601)",
-    ),
-    closed_before: str | None = typer.Option(
-        None,
-        "--closed-before",
-        help="Issues closed before date (ISO8601)",
-    ),
-    limit: int | None = typer.Option(None, "--limit", help="Limit results"),
-    agent_only: bool = typer.Option(
-        False,
-        "--agent-only",
-        help="Only show issues available for agents",
-    ),
-    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
-) -> None:
-    """Alias for list --tree."""
-    list_issues(
-        status=status,
-        priority=priority,
-        issue_type=issue_type,
-        label=label,
-        owner=owner,
-        closed=closed,
-        open_issues=open_issues,
-        all_issues=all_issues,
-        closed_after=closed_after,
-        closed_before=closed_before,
-        limit=limit,
-        agent_only=agent_only,
-        tree=True,
-        table=False,
-        json_output=json_output,
-        dogcats_dir=dogcats_dir,
-    )
+)
 
-
-@app.command(name="lt", hidden=True)
-def list_table_alias(
-    status: str | None = typer.Option(None, "--status", "-s", help="Filter by status"),
-    priority: int | None = typer.Option(
-        None,
-        "--priority",
-        "-p",
-        help="Filter by priority",
+app.command(name="lt", hidden=True)(
+    _make_alias(
+        list_issues,
+        doc="Alias for list --table.",
+        exclude_params=frozenset({"tree", "table"}),
+        param_defaults={"tree": False, "table": True},
     ),
-    issue_type: str | None = typer.Option(None, "--type", "-t", help="Filter by type"),
-    label: str | None = typer.Option(
-        None,
-        "--label",
-        "-l",
-        help="Filter by label (comma or space separated)",
-    ),
-    owner: str | None = typer.Option(None, "--owner", "-o", help="Filter by owner"),
-    closed: bool = typer.Option(False, "--closed", help="Show only closed issues"),
-    open_issues: bool = typer.Option(
-        False,
-        "--open",
-        help="Show only open/in-progress issues",
-    ),
-    all_issues: bool = typer.Option(
-        False,
-        "--all",
-        help="Include archived and deleted issues",
-    ),
-    closed_after: str | None = typer.Option(
-        None,
-        "--closed-after",
-        help="Issues closed after date (ISO8601)",
-    ),
-    closed_before: str | None = typer.Option(
-        None,
-        "--closed-before",
-        help="Issues closed before date (ISO8601)",
-    ),
-    limit: int | None = typer.Option(None, "--limit", help="Limit results"),
-    agent_only: bool = typer.Option(
-        False,
-        "--agent-only",
-        help="Only show issues available for agents",
-    ),
-    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-    dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
-) -> None:
-    """Alias for list --table."""
-    list_issues(
-        status=status,
-        priority=priority,
-        issue_type=issue_type,
-        label=label,
-        owner=owner,
-        closed=closed,
-        open_issues=open_issues,
-        all_issues=all_issues,
-        closed_after=closed_after,
-        closed_before=closed_before,
-        limit=limit,
-        agent_only=agent_only,
-        tree=False,
-        table=True,
-        json_output=json_output,
-        dogcats_dir=dogcats_dir,
-    )
+)
 
 
 @app.command(name="rc", hidden=True)
