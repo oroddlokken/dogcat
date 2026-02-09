@@ -2,6 +2,7 @@ __pycache__
 .venv
 node_modules
 .env
+.tox
 htmlcov
 .coverage*
 .DS_Store

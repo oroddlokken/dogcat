@@ -55,6 +55,14 @@ test-regression:
 test-all:
     pytest --timeout 60 -n 8 tests --cov-config=.coveragerc --cov-report=html --cov=src/dogcat
 
+# run tests across Python 3.10-3.14 (installs missing interpreters automatically)
+test-matrix *args:
+    tox {{args}}
+
+# run tests on a single Python version (e.g. just test-py 3.12)
+test-py version *args:
+    tox -e py{{replace(version, ".", "")}} {{args}}
+
 # generate JSONL fixture for a specific tag (or all tags)
 generate-fixture tag="":
     python tests/generate_fixture.py {{tag}}
