@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import Any
 
 from typer.testing import CliRunner
 
@@ -112,7 +113,7 @@ class TestRecentlyClosed:
             ["recently-closed", "--json", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
-        data = json.loads(result.stdout)
+        data: list[Any] = json.loads(result.stdout)
         assert isinstance(data, list)
         assert len(data) == 1
         assert data[0]["title"] == "Issue A"
@@ -186,7 +187,7 @@ class TestSearch:
             ["search", "login", "--json", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
-        data = json.loads(result.stdout)
+        data: list[Any] = json.loads(result.stdout)
         assert isinstance(data, list)
         assert len(data) == 1
         assert data[0]["title"] == "Fix login bug"
@@ -674,7 +675,7 @@ class TestReadyJsonOutput:
             ["ready", "--json", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
-        data = json.loads(result.stdout)
+        data: list[Any] = json.loads(result.stdout)
         assert isinstance(data, list)
         assert len(data) >= 1
 
@@ -703,7 +704,7 @@ class TestBlockedJsonOutput:
             ["blocked", "--json", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
-        data = json.loads(result.stdout)
+        data: list[Any] = json.loads(result.stdout)
         assert isinstance(data, list)
         assert len(data) >= 1
 
@@ -731,7 +732,7 @@ class TestInProgressJsonOutput:
             ["in-progress", "--json", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
-        data = json.loads(result.stdout)
+        data: list[Any] = json.loads(result.stdout)
         assert isinstance(data, list)
         assert len(data) == 1
 
@@ -759,7 +760,7 @@ class TestInReviewJsonOutput:
             ["in-review", "--json", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
-        data = json.loads(result.stdout)
+        data: list[Any] = json.loads(result.stdout)
         assert isinstance(data, list)
         assert len(data) == 1
 
@@ -787,7 +788,7 @@ class TestDeferredJsonOutput:
             ["deferred", "--json", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
-        data = json.loads(result.stdout)
+        data: list[Any] = json.loads(result.stdout)
         assert isinstance(data, list)
         assert len(data) == 1
 
@@ -813,7 +814,7 @@ class TestManualListJsonOutput:
             ["manual", "--json", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
-        data = json.loads(result.stdout)
+        data: list[Any] = json.loads(result.stdout)
         assert isinstance(data, list)
         assert len(data) == 1
 
@@ -923,7 +924,7 @@ class TestDependencySubcommands:
             ],
         )
         assert result.exit_code == 0
-        data = json.loads(result.stdout)
+        data: list[Any] = json.loads(result.stdout)
         assert isinstance(data, list)
 
     def test_dep_add_missing_depends_on(self, tmp_path: Path) -> None:
@@ -1451,7 +1452,7 @@ class TestCommentCommand:
             ],
         )
         assert result.exit_code == 0
-        data = json.loads(result.stdout)
+        data: list[Any] = json.loads(result.stdout)
         assert isinstance(data, list)
         assert len(data) == 1
         assert data[0]["text"] == "A comment"
@@ -2736,7 +2737,7 @@ class TestListJsonOutput:
             ["list", "--json", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
-        data = json.loads(result.stdout)
+        data: list[Any] = json.loads(result.stdout)
         assert isinstance(data, list)
         assert len(data) >= 1
 
@@ -2977,7 +2978,7 @@ class TestRecentlyAdded:
             ["recently-added", "--json", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
-        data = json.loads(result.stdout)
+        data: list[Any] = json.loads(result.stdout)
         assert isinstance(data, list)
         assert len(data) == 1
         assert data[0]["title"] == "Issue A"

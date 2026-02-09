@@ -129,6 +129,7 @@ ignore = [
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
+exclude = ["scratch", ".venv", "src/dogcat/_version.py"]
 typeCheckingMode = "strict"
 stubPath = "./typings"
 reportMissingTypeStubs = "none" # Annoying

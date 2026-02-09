@@ -7,7 +7,7 @@ import tempfile
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -453,7 +453,7 @@ class JSONLStorage:
         if "label" in filters:
             label_filter = filters["label"]
             if isinstance(label_filter, list):
-                label_set: set[str] = set(label_filter)
+                label_set: set[str] = set(cast("list[str]", label_filter))
                 issues = [i for i in issues if label_set & set(i.labels)]
             else:
                 issues = [i for i in issues if label_filter in i.labels]

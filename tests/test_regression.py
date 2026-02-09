@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from dogcat.models import DependencyType, IssueType, Status
+from dogcat.models import Dependency, DependencyType, IssueType, Link, Status
 from dogcat.storage import JSONLStorage
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -96,7 +96,7 @@ class TestFixtureRegression:
     def test_dependencies_survive(self, loaded_storage: JSONLStorage) -> None:
         """Fixture preserves dependency relationships."""
         issues = loaded_storage.list()
-        all_deps = []
+        all_deps: list[Dependency] = []
         for issue in issues:
             deps = loaded_storage.get_dependencies(issue.full_id)
             all_deps.extend(deps)
@@ -105,7 +105,7 @@ class TestFixtureRegression:
     def test_links_survive(self, loaded_storage: JSONLStorage) -> None:
         """Fixture preserves link relationships."""
         issues = loaded_storage.list()
-        all_links = []
+        all_links: list[Link] = []
         for issue in issues:
             links = loaded_storage.get_links(issue.full_id)
             all_links.extend(links)

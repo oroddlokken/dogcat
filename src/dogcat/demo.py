@@ -923,6 +923,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             ["documentation", "api"],
             "DOC-601",
             None,
+            False,
         ),
         (
             "Set up monitoring alerts",
@@ -933,6 +934,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             ["devops", "monitoring"],
             "INFRA-602",
             None,
+            False,
         ),
         (
             "Configure backup strategy",
@@ -943,6 +945,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             ["devops", "infrastructure"],
             "INFRA-603",
             "Daily backups to S3 with 30-day retention. Tested restore procedure.",
+            True,
         ),
         (
             "Review security policies",
@@ -953,6 +956,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             ["security", "compliance"],
             "SEC-604",
             None,
+            True,
         ),
         (
             "Plan Q2 roadmap",
@@ -963,6 +967,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             ["planning", "strategic"],
             "PLAN-605",
             None,
+            False,
         ),
     ]
     for (
@@ -974,6 +979,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         labels,
         ext_ref,
         close_reason,
+        manual,
     ) in standalone_tasks:
         should_close = target_status == Status.CLOSED
         initial_status = Status.OPEN if should_close else target_status
@@ -986,6 +992,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             external_ref=ext_ref,
             owner=creator if not should_close else None,
             created_by=creator,
+            **({"metadata": {"manual": True}} if manual else {}),
         )
         if should_close:
             _close(

@@ -4063,7 +4063,7 @@ class TestCLIClose:
         )
 
         # Create three issues
-        ids = []
+        ids: list[str] = []
         for title in ["First to delete", "Second to delete", "Third to delete"]:
             create_result = runner.invoke(
                 app,
@@ -4125,7 +4125,7 @@ class TestCLIClose:
         )
 
         # Create three issues
-        ids = []
+        ids: list[str] = []
         for title in ["First to close", "Second to close", "Third to close"]:
             create_result = runner.invoke(
                 app,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -14,7 +15,7 @@ from dogcat.models import Issue
 
 def _make_issue(**kwargs: object) -> Issue:
     """Create a test issue with sensible defaults."""
-    defaults = {
+    defaults: dict[str, Any] = {
         "id": "test",
         "title": "Test issue",
         "namespace": "dc",
@@ -39,7 +40,7 @@ class TestCollapsibleFields:
         issue = _make_issue()
         app = IssueEditorApp(issue, _make_storage())
 
-        async with app.run_test() as pilot:  # noqa: F841
+        async with app.run_test() as _pilot:
             collapsibles = app.query(Collapsible)
             titles = [c.title for c in collapsibles]
             assert "Notes" in titles
@@ -52,7 +53,7 @@ class TestCollapsibleFields:
         issue = _make_issue(notes=None, acceptance=None, design=None)
         app = IssueEditorApp(issue, _make_storage())
 
-        async with app.run_test() as pilot:  # noqa: F841
+        async with app.run_test() as _pilot:
             for collapsible in app.query(Collapsible):
                 assert collapsible.collapsed is True
 
@@ -66,7 +67,7 @@ class TestCollapsibleFields:
         )
         app = IssueEditorApp(issue, _make_storage())
 
-        async with app.run_test() as pilot:  # noqa: F841
+        async with app.run_test() as _pilot:
             for collapsible in app.query(Collapsible):
                 assert collapsible.collapsed is False
 
@@ -80,7 +81,7 @@ class TestCollapsibleFields:
         )
         app = IssueEditorApp(issue, _make_storage())
 
-        async with app.run_test() as pilot:  # noqa: F841
+        async with app.run_test() as _pilot:
             assert app.query_one("#notes-input", TextArea).text == "my notes"
             assert app.query_one("#acceptance-input", TextArea).text == "my criteria"
             assert app.query_one("#design-input", TextArea).text == "my design"
@@ -147,7 +148,7 @@ class TestCollapsibleFields:
         issue = _make_issue(notes="has notes", acceptance=None, design="has design")
         app = IssueEditorApp(issue, _make_storage())
 
-        async with app.run_test() as pilot:  # noqa: F841
+        async with app.run_test() as _pilot:
             collapsibles = {c.title: c for c in app.query(Collapsible)}
             assert collapsibles["Notes"].collapsed is False
             assert collapsibles["Acceptance Criteria"].collapsed is True
@@ -163,7 +164,7 @@ class TestExternalRefField:
         issue = _make_issue()
         app = IssueEditorApp(issue, _make_storage())
 
-        async with app.run_test() as pilot:  # noqa: F841
+        async with app.run_test() as _pilot:
             ref_input = app.query_one("#external-ref-input", Input)
             assert ref_input.value == ""
 
@@ -173,7 +174,7 @@ class TestExternalRefField:
         issue = _make_issue(external_ref="JIRA-123")
         app = IssueEditorApp(issue, _make_storage())
 
-        async with app.run_test() as pilot:  # noqa: F841
+        async with app.run_test() as _pilot:
             ref_input = app.query_one("#external-ref-input", Input)
             assert ref_input.value == "JIRA-123"
 
@@ -221,7 +222,7 @@ class TestCreateMode:
         issue = _make_issue(id="", title="")
         app = IssueEditorApp(issue, _make_storage(), create_mode=True, namespace="dc")
 
-        async with app.run_test() as pilot:  # noqa: F841
+        async with app.run_test() as _pilot:
             id_display = app.query_one("#id-display", Static)
             assert str(id_display.render()) == "New Issue"
 
@@ -352,7 +353,7 @@ class TestCreateModeShorthands:
         issue = _make_issue(id="", title="My bug report")
         app = IssueEditorApp(issue, _make_storage(), create_mode=True, namespace="dc")
 
-        async with app.run_test() as pilot:  # noqa: F841
+        async with app.run_test() as _pilot:
             title_input = app.query_one("#title-input", Input)
             assert title_input.value == "My bug report"
 
@@ -362,8 +363,11 @@ class TestCreateModeShorthands:
         issue = _make_issue(id="", title="", priority=0)
         app = IssueEditorApp(issue, _make_storage(), create_mode=True, namespace="dc")
 
-        async with app.run_test() as pilot:  # noqa: F841
-            priority_select = app.query_one("#priority-input", Select)
+        async with app.run_test() as _pilot:
+            priority_select = cast(
+                "Select[int]",
+                app.query_one("#priority-input", Select),
+            )
             assert priority_select.value == 0
 
     @pytest.mark.asyncio
@@ -374,8 +378,8 @@ class TestCreateModeShorthands:
         issue = _make_issue(id="", title="", issue_type=IssueType.BUG)
         app = IssueEditorApp(issue, _make_storage(), create_mode=True, namespace="dc")
 
-        async with app.run_test() as pilot:  # noqa: F841
-            type_select = app.query_one("#type-input", Select)
+        async with app.run_test() as _pilot:
+            type_select = cast("Select[str]", app.query_one("#type-input", Select))
             assert type_select.value == "bug"
 
     @pytest.mark.asyncio
@@ -430,8 +434,8 @@ class TestParentPicker:
         storage.get_children.return_value = []
         app = IssueEditorApp(issue, storage)
 
-        async with app.run_test() as pilot:  # noqa: F841
-            parent_select = app.query_one("#parent-input", Select)
+        async with app.run_test() as _pilot:
+            parent_select = cast("Select[str]", app.query_one("#parent-input", Select))
             assert parent_select is not None
 
     @pytest.mark.asyncio
@@ -444,8 +448,8 @@ class TestParentPicker:
         storage.get_children.return_value = []
         app = IssueEditorApp(issue, storage)
 
-        async with app.run_test() as pilot:  # noqa: F841
-            parent_select = app.query_one("#parent-input", Select)
+        async with app.run_test() as _pilot:
+            parent_select = cast("Select[str]", app.query_one("#parent-input", Select))
             assert parent_select.value == "dc-par1"
 
     @pytest.mark.asyncio
@@ -457,8 +461,8 @@ class TestParentPicker:
         storage.get_children.return_value = []
         app = IssueEditorApp(issue, storage)
 
-        async with app.run_test() as pilot:  # noqa: F841
-            parent_select = app.query_one("#parent-input", Select)
+        async with app.run_test() as _pilot:
+            parent_select = cast("Select[str]", app.query_one("#parent-input", Select))
             assert parent_select.value == Select.BLANK
 
     @pytest.mark.asyncio
@@ -468,8 +472,8 @@ class TestParentPicker:
         storage = self._make_storage_with_issues()
         app = IssueEditorApp(issue, storage)
 
-        async with app.run_test() as pilot:  # noqa: F841
-            parent_select = app.query_one("#parent-input", Select)
+        async with app.run_test() as _pilot:
+            parent_select = cast("Select[str]", app.query_one("#parent-input", Select))
             option_values = [opt[1] for opt in parent_select._options]
             assert "dc-test" not in option_values
             assert "dc-par1" in option_values
@@ -482,8 +486,8 @@ class TestParentPicker:
         storage = self._make_storage_with_issues()
         app = IssueEditorApp(issue, storage)
 
-        async with app.run_test() as pilot:  # noqa: F841
-            parent_select = app.query_one("#parent-input", Select)
+        async with app.run_test() as _pilot:
+            parent_select = cast("Select[str]", app.query_one("#parent-input", Select))
             option_values = [opt[1] for opt in parent_select._options]
             assert "dc-ch1" not in option_values
 
@@ -572,7 +576,7 @@ class TestMakeIssueLabel:
 
 def _make_picker_issues() -> list[tuple[Text, str]]:
     """Create test issue labels for the picker."""
-    issues = []
+    issues: list[tuple[Text, str]] = []
     for id_, type_, title in [
         ("dc-abc1", "bug", "Fix login crash"),
         ("dc-def2", "feature", "Add dark mode"),
@@ -594,7 +598,7 @@ class TestIssuePicker:
         issues = _make_picker_issues()
         app = IssuePickerApp(issues)
 
-        async with app.run_test() as pilot:  # noqa: F841
+        async with app.run_test() as _pilot:
             option_list = app.query_one("#picker-list", OptionList)
             assert option_list.option_count == 3
 

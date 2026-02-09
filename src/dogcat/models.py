@@ -88,7 +88,7 @@ class Issue:
     issue_type: IssueType = IssueType.TASK
     owner: str | None = None
     parent: str | None = None  # Parent issue ID for subtasks
-    labels: list[str] = field(default_factory=list)
+    labels: list[str] = field(default_factory=list[str])
     external_ref: str | None = None
     design: str | None = None
     acceptance: str | None = None
@@ -104,9 +104,9 @@ class Issue:
     deleted_by: str | None = None
     delete_reason: str | None = None
     original_type: IssueType | None = None  # For tombstones
-    comments: list[Comment] = field(default_factory=list)
+    comments: list[Comment] = field(default_factory=list[Comment])
     duplicate_of: str | None = None  # ID of original if this is a duplicate
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def is_closed(self) -> bool:
         """Check if the issue is closed."""

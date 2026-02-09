@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from rich.text import Text
 from textual.app import App, ComposeResult
@@ -307,9 +307,12 @@ class IssueEditorApp(App[bool]):
             self.notify("Title cannot be empty", severity="error")
             return
 
-        type_val = self.query_one("#type-input", Select).value
-        status_val = self.query_one("#status-input", Select).value
-        priority_val = self.query_one("#priority-input", Select).value
+        type_val = cast("Select[str]", self.query_one("#type-input", Select)).value
+        status_val = cast("Select[str]", self.query_one("#status-input", Select)).value
+        priority_val = cast(
+            "Select[int]",
+            self.query_one("#priority-input", Select),
+        ).value
         description = self.query_one("#description-input", TextArea).text.strip()
 
         if self._create_mode:
@@ -337,7 +340,7 @@ class IssueEditorApp(App[bool]):
             namespace=self._namespace,
         )
 
-        parent_val = self.query_one("#parent-input", Select).value
+        parent_val = cast("Select[str]", self.query_one("#parent-input", Select)).value
         parent = parent_val if isinstance(parent_val, str) else None
 
         manual_val = self.query_one("#manual-input", Checkbox).value
@@ -407,7 +410,7 @@ class IssueEditorApp(App[bool]):
         if new_ref != self._issue.external_ref:
             updates["external_ref"] = new_ref
 
-        parent_val = self.query_one("#parent-input", Select).value
+        parent_val = cast("Select[str]", self.query_one("#parent-input", Select)).value
         new_parent = parent_val if isinstance(parent_val, str) else None
         if new_parent != self._issue.parent:
             updates["parent"] = new_parent

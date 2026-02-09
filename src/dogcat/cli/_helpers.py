@@ -20,7 +20,6 @@ from dogcat.constants import (
     PRIORITY_SHORTHANDS,
     TYPE_SHORTHANDS,
 )
-from dogcat.idgen import IDGenerator  # noqa: F401
 from dogcat.storage import JSONLStorage
 
 if TYPE_CHECKING:

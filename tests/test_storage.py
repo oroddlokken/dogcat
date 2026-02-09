@@ -663,6 +663,7 @@ class TestCloseDeleteUpdatedAt:
         time.sleep(0.01)
         closed = storage.close("issue-1", reason="Done")
         assert closed.updated_at > original_time
+        assert closed.closed_at is not None
         assert closed.updated_at >= closed.closed_at
 
     def test_delete_sets_updated_at(self, storage: JSONLStorage) -> None:
@@ -676,6 +677,7 @@ class TestCloseDeleteUpdatedAt:
         time.sleep(0.01)
         deleted = storage.delete("issue-1", reason="Dup")
         assert deleted.updated_at > original_time
+        assert deleted.deleted_at is not None
         assert deleted.updated_at >= deleted.deleted_at
 
 
