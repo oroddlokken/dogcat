@@ -469,6 +469,65 @@ class TestParentChildRelationships:
         assert children[0].full_id == "dc-child"
 
 
+class TestChildrenByParentIndex:
+    """Test the _children_by_parent index is maintained correctly."""
+
+    def test_index_populated_on_create(self, storage: JSONLStorage) -> None:
+        """Test index is updated when creating issues with a parent."""
+        parent = Issue(id="p1", namespace="test", title="Parent")
+        child = Issue(id="c1", namespace="test", title="Child", parent="test-p1")
+        storage.create(parent)
+        storage.create(child)
+
+        assert "test-c1" in storage._children_by_parent.get("test-p1", [])
+
+    def test_index_updated_on_reparent(self, storage: JSONLStorage) -> None:
+        """Test index is updated when an issue's parent changes."""
+        p1 = Issue(id="p1", namespace="test", title="Parent 1")
+        p2 = Issue(id="p2", namespace="test", title="Parent 2")
+        child = Issue(id="c1", namespace="test", title="Child", parent="test-p1")
+        storage.create(p1)
+        storage.create(p2)
+        storage.create(child)
+
+        storage.update("test-c1", {"parent": "test-p2"})
+
+        assert "test-c1" not in storage._children_by_parent.get("test-p1", [])
+        assert "test-c1" in storage._children_by_parent.get("test-p2", [])
+
+    def test_index_updated_on_parent_removed(self, storage: JSONLStorage) -> None:
+        """Test index is updated when parent is set to None."""
+        parent = Issue(id="p1", namespace="test", title="Parent")
+        child = Issue(id="c1", namespace="test", title="Child", parent="test-p1")
+        storage.create(parent)
+        storage.create(child)
+
+        storage.update("test-c1", {"parent": None})
+
+        assert storage._children_by_parent.get("test-p1", []) == []
+
+    def test_index_survives_reload(self, storage: JSONLStorage) -> None:
+        """Test index is rebuilt correctly after reload."""
+        parent = Issue(id="p1", namespace="test", title="Parent")
+        child = Issue(id="c1", namespace="test", title="Child", parent="test-p1")
+        storage.create(parent)
+        storage.create(child)
+
+        storage.reload()
+
+        children = storage.get_children("test-p1")
+        assert len(children) == 1
+        assert children[0].full_id == "test-c1"
+        assert "test-c1" in storage._children_by_parent["test-p1"]
+
+    def test_index_empty_for_no_children(self, storage: JSONLStorage) -> None:
+        """Test index has no entry for issues without children."""
+        issue = Issue(id="p1", namespace="test", title="No children")
+        storage.create(issue)
+
+        assert "test-p1" not in storage._children_by_parent
+
+
 class TestUpdateFieldAllowlist:
     """Test that update() only modifies allowed fields."""
 

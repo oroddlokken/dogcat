@@ -248,48 +248,58 @@ def format_issue_brief(
     return f"{base}{parent_str}{labels_str}{manual_str}{blocked_by_str}{closed_str}"
 
 
+def _styled_key(label: str) -> str:
+    """Style a field label as bold cyan."""
+    return typer.style(label, fg="cyan", bold=True)
+
+
 def format_issue_full(issue: Issue, parent_title: str | None = None) -> str:
     """Format issue for full display."""
+    key = _styled_key
     lines = [
-        f"ID: {issue.full_id}",
-        f"Title: {issue.title}",
+        f"{key('ID:')} {issue.full_id}",
+        f"{key('Title:')} {issue.title}",
         "",
-        f"Status: {issue.status.value}",
-        f"Priority: {issue.priority}",
-        f"Type: {issue.issue_type.value}",
+        f"{key('Status:')} {issue.status.value}",
+        f"{key('Priority:')} {issue.priority}",
+        f"{key('Type:')} {issue.issue_type.value}",
         "",
     ]
 
     if issue.parent:
-        parent_line = f"Parent: {issue.parent}"
+        parent_line = f"{key('Parent:')} {issue.parent}"
         if parent_title:
             parent_line += f" ({parent_title})"
         lines.append(parent_line)
     if issue.owner:
-        lines.append(f"Owner: {issue.owner}")
+        lines.append(f"{key('Owner:')} {issue.owner}")
     if issue.labels:
-        lines.append(f"Labels: {', '.join(issue.labels)}")
+        lines.append(f"{key('Labels:')} {', '.join(issue.labels)}")
     if issue.duplicate_of:
-        lines.append(f"Duplicate of: {issue.duplicate_of}")
-    if issue.acceptance:
-        lines.append(f"Acceptance: {issue.acceptance}")
-
-    if issue.notes:
-        lines.append(f"Notes: {issue.notes}")
+        lines.append(f"{key('Duplicate of:')} {issue.duplicate_of}")
 
     dt_fmt = "%Y-%m-%d %H:%M:%S"
-    lines.append(f"Created: {issue.created_at.strftime(dt_fmt)}")
+    lines.append(f"{key('Created:')} {issue.created_at.strftime(dt_fmt)}")
     if issue.closed_at:
-        closed_line = f"Closed: {issue.closed_at.strftime(dt_fmt)}"
+        closed_line = f"{key('Closed:')} {issue.closed_at.strftime(dt_fmt)}"
         if issue.close_reason:
             closed_line += f" ({issue.close_reason})"
         lines.append(closed_line)
 
     if issue.description:
-        lines.append(f"\nDescription: {issue.description}")
+        lines.append(f"\n{key('Description:')}\n{issue.description}")
+
+    if issue.notes:
+        lines.append(f"\n{key('Notes:')}\n{issue.notes}")
+
+    if issue.acceptance:
+        lines.append(f"\n{key('Acceptance criteria:')}\n{issue.acceptance}")
+
+    if issue.design:
+        lines.append(f"\n{key('Design:')}\n{issue.design}")
 
     if issue.comments:
-        lines.append("\nComments:")
+        lines.append(f"\n{key('Comments:')}")
         for comment in issue.comments:
             lines.append(f"  [{comment.id}] {comment.author}")
             lines.append(f"  {comment.text}")
@@ -817,6 +827,17 @@ def create(
         "--created-by",
         help="Who is creating this",
     ),
+    design: str | None = typer.Option(None, "--design", help="Design notes"),
+    external_ref: str | None = typer.Option(
+        None,
+        "--external-ref",
+        help="External reference URL or ID",
+    ),
+    duplicate_of: str | None = typer.Option(
+        None,
+        "--duplicate-of",
+        help="Original issue ID if duplicate",
+    ),
     manual: bool = typer.Option(
         False,
         "--manual",
@@ -946,6 +967,14 @@ def create(
                 typer.echo(f"Error: Issue {blocks} not found", err=True)
                 raise typer.Exit(1)
 
+        # Resolve duplicate_of if provided
+        if duplicate_of:
+            resolved_dup = storage.resolve_id(duplicate_of)
+            if resolved_dup is None:
+                typer.echo(f"Error: Issue {duplicate_of} not found", err=True)
+                raise typer.Exit(1)
+            duplicate_of = resolved_dup
+
         # Resolve parent if provided
         if parent:
             resolved_parent = storage.resolve_id(parent)
@@ -966,8 +995,11 @@ def create(
             owner=final_owner,
             parent=parent,
             labels=issue_labels,
+            external_ref=external_ref,
+            design=design,
             acceptance=acceptance,
             notes=notes,
+            duplicate_of=duplicate_of,
             created_by=final_created_by,
             metadata=issue_metadata,
         )
@@ -1507,10 +1539,32 @@ def update(
         "-l",
         help="Labels, comma or space separated (replaces existing)",
     ),
+    design: str | None = typer.Option(None, "--design", help="New design notes"),
+    external_ref: str | None = typer.Option(
+        None,
+        "--external-ref",
+        help="New external reference URL or ID",
+    ),
+    depends_on: str | None = typer.Option(
+        None,
+        "--depends-on",
+        help="Issue ID this depends on (this issue is blocked by the other)",
+    ),
+    blocks: str | None = typer.Option(
+        None,
+        "--blocks",
+        help="Issue ID this blocks (the other issue is blocked by this one)",
+    ),
     manual: bool | None = typer.Option(
         None,
         "--manual/--no-manual",
         help="Mark/unmark issue as manual (not for agents)",
+    ),
+    editor: bool = typer.Option(
+        False,
+        "--editor",
+        "-e",
+        help="Open the Textual editor after updating the issue",
     ),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     updated_by: str | None = typer.Option(
@@ -1542,6 +1596,10 @@ def update(
             updates["acceptance"] = acceptance
         if notes is not None:
             updates["notes"] = notes
+        if design is not None:
+            updates["design"] = design
+        if external_ref is not None:
+            updates["external_ref"] = external_ref
         if duplicate_of is not None:
             if duplicate_of == "":
                 updates["duplicate_of"] = None
@@ -1577,16 +1635,39 @@ def update(
                 new_metadata.pop("no_agent", None)  # migrate old key
             updates["metadata"] = new_metadata
 
-        if not updates:
+        if not updates and not depends_on and not blocks and not editor:
             typer.echo("No updates provided", err=True)
             raise typer.Exit(1)
 
         # Set updated_by to default operator if not provided
-        updates["updated_by"] = (
+        final_updated_by = (
             updated_by if updated_by is not None else get_default_operator()
         )
 
-        issue = storage.update(issue_id, updates)
+        if updates:
+            updates["updated_by"] = final_updated_by
+            issue = storage.update(issue_id, updates)
+        else:
+            issue = storage.get(issue_id)
+            if issue is None:
+                typer.echo(f"Issue {issue_id} not found", err=True)
+                raise typer.Exit(1)
+
+        # Add dependencies if specified
+        if depends_on:
+            storage.add_dependency(
+                issue_id,
+                depends_on,
+                "blocks",
+                created_by=final_updated_by,
+            )
+        if blocks:
+            storage.add_dependency(
+                blocks,
+                issue.full_id,
+                "blocks",
+                created_by=final_updated_by,
+            )
 
         if json_output:
             from dogcat.models import issue_to_dict
@@ -1595,9 +1676,20 @@ def update(
         else:
             typer.echo(f"✓ Updated {issue.full_id}: {issue.title}")
 
+        if editor:
+            from dogcat.edit import edit_issue
+
+            edited = edit_issue(issue.full_id, storage)
+            if edited is not None:
+                typer.echo(f"✓ Updated {edited.full_id}: {edited.title}")
+            else:
+                typer.echo("Edit cancelled")
+
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
+    except typer.Exit:
+        raise
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
@@ -3749,18 +3841,22 @@ DOGCAT WORKFLOW GUIDE
 
 ## Quick Start for AI agents
 
-0. Allowed issue types, priorities, and statuses:
-   Types: bug, chore, draft, epic, feature, question, story, task
-   Priorities: 0 (Critical), 1 (High), 2 (Medium, default), 3 (Low), 4 (Minimal)
-   Statuses: open, in_progress, in_review, blocked, deferred, closed
+0a. Allowed issue types, priorities, and statuses:
+      Types: bug, chore, draft, epic, feature, question, story, task
+      Priorities: 0 (Critical), 1 (High), 2 (Medium, default), 3 (Low), 4 (Minimal)
+      Statuses: open, in_progress, in_review, blocked, deferred, closed
 
+0b. `dcat create` and `dcat update` both support --title, --description,
+    --priority, --acceptance, --notes, --labels, --parent, --manual,
+    --design, --external-ref, --depends-on, --blocks, --duplicate-of,
+    --editor
 
 1. Create an issue:
-   $ dcat create "My first issue" --type bug --priority 1
+   $ dcat create "My first issue" --type bug --priority 1 -d "Description"
+   # All options from 0b above can be used here.
 
 2. List issues:
    $ dcat list              - Show all open issues
-   $ dcat list --open       - Show only open/in-progress issues
    $ dcat list --closed     - Show only closed issues
    $ dcat ready             - Show issues ready to work (no blockers)
 
@@ -3777,6 +3873,8 @@ DOGCAT WORKFLOW GUIDE
   dcat create <title> --status in_progress  - Create with status
   dcat create <title> --depends-on <id>     - Create with dependency
   dcat update <id>                          - Update an issue
+  dcat update <id> --depends-on <other_id>  - Add dependency via update
+  dcat update <id> --editor                 - Update then open editor
   dcat close <id>                           - Mark issue as closed
 
 ### Managing Dependencies

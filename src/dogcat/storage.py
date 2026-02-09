@@ -52,6 +52,7 @@ class JSONLStorage:
         self._deps_by_depends_on: dict[str, list[Dependency]] = {}
         self._links_by_from: dict[str, list[Link]] = {}
         self._links_by_to: dict[str, list[Link]] = {}
+        self._children_by_parent: dict[str, list[str]] = {}
         # Track lines for compaction decisions
         self._base_lines: int = 0
         self._appended_lines: int = 0
@@ -172,6 +173,13 @@ class JSONLStorage:
         for link in self._links:
             self._links_by_from.setdefault(link.from_id, []).append(link)
             self._links_by_to.setdefault(link.to_id, []).append(link)
+
+        self._children_by_parent = {}
+        for issue in self._issues.values():
+            if issue.parent:
+                self._children_by_parent.setdefault(issue.parent, []).append(
+                    issue.full_id,
+                )
 
     def _save(self) -> None:
         """Compact: rewrite the entire file with only current state.
@@ -333,6 +341,8 @@ class JSONLStorage:
         validate_priority(issue.priority)
 
         self._issues[issue.full_id] = issue
+        if issue.parent:
+            self._children_by_parent.setdefault(issue.parent, []).append(issue.full_id)
         self._append([self._issue_record(issue)])
         return issue
 
@@ -486,6 +496,9 @@ class JSONLStorage:
 
         issue = self._issues[resolved_id]
 
+        # Track old parent for index maintenance
+        old_parent = issue.parent
+
         # Update fields
         for key, value in updates.items():
             if key not in self.UPDATABLE_FIELDS:
@@ -500,6 +513,19 @@ class JSONLStorage:
                 elif key == "issue_type" and isinstance(value, str):
                     value = IssueType(value)
                 setattr(issue, key, value)
+
+        # Maintain parent-child index if parent changed
+        if issue.parent != old_parent:
+            if old_parent and old_parent in self._children_by_parent:
+                children = self._children_by_parent[old_parent]
+                if resolved_id in children:
+                    children.remove(resolved_id)
+                if not children:
+                    del self._children_by_parent[old_parent]
+            if issue.parent:
+                self._children_by_parent.setdefault(issue.parent, []).append(
+                    resolved_id,
+                )
 
         # Update timestamp
         issue.updated_at = datetime.now().astimezone()
@@ -880,7 +906,11 @@ class JSONLStorage:
         if resolved_id is None:
             msg = f"Issue {issue_id} not found"
             raise ValueError(msg)
-        return [issue for issue in self._issues.values() if issue.parent == resolved_id]
+        return [
+            self._issues[cid]
+            for cid in self._children_by_parent.get(resolved_id, [])
+            if cid in self._issues
+        ]
 
     def get_issue_ids(self) -> set[str]:
         """Get all issue IDs in storage.

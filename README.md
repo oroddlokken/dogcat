@@ -14,7 +14,7 @@ It also avoids some complexity by not using a daemon and/or SQL database, and on
 
 ## Installation
 
-### Homebrew (macOS/Linux)
+### Homebrew (macOS)
 
 ```bash
 brew install oroddlokken/tap/dogcat
@@ -25,6 +25,12 @@ This installs `dcat`/`dogcat` and handles Python and dependencies automatically 
 ### From source
 
 Install `uv`, then run `./dcat.py`.
+
+### Using uvx
+By installing [uv](https://docs.astral.sh/uv/) and adding `alias dcat="uvx -p 3.13 --from git+https://github.com/oroddlokken/dogcat dcat"` to your `~/.zshrc` or `~/.bashrc` you can run it without installing it. 
+
+### Other platforms
+I hope to have something better in place soon that doesnt require on uv!
 
 ## Usage
 

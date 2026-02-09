@@ -1168,6 +1168,100 @@ class TestCLICreate:
         assert data["issue_type"] == "bug"
 
 
+class TestCreateAlignedOptions:
+    """Test --design, --external-ref, --duplicate-of on create command."""
+
+    def test_create_with_design(self, tmp_path: Path) -> None:
+        """Test creating an issue with --design."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "Test issue",
+                "--design",
+                "Use a factory pattern",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["design"] == "Use a factory pattern"
+
+    def test_create_with_external_ref(self, tmp_path: Path) -> None:
+        """Test creating an issue with --external-ref."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "Test issue",
+                "--external-ref",
+                "https://example.com/issue/42",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["external_ref"] == "https://example.com/issue/42"
+
+    def test_create_with_duplicate_of(self, tmp_path: Path) -> None:
+        """Test creating an issue with --duplicate-of."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # Create original issue
+        orig = runner.invoke(
+            app,
+            ["create", "Original issue", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        orig_data = json.loads(orig.stdout)
+        orig_id = f"{orig_data['namespace']}-{orig_data['id']}"
+
+        # Create duplicate
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "Duplicate issue",
+                "--duplicate-of",
+                orig_id,
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["duplicate_of"] == orig_id
+
+    def test_create_duplicate_of_nonexistent_fails(self, tmp_path: Path) -> None:
+        """Test that --duplicate-of with a nonexistent ID fails."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "Dup issue",
+                "--duplicate-of",
+                "nonexistent",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 1
+
+
 class TestEditAlias:
     """Test 'e' alias for edit command."""
 
@@ -2833,6 +2927,221 @@ class TestCLILabel:
         )
         data = json.loads(show_result.stdout)
         assert "manual" not in data["metadata"]
+
+
+class TestUpdateAlignedOptions:
+    """Test --design, --external-ref, --depends-on, --blocks, --editor on update."""
+
+    def test_update_design(self, tmp_path: Path) -> None:
+        """Test updating issue design notes."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create_result = runner.invoke(
+            app,
+            ["create", "Test issue", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data = json.loads(create_result.stdout)
+        issue_id = f"{data['namespace']}-{data['id']}"
+
+        result = runner.invoke(
+            app,
+            [
+                "update",
+                issue_id,
+                "--design",
+                "Use observer pattern",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+
+        show_result = runner.invoke(
+            app,
+            ["show", issue_id, "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        show_data = json.loads(show_result.stdout)
+        assert show_data["design"] == "Use observer pattern"
+
+    def test_update_external_ref(self, tmp_path: Path) -> None:
+        """Test updating issue external reference."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create_result = runner.invoke(
+            app,
+            ["create", "Test issue", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data = json.loads(create_result.stdout)
+        issue_id = f"{data['namespace']}-{data['id']}"
+
+        result = runner.invoke(
+            app,
+            [
+                "update",
+                issue_id,
+                "--external-ref",
+                "https://jira.example.com/PROJ-123",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+
+        show_result = runner.invoke(
+            app,
+            ["show", issue_id, "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        show_data = json.loads(show_result.stdout)
+        assert show_data["external_ref"] == "https://jira.example.com/PROJ-123"
+
+    def test_update_depends_on(self, tmp_path: Path) -> None:
+        """Test adding a dependency via update --depends-on."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create1 = runner.invoke(
+            app,
+            ["create", "Blocker issue", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data1 = json.loads(create1.stdout)
+        blocker_id = f"{data1['namespace']}-{data1['id']}"
+
+        create2 = runner.invoke(
+            app,
+            ["create", "Dependent issue", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data2 = json.loads(create2.stdout)
+        dep_id = f"{data2['namespace']}-{data2['id']}"
+
+        result = runner.invoke(
+            app,
+            [
+                "update",
+                dep_id,
+                "--depends-on",
+                blocker_id,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+
+        # Verify dependency exists
+        dep_result = runner.invoke(
+            app,
+            ["dep", dep_id, "list", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert blocker_id in dep_result.stdout
+
+    def test_update_blocks(self, tmp_path: Path) -> None:
+        """Test adding a dependency via update --blocks."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create1 = runner.invoke(
+            app,
+            ["create", "Blocker issue", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data1 = json.loads(create1.stdout)
+        blocker_id = f"{data1['namespace']}-{data1['id']}"
+
+        create2 = runner.invoke(
+            app,
+            ["create", "Blocked issue", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data2 = json.loads(create2.stdout)
+        blocked_id = f"{data2['namespace']}-{data2['id']}"
+
+        result = runner.invoke(
+            app,
+            [
+                "update",
+                blocker_id,
+                "--blocks",
+                blocked_id,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+
+        # Verify dependency exists on the blocked issue
+        dep_result = runner.invoke(
+            app,
+            ["dep", blocked_id, "list", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert blocker_id in dep_result.stdout
+
+    def test_update_depends_on_only_without_field_updates(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test that --depends-on works even without any field updates."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create1 = runner.invoke(
+            app,
+            ["create", "Issue A", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        d1 = json.loads(create1.stdout)
+        id1 = f"{d1['namespace']}-{d1['id']}"
+
+        create2 = runner.invoke(
+            app,
+            ["create", "Issue B", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        d2 = json.loads(create2.stdout)
+        id2 = f"{d2['namespace']}-{d2['id']}"
+
+        # Only --depends-on, no field changes
+        result = runner.invoke(
+            app,
+            [
+                "update",
+                id2,
+                "--depends-on",
+                id1,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+
+    def test_update_with_editor(self, tmp_path: Path) -> None:
+        """Test that update --editor opens the editor after updating."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create_result = runner.invoke(
+            app,
+            ["create", "Test issue", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data = json.loads(create_result.stdout)
+        issue_id = f"{data['namespace']}-{data['id']}"
+
+        mock_issue = MagicMock()
+        mock_issue.full_id = issue_id
+        mock_issue.title = "Edited title"
+
+        with patch("dogcat.edit.edit_issue", return_value=mock_issue) as mock_edit:
+            result = runner.invoke(
+                app,
+                [
+                    "update",
+                    issue_id,
+                    "--title",
+                    "New title",
+                    "--editor",
+                    "--dogcats-dir",
+                    str(dogcats_dir),
+                ],
+            )
+            assert result.exit_code == 0
+            mock_edit.assert_called_once()
+            assert "Updated" in result.stdout
 
 
 class TestCLIDependency:
