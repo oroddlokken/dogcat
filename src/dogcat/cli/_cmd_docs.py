@@ -317,6 +317,24 @@ Child issues appear in `dcat ready` even when their parent is still open.
 - Must the parent complete first? → Add explicit dependency:
     dcat update <child_id> --depends-on <parent_id>
 
+## Breaking Down Large Tasks
+
+When the user requests a large or complex task, break it into an epic
+with subtasks rather than tackling it as a single issue:
+
+1. Create an epic for the overall goal:
+   $ dcat create "Redesign auth system" --type epic
+
+2. Create subtasks under the epic:
+   $ dcat create "Add OAuth provider" --type task --parent <epic_id>
+   $ dcat create "Migrate user sessions" --type task --parent <epic_id>
+
+3. Add dependencies between subtasks where ordering matters:
+   $ dcat update <task_id> --depends-on <other_task_id>
+
+Prefer multiple small, focused issues over one large issue.
+If unsure about scope, ask the user before creating the breakdown.
+
 ## Agent Integration
 
 Use --agent-only in list/ready to filter out manual issues:
