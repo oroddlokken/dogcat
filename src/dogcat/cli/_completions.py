@@ -15,7 +15,11 @@ def complete_issue_ids(incomplete: str) -> list[tuple[str, str]]:
     """Complete issue IDs from storage."""
     try:
         storage = get_storage()
-        issues = {i.full_id: i.title for i in storage.list()}
+        issues = {
+            i.full_id: i.title
+            for i in storage.list()
+            if i.status.value not in ("closed", "tombstone")
+        }
         return sorted(
             (fid, title) for fid, title in issues.items() if fid.startswith(incomplete)
         )

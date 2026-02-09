@@ -66,6 +66,19 @@ def storage_with_issues(temp_dogcats_dir: Path) -> JSONLStorage:
             created_at=now,
         ),
     )
+    storage.create(
+        Issue(
+            id="closed1",
+            namespace="dc",
+            title="Closed issue",
+            status=Status.CLOSED,
+            priority=2,
+            issue_type=IssueType.BUG,
+            labels=["backend"],
+            created_by="test",
+            created_at=now,
+        ),
+    )
     return storage
 
 
@@ -153,12 +166,12 @@ class TestCompletePriorities:
 class TestCompleteIssueIds:
     """Test complete_issue_ids completion callback."""
 
-    def test_returns_ids(
+    def test_returns_open_ids(
         self,
         storage_with_issues: JSONLStorage,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Should return all issue IDs from storage with titles."""
+        """Should return open issue IDs and exclude closed ones."""
         monkeypatch.setattr(
             "dogcat.cli._completions.get_storage",
             lambda: storage_with_issues,
@@ -168,6 +181,7 @@ class TestCompleteIssueIds:
         assert "dc-abc1" in values
         assert "dc-abc2" in values
         assert "dc-xyz1" in values
+        assert "dc-closed1" not in values
         # Verify help text contains issue titles
         helps = dict(result)
         assert helps["dc-abc1"] == "First issue"

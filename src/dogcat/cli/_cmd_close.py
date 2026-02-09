@@ -158,7 +158,7 @@ def register(app: typer.Typer) -> None:
         if has_errors:
             raise typer.Exit(1)
 
-    @app.command(name="remove")
+    @app.command(name="remove", hidden=True)
     def remove_cmd(
         issue_id: str = typer.Argument(
             ...,
