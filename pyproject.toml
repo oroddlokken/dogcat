@@ -124,6 +124,8 @@ ignore = [
 ]
 
 [tool.pyright]
+venvPath = "."
+venv = ".venv"
 typeCheckingMode = "strict"
 stubPath = "./typings"
 reportMissingTypeStubs = "none" # Annoying

@@ -3402,9 +3402,9 @@ class TestCLIBlocked:
         )
 
         with patch(
-            "dogcat.cli.format_issue_brief",
+            "dogcat.cli._cmd_workflow.format_issue_brief",
             wraps=__import__(
-                "dogcat.cli",
+                "dogcat.cli._formatting",
                 fromlist=["format_issue_brief"],
             ).format_issue_brief,
         ) as mock_fmt:

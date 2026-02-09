@@ -41,7 +41,7 @@ lint-all:
 
 # find dead code with vulture
 vulture:
-    vulture src tests dcat.py benchmark.py --ignore-decorators "@app.command" --ignore-names "on_modified,on_moved,RELATED,reload"
+    vulture src tests dcat.py benchmark.py vulture_whitelist.py --ignore-decorators "@app.command" --ignore-names "on_modified,on_moved,RELATED,reload"
 
 # run tests (excludes regression tests)
 test:
