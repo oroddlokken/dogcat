@@ -3749,14 +3749,20 @@ DOGCAT WORKFLOW GUIDE
 
 ## Quick Start for AI agents
 
+0. Allowed issue types, priorities, and statuses:
+   Types: bug, chore, draft, epic, feature, question, story, task
+   Priorities: 0 (Critical), 1 (High), 2 (Medium, default), 3 (Low), 4 (Minimal)
+   Statuses: open, in_progress, in_review, blocked, deferred, closed
+
+
 1. Create an issue:
    $ dcat create "My first issue" --type bug --priority 1
 
 2. List issues:
-   $ dcat list
-   $ dcat list --open
-   $ dcat list --closed
-   $ dcat list --table  # Formatted table
+   $ dcat list              - Show all open issues
+   $ dcat list --open       - Show only open/in-progress issues
+   $ dcat list --closed     - Show only closed issues
+   $ dcat ready             - Show issues ready to work (no blockers)
 
 3. Update an issue:
    $ dcat update <issue_id> --status in_progress
@@ -3765,16 +3771,6 @@ DOGCAT WORKFLOW GUIDE
    $ dcat close <issue_id> --reason "Fixed"
 
 ## Essential Commands
-
-### Finding Work
-  dcat list              - Show all open issues
-  dcat list --open       - Show only open/in-progress issues
-  dcat list --closed     - Show only closed issues
-  dcat list --table     - Show as formatted table
-  dcat ready             - Show issues ready to work (no blockers)
-  dcat in-progress       - Show issues currently in progress
-  dcat in-review         - Show issues currently in review
-  dcat recently-closed   - Show recently closed issues
 
 ### Creating & Updating
   dcat create <title>                       - Create a new issue
@@ -3787,12 +3783,6 @@ DOGCAT WORKFLOW GUIDE
   dcat dep <id> add --depends-on <other_id> - Add dependency
   dcat dep <id> list                        - Show dependencies
   dcat blocked                              - Show all blocked issues
-
-### Maintenance Commands
-  dcat prune             - Remove tombstoned issues permanently
-  dcat prune --dry-run   - Preview what would be pruned
-  dcat export            - Export all issues, deps, and links
-  dcat stream            - Stream issue changes in real-time
 
 ## Parent-Child vs Dependencies
 
@@ -3807,27 +3797,6 @@ Use this to decide:
 Example: A feature with subtasks - subtasks can often be worked in parallel,
 so they should NOT depend on the parent. But if subtask B needs subtask A's
 output, add a dependency between them.
-
-## External .dogcats Directory
-
-Place .dogcats outside your repo with a .dogcatrc file:
-  echo "/path/to/.dogcats" > .dogcatrc
-
-Or use init with --dir:
-  dcat init --dir /path/to/external/.dogcats
-
-The .dogcatrc file contains a single line: the path to the .dogcats
-directory. Supports both absolute and relative paths (relative to the
-.dogcatrc file location).
-
-## Tips & Tricks
-
-- Use --json flag with any list command for programmatic output
-- Use --operator flag to track who made changes
-- Use --closed-after and --closed-before for date-based queries
-- Use --all flag to include archived/tombstoned issues
-- Use dcat info to see valid types, statuses, and priorities
-- Use dcat search <query> to find issues by title/description
 
 ## Agent Integration
 
@@ -3852,18 +3821,8 @@ Do NOT attempt to work on manual issues. Leave them for the user.
 Issues progress through these statuses:
   open -> in_progress -> in_review -> closed
 
-Status meanings:
-  open        - New issue, not yet started
-  in_progress - Actively being worked on
-  in_review   - Work complete, awaiting review/testing
-  blocked     - Waiting on external dependency
-  deferred    - Postponed for later
-  closed      - Done
-
 Update status:
   dcat update <id> --status in_review
-  dcat ir <id>            # Shortcut for setting status to in_review
-  dcat ip <id>            # Shortcut for setting status to in_progress
 
 ## Common Workflows
 
@@ -3873,7 +3832,6 @@ $ dcat show <issue_id>    # View issue details (includes parent, children, depen
 $ dcat update <issue_id> --status in_progress
 
 ### Submitting for Review
-$ dcat ir <issue_id>                         # Shortcut command
 $ dcat update <issue_id> --status in_review  # Alternative
 
 ### Creating Related Issues
@@ -3884,8 +3842,8 @@ $ dcat create "Dependent task" --depends-on <blocker_id>
 $ dcat close <issue_id> --reason "Explanation"
 
 ### Tracking Dependencies
+$ dcat blocked                                       # See what's blocked
 $ dcat dep <new_task> add --depends-on <blocker_id>
-$ dcat blocked            # See what's blocked
 
 ## Questions
 
@@ -3895,7 +3853,7 @@ questions that need answers, NOT tasks to work on. Use them to:
 - Track decisions that need to be made
 - Record questions for team discussion
 
-Close with answer:  dcat close <id> --reason "Use JWT tokens"
+Close with answer: dcat close <id> --reason "Use JWT tokens"
 
 ## Need Help?
   dcat --help            - Show all commands

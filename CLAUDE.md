@@ -7,42 +7,9 @@ Then run `dcat list --agent-only` to see the list of issues. Generally we work o
 
 ALWAYS run `dcat update --status in_progress $issueId` when you start working on an issue.
 
-When picking up a child issue, consider whether it can truly be started before the parent is done. Parent-child is organizational, not blocking. If the child genuinely needs the parent to complete first, add an explicit dependency with `dcat dep <child_id> add --depends-on <parent_id>`.
-
 It is okay to work on multiple issues at the same time - just mark all of them as in_progress, and ask the user which one to prioritize if there is a conflict.
 
-If the user brings up a new bug, feature or anything else that warrants changes to the code, first ask if we should create an issue for it before you start working on the code.
-
-When creating a **question** issue (type: question), always draft the title and description first and confirm them with the user before running `dcat create`. Questions capture decisions and context, so the wording matters.
-
-### Issue Status Workflow
-
-Status progression: `open` → `in_progress` → `in_review` → `closed`
-
-When starting work:
-
-```bash
-dcat show $issueId                         # Read full issue details first
-dcat update --status in_progress $issueId  # Then mark as in progress
-```
-
-When work is complete and ready for user review:
-
-```bash
-dcat update --status in_review $issueId
-```
-
-If changes are needed after review, set back to in_progress:
-
-```bash
-dcat update --status in_progress $issueId
-```
-
-If you encounter an issue you cannot solve (e.g. requires deployment, credentials, physical access, or subjective human judgment), mark it as manual and tell the user what needs their attention:
-
-```bash
-dcat update --manual $issueId
-```
+If the user brings up a new bug, feature or anything else that warrants changes to the code, ALWAYS ask if we should create an issue for it before you start working on the code.
 
 ### Closing Issues - IMPORTANT
 
@@ -63,11 +30,11 @@ Import from this module rather than hardcoding values in multiple places.
 
 Remember to run "$PROJECT_FOLDER/.venv/bin/activate &&" before running any commands that runs Python. This is to ensure the virtual environment is loaded and all dependencies are installed.
 
-Run `just fmt-all` every now and then to format all the files
-
 Always write tests for new features or when changing functionality.
 
 Use `just test` during development for fast feedback (excludes regression tests). Run `just test-regression` once you're happy with the changes to verify nothing is broken across versions. Use `just test-all` to run everything.
+
+Use `just lint` to check for linting errors. Run `just fmt-all` to automatically fix formatting issues. The CICD pipeline will fail if linting errors are present, so they must be fixed before pushing code.
 
 We are using uv for dependency management. Never call out to pip.
 
