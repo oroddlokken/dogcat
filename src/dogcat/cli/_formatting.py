@@ -175,6 +175,16 @@ def format_issue_tree(
     """
     hierarchy = build_hierarchy(issues)
 
+    # Collect all issue IDs in the filtered set
+    issue_ids = {issue.full_id for issue in issues}
+
+    # Determine root issues: those with no parent, OR whose parent is not
+    # in the filtered set (orphaned children).
+    roots = sorted(
+        [i for i in issues if i.parent is None or i.parent not in issue_ids],
+        key=lambda i: (i.priority, i.full_id),
+    )
+
     def format_recursive(parent_id: str | None, depth: int) -> list[str]:
         """Recursively format issues and their children."""
         lines: list[str] = []
@@ -191,7 +201,13 @@ def format_issue_tree(
 
         return lines
 
-    lines = format_recursive(None, 0)
+    # Format root issues and their children
+    lines: list[str] = []
+    for issue in roots:
+        formatted = format_issue_brief(issue, blocked_ids, blocked_by_map)
+        lines.append(formatted)
+        lines.extend(format_recursive(issue.full_id, 1))
+
     return "\n".join(lines)
 
 

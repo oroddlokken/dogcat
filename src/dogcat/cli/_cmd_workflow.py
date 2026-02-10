@@ -6,7 +6,7 @@ import orjson
 import typer
 
 from ._completions import complete_issue_ids
-from ._formatting import format_issue_brief
+from ._formatting import format_issue_brief, format_issue_tree
 from ._helpers import get_default_operator, get_storage
 
 
@@ -128,8 +128,12 @@ def register(app: typer.Typer) -> None:
                 if not issues:
                     typer.echo("No in-progress issues")
                 else:
-                    for issue in issues:
-                        typer.echo(format_issue_brief(issue))
+                    has_parent = any(i.parent for i in issues)
+                    if has_parent:
+                        typer.echo(format_issue_tree(issues))
+                    else:
+                        for issue in issues:
+                            typer.echo(format_issue_brief(issue))
 
         except Exception as e:
             typer.echo(f"Error: {e}", err=True)
@@ -155,8 +159,12 @@ def register(app: typer.Typer) -> None:
                 if not issues:
                     typer.echo("No in-review issues")
                 else:
-                    for issue in issues:
-                        typer.echo(format_issue_brief(issue))
+                    has_parent = any(i.parent for i in issues)
+                    if has_parent:
+                        typer.echo(format_issue_tree(issues))
+                    else:
+                        for issue in issues:
+                            typer.echo(format_issue_brief(issue))
 
         except Exception as e:
             typer.echo(f"Error: {e}", err=True)
@@ -528,16 +536,28 @@ def register(app: typer.Typer) -> None:
                 if not ip_issues:
                     typer.echo("  No in-progress issues")
                 else:
-                    for issue in ip_issues:
-                        typer.echo(f"  {format_issue_brief(issue)}")
+                    ip_has_parent = any(i.parent for i in ip_issues)
+                    if ip_has_parent:
+                        tree = format_issue_tree(ip_issues)
+                        for line in tree.splitlines():
+                            typer.echo(f"  {line}")
+                    else:
+                        for issue in ip_issues:
+                            typer.echo(f"  {format_issue_brief(issue)}")
 
                 typer.echo()
                 typer.echo("In Review:")
                 if not ir_issues:
                     typer.echo("  No in-review issues")
                 else:
-                    for issue in ir_issues:
-                        typer.echo(f"  {format_issue_brief(issue)}")
+                    ir_has_parent = any(i.parent for i in ir_issues)
+                    if ir_has_parent:
+                        tree = format_issue_tree(ir_issues)
+                        for line in tree.splitlines():
+                            typer.echo(f"  {line}")
+                    else:
+                        for issue in ir_issues:
+                            typer.echo(f"  {format_issue_brief(issue)}")
 
         except Exception as e:
             typer.echo(f"Error: {e}", err=True)

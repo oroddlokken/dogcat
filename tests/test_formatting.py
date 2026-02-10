@@ -1,6 +1,6 @@
 """Tests for display and formatting functions."""
 
-from dogcat.cli._formatting import format_issue_table
+from dogcat.cli._formatting import format_issue_table, format_issue_tree
 from dogcat.models import Issue
 
 
@@ -80,3 +80,64 @@ class TestFormatIssueTableMarkupEscaping:
         """Test that empty issue list returns empty string."""
         output = format_issue_table([])
         assert output == ""
+
+
+class TestFormatIssueTreeOrphanedChildren:
+    """Test that format_issue_tree handles orphaned children correctly."""
+
+    def test_orphaned_child_treated_as_root(self) -> None:
+        """Test that a child whose parent is not in the set is shown as root."""
+        child = Issue(
+            id="child1",
+            namespace="dc",
+            title="Orphaned child",
+            parent="dc-missing",
+        )
+
+        output = format_issue_tree([child])
+
+        assert "Orphaned child" in output
+        # Should not be indented since parent is not in set
+        assert not output.startswith("  ")
+
+    def test_parent_and_child_both_in_set(self) -> None:
+        """Test normal parent-child tree rendering."""
+        parent = Issue(
+            id="par1",
+            namespace="dc",
+            title="Parent issue",
+        )
+        child = Issue(
+            id="ch1",
+            namespace="dc",
+            title="Child issue",
+            parent="dc-par1",
+        )
+
+        output = format_issue_tree([parent, child])
+
+        assert "Parent issue" in output
+        assert "Child issue" in output
+        # Child should be indented
+        for line in output.splitlines():
+            if "Child issue" in line:
+                assert line.startswith("  ")
+
+    def test_mixed_orphaned_and_rooted(self) -> None:
+        """Test mix of orphaned children and proper roots."""
+        root = Issue(
+            id="root1",
+            namespace="dc",
+            title="Root issue",
+        )
+        orphan = Issue(
+            id="orphan1",
+            namespace="dc",
+            title="Orphan issue",
+            parent="dc-gone",
+        )
+
+        output = format_issue_tree([root, orphan])
+
+        assert "Root issue" in output
+        assert "Orphan issue" in output

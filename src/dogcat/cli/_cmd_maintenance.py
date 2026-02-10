@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -610,12 +611,15 @@ def register(app: typer.Typer) -> None:
             actual_dogcats_dir = str(storage.dogcats_dir)
             prefix = get_issue_prefix(actual_dogcats_dir)
 
-            # Count issues by status
+            # Count issues by status and type
             all_issues = storage.list()
             status_counts: dict[str, int] = {}
+            type_counts: dict[str, int] = {}
             for issue in all_issues:
                 status_val = issue.status.value
                 status_counts[status_val] = status_counts.get(status_val, 0) + 1
+                type_val = issue.issue_type.value
+                type_counts[type_val] = type_counts.get(type_val, 0) + 1
 
             total = len(all_issues)
 
@@ -624,6 +628,7 @@ def register(app: typer.Typer) -> None:
                     "prefix": prefix,
                     "total": total,
                     "by_status": status_counts,
+                    "by_type": type_counts,
                 }
                 typer.echo(orjson.dumps(output, option=orjson.OPT_INDENT_2).decode())
             else:
@@ -633,16 +638,32 @@ def register(app: typer.Typer) -> None:
                     typer.echo("\nBy status:")
                     for status_val, count in sorted(status_counts.items()):
                         typer.echo(f"  {status_val:<12} {count}")
+                if type_counts:
+                    typer.echo("\nBy type:")
+                    for type_val, count in sorted(type_counts.items()):
+                        typer.echo(f"  {type_val:<12} {count}")
 
         except ValueError as e:
             typer.echo(f"Error: {e}", err=True)
             raise typer.Exit(1) from None
 
+    def _extract_snippet(text: str, pattern: re.Pattern[str], context: int = 40) -> str:
+        """Extract a context snippet around the first match in text."""
+        match = pattern.search(text)
+        if not match:
+            return ""
+        start = max(0, match.start() - context)
+        end = min(len(text), match.end() + context)
+        snippet = text[start:end].replace("\n", " ")
+        prefix = "..." if start > 0 else ""
+        suffix = "..." if end < len(text) else ""
+        return f"{prefix}{snippet}{suffix}"
+
     @app.command()
     def search(
         query: str = typer.Argument(
             ...,
-            help="Search query (searches title and description)",
+            help="Search query (searches all text fields)",
         ),
         case_sensitive: bool = typer.Option(
             False,
@@ -655,9 +676,10 @@ def register(app: typer.Typer) -> None:
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
-        """Search issues by title and description.
+        """Search issues by text content across all fields.
 
-        Searches for the query string in issue titles and descriptions.
+        Searches for the query string in issue titles, descriptions,
+        notes, acceptance criteria, design, and comments.
         By default, search is case-insensitive.
 
         Examples:
@@ -665,8 +687,6 @@ def register(app: typer.Typer) -> None:
             dcat search "bug" --type bug     # Find bug issues mentioning bug
             dcat search "API" -c             # Case-sensitive search
         """
-        import re
-
         from dogcat.models import Issue
 
         try:
@@ -685,34 +705,59 @@ def register(app: typer.Typer) -> None:
                     i for i in issues if i.status.value not in ("closed", "tombstone")
                 ]
 
-            # Search in title and description
+            # Search across all text fields
             flags = 0 if case_sensitive else re.IGNORECASE
             pattern = re.compile(re.escape(query), flags)
 
-            matches: list[Issue] = []
+            # Fields to search: (attribute_name, display_label)
+            search_fields = [
+                ("title", "Title"),
+                ("description", "Description"),
+                ("notes", "Notes"),
+                ("acceptance", "Acceptance"),
+                ("design", "Design"),
+            ]
+
+            matches: list[tuple[Issue, list[tuple[str, str]]]] = []
             for issue in issues:
-                title_match = pattern.search(issue.title) if issue.title else None
-                desc_match = (
-                    pattern.search(issue.description) if issue.description else None
-                )
-                if title_match or desc_match:
-                    matches.append(issue)
+                matched_fields: list[tuple[str, str]] = []
+                for attr, label in search_fields:
+                    text = getattr(issue, attr, None)
+                    if text and pattern.search(text):
+                        snippet = _extract_snippet(text, pattern)
+                        matched_fields.append((label, snippet))
+                # Also search comments
+                for comment in issue.comments:
+                    if comment.text and pattern.search(comment.text):
+                        snippet = _extract_snippet(comment.text, pattern)
+                        matched_fields.append(("Comment", snippet))
+                        break  # One comment match is enough
+                if matched_fields:
+                    matches.append((issue, matched_fields))
 
             # Sort by priority
-            matches = sorted(matches, key=lambda i: (i.priority, i.id))
+            matches = sorted(matches, key=lambda m: (m[0].priority, m[0].id))
 
             if json_output:
                 from dogcat.models import issue_to_dict
 
-                output = [issue_to_dict(issue) for issue in matches]
+                output = [issue_to_dict(issue) for issue, _ in matches]
                 typer.echo(orjson.dumps(output).decode())
             else:
                 if not matches:
                     typer.echo(f"No issues found matching '{query}'")
                 else:
                     typer.echo(f"Found {len(matches)} issue(s) matching '{query}':\n")
-                    for issue in matches:
+                    for issue, matched_fields in matches:
                         typer.echo(format_issue_brief(issue))
+                        for field_name, snippet in matched_fields:
+                            if field_name == "Title":
+                                continue  # Title is already visible
+                            styled_field = typer.style(
+                                f"  {field_name}:",
+                                fg="bright_black",
+                            )
+                            typer.echo(f"{styled_field} {snippet}")
 
         except Exception as e:
             typer.echo(f"Error: {e}", err=True)

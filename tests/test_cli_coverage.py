@@ -3192,3 +3192,456 @@ class TestRemoveCommand:
         assert result.exit_code == 0
         data = json.loads(result.stdout)
         assert data["deleted_by"] == "alice"
+
+
+class TestStatusByType:
+    """Test 'By type' breakdown in status command (dogcat-12zo)."""
+
+    def test_status_shows_by_type(self, tmp_path: Path) -> None:
+        """Test status shows issue counts by type."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        runner.invoke(
+            app,
+            ["create", "Bug one", "--type", "bug", "--dogcats-dir", str(dogcats_dir)],
+        )
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Feature one",
+                "--type",
+                "feature",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Feature two",
+                "--type",
+                "feature",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["status", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "By type:" in result.stdout
+        assert "bug" in result.stdout
+        assert "feature" in result.stdout
+
+    def test_status_json_includes_by_type(self, tmp_path: Path) -> None:
+        """Test status JSON output includes by_type."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        runner.invoke(
+            app,
+            ["create", "Bug one", "--type", "bug", "--dogcats-dir", str(dogcats_dir)],
+        )
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Task one",
+                "--type",
+                "task",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["status", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert "by_type" in data
+        assert data["by_type"]["bug"] == 1
+        assert data["by_type"]["task"] == 1
+
+
+class TestWorkflowTreeView:
+    """Test tree view in in-progress, in-review, and pr commands (dogcat-1403)."""
+
+    def test_in_progress_tree_with_parent_child(self, tmp_path: Path) -> None:
+        """Test in-progress shows tree when parent-child relationships exist."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # Create parent
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "Epic task",
+                "--type",
+                "epic",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        parent_id = result.stdout.strip().split(": ")[0].split()[-1]
+
+        # Create child
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "Subtask one",
+                "--parent",
+                parent_id,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        child_id = result.stdout.strip().split(": ")[0].split()[-1]
+
+        # Set both to in_progress
+        runner.invoke(
+            app,
+            [
+                "update",
+                parent_id,
+                "--status",
+                "in_progress",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        runner.invoke(
+            app,
+            [
+                "update",
+                child_id,
+                "--status",
+                "in_progress",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["in-progress", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Epic task" in result.stdout
+        assert "Subtask one" in result.stdout
+        # Check indentation (child should be indented)
+        for line in result.stdout.splitlines():
+            if "Subtask one" in line:
+                assert line.startswith("  ")
+                break
+
+    def test_in_progress_flat_without_parents(self, tmp_path: Path) -> None:
+        """Test in-progress shows flat list when no parent-child relationships."""
+        dogcats_dir, ids = _init_and_create(tmp_path, "Task A", "Task B")
+        for issue_id in ids:
+            runner.invoke(
+                app,
+                [
+                    "update",
+                    issue_id,
+                    "--status",
+                    "in_progress",
+                    "--dogcats-dir",
+                    str(dogcats_dir),
+                ],
+            )
+
+        result = runner.invoke(
+            app,
+            ["in-progress", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Task A" in result.stdout
+        assert "Task B" in result.stdout
+
+    def test_in_review_tree_with_parent_child(self, tmp_path: Path) -> None:
+        """Test in-review shows tree when parent-child relationships exist."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # Create parent
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "Epic review",
+                "--type",
+                "epic",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        parent_id = result.stdout.strip().split(": ")[0].split()[-1]
+
+        # Create child
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "Review subtask",
+                "--parent",
+                parent_id,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        child_id = result.stdout.strip().split(": ")[0].split()[-1]
+
+        # Set both to in_review
+        for iid in [parent_id, child_id]:
+            runner.invoke(
+                app,
+                [
+                    "update",
+                    iid,
+                    "--status",
+                    "in_progress",
+                    "--dogcats-dir",
+                    str(dogcats_dir),
+                ],
+            )
+            runner.invoke(
+                app,
+                [
+                    "update",
+                    iid,
+                    "--status",
+                    "in_review",
+                    "--dogcats-dir",
+                    str(dogcats_dir),
+                ],
+            )
+
+        result = runner.invoke(
+            app,
+            ["in-review", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Epic review" in result.stdout
+        assert "Review subtask" in result.stdout
+
+    def test_pr_tree_view(self, tmp_path: Path) -> None:
+        """Test pr command shows tree view when parent-child relationships exist."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # Create parent and child
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "PR Epic",
+                "--type",
+                "epic",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        parent_id = result.stdout.strip().split(": ")[0].split()[-1]
+
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "PR Subtask",
+                "--parent",
+                parent_id,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        child_id = result.stdout.strip().split(": ")[0].split()[-1]
+
+        # Set both to in_progress
+        for iid in [parent_id, child_id]:
+            runner.invoke(
+                app,
+                [
+                    "update",
+                    iid,
+                    "--status",
+                    "in_progress",
+                    "--dogcats-dir",
+                    str(dogcats_dir),
+                ],
+            )
+
+        result = runner.invoke(
+            app,
+            ["pr", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "In Progress:" in result.stdout
+        assert "PR Epic" in result.stdout
+        assert "PR Subtask" in result.stdout
+
+    def test_orphaned_child_shown_as_root(self, tmp_path: Path) -> None:
+        """Test that child whose parent isn't in filtered set is treated as root."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # Create parent (will stay open, not in in-progress set)
+        result = runner.invoke(
+            app,
+            ["create", "Parent task", "--dogcats-dir", str(dogcats_dir)],
+        )
+        parent_id = result.stdout.strip().split(": ")[0].split()[-1]
+
+        # Create child with parent
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "Child task",
+                "--parent",
+                parent_id,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        child_id = result.stdout.strip().split(": ")[0].split()[-1]
+
+        # Only set child to in_progress (parent stays open)
+        runner.invoke(
+            app,
+            [
+                "update",
+                child_id,
+                "--status",
+                "in_progress",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["in-progress", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Child task" in result.stdout
+        # Should not crash, child is shown even though parent isn't in the set
+
+
+class TestSearchContextSnippets:
+    """Test search context snippets (dogcat-5u7x)."""
+
+    def test_search_shows_description_snippet(self, tmp_path: Path) -> None:
+        """Test search shows context snippet from description."""
+        dogcats_dir, ids = _init_and_create(tmp_path, "Generic title")
+        runner.invoke(
+            app,
+            [
+                "update",
+                ids[0],
+                "--description",
+                "The login page crashes on Safari browser when clicking submit",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["search", "Safari", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Generic title" in result.stdout
+        assert "Description:" in result.stdout
+        assert "Safari" in result.stdout
+
+    def test_search_shows_notes_snippet(self, tmp_path: Path) -> None:
+        """Test search shows context snippet from notes field."""
+        dogcats_dir, ids = _init_and_create(tmp_path, "Some issue")
+        runner.invoke(
+            app,
+            [
+                "update",
+                ids[0],
+                "--notes",
+                "Investigated and found the foobar module is causing issues",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["search", "foobar", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Some issue" in result.stdout
+        assert "Notes:" in result.stdout
+        assert "foobar" in result.stdout
+
+    def test_search_shows_acceptance_snippet(self, tmp_path: Path) -> None:
+        """Test search shows context snippet from acceptance field."""
+        dogcats_dir, ids = _init_and_create(tmp_path, "Feature X")
+        runner.invoke(
+            app,
+            [
+                "update",
+                ids[0],
+                "--acceptance",
+                "User must be able to use bazqux endpoint",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["search", "bazqux", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Feature X" in result.stdout
+        assert "Acceptance:" in result.stdout
+        assert "bazqux" in result.stdout
+
+    def test_search_title_match_no_extra_snippet(self, tmp_path: Path) -> None:
+        """Test search with title-only match does not show Title: snippet."""
+        dogcats_dir, _ = _init_and_create(tmp_path, "Fix login bug")
+
+        result = runner.invoke(
+            app,
+            ["search", "login", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Fix login bug" in result.stdout
+        # Should not show a "Title:" snippet since title is already visible
+        assert "Title:" not in result.stdout
+
+    def test_search_design_field(self, tmp_path: Path) -> None:
+        """Test search matches in design field."""
+        dogcats_dir, ids = _init_and_create(tmp_path, "Design issue")
+        runner.invoke(
+            app,
+            [
+                "update",
+                ids[0],
+                "--design",
+                "We should use the quuxflop architecture pattern",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["search", "quuxflop", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Design issue" in result.stdout
+        assert "Design:" in result.stdout
+        assert "quuxflop" in result.stdout
