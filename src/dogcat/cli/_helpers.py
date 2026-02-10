@@ -28,7 +28,8 @@ if TYPE_CHECKING:
     import click
 
 _type_keys = "/".join(sorted(TYPE_SHORTHANDS.keys()))
-_ARG_HELP = f"Title or shorthand (0-4 for priority, {_type_keys} for type)"
+_ARG_HELP = "Issue title"
+_ARG_HELP_SHORTHAND = f"Title or shorthand (0-4 for priority, {_type_keys} for type)"
 
 
 def _make_alias(
@@ -37,16 +38,34 @@ def _make_alias(
     doc: str,
     exclude_params: frozenset[str] = frozenset(),
     param_defaults: dict[str, Any] | None = None,
+    param_help: dict[str, str] | None = None,
 ) -> Callable[..., Any]:
     """Create a CLI command alias by cloning a source function's signature.
 
     Typer infers CLI parameters from function signatures. This creates a thin
     wrapper that shares the source function's signature (minus any excluded
     params) so parameter declarations aren't duplicated across aliases.
+
+    ``param_help`` overrides the help text on specific parameters (useful when
+    the alias presents an argument differently, e.g. "Issue title" instead of
+    the shorthand-aware help string).
     """
+    import copy
+
     defaults = param_defaults or {}
     sig = inspect.signature(source_fn)
     new_params = [p for name, p in sig.parameters.items() if name not in exclude_params]
+
+    if param_help:
+        updated = []
+        for p in new_params:
+            if p.name in param_help:
+                new_default = copy.copy(p.default)
+                new_default.help = param_help[p.name]
+                updated.append(p.replace(default=new_default))
+            else:
+                updated.append(p)
+        new_params = updated
 
     def wrapper(**kwargs: Any) -> Any:
         kwargs.update(defaults)
@@ -246,8 +265,15 @@ def _is_invalid_single_char(value: str) -> bool:
 
 def _parse_args_for_create(
     args: list[str | None],
+    *,
+    allow_shorthands: bool = True,
 ) -> tuple[str, int | None, str | None]:
     """Parse positional arguments to extract title, priority, and type shorthand.
+
+    Args:
+        args: Positional arguments from the CLI.
+        allow_shorthands: If False, valid shorthands raise ValueError directing
+            the user to ``dcat c``.
 
     Returns:
         (title, priority_shorthand, type_shorthand)
@@ -260,6 +286,12 @@ def _parse_args_for_create(
     for arg in args:
         if arg is None:
             continue
+        if not allow_shorthands and _is_shorthand(arg):
+            msg = (
+                "Shorthands are only available with 'dcat c'. "
+                "Use --type/--priority flags instead."
+            )
+            raise ValueError(msg)
         if _is_priority_shorthand(arg) and priority_sh is None:
             priority_sh = int(arg)
         elif _is_type_shorthand(arg) and type_sh is None:

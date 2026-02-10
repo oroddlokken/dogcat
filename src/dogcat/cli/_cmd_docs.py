@@ -121,9 +121,10 @@ def register(app: typer.Typer) -> None:
 
     dcat create "Crash on empty input" --type bug --priority 1
 
-  Shorthands also work — single letters for type, digits for priority:
+  For quick creation, `dcat c` supports shorthands — single letters
+  for type, digits for priority:
 
-    dcat create "Crash on empty input" b 1
+    dcat c b 1 "Crash on empty input"
 
   Available types: task (t), bug (b), feature (f), story (s),
                    chore (c), epic (e), question (q), draft (d)

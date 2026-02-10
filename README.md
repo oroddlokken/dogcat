@@ -85,7 +85,7 @@ There is also a `--no-agent` option that can be passed to `dcat list` that will 
 | Command | Action |
 | --- | --- |
 | `dcat create "My first bug" -t bug -p 0` | Create a bug issue, with priority 0 |
-| `dcat create b 0 "My first bug"` | Same as above, but using shorthands for type and priority |
+| `dcat c b 0 "My first bug"` | Same as above, using `dcat c` shorthands for type and priority |
 | `dcat create "Turn off the lights" --manual` | Indicate to the agent that this is a manual issue, and should be done by the user, not the agent |
 | `dcat ready` | List issues that is not blocked by other issues |
 | `dcat close $id` | Close an issue |

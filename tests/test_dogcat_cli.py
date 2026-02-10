@@ -216,11 +216,15 @@ class TestCLICreate:
         data = json.loads(result.output)
         assert data["title"] == "Title from flag"
 
-    def test_create_with_title_flag_and_shorthand(self, tmp_path: Path) -> None:
-        """Test --title flag with type/priority shorthands as positional args."""
+    def test_create_with_title_flag_and_shorthand_rejected(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test that create rejects extra positional args (shorthands)."""
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
 
+        # create only accepts one positional arg, so extra args are rejected
         result = runner.invoke(
             app,
             [
@@ -234,11 +238,7 @@ class TestCLICreate:
                 str(dogcats_dir),
             ],
         )
-        assert result.exit_code == 0
-        data = json.loads(result.output)
-        assert data["title"] == "Bug from flag"
-        assert data["issue_type"] == "bug"
-        assert data["priority"] == 1
+        assert result.exit_code != 0
 
     def test_create_with_title_flag_and_positional_title_errors(
         self,
@@ -262,28 +262,26 @@ class TestCLICreate:
         assert result.exit_code != 0
         assert "Cannot use both positional title and --title flag" in result.output
 
-    def test_create_priority_shorthand(self, tmp_path: Path) -> None:
-        """Test creating an issue with priority shorthand (0-4)."""
+    def test_create_priority_shorthand_rejected(self, tmp_path: Path) -> None:
+        """Test that create rejects extra positional args (priority shorthand)."""
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
             ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
+        # create only accepts one positional arg
         result = runner.invoke(
             app,
             [
                 "create",
                 "High priority issue",
                 "1",
-                "--json",
                 "--dogcats-dir",
                 str(dogcats_dir),
             ],
         )
-        assert result.exit_code == 0
-        data = json.loads(result.stdout)
-        assert data["priority"] == 1
+        assert result.exit_code != 0
 
     def test_create_priority_pint_flag(self, tmp_path: Path) -> None:
         """Test creating an issue with -p p1 (pINT notation)."""
@@ -424,85 +422,39 @@ class TestCLICreate:
         )
         assert result.exit_code != 0
 
-    def test_create_type_shorthand(self, tmp_path: Path) -> None:
-        """Test creating an issue with type shorthand (b/f/e/s)."""
+    def test_create_type_shorthand_rejected(self, tmp_path: Path) -> None:
+        """Test that create rejects extra positional args (type shorthands)."""
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
             ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
-        # Test bug shorthand
-        result = runner.invoke(
-            app,
-            ["create", "Bug issue", "b", "--json", "--dogcats-dir", str(dogcats_dir)],
-        )
-        assert result.exit_code == 0
-        data = json.loads(result.stdout)
-        assert data["issue_type"] == "bug"
-
-        # Test feature shorthand
-        result = runner.invoke(
-            app,
-            [
-                "create",
-                "Feature issue",
-                "f",
-                "--json",
-                "--dogcats-dir",
-                str(dogcats_dir),
-            ],
-        )
-        assert result.exit_code == 0
-        data = json.loads(result.stdout)
-        assert data["issue_type"] == "feature"
-
-        # Test epic shorthand
-        result = runner.invoke(
-            app,
-            ["create", "Epic issue", "e", "--json", "--dogcats-dir", str(dogcats_dir)],
-        )
-        assert result.exit_code == 0
-        data = json.loads(result.stdout)
-        assert data["issue_type"] == "epic"
-
-        # Test story shorthand
-        result = runner.invoke(
-            app,
-            ["create", "Story issue", "s", "--json", "--dogcats-dir", str(dogcats_dir)],
-        )
-        assert result.exit_code == 0
-        data = json.loads(result.stdout)
-        assert data["issue_type"] == "story"
-
-        # Test question shorthand
-        result = runner.invoke(
-            app,
-            [
-                "create",
-                "Question issue",
-                "q",
-                "--json",
-                "--dogcats-dir",
-                str(dogcats_dir),
-            ],
-        )
-        assert result.exit_code == 0
-        data = json.loads(result.stdout)
-        assert data["issue_type"] == "question"
+        for shorthand in ("b", "f", "e", "s", "q"):
+            result = runner.invoke(
+                app,
+                [
+                    "create",
+                    "Some issue",
+                    shorthand,
+                    "--dogcats-dir",
+                    str(dogcats_dir),
+                ],
+            )
+            assert result.exit_code != 0, f"shorthand '{shorthand}' was not rejected"
 
     def test_create_shorthand_and_explicit_option_errors_for_priority(
         self,
         tmp_path: Path,
     ) -> None:
-        """Test that using both shorthand and explicit option errors for priority."""
+        """Extra positional arg rejected even with explicit --priority."""
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
             ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
-        # Shorthand says priority 1, but explicit option says 3 - should error
+        # create only accepts one positional arg
         result = runner.invoke(
             app,
             [
@@ -515,21 +467,20 @@ class TestCLICreate:
                 str(dogcats_dir),
             ],
         )
-        assert result.exit_code == 1
-        assert "Cannot use both priority shorthand" in result.output
+        assert result.exit_code != 0
 
     def test_create_shorthand_and_explicit_option_errors_for_type(
         self,
         tmp_path: Path,
     ) -> None:
-        """Test that using both shorthand and explicit option errors for type."""
+        """Extra positional arg rejected even with explicit --type."""
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
             ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
-        # Shorthand says type bug, but explicit option says feature - should error
+        # create only accepts one positional arg
         result = runner.invoke(
             app,
             [
@@ -542,53 +493,44 @@ class TestCLICreate:
                 str(dogcats_dir),
             ],
         )
-        assert result.exit_code == 1
-        assert "Cannot use both type shorthand" in result.output
+        assert result.exit_code != 0
 
-    def test_create_shorthand_before_title(self, tmp_path: Path) -> None:
-        """Test that shorthand can come before the title."""
+    def test_create_shorthand_before_title_rejected(self, tmp_path: Path) -> None:
+        """Test that create rejects extra positional args (shorthand before title)."""
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
             ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
-        # Priority shorthand before title
+        # create only accepts one positional arg
         result = runner.invoke(
             app,
             [
                 "create",
                 "0",
                 "Critical issue",
-                "--json",
                 "--dogcats-dir",
                 str(dogcats_dir),
             ],
         )
-        assert result.exit_code == 0
-        data = json.loads(result.stdout)
-        assert data["title"] == "Critical issue"
-        assert data["priority"] == 0
+        assert result.exit_code != 0
 
-        # Type shorthand before title
         result = runner.invoke(
             app,
-            ["create", "b", "Bug report", "--json", "--dogcats-dir", str(dogcats_dir)],
+            ["create", "b", "Bug report", "--dogcats-dir", str(dogcats_dir)],
         )
-        assert result.exit_code == 0
-        data = json.loads(result.stdout)
-        assert data["title"] == "Bug report"
-        assert data["issue_type"] == "bug"
+        assert result.exit_code != 0
 
-    def test_create_combined_shorthands(self, tmp_path: Path) -> None:
-        """Test that both priority and type shorthands can be used together."""
+    def test_create_combined_shorthands_rejected(self, tmp_path: Path) -> None:
+        """Test that create rejects extra positional args (combined shorthands)."""
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
             ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
-        # Priority and type shorthand together
+        # create only accepts one positional arg
         result = runner.invoke(
             app,
             [
@@ -596,83 +538,47 @@ class TestCLICreate:
                 "0",
                 "b",
                 "Critical bug",
-                "--json",
                 "--dogcats-dir",
                 str(dogcats_dir),
             ],
-        )
-        assert result.exit_code == 0
-        data = json.loads(result.stdout)
-        assert data["title"] == "Critical bug"
-        assert data["priority"] == 0
-        assert data["issue_type"] == "bug"
-
-        # Different order: type, priority, title
-        result = runner.invoke(
-            app,
-            [
-                "create",
-                "f",
-                "1",
-                "New feature",
-                "--json",
-                "--dogcats-dir",
-                str(dogcats_dir),
-            ],
-        )
-        assert result.exit_code == 0
-        data = json.loads(result.stdout)
-        assert data["title"] == "New feature"
-        assert data["priority"] == 1
-        assert data["issue_type"] == "feature"
-
-    def test_create_invalid_shorthand_errors(self, tmp_path: Path) -> None:
-        """Test that invalid single-char arguments cause an error."""
-        dogcats_dir = tmp_path / ".dogcats"
-        runner.invoke(
-            app,
-            ["init", "--dogcats-dir", str(dogcats_dir)],
-        )
-
-        # 'p' is not a valid shorthand
-        result = runner.invoke(
-            app,
-            ["create", "0", "p", "Invalid", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code != 0
-        assert "Invalid shorthand" in result.output
 
-    def test_create_ambiguous_triple_shorthand_errors(self, tmp_path: Path) -> None:
-        """Test that three shorthand-like arguments cause an error."""
+    def test_create_invalid_shorthand_errors(self, tmp_path: Path) -> None:
+        """Test that extra positional args cause an error (including invalid ones)."""
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
             ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
-        # 'b 0 b' is ambiguous - second 'b' would become title
+        # create only accepts one positional arg
+        result = runner.invoke(
+            app,
+            ["create", "Invalid title", "p", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code != 0
+
+    def test_create_ambiguous_triple_shorthand_errors(self, tmp_path: Path) -> None:
+        """Test that extra positional args are rejected by create."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        # create only accepts one positional arg
         result = runner.invoke(
             app,
             ["create", "b", "0", "b", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code != 0
-        assert "Ambiguous" in result.output
 
-        # 'f 1 f' same issue
-        result = runner.invoke(
-            app,
-            ["create", "f", "1", "f", "--dogcats-dir", str(dogcats_dir)],
-        )
-        assert result.exit_code != 0
-        assert "Ambiguous" in result.output
-
-        # But 'b 0 "Fix bug"' should work fine
         result = runner.invoke(
             app,
             ["create", "b", "0", "Fix bug", "--dogcats-dir", str(dogcats_dir)],
         )
-        assert result.exit_code == 0
-        assert "Fix bug" in result.stdout
+        assert result.exit_code != 0
 
     def test_create_with_initial_status(self, tmp_path: Path) -> None:
         """Test creating an issue with initial status."""
@@ -1087,14 +993,15 @@ class TestCLICreate:
         assert data["priority"] == 2
         assert data["issue_type"] == "task"
 
-    def test_add_alias_with_shorthands(self, tmp_path: Path) -> None:
-        """Test that 'add' alias works with priority and type shorthands."""
+    def test_add_alias_with_shorthands_rejected(self, tmp_path: Path) -> None:
+        """Test that 'add' alias rejects extra positional args like 'create'."""
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
             ["init", "--dogcats-dir", str(dogcats_dir)],
         )
 
+        # add only accepts one positional arg (same as create)
         result = runner.invoke(
             app,
             [
@@ -1102,16 +1009,11 @@ class TestCLICreate:
                 "1",
                 "f",
                 "New feature",
-                "--json",
                 "--dogcats-dir",
                 str(dogcats_dir),
             ],
         )
-        assert result.exit_code == 0
-        data = json.loads(result.stdout)
-        assert data["title"] == "New feature"
-        assert data["priority"] == 1
-        assert data["issue_type"] == "feature"
+        assert result.exit_code != 0
 
     def test_create_title_starting_with_dashes_using_sentinel(
         self,

@@ -22,6 +22,7 @@ from ._completions import (
 )
 from ._helpers import (
     _ARG_HELP,
+    _ARG_HELP_SHORTHAND,
     _make_alias,
     _parse_args_for_create,
     _parse_priority_value,
@@ -29,23 +30,51 @@ from ._helpers import (
     get_storage,
 )
 
+_CREATE_DOC = """\
+Create a new issue.
+
+Use --type and --priority flags to set type and priority.
+
+If the title starts with --, use -- to stop option parsing:
+    dcat create -- "--flag is not a flag"
+
+Examples:
+    dcat create "Fix login bug"           # Default priority 2, type task
+    dcat create --title "Fix login bug"   # Same, using --title flag
+    dcat create "Fix login bug" -p 1      # Priority 1 (explicit flag)
+    dcat create "Fix login bug" -p p1     # Priority 1 (pINT notation)
+    dcat create "Add feature" -t feature  # Type feature (explicit flag)
+    dcat create -- "--flag is not a flag"  # Title starting with dashes\
+"""
+
+_C_DOC = """\
+Create a new issue (quick create).
+
+Supports shorthand notation: use single characters (0-4 for priority,
+b/f/e/s for bug/feature/epic/story) before or after the title.
+
+Examples:
+    dcat c "Fix login bug"           # Default priority 2, type task
+    dcat c "Fix login bug" 1         # Priority 1
+    dcat c 0 b "Critical bug"        # Priority 0, type bug\
+"""
+
 
 def register(app: typer.Typer) -> None:
     """Register create and new commands."""
 
-    @app.command()
-    def create(
+    def _create_impl(
         arg1: str | None = typer.Argument(
             None,
-            help=_ARG_HELP,
+            help=_ARG_HELP_SHORTHAND,
         ),
         arg2: str | None = typer.Argument(
             None,
-            help=_ARG_HELP,
+            help=_ARG_HELP_SHORTHAND,
         ),
         arg3: str | None = typer.Argument(
             None,
-            help=_ARG_HELP,
+            help=_ARG_HELP_SHORTHAND,
         ),
         title_opt: str | None = typer.Option(
             None,
@@ -148,34 +177,15 @@ def register(app: typer.Typer) -> None:
             "-e",
             help="Open the Textual editor after creating the issue",
         ),
+        allow_shorthands: bool = typer.Option(False, hidden=True),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
-        """Create a new issue.
-
-        Supports shorthand notation: use single characters (0-4 for priority,
-        b/f/e/s for bug/feature/epic/story) before or after the title.
-
-        If the title starts with --, use -- to stop option parsing:
-            dcat create -- "--flag is not a flag"
-
-        Examples:
-            dcat create "Fix login bug"           # Default priority 2, type task
-            dcat create --title "Fix login bug"   # Same, using --title flag
-            dcat create "Fix login bug" 1         # Priority 1
-            dcat create 1 "Fix login bug"         # Priority 1 (shorthand first)
-            dcat create "Add feature" f           # Type feature
-            dcat create b "Fix crash"             # Type bug (shorthand first)
-            dcat create 0 b "Critical bug"        # Priority 0, type bug
-            dcat create b 1 "Important bug"       # Type bug, priority 1
-            dcat create "Fix login bug" -p 1      # Priority 1 (explicit flag)
-            dcat create "Fix login bug" -p p1     # Priority 1 (pINT notation)
-            dcat create "Add feature" -t feature  # Type feature (explicit flag)
-            dcat create -- "--flag is not a flag"  # Title starting with dashes
-        """
+        """Create a new issue (implementation)."""
         try:
             # Parse arguments to extract title and shorthands
             title, shorthand_priority, shorthand_type = _parse_args_for_create(
                 [arg1, arg2, arg3],
+                allow_shorthands=allow_shorthands,
             )
 
             # --title flag overrides positional title if no positional title given
@@ -352,38 +362,49 @@ def register(app: typer.Typer) -> None:
             typer.echo(f"Error: {e}", err=True)
             raise typer.Exit(1)
 
-    app.command(name="c", hidden=True)(
+    app.command(name="create")(
         _make_alias(
-            create,
-            doc=(
-                "Create a new issue (alias for 'create' command).\n\n"
-                "Supports shorthand notation: use single characters "
-                "(0-4 for priority,\n"
-                "b/f/e/s for bug/feature/epic/story) before or after the title.\n\n"
-                "Examples:\n"
-                '    dcat c "Fix login bug"           # Default priority 2, type task\n'
-                '    dcat c "Fix login bug" 1         # Priority 1\n'
-                '    dcat c 0 b "Critical bug"        # Priority 0, type bug'
-            ),
-            exclude_params=frozenset({"editor"}),
-            param_defaults={"editor": False},
+            _create_impl,
+            doc=_CREATE_DOC,
+            exclude_params=frozenset({"arg2", "arg3", "allow_shorthands"}),
+            param_defaults={
+                "arg2": None,
+                "arg3": None,
+                "allow_shorthands": False,
+            },
+            param_help={"arg1": _ARG_HELP},
+        ),
+    )
+
+    app.command(name="c", hidden=False)(
+        _make_alias(
+            _create_impl,
+            doc=_C_DOC,
+            exclude_params=frozenset({"editor", "allow_shorthands"}),
+            param_defaults={"editor": False, "allow_shorthands": True},
         ),
     )
 
     app.command(name="add", hidden=True)(
         _make_alias(
-            create,
+            _create_impl,
             doc="Create a new issue (alias for 'create' command).",
-            exclude_params=frozenset({"editor"}),
-            param_defaults={"editor": False},
+            exclude_params=frozenset({"arg2", "arg3", "editor", "allow_shorthands"}),
+            param_defaults={
+                "arg2": None,
+                "arg3": None,
+                "editor": False,
+                "allow_shorthands": False,
+            },
+            param_help={"arg1": _ARG_HELP},
         ),
     )
 
     @app.command(name="new")
     def new_issue_cmd(
-        arg1: str | None = typer.Argument(None, help=_ARG_HELP),
-        arg2: str | None = typer.Argument(None, help=_ARG_HELP),
-        arg3: str | None = typer.Argument(None, help=_ARG_HELP),
+        arg1: str | None = typer.Argument(None, help=_ARG_HELP_SHORTHAND),
+        arg2: str | None = typer.Argument(None, help=_ARG_HELP_SHORTHAND),
+        arg3: str | None = typer.Argument(None, help=_ARG_HELP_SHORTHAND),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     ) -> None:
