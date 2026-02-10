@@ -90,6 +90,8 @@ There is also a `--no-agent` option that can be passed to `dcat list` that will 
 | `dcat ready` | List issues that is not blocked by other issues |
 | `dcat close $id` | Close an issue |
 | `dcat close $id -reason "Fixed the bug"` | Close an issue with reason |
+| `dcat search "login"` | Search issues across all fields |
+| `dcat search "bug" --type bug` | Search with type filter |
 | `dcat show $id` | Show full details about an issue |
 | `dcat new` | Interactive TUI for creating a new issue |
 | `dcat edit [$id]` | Interactive TUI for editing an issue |

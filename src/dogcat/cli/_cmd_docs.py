@@ -146,9 +146,13 @@ def register(app: typer.Typer) -> None:
 
     dcat show <issue_id>
 
-  Search issues by keyword:
+  Search issues by keyword across all fields (title, description,
+  notes, acceptance criteria, design, comments):
 
     dcat search "login"
+    dcat search "API" --type bug          # filter by type
+    dcat search "auth" --status open      # filter by status
+    dcat search "API" -c                  # case-sensitive
 
   See recently closed issues:
 
@@ -307,6 +311,8 @@ DOGCAT WORKFLOW GUIDE
   dcat update <id> --depends-on <other_id>  - Add dependency to existing issue
   dcat update <id> --blocks <other_id>      - Mark issue as blocking another
   dcat show <id>                            - View issue details
+  dcat search <query>                       - Search issues across all fields
+  dcat search <query> --type bug            - Search with type filter
   dcat close <id>                           - Mark issue as closed
 
 ## Parent-Child vs Dependencies
