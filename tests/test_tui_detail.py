@@ -99,15 +99,15 @@ class TestDetailScreenLayout:
             app.push_screen(screen)
             await pilot.pause()
 
-            type_select = screen.query_one("#type-input", Select[str])
+            type_select = screen.query_one("#type-input", Select)
             assert type_select.value == "bug"
             assert type_select.disabled is True
 
-            status_select = screen.query_one("#status-input", Select[str])
+            status_select = screen.query_one("#status-input", Select)
             assert status_select.value == "in_progress"
             assert status_select.disabled is True
 
-            priority_select = screen.query_one("#priority-input", Select[int])
+            priority_select = screen.query_one("#priority-input", Select)
             assert priority_select.value == 1
             assert priority_select.disabled is True
 
