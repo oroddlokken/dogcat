@@ -363,7 +363,7 @@ def register(app: typer.Typer) -> None:
             storage = get_storage(dogcats_dir)
 
             if issue_id is None:
-                from dogcat.edit import pick_issue
+                from dogcat.tui.picker import pick_issue
 
                 issue_id = pick_issue(storage)
                 if issue_id is None:
@@ -375,7 +375,7 @@ def register(app: typer.Typer) -> None:
                 typer.echo(f"Error: Issue {issue_id} not found", err=True)
                 raise typer.Exit(1)
 
-            from dogcat.edit import edit_issue
+            from dogcat.tui.editor import edit_issue
 
             updated = edit_issue(issue_id, storage)
             if updated is not None:

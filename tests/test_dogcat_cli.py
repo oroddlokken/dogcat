@@ -1184,7 +1184,10 @@ class TestEditAlias:
         mock_issue.full_id = issue_id
         mock_issue.title = "Edited title"
 
-        with patch("dogcat.edit.edit_issue", return_value=mock_issue) as mock_edit:
+        with patch(
+            "dogcat.tui.editor.edit_issue",
+            return_value=mock_issue,
+        ) as mock_edit:
             result = runner.invoke(
                 app,
                 ["e", issue_id, "--dogcats-dir", str(dogcats_dir)],
@@ -1221,7 +1224,10 @@ class TestCLICreateEditor:
         mock_issue.full_id = "dc-test"
         mock_issue.title = "Edited title"
 
-        with patch("dogcat.edit.edit_issue", return_value=mock_issue) as mock_edit:
+        with patch(
+            "dogcat.tui.editor.edit_issue",
+            return_value=mock_issue,
+        ) as mock_edit:
             result = runner.invoke(
                 app,
                 [
@@ -1246,7 +1252,10 @@ class TestCLICreateEditor:
         mock_issue.full_id = "dc-test"
         mock_issue.title = "Edited title"
 
-        with patch("dogcat.edit.edit_issue", return_value=mock_issue) as mock_edit:
+        with patch(
+            "dogcat.tui.editor.edit_issue",
+            return_value=mock_issue,
+        ) as mock_edit:
             result = runner.invoke(
                 app,
                 [
@@ -1267,7 +1276,7 @@ class TestCLICreateEditor:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
 
-        with patch("dogcat.edit.edit_issue", return_value=None) as mock_edit:
+        with patch("dogcat.tui.editor.edit_issue", return_value=None) as mock_edit:
             result = runner.invoke(
                 app,
                 [
@@ -1291,7 +1300,7 @@ class TestCLICreateEditor:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
 
-        with patch("dogcat.edit.edit_issue") as mock_edit:
+        with patch("dogcat.tui.editor.edit_issue") as mock_edit:
             result = runner.invoke(
                 app,
                 [
@@ -3028,7 +3037,10 @@ class TestUpdateAlignedOptions:
         mock_issue.full_id = issue_id
         mock_issue.title = "Edited title"
 
-        with patch("dogcat.edit.edit_issue", return_value=mock_issue) as mock_edit:
+        with patch(
+            "dogcat.tui.editor.edit_issue",
+            return_value=mock_issue,
+        ) as mock_edit:
             result = runner.invoke(
                 app,
                 [

@@ -18,7 +18,7 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Launch the interactive TUI dashboard."""
         from dogcat.cli._helpers import get_storage
-        from dogcat.cli._tui_app import DogcatTUI
+        from dogcat.tui.dashboard import DogcatTUI
 
         storage = get_storage(dogcats_dir)
         tui_app = DogcatTUI(storage)

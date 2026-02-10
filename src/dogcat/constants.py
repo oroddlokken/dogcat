@@ -60,6 +60,15 @@ TYPE_COLORS = {
     "draft": "bright_black",
 }
 
+STATUS_COLORS = {
+    "open": "bright_green",
+    "in_progress": "bright_blue",
+    "in_review": "bright_yellow",
+    "blocked": "bright_red",
+    "deferred": "bright_black",
+    "closed": "white",
+}
+
 # UI dropdown options (display_label, value)
 TYPE_OPTIONS = [
     ("Task", "task"),

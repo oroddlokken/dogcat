@@ -57,7 +57,7 @@ def _make_alias(
     new_params = [p for name, p in sig.parameters.items() if name not in exclude_params]
 
     if param_help:
-        updated = []
+        updated: list[inspect.Parameter] = []
         for p in new_params:
             if p.name in param_help:
                 new_default = copy.copy(p.default)

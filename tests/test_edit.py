@@ -9,8 +9,10 @@ import pytest
 from rich.text import Text
 from textual.widgets import Collapsible, Input, OptionList, Select, Static, TextArea
 
-from dogcat.edit import IssueEditorApp, IssuePickerApp, _make_issue_label
 from dogcat.models import Issue
+from dogcat.tui.editor import IssueEditorApp
+from dogcat.tui.picker import IssuePickerApp
+from dogcat.tui.shared import make_issue_label
 
 
 def _make_issue(**kwargs: object) -> Issue:
@@ -547,30 +549,30 @@ class TestParentPicker:
 
 
 class TestMakeIssueLabel:
-    """Test _make_issue_label includes labels and manual flag."""
+    """Test make_issue_label includes labels and manual flag."""
 
     def test_labels_shown(self) -> None:
         """Labels appear in the picker label text."""
         issue = _make_issue(labels=["ui", "ux"])
-        text = _make_issue_label(issue)
+        text = make_issue_label(issue)
         assert "[ui, ux]" in text.plain
 
     def test_no_labels_when_empty(self) -> None:
         """No label bracket when issue has no labels."""
         issue = _make_issue(labels=[])
-        text = _make_issue_label(issue)
+        text = make_issue_label(issue)
         assert "[ui" not in text.plain
 
     def test_manual_flag_shown(self) -> None:
         """Manual flag appears when metadata.manual is set."""
         issue = _make_issue(metadata={"manual": True})
-        text = _make_issue_label(issue)
+        text = make_issue_label(issue)
         assert "[manual]" in text.plain
 
     def test_no_manual_flag_by_default(self) -> None:
         """No manual flag when metadata has no manual key."""
         issue = _make_issue()
-        text = _make_issue_label(issue)
+        text = make_issue_label(issue)
         assert "[manual]" not in text.plain
 
 

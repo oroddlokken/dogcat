@@ -226,7 +226,7 @@ def register(app: typer.Typer) -> None:
                 typer.echo(f"✓ Updated {issue.full_id}: {issue.title}")
 
             if editor:
-                from dogcat.edit import edit_issue
+                from dogcat.tui.editor import edit_issue
 
                 edited = edit_issue(issue.full_id, storage)
                 if edited is not None:

@@ -345,7 +345,7 @@ def register(app: typer.Typer) -> None:
                 )
 
             if editor:
-                from dogcat.edit import edit_issue
+                from dogcat.tui.editor import edit_issue
 
                 updated = edit_issue(issue.full_id, storage)
                 if updated is not None:
@@ -432,7 +432,7 @@ def register(app: typer.Typer) -> None:
             namespace = get_issue_prefix(dogcats_dir)
             owner = get_default_operator()
 
-            from dogcat.edit import new_issue
+            from dogcat.tui.editor import new_issue
 
             created = new_issue(
                 storage,
