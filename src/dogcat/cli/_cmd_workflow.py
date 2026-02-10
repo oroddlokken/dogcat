@@ -438,7 +438,11 @@ def register(app: typer.Typer) -> None:
         """
         try:
             storage = get_storage(dogcats_dir)
-            issues = [i for i in storage.list() if i.status.value != "closed"]
+            issues = [
+                i
+                for i in storage.list()
+                if i.status.value not in ("closed", "tombstone")
+            ]
 
             # Sort by created_at descending (newest first)
             issues.sort(key=lambda i: i.created_at, reverse=True)

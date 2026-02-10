@@ -3013,6 +3013,24 @@ class TestRecentlyAdded:
         assert result.exit_code == 0
         assert "Issue A" in result.stdout
 
+    def test_recently_added_excludes_tombstoned(self, tmp_path: Path) -> None:
+        """Test that recently-added filters out tombstoned (deleted) issues."""
+        dogcats_dir, ids = _init_and_create(tmp_path, "Active Issue", "Deleted Issue")
+
+        # Delete (tombstone) the second issue
+        runner.invoke(
+            app,
+            ["delete", ids[1], "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["recently-added", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Active Issue" in result.stdout
+        assert "Deleted Issue" not in result.stdout
+
 
 class TestProgressReview:
     """Test the pr command (in-progress + in-review combined view)."""
