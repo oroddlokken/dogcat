@@ -762,3 +762,150 @@ def register(app: typer.Typer) -> None:
         except Exception as e:
             typer.echo(f"Error: {e}", err=True)
             raise typer.Exit(1)
+
+    @app.command(name="backfill-history")
+    def backfill_history(
+        dry_run: bool = typer.Option(
+            False,
+            "--dry-run",
+            help="Preview without writing events",
+        ),
+        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+    ) -> None:
+        """Backfill event history from existing JSONL records.
+
+        Replays the issues.jsonl file and generates event records for all
+        intermediate states. Should be run once after upgrading to populate
+        the event log for existing issues.
+        """
+        try:
+            from dogcat.constants import TRACKED_FIELDS
+            from dogcat.event_log import EventLog, EventRecord, _serialize
+            from dogcat.models import classify_record, dict_to_issue, issue_to_dict
+
+            storage = get_storage(dogcats_dir)
+            event_log = EventLog(storage.dogcats_dir)
+
+            # Warn if event records already exist
+            existing = event_log.read(limit=1)
+            if existing:
+                typer.echo(
+                    "Warning: event records already exist. "
+                    "Backfill may create duplicates.",
+                    err=True,
+                )
+                if not dry_run:
+                    typer.echo("Use --dry-run to preview first.", err=True)
+                    raise typer.Exit(1)
+
+            # Replay issues.jsonl to reconstruct history
+            issue_states: dict[str, dict[str, Any]] = {}
+            events_generated = 0
+            storage_path = storage.path
+
+            with storage_path.open("rb") as f:
+                for line_bytes in f:
+                    line_bytes = line_bytes.strip()
+                    if not line_bytes:
+                        continue
+                    data = orjson.loads(line_bytes)
+                    rtype = classify_record(data)
+                    if rtype != "issue":
+                        continue
+
+                    issue = dict_to_issue(data)
+                    new_state = issue_to_dict(issue)
+                    full_id = issue.full_id
+
+                    if full_id not in issue_states:
+                        # First occurrence -> "created" event
+                        changes: dict[str, dict[str, Any]] = {}
+                        for field_name in TRACKED_FIELDS:
+                            value = new_state.get(field_name)
+                            if value is not None and value != [] and value != "":
+                                if field_name == "description":
+                                    changes[field_name] = {
+                                        "old": None,
+                                        "new": "changed",
+                                    }
+                                else:
+                                    changes[field_name] = {
+                                        "old": None,
+                                        "new": value,
+                                    }
+                        event = EventRecord(
+                            event_type="created",
+                            issue_id=full_id,
+                            timestamp=new_state.get(
+                                "created_at",
+                                issue.created_at.isoformat(),
+                            ),
+                            by=new_state.get("created_by"),
+                            title=issue.title,
+                            changes=changes,
+                        )
+                    else:
+                        # Subsequent occurrence -> compute diff
+                        old_state = issue_states[full_id]
+                        changes = {}
+                        for field_name in TRACKED_FIELDS:
+                            old_val = old_state.get(field_name)
+                            new_val = new_state.get(field_name)
+                            if old_val != new_val:
+                                if field_name == "description":
+                                    changes[field_name] = {
+                                        "old": "changed",
+                                        "new": "changed",
+                                    }
+                                else:
+                                    changes[field_name] = {
+                                        "old": old_val,
+                                        "new": new_val,
+                                    }
+                        if not changes:
+                            issue_states[full_id] = new_state
+                            continue
+
+                        # Determine event type
+                        event_type = "updated"
+                        if "status" in changes and changes["status"]["new"] == "closed":
+                            event_type = "closed"
+                        elif (
+                            "status" in changes
+                            and changes["status"]["new"] == "tombstone"
+                        ):
+                            event_type = "deleted"
+
+                        event = EventRecord(
+                            event_type=event_type,
+                            issue_id=full_id,
+                            timestamp=new_state.get(
+                                "updated_at",
+                                issue.updated_at.isoformat(),
+                            ),
+                            by=new_state.get("updated_by"),
+                            title=issue.title,
+                            changes=changes,
+                        )
+
+                    if dry_run:
+                        data = _serialize(event)
+                        typer.echo(orjson.dumps(data).decode())
+                    else:
+                        event_log.append(event)
+                    events_generated += 1
+                    issue_states[full_id] = new_state
+
+            if dry_run:
+                typer.echo(
+                    f"\nDry run: would generate {events_generated} event(s)",
+                    err=True,
+                )
+            else:
+                typer.echo(f"✓ Backfilled {events_generated} event(s)")
+
+        except typer.Exit:
+            raise
+        except Exception as e:
+            typer.echo(f"Error: {e}", err=True)
+            raise typer.Exit(1) from e

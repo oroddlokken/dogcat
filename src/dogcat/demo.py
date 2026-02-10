@@ -132,6 +132,10 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             raise ValueError(msg)
         storage.add_dependency(resolved_issue, resolved_dep, "blocks")
 
+    def _update(issue_id: str, updates: dict[str, Any], *, updated_by: str) -> None:
+        """Update fields on an issue (generates event log entries)."""
+        storage.update(issue_id, {**updates, "updated_by": updated_by})
+
     # =========================================================================
     # Epic 1: Platform Modernization
     # =========================================================================
@@ -163,15 +167,14 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             "Initiated after Q1 performance review. Expected to take 4-6 months "
             "with potential for phased rollout. Budget approved by leadership."
         ),
-        status=Status.IN_PROGRESS,
         priority=0,
         issue_type=IssueType.EPIC,
         labels=["infrastructure", "strategic", "q1-2026", "backend"],
         external_ref="PLAT-100",
-        owner="charlie@example.com",
         created_by="alice@example.com",
     )
-    storage.update(epic1_id, {"updated_by": "bob@example.com"})
+    _update(epic1_id, {"owner": "charlie@example.com"}, updated_by="bob@example.com")
+    _update(epic1_id, {"status": "in_progress"}, updated_by="charlie@example.com")
     _comment(
         epic1_id,
         "alice@example.com",
@@ -212,16 +215,18 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             "Started with architectural assessment. "
             "Current focus: identifying service boundaries."
         ),
-        status=Status.IN_PROGRESS,
         priority=1,
         issue_type=IssueType.FEATURE,
         labels=["backend", "architecture", "microservices"],
         external_ref="PLAT-101",
         parent=epic1_id,
-        owner="charlie@example.com",
         created_by="alice@example.com",
     )
-    storage.update(feature1_id, {"updated_by": "charlie@example.com"})
+    _update(
+        feature1_id,
+        {"owner": "charlie@example.com", "status": "in_progress"},
+        updated_by="charlie@example.com",
+    )
 
     # Task 1.1.1: Design service boundaries (CLOSED)
     task1_id = _create(
@@ -247,15 +252,18 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         labels=["backend", "design", "documentation"],
         external_ref="PLAT-102",
         parent=feature1_id,
-        owner="charlie@example.com",
         created_by="alice@example.com",
+    )
+    _update(
+        task1_id,
+        {"owner": "charlie@example.com", "status": "in_progress"},
+        updated_by="charlie@example.com",
     )
     _close(
         task1_id,
         "Architecture design complete. Approved in tech review.",
         closed_by="bob@example.com",
     )
-    storage.update(task1_id, {"updated_by": "charlie@example.com"})
     _comment(
         task1_id,
         "charlie@example.com",
@@ -292,17 +300,19 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             "Kong selected after evaluating Kong, Nginx, and Ambassador. "
             "Best fit for our K8s setup."
         ),
-        status=Status.IN_PROGRESS,
         priority=1,
         issue_type=IssueType.TASK,
         labels=["backend", "infrastructure", "api"],
         external_ref="PLAT-103",
         parent=feature1_id,
-        owner="eve@example.com",
         created_by="alice@example.com",
     )
     _dep(task2_id, task1_id)
-    storage.update(task2_id, {"updated_by": "eve@example.com"})
+    _update(
+        task2_id,
+        {"owner": "eve@example.com", "status": "in_progress"},
+        updated_by="eve@example.com",
+    )
     _comment(
         task2_id,
         "eve@example.com",
@@ -436,10 +446,8 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         ext_ref,
         close_reason,
     ) in enumerate(feature2_tasks):
-        initial_status = Status.OPEN if should_close else feature2_statuses[idx]
         task_id = _create(
             title,
-            status=initial_status,
             priority=pri,
             issue_type=IssueType.TASK,
             labels=labels,
@@ -449,10 +457,21 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             created_by=creator,
         )
         if should_close:
+            _update(
+                task_id,
+                {"owner": creator, "status": "in_progress"},
+                updated_by=creator,
+            )
             _close(
                 task_id,
                 close_reason or "Completed",
                 closed_by=closer or creator,
+            )
+        elif feature2_statuses[idx] != Status.OPEN:
+            _update(
+                task_id,
+                {"status": feature2_statuses[idx].value},
+                updated_by=creator,
             )
 
     # =========================================================================
@@ -479,10 +498,9 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         issue_type=IssueType.EPIC,
         labels=["frontend", "ux", "strategic", "q1-2026"],
         external_ref="UX-200",
-        owner="diana@example.com",
         created_by="alice@example.com",
     )
-    storage.update(epic2_id, {"updated_by": "diana@example.com"})
+    _update(epic2_id, {"owner": "diana@example.com"}, updated_by="diana@example.com")
     _comment(
         epic2_id,
         "alice@example.com",
@@ -526,16 +544,18 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             "Design team completed mockups. "
             "Waiting for product approval before dev starts."
         ),
-        status=Status.IN_PROGRESS,
         priority=1,
         issue_type=IssueType.FEATURE,
         labels=["frontend", "ux", "dashboard"],
         external_ref="UX-201",
         parent=epic2_id,
-        owner="diana@example.com",
         created_by="alice@example.com",
     )
-    storage.update(feature3_id, {"updated_by": "diana@example.com"})
+    _update(
+        feature3_id,
+        {"owner": "diana@example.com", "status": "in_progress"},
+        updated_by="diana@example.com",
+    )
 
     # Story under feature 3
     story1_id = _create(
@@ -556,14 +576,17 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             "High user demand based on support tickets. "
             "UX research validates this is a top priority."
         ),
-        status=Status.IN_PROGRESS,
         priority=2,
         issue_type=IssueType.STORY,
         labels=["frontend", "ux", "user-story"],
         external_ref="UX-202",
         parent=feature3_id,
-        owner="eve@example.com",
         created_by="diana@example.com",
+    )
+    _update(
+        story1_id,
+        {"owner": "eve@example.com", "status": "in_progress"},
+        updated_by="eve@example.com",
     )
 
     # Subtasks for story
@@ -606,10 +629,8 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         labels,
         ext_ref,
     ) in enumerate(subtask_specs):
-        initial_status = Status.OPEN if should_close else subtask_statuses[idx]
         subtask_id = _create(
             title,
-            status=initial_status,
             priority=2,
             issue_type=IssueType.SUBTASK,
             labels=labels,
@@ -619,10 +640,21 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             created_by=creator,
         )
         if should_close:
+            _update(
+                subtask_id,
+                {"owner": creator, "status": "in_progress"},
+                updated_by=creator,
+            )
             _close(
                 subtask_id,
                 close_reason or "Completed",
                 closed_by=closer or creator,
+            )
+        elif subtask_statuses[idx] != Status.OPEN:
+            _update(
+                subtask_id,
+                {"status": subtask_statuses[idx].value},
+                updated_by=creator,
             )
 
     # =========================================================================
@@ -649,6 +681,11 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         labels=["frontend", "mobile", "critical", "customer-reported"],
         external_ref="BUG-301",
         created_by="igor@example.com",
+    )
+    _update(
+        bug1_id,
+        {"owner": "eve@example.com", "status": "in_progress"},
+        updated_by="eve@example.com",
     )
     _comment(
         bug1_id,
@@ -679,15 +716,17 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             "unreleased "
             "event listeners. Heap dump shows accumulating Socket objects."
         ),
-        status=Status.IN_PROGRESS,
         priority=1,
         issue_type=IssueType.BUG,
         labels=["backend", "performance", "memory-leak"],
         external_ref="BUG-302",
-        owner="frank@example.com",
         created_by="igor@example.com",
     )
-    storage.update(bug2_id, {"updated_by": "frank@example.com"})
+    _update(
+        bug2_id,
+        {"owner": "frank@example.com", "status": "in_progress"},
+        updated_by="frank@example.com",
+    )
     _comment(
         bug2_id,
         "frank@example.com",
@@ -712,12 +751,16 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         external_ref="BUG-303",
         created_by="igor@example.com",
     )
+    _update(
+        bug3_id,
+        {"owner": "eve@example.com", "status": "in_progress"},
+        updated_by="eve@example.com",
+    )
     _close(
         bug3_id,
         "Fixed HTML encoding in auth form. Added regression test.",
         closed_by="eve@example.com",
     )
-    storage.update(bug3_id, {"updated_by": "eve@example.com"})
 
     # Feature 2.2: Accessibility compliance
     feature4_id = _create(
@@ -892,13 +935,13 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             "responsibilities that should be separated."
         ),
         notes="Deferred pending completion of API gateway feature to avoid conflicts.",
-        status=Status.DEFERRED,
         priority=3,
         issue_type=IssueType.CHORE,
         labels=["backend", "tech-debt", "refactoring"],
         external_ref="MAINT-502",
         created_by="kate@example.com",
     )
+    _update(chore2_id, {"status": "deferred"}, updated_by="kate@example.com")
     _comment(
         chore2_id,
         "kate@example.com",
@@ -982,10 +1025,8 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         manual,
     ) in standalone_tasks:
         should_close = target_status == Status.CLOSED
-        initial_status = Status.OPEN if should_close else target_status
         task_id = _create(
             title,
-            status=initial_status,
             priority=pri,
             issue_type=IssueType.TASK,
             labels=labels,
@@ -995,11 +1036,21 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             **({"metadata": {"manual": True}} if manual else {}),
         )
         if should_close:
+            _update(
+                task_id,
+                {"owner": creator, "status": "in_progress"},
+                updated_by=creator,
+            )
             _close(
                 task_id,
                 close_reason or "Completed",
                 closed_by=closer or creator,
             )
+        elif target_status != Status.OPEN:
+            # Transition through in_progress for issues going to in_review
+            if target_status == Status.IN_REVIEW:
+                _update(task_id, {"status": "in_progress"}, updated_by=creator)
+            _update(task_id, {"status": target_status.value}, updated_by=creator)
 
     # =========================================================================
     # Questions
@@ -1019,6 +1070,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         external_ref="ARCH-701",
         created_by="charlie@example.com",
     )
+    _update(question1_id, {"status": "in_progress"}, updated_by="charlie@example.com")
     _close(
         question1_id,
         "Decision: REST for public APIs, GraphQL for internal dashboard. "

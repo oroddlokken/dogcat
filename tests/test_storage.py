@@ -731,7 +731,7 @@ class TestCloseDeleteOperator:
         assert loaded.closed_by == "alice"
 
     def test_close_writes_single_event(self, temp_workspace: Path) -> None:
-        """Test that close with closed_by writes only one event, not two."""
+        """Test that close with closed_by writes one issue record + one event record."""
         storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
         storage = JSONLStorage(str(storage_path), create_dir=True)
 
@@ -742,7 +742,8 @@ class TestCloseDeleteOperator:
         storage.close("issue-1", reason="Done", closed_by="alice")
         lines_after = storage_path.read_text().strip().count("\n") + 1
 
-        assert lines_after - lines_before == 1
+        # Each close appends 2 lines: issue record + event record
+        assert lines_after - lines_before == 2
 
     def test_delete_includes_deleted_by_in_single_record(
         self,
@@ -774,7 +775,7 @@ class TestAppendOnlyStorage:
     """Test that mutations append instead of rewriting the entire file."""
 
     def test_create_appends_single_line(self, temp_workspace: Path) -> None:
-        """Test that creating an issue appends one line rather than rewriting."""
+        """Test that creating an issue appends lines rather than rewriting."""
         storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
         storage = JSONLStorage(str(storage_path), create_dir=True)
 
@@ -784,11 +785,11 @@ class TestAppendOnlyStorage:
         storage.create(Issue(id="issue-2", title="Second"))
         lines_after_second = _count_lines(storage_path)
 
-        # Should have added exactly one line
-        assert lines_after_second == lines_after_first + 1
+        # Each create appends 2 lines: issue record + event record
+        assert lines_after_second == lines_after_first + 2
 
     def test_update_appends_single_line(self, temp_workspace: Path) -> None:
-        """Test that updating an issue appends one line."""
+        """Test that updating an issue appends lines."""
         storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
         storage = JSONLStorage(str(storage_path), create_dir=True)
 
@@ -798,7 +799,8 @@ class TestAppendOnlyStorage:
         storage.update("issue-1", {"title": "Updated"})
         lines_after = _count_lines(storage_path)
 
-        assert lines_after == lines_before + 1
+        # Each update appends 2 lines: issue record + event record
+        assert lines_after == lines_before + 2
 
     def test_update_persists_through_reload(self, temp_workspace: Path) -> None:
         """Test that appended updates are correctly loaded by a new instance."""
@@ -886,14 +888,14 @@ class TestAppendOnlyStorage:
         for i in range(1, 6):
             storage.update("issue-1", {"title": f"v{i}"})
 
-        # File should have 1 + 5 = 6 lines (original + 5 updates)
-        assert _count_lines(storage_path) == 6
+        # Each op appends 2 lines (issue + event): 1 create + 5 updates = 12
+        assert _count_lines(storage_path) == 12
 
         # Force compaction
         storage._save()
 
-        # After compaction, only 1 line (current state)
-        assert _count_lines(storage_path) == 1
+        # After compaction: 1 issue line + 6 preserved event records = 7 lines
+        assert _count_lines(storage_path) == 7
 
         # Data still correct after compaction
         storage2 = JSONLStorage(str(storage_path))

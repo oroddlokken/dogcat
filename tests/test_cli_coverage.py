@@ -80,7 +80,7 @@ class TestRecentlyClosed:
         assert result.exit_code == 0
         assert "Issue A" in result.stdout
         assert "Issue B" in result.stdout
-        assert "Fixed" in result.stdout
+        assert "Closed" in result.stdout
 
     def test_recently_closed_empty(self, tmp_path: Path) -> None:
         """Test recently-closed with no closed issues."""

@@ -158,6 +158,16 @@ def register(app: typer.Typer) -> None:
 
     dcat recently-closed
 
+  View change history (who changed what, when):
+
+    dcat history
+    dcat history -i <id>           # filter by issue
+    dcat history -v                # show full field content
+
+  See uncommitted changes vs last git commit:
+
+    dcat diff
+
 ── Working on Issues ───────────────────────────────────────────────────────
 
   Issues move through these statuses:
@@ -256,6 +266,8 @@ def register(app: typer.Typer) -> None:
 
   dcat info        Show valid types, statuses, and priorities
   dcat status      Show project overview and counts
+  dcat history     Show change history timeline
+  dcat diff        Show uncommitted issue changes
   dcat doctor      Run health checks on your issue data
   dcat export      Export all issues (for backup or migration)
   dcat prune       Permanently remove deleted issues
@@ -314,6 +326,9 @@ DOGCAT WORKFLOW GUIDE
   dcat search <query>                       - Search issues across all fields
   dcat search <query> --type bug            - Search with type filter
   dcat close <id>                           - Mark issue as closed
+  dcat history                              - Show change history timeline
+  dcat history -i <id>                      - History for a specific issue
+  dcat diff                                 - Show uncommitted issue changes
 
 ## Parent-Child vs Dependencies
 

@@ -391,45 +391,35 @@ def register(app: typer.Typer) -> None:
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
-        """Show recently closed issues in descending order (newest first).
+        """Show recently closed issues (newest first).
 
-        Displays the last N closed issues sorted by closed_at date,
-        with the most recently closed issue at the top.
+        Displays the last N closed issues, most recent at the top.
         """
         try:
+            from dogcat.event_log import EventLog, _serialize
+
+            from ._formatting import format_event, get_event_legend
+
             storage = get_storage(dogcats_dir)
-            issues = storage.list()
+            event_log = EventLog(storage.dogcats_dir)
+            events = [e for e in event_log.read() if e.event_type == "closed"][:limit]
 
-            # Filter to closed issues with closed_at date
-            closed_issues = [
-                i for i in issues if i.status.value == "closed" and i.closed_at
-            ]
-
-            # Sort by closed_at descending (newest first)
-            closed_issues.sort(key=lambda i: i.closed_at, reverse=True)  # type: ignore[arg-type]
-
-            # Take first N (most recent)
-            recent = closed_issues[:limit]
+            # Fill in missing titles from storage
+            for event in events:
+                if not event.title:
+                    issue_obj = storage.get(event.issue_id)
+                    if issue_obj:
+                        event.title = issue_obj.title
 
             if json_output:
-                from dogcat.models import issue_to_dict
-
-                output = [issue_to_dict(issue) for issue in recent]
+                output = [_serialize(e) for e in events]
                 typer.echo(orjson.dumps(output).decode())
+            elif not events:
+                typer.echo("No recently closed issues")
             else:
-                if not recent:
-                    typer.echo("No recently closed issues")
-                else:
-                    for issue in recent:
-                        closed_str = (
-                            issue.closed_at.strftime("%Y-%m-%d %H:%M")
-                            if issue.closed_at
-                            else ""
-                        )
-                        typer.echo(f"✓ [{closed_str}] {issue.full_id}: {issue.title}")
-                        if issue.close_reason:
-                            typer.echo(f"    {issue.close_reason}")
-                        typer.echo()  # Blank line between issues
+                for event in events:
+                    typer.echo(format_event(event))
+                typer.echo(get_event_legend())
 
         except Exception as e:
             typer.echo(f"Error: {e}", err=True)

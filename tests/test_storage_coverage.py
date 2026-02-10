@@ -222,12 +222,17 @@ class TestCompaction:
             storage.create(Issue(id=f"issue-{i}", title=f"Issue {i}"))
 
         # Force a full save to set base_lines
+        # Each issue + event = 2 lines on disk, but _save() counts issues + deps +
+        # links + events, so 25 issues + 25 events = 50 base lines
         storage._save()
-        assert storage._base_lines == 25
+        assert storage._base_lines == 50
         assert storage._appended_lines == 0
 
-        # Now append enough updates to exceed 50% ratio (>12 appends)
-        for i in range(13):
+        # _append() only counts issue records (not event log records written
+        # separately by EventLog.append), so each update adds 1 to _appended_lines.
+        # Compaction triggers when _appended_lines > base_lines * 0.5 = 25,
+        # so we need 26 updates.
+        for i in range(26):
             storage.update("issue-0", {"title": f"Updated {i}"})
 
         # Compaction should have triggered, resetting appended_lines

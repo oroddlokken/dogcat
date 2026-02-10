@@ -6,9 +6,10 @@ from typing import TYPE_CHECKING
 
 import typer
 
-from dogcat.constants import PRIORITY_COLORS, TYPE_COLORS
+from dogcat.constants import EVENT_SYMBOLS, PRIORITY_COLORS, TYPE_COLORS
 
 if TYPE_CHECKING:
+    from dogcat.event_log import EventRecord
     from dogcat.models import Issue
 
 
@@ -308,3 +309,85 @@ def format_issue_table(
     console.print(table)
 
     return string_io.getvalue().rstrip()
+
+
+def format_event(event: EventRecord, *, verbose: bool = False) -> str:
+    """Format an event record for terminal display.
+
+    Args:
+        event: The event record to format.
+        verbose: If True, show full content of long-form fields instead of "changed".
+
+    Returns:
+        Formatted multi-line string with symbol, timestamp, issue ID, and changes.
+    """
+    symbol = EVENT_SYMBOLS.get(event.event_type, "?")
+
+    # Color the symbol based on event type
+    symbol_colors = {
+        "created": "bright_green",
+        "closed": "white",
+        "updated": "yellow",
+        "deleted": "red",
+    }
+    color = symbol_colors.get(event.event_type, "white")
+    styled_symbol = typer.style(symbol, fg=color, bold=True)
+
+    # Parse and format the timestamp
+    from datetime import datetime
+
+    try:
+        ts = datetime.fromisoformat(event.timestamp)
+        ts_str = ts.strftime("%Y-%m-%d %H:%M")
+    except (ValueError, TypeError):
+        ts_str = event.timestamp
+
+    ts_styled = typer.style(ts_str, fg="bright_black")
+
+    # Show id: title, matching the pattern used by other commands
+    title = event.title
+    if not title and event.event_type == "created" and "title" in event.changes:
+        title = event.changes["title"].get("new", "")
+    issue_styled = typer.style(event.issue_id, fg="cyan")
+    if title:
+        issue_styled += f": {title}"
+
+    header = f"{styled_symbol} {ts_styled}  {issue_styled}"
+
+    # Long-form fields: show "changed" (red) instead of full content unless verbose
+    _long_fields = {"description", "notes", "acceptance", "design"}
+    _changed = typer.style("changed", fg="red")
+
+    # Format field changes on the next line
+    change_parts: list[str] = []
+    if event.by:
+        by_label = typer.style("by", fg="cyan")
+        change_parts.append(f"{by_label}: {event.by}")
+    for field_name, change in event.changes.items():
+        if field_name == "title" and event.event_type == "created":
+            continue  # Already shown in header
+        old = change.get("old")
+        new = change.get("new")
+        if not verbose and field_name in _long_fields:
+            old = _changed if old is not None else None
+            new = _changed if new is not None else None
+        field_styled = typer.style(field_name, fg="cyan")
+        if old is None:
+            change_parts.append(f"{field_styled}: {new}")
+        else:
+            change_parts.append(f"{field_styled}: {old} -> {new}")
+
+    lines = [header]
+    if change_parts:
+        lines.append("    " + "  ".join(change_parts))
+
+    return "\n".join(lines)
+
+
+def get_event_legend() -> str:
+    """Get a legend explaining event symbols.
+
+    Returns:
+        Legend string
+    """
+    return "\nLegend: + Created  ~ Updated  ✓ Closed  ✗ Deleted"

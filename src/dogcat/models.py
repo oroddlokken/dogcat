@@ -320,13 +320,13 @@ def dict_to_issue(data: dict[str, Any]) -> Issue:
 
 
 def classify_record(data: dict[str, Any]) -> str:
-    """Classify a JSONL record as 'issue', 'dependency', or 'link'.
+    """Classify a JSONL record as 'issue', 'dependency', 'link', or 'event'.
 
     Checks for an explicit ``record_type`` field first, then falls back to
     field-sniffing for backward compatibility with older records.
     """
     explicit = data.get("record_type")
-    if explicit in ("issue", "dependency", "link"):
+    if explicit in ("issue", "dependency", "link", "event"):
         return explicit  # type: ignore[return-value]
 
     if "from_id" in data and "to_id" in data:

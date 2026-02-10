@@ -132,12 +132,18 @@ class TestArchiveBasic:
         assert len(archive_files) == 1
 
         # Read and verify content — archive preserves full event history,
-        # so there may be multiple lines (create + status updates).
+        # so there may be multiple lines (create + status updates + events).
         # The last issue record should be the final closed state.
         with archive_files[0].open("rb") as f:
             lines = f.readlines()
             assert len(lines) >= 1
-            last_record = orjson.loads(lines[-1])
+            issue_records = [
+                orjson.loads(line)
+                for line in lines
+                if orjson.loads(line).get("record_type") != "event"
+            ]
+            assert len(issue_records) >= 1
+            last_record = issue_records[-1]
             assert last_record["title"] == "Test issue"
             assert last_record["status"] == "closed"
 
@@ -495,12 +501,19 @@ class TestArchivePreservesHistory:
         # Archive must have all the original raw records, not just a snapshot
         assert len(archived_lines) >= 3
 
-        # Verify first record is the initial create (status=open)
-        first = orjson.loads(archived_lines[0])
+        # Filter to issue records only (skip event records)
+        issue_records = [
+            orjson.loads(ln)
+            for ln in archived_lines
+            if orjson.loads(ln).get("record_type") != "event"
+        ]
+
+        # Verify first issue record is the initial create (status=open)
+        first = issue_records[0]
         assert first["status"] == "open"
 
-        # Verify last record is the final closed state
-        last = orjson.loads(archived_lines[-1])
+        # Verify last issue record is the final closed state
+        last = issue_records[-1]
         assert last["status"] == "closed"
 
     def test_archive_preserves_remaining_issue_history(self, tmp_path: Path) -> None:

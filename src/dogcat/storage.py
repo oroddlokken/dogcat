@@ -12,9 +12,12 @@ from typing import TYPE_CHECKING, Any, cast
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+import logging
+
 import orjson
 
 from dogcat._version import version as _dcat_version
+from dogcat.constants import TRACKED_FIELDS
 from dogcat.models import (
     Dependency,
     DependencyType,
@@ -76,6 +79,11 @@ class JSONLStorage:
             )
 
         self._lock_path = self.dogcats_dir / ".issues.lock"
+
+        # Initialize event log for change tracking
+        from dogcat.event_log import EventLog
+
+        self._event_log = EventLog(self.dogcats_dir)
 
         # Load existing issues if file exists
         if self.path.exists():
@@ -150,6 +158,8 @@ class JSONLStorage:
                                     created_by=data.get("created_by"),
                                 )
                                 dep_map[key] = dep
+                        elif rtype == "event":
+                            continue
                         else:
                             # Issue record — last-write-wins
                             issue = dict_to_issue(data)
@@ -254,6 +264,19 @@ class JSONLStorage:
                         tmp_file.write(b"\n")
                         line_count += 1
 
+                    # Preserve event records from the current file
+                    if self.path.exists():
+                        with self.path.open("rb") as src:
+                            for raw_line in src:
+                                raw_line = raw_line.strip()
+                                if not raw_line:
+                                    continue
+                                data = orjson.loads(raw_line)
+                                if data.get("record_type") == "event":
+                                    tmp_file.write(raw_line)
+                                    tmp_file.write(b"\n")
+                                    line_count += 1
+
                     tmp_file.flush()
                 except Exception as e:
                     tmp_path.unlink(missing_ok=True)
@@ -298,6 +321,61 @@ class JSONLStorage:
             and self._appended_lines > self._base_lines * self._COMPACTION_RATIO
         ):
             self._save()
+
+    # -- Event emission helpers ------------------------------------------
+
+    def _emit_event(
+        self,
+        event_type: str,
+        issue: Issue,
+        changes: dict[str, dict[str, Any]],
+        by: str | None = None,
+    ) -> None:
+        """Emit an event to the event log (best-effort)."""
+        from dogcat.event_log import EventRecord
+
+        if not changes:
+            return
+
+        event = EventRecord(
+            event_type=event_type,
+            issue_id=issue.full_id,
+            timestamp=issue.updated_at.isoformat(),
+            by=by,
+            title=issue.title,
+            changes=changes,
+        )
+        try:
+            self._event_log.append(event)
+        except Exception:
+            logging.getLogger(__name__).debug(
+                "Failed to write event for %s",
+                issue.full_id,
+                exc_info=True,
+            )
+
+    @staticmethod
+    def _field_value(value: Any) -> Any:
+        """Normalize a field value for event storage."""
+        if hasattr(value, "value"):
+            return value.value  # Enum -> string
+        return value
+
+    def _tracked_changes(
+        self,
+        old_values: dict[str, Any],
+        new_values: dict[str, Any],
+    ) -> dict[str, dict[str, Any]]:
+        """Compute tracked field changes between old and new values."""
+        changes: dict[str, dict[str, Any]] = {}
+        for field_name in old_values:
+            if field_name not in TRACKED_FIELDS:
+                continue
+            old = self._field_value(old_values[field_name])
+            new = self._field_value(new_values[field_name])
+            if old != new:
+                changes[field_name] = {"old": old, "new": new}
+        return changes
 
     @staticmethod
     def _issue_record(issue: Issue) -> dict[str, Any]:
@@ -364,6 +442,18 @@ class JSONLStorage:
         if issue.parent:
             self._children_by_parent.setdefault(issue.parent, []).append(issue.full_id)
         self._append([self._issue_record(issue)])
+
+        # Emit creation event
+        changes: dict[str, dict[str, Any]] = {}
+        for field_name in TRACKED_FIELDS:
+            value = getattr(issue, field_name, None)
+            if value is not None and value != [] and value != "":
+                changes[field_name] = {
+                    "old": None,
+                    "new": self._field_value(value),
+                }
+        self._emit_event("created", issue, changes, by=issue.created_by)
+
         return issue
 
     def resolve_id(self, partial_id: str) -> str | None:
@@ -520,6 +610,11 @@ class JSONLStorage:
         # Track old parent for index maintenance
         old_parent = issue.parent
 
+        # Capture old values for event emission
+        old_values: dict[str, Any] = {
+            k: getattr(issue, k, None) for k in updates if k in TRACKED_FIELDS
+        }
+
         # Update fields — only UPDATABLE_FIELDS are allowed
         for key, value in updates.items():
             if key not in self.UPDATABLE_FIELDS:
@@ -551,6 +646,16 @@ class JSONLStorage:
         issue.updated_at = datetime.now().astimezone()
 
         self._append([self._issue_record(issue)])
+
+        # Emit update event
+        new_values = {k: getattr(issue, k, None) for k in old_values}
+        changes = self._tracked_changes(old_values, new_values)
+        by = updates.get("updated_by") or issue.updated_by
+        event_type = "updated"
+        if "status" in changes and changes["status"]["new"] == "closed":
+            event_type = "closed"
+        self._emit_event(event_type, issue, changes, by=by)
+
         return issue
 
     def close(
@@ -578,6 +683,7 @@ class JSONLStorage:
             raise ValueError(msg)
 
         issue = self._issues[resolved_id]
+        old_status = issue.status.value
 
         now = datetime.now().astimezone()
         issue.status = Status.CLOSED
@@ -589,6 +695,15 @@ class JSONLStorage:
             issue.closed_by = closed_by
 
         self._append([self._issue_record(issue)])
+
+        # Emit close event
+        self._emit_event(
+            "closed",
+            issue,
+            {"status": {"old": old_status, "new": "closed"}},
+            by=closed_by,
+        )
+
         return issue
 
     def delete(
@@ -616,6 +731,7 @@ class JSONLStorage:
             raise ValueError(msg)
 
         issue = self._issues[resolved_id]
+        old_status = issue.status.value
 
         now = datetime.now().astimezone()
         issue.status = Status.TOMBSTONE
@@ -642,6 +758,15 @@ class JSONLStorage:
 
         self._rebuild_indexes()
         self._save()
+
+        # Emit delete event
+        self._emit_event(
+            "deleted",
+            issue,
+            {"status": {"old": old_status, "new": "tombstone"}},
+            by=deleted_by,
+        )
+
         return issue
 
     def add_dependency(

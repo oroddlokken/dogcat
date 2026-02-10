@@ -261,6 +261,12 @@ def register(app: typer.Typer) -> None:
                             archived_dep_count += 1
                         else:
                             remaining_lines.append(raw_line)
+                    elif rtype == "event":
+                        # Event record — follow issue_id
+                        if data.get("issue_id") in archivable_ids:
+                            archived_lines.append(raw_line)
+                        else:
+                            remaining_lines.append(raw_line)
                     else:
                         # Issue record — resolve full_id from raw dict
                         if "namespace" in data:

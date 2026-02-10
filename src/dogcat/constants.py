@@ -120,3 +120,29 @@ ID_LENGTH_MAX = 7
 
 # Config file for external .dogcats directory
 DOGCATRC_FILENAME = ".dogcatrc"
+
+# Fields tracked in the event log (content fields only)
+TRACKED_FIELDS: frozenset[str] = frozenset(
+    {
+        "title",
+        "description",
+        "labels",
+        "external_ref",
+        "issue_type",
+        "priority",
+        "parent",
+        "acceptance",
+        "notes",
+        "design",
+        "status",
+        "owner",
+    },
+)
+
+# Symbols for history/diff output
+EVENT_SYMBOLS: dict[str, str] = {
+    "created": "+",
+    "closed": "\u2713",
+    "updated": "~",
+    "deleted": "\u2717",
+}
