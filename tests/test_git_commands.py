@@ -14,6 +14,8 @@ from typer.testing import CliRunner
 from dogcat.cli import app
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     import pytest
     from conftest import GitRepo
 
@@ -278,3 +280,78 @@ class TestGitSetup:
         result = runner.invoke(app, ["git", "check"], catch_exceptions=False)
         assert result.exit_code == 0
         assert "All checks passed" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# dcat prime --opinionated
+# ---------------------------------------------------------------------------
+
+
+class TestPrimeOpinionated:
+    """Test dcat prime --opinionated flag."""
+
+    def test_prime_without_opinionated_unchanged(self) -> None:
+        """Standard prime output does not include git health section."""
+        result = runner.invoke(app, ["prime"], catch_exceptions=False)
+        assert result.exit_code == 0
+        assert "DOGCAT WORKFLOW GUIDE" in result.stdout
+        assert "Git Integration Health" not in result.stdout
+
+    def test_prime_opinionated_in_git_repo_shows_failing_checks(
+        self,
+        git_repo: GitRepo,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """In a git repo with issues, shows failing checks and fix suggestions."""
+        monkeypatch.chdir(git_repo.path)
+        # No gitignore, no merge driver, no gitattributes
+        result = runner.invoke(
+            app,
+            ["prime", "--opinionated"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert "Git Integration Health" in result.stdout
+        assert "Fix:" in result.stdout
+        assert "merge driver" in result.stdout.lower()
+        assert "Inform the user" in result.stdout
+
+    def test_prime_opinionated_in_git_repo_all_pass(
+        self,
+        git_repo: GitRepo,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """In a fully configured git repo, shows all checks passed."""
+        repo = git_repo
+        monkeypatch.chdir(repo.path)
+
+        (repo.path / ".gitignore").write_text(".dogcats/.issues.lock\n")
+        repo.git("config", "merge.dcat-jsonl.driver", "dcat-merge-jsonl %O %A %B")
+        (repo.path / ".gitattributes").write_text(
+            ".dogcats/*.jsonl merge=dcat-jsonl\n",
+        )
+
+        result = runner.invoke(
+            app,
+            ["prime", "--opinionated"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        # All checks shown with pass marks, no nudge to fix
+        assert "✓" in result.stdout
+        assert "Please fix" not in result.stdout
+
+    def test_prime_opinionated_outside_git_repo(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Outside a git repo, skips git checks gracefully."""
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(
+            app,
+            ["prime", "--opinionated"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert "Git Integration Health" not in result.stdout
