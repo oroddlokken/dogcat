@@ -1,0 +1,3 @@
+# Use dogcat's JSONL-aware merge driver for issue files.
+# Install the driver with: dcat git setup
+.dogcats/*.jsonl merge=dcat-jsonl

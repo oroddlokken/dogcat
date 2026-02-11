@@ -2755,7 +2755,7 @@ class TestDoctorTextOutput:
         )
         # Doctor shows health check text
         assert "Dogcat Health Check" in result.stdout
-        assert "=" in result.stdout
+        assert "All checks passed" in result.stdout
 
 
 class TestDoctorDanglingDepsDetection:

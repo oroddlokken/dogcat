@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fcntl
+import subprocess
 import tempfile
 from contextlib import contextmanager
 from datetime import datetime
@@ -314,13 +315,47 @@ class JSONLStorage:
         self._appended_lines += len(records)
         self._maybe_compact()
 
+    _DEFAULT_BRANCHES = frozenset({"main", "master"})
+
+    def _is_default_branch(self) -> bool:
+        """Check whether the working tree is on a default branch (main/master).
+
+        Returns True if not in a git repository (safe to compact).
+        """
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=False,
+                cwd=str(self.dogcats_dir),
+            )
+            if result.returncode != 0:
+                return True  # Not a git repo — safe to compact
+            return result.stdout.strip() in self._DEFAULT_BRANCHES
+        except FileNotFoundError:
+            return True  # git not installed — safe to compact
+
     def _maybe_compact(self) -> None:
-        """Compact the file if appended lines exceed the threshold."""
+        """Compact the file if appended lines exceed the threshold.
+
+        Skips automatic compaction on non-default branches to prevent
+        merge conflicts when multiple branches compact independently.
+        """
         if (
             self._base_lines >= self._COMPACTION_MIN_BASE
             and self._appended_lines > self._base_lines * self._COMPACTION_RATIO
+            and self._is_default_branch()
         ):
             self._save()
+
+    def compact(self) -> None:
+        """Explicitly compact the storage file.
+
+        Unlike automatic compaction, this always runs regardless of
+        branch or thresholds. Use for intentional maintenance operations.
+        """
+        self._save()
 
     # -- Event emission helpers ------------------------------------------
 
@@ -742,22 +777,36 @@ class JSONLStorage:
         if deleted_by:
             issue.deleted_by = deleted_by
 
-        # Clean up dependencies pointing to or from this issue
+        # Collect deps/links to remove (for append-only removal records)
+        removed_deps = [
+            d
+            for d in self._dependencies
+            if d.issue_id == resolved_id or d.depends_on_id == resolved_id
+        ]
+        removed_links = [
+            link
+            for link in self._links
+            if link.from_id == resolved_id or link.to_id == resolved_id
+        ]
+
+        # Clean up in-memory state
         self._dependencies = [
             d
             for d in self._dependencies
             if d.issue_id != resolved_id and d.depends_on_id != resolved_id
         ]
-
-        # Clean up links pointing to or from this issue
         self._links = [
             link
             for link in self._links
             if link.from_id != resolved_id and link.to_id != resolved_id
         ]
-
         self._rebuild_indexes()
-        self._save()
+
+        # Append tombstone + removal records (instead of rewriting the file)
+        records: list[dict[str, Any]] = [issue_to_dict(issue)]
+        records.extend(self._dep_record(d, op="remove") for d in removed_deps)
+        records.extend(self._link_record(lnk, op="remove") for lnk in removed_links)
+        self._append(records)
 
         # Emit delete event
         self._emit_event(

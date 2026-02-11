@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import subprocess
+from pathlib import Path
+
 import typer
 
+from ._helpers import SortedGroup
 
-def register(app: typer.Typer) -> None:
-    """Register documentation commands."""
+# Sub-app for 'dcat git' subcommands
+git_app = typer.Typer(
+    help="Git integration commands.",
+    no_args_is_help=True,
+    cls=SortedGroup,
+)
 
-    @app.command()
-    def git() -> None:
-        """Show guide for integrating dogcat with git."""
-        guide_text = """\
+_GIT_GUIDE_TEXT = """\
 ╔════════════════════════════════════════════════════════════════════════════╗
 ║                       DOGCAT + GIT INTEGRATION GUIDE                       ║
 ╚════════════════════════════════════════════════════════════════════════════╝
@@ -27,24 +32,25 @@ def register(app: typer.Typer) -> None:
   From then on, treat .dogcats/ like any other tracked directory — commit
   changes alongside the code they relate to.
 
+── Merge Driver ───────────────────────────────────────────────────────────
+
+  Dogcat includes a custom JSONL merge driver that auto-resolves most
+  merge conflicts. Install it with:
+
+    $ dcat git setup
+
+  This configures git to use dogcat's merge driver for .dogcats/*.jsonl
+  files. Without the driver, git's default text merge will conflict
+  whenever two branches both modify the issue file.
+
 ── Resolving Merge Conflicts ───────────────────────────────────────────────
 
-  Dogcat stores issues in .dogcats/issues.jsonl, an append-only format.
-  Conflicts are rare, but when they happen:
+  With the merge driver installed, conflicts are rare. If they happen:
 
   1. Open the conflicted file (.dogcats/issues.jsonl)
   2. In most cases, keep BOTH sides — each line is an independent event
   3. Remove the conflict markers (<<<<<<, ======, >>>>>>)
   4. Save and continue the merge
-
-  Example conflict:
-    <<<<<<< HEAD
-    {"id":"abc-1","title":"Fix login","op":"update","status":"closed"}
-    =======
-    {"id":"abc-2","title":"Add signup","op":"create","status":"open"}
-    >>>>>>> feature-branch
-
-  Resolution: keep both lines (they are separate issues).
 
   If both sides modify the SAME issue, keep the more recent change
   (or keep both — dogcat replays events in order, so the last one wins).
@@ -74,11 +80,220 @@ def register(app: typer.Typer) -> None:
 
 ── Quick Reference ─────────────────────────────────────────────────────────
 
+  Install merge driver:   dcat git setup
+  Check configuration:    dcat git check
   Commit issues:          git add .dogcats/ && git commit
   Ignore issues:          echo ".dogcats/" >> .gitignore
+  Validate issue data:    dcat doctor
   Log issue history:      git log --oneline -- .dogcats/
+
+── CI Validation ──────────────────────────────────────────────────────
+
+  Add a CI step to validate issue data on pull requests. Dogcat ships
+  a ready-made GitHub Actions workflow at:
+
+    .github/workflows/validate-issues.yml
+
+  It runs 'dcat doctor' whenever .dogcats/ files change, catching
+  broken JSON, invalid references, and corrupt data before merge.
+
+  To use it in your own project, copy the workflow file and ensure
+  dogcat is installable (e.g. via pyproject.toml or requirements.txt).
+
+  For other CI systems, the key command is:
+
+    dcat doctor          # exits 0 on success, 1 on errors
 """
-        typer.echo(guide_text)
+
+
+def register(app: typer.Typer) -> None:
+    """Register documentation commands."""
+    app.add_typer(git_app, name="git")
+
+    @git_app.command("guide")
+    def git_guide() -> None:
+        """Show guide for integrating dogcat with git."""
+        typer.echo(_GIT_GUIDE_TEXT)
+
+    @git_app.command("check")
+    def git_check(
+        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    ) -> None:
+        """Check git-related configuration for dogcat."""
+        import orjson
+
+        checks: dict[str, dict[str, object]] = {}
+        all_passed = True
+
+        # Check 1: Are we in a git repo?
+        result = subprocess.run(
+            ["git", "rev-parse", "--git-dir"],
+            capture_output=True,
+            check=False,
+        )
+        in_git_repo = result.returncode == 0
+        checks["git_repo"] = {
+            "description": "Inside a git repository",
+            "passed": in_git_repo,
+            "fix": "Run 'git init' to initialize a git repository",
+        }
+        if not in_git_repo:
+            all_passed = False
+
+        # Check 2: Is .issues.lock in .gitignore?
+        lock_ignored = False
+        gitignore = Path(".gitignore")
+        if gitignore.exists():
+            content = gitignore.read_text()
+            lock_ignored = ".issues.lock" in content or ".dogcats/" in content
+        checks["lock_ignored"] = {
+            "description": ".gitignore covers .issues.lock",
+            "fail_description": ".gitignore does not include .issues.lock",
+            "passed": lock_ignored,
+            "fix": "Add '.dogcats/.issues.lock' to .gitignore",
+        }
+        if not lock_ignored:
+            all_passed = False
+
+        # Check 3: Is .dogcats/ entirely in .gitignore? (informational)
+        dogcats_ignored = False
+        if gitignore.exists():
+            lines = gitignore.read_text().splitlines()
+            dogcats_ignored = any(
+                ln.strip() in (".dogcats/", ".dogcats") for ln in lines
+            )
+        checks["dogcats_ignored"] = {
+            "description": ".dogcats/ is shared with team via git",
+            "fail_description": ".dogcats/ is in .gitignore (not shared with team)",
+            "passed": not dogcats_ignored,
+            "fix": "Remove '.dogcats/' from .gitignore to share issues with team",
+            "optional": True,
+        }
+
+        # Check 4: Is the merge driver configured?
+        driver_result = subprocess.run(
+            ["git", "config", "merge.dcat-jsonl.driver"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        driver_installed = (
+            driver_result.returncode == 0 and driver_result.stdout.strip()
+        )
+        checks["merge_driver"] = {
+            "description": "JSONL merge driver is configured",
+            "fail_description": "JSONL merge driver is not configured",
+            "passed": bool(driver_installed),
+            "fix": "Run 'dcat git setup' to install the merge driver",
+        }
+        if not driver_installed:
+            all_passed = False
+
+        # Check 5: Does .gitattributes have the merge driver entry?
+        gitattrs = Path(".gitattributes")
+        has_gitattrs = False
+        if gitattrs.exists():
+            has_gitattrs = "merge=dcat-jsonl" in gitattrs.read_text()
+        checks["gitattributes"] = {
+            "description": ".gitattributes has JSONL merge driver entry",
+            "fail_description": ".gitattributes is missing JSONL merge driver entry",
+            "passed": has_gitattrs,
+            "fix": (
+                "Run 'dcat git setup' or add"
+                " '.dogcats/*.jsonl merge=dcat-jsonl' to .gitattributes"
+            ),
+        }
+        if not has_gitattrs:
+            all_passed = False
+
+        # Output
+        if json_output:
+            output_data = {
+                "status": "ok" if all_passed else "issues_found",
+                "checks": {
+                    name: {
+                        "passed": check["passed"],
+                        "description": check["description"],
+                        "fix": check["fix"] if not check["passed"] else None,
+                    }
+                    for name, check in checks.items()
+                },
+            }
+            typer.echo(orjson.dumps(output_data, option=orjson.OPT_INDENT_2).decode())
+        else:
+            typer.echo("\nGit Integration Check\n")
+            for check in checks.values():
+                is_optional = check.get("optional", False)
+                if check["passed"]:
+                    desc = check["description"]
+                    line = typer.style(f"✓ {desc}", fg="green")
+                elif is_optional:
+                    desc = check.get("fail_description", check["description"])
+                    line = typer.style(f"○ {desc}", fg="yellow")
+                else:
+                    desc = check.get("fail_description", check["description"])
+                    line = typer.style(f"✗ {desc}", fg="red")
+                typer.echo(line)
+                if not check["passed"] and not is_optional:
+                    typer.echo(typer.style(f"  Fix: {check['fix']}", fg="yellow"))
+                typer.echo()
+            if all_passed:
+                typer.echo(typer.style("\n✓ All checks passed!", fg="green"))
+            else:
+                typer.echo(
+                    typer.style(
+                        "\n✗ Some checks failed. See above for fixes.",
+                        fg="red",
+                    ),
+                )
+
+        raise typer.Exit(0 if all_passed else 1)
+
+    @git_app.command("setup")
+    def git_setup() -> None:
+        """Install the JSONL merge driver for git."""
+        # Check we're in a git repo
+        result = subprocess.run(
+            ["git", "rev-parse", "--git-dir"],
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            typer.echo("Error: Not in a git repository", err=True)
+            raise typer.Exit(1)
+
+        # Configure the merge driver
+        subprocess.run(
+            ["git", "config", "merge.dcat-jsonl.driver", "dcat-merge-jsonl %O %A %B"],
+            check=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "config",
+                "merge.dcat-jsonl.name",
+                "dogcat JSONL merge driver",
+            ],
+            check=True,
+        )
+
+        # Ensure .gitattributes exists with the merge driver entry
+        gitattrs = Path(".gitattributes")
+        entry = ".dogcats/*.jsonl merge=dcat-jsonl"
+        if gitattrs.exists():
+            content = gitattrs.read_text()
+            if entry not in content:
+                with gitattrs.open("a") as f:
+                    f.write(f"\n{entry}\n")
+                typer.echo(f"✓ Added '{entry}' to .gitattributes")
+            else:
+                typer.echo("✓ .gitattributes already configured")
+        else:
+            gitattrs.write_text(f"# Dogcat JSONL merge driver\n{entry}\n")
+            typer.echo(f"✓ Created .gitattributes with '{entry}'")
+
+        typer.echo("✓ Merge driver configured in local git config")
+        typer.echo("\nDone! The merge driver will auto-resolve JSONL conflicts.")
 
     @app.command()
     def guide() -> None:

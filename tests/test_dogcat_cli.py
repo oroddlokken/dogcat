@@ -4964,8 +4964,8 @@ class TestCLIGit:
     """Test git integration guide command."""
 
     def test_git_guide_output(self) -> None:
-        """Test that git command outputs the integration guide."""
-        result = runner.invoke(app, ["git"])
+        """Test that git guide subcommand outputs the integration guide."""
+        result = runner.invoke(app, ["git", "guide"])
         assert result.exit_code == 0
         assert "DOGCAT + GIT INTEGRATION GUIDE" in result.stdout
         assert "Committing .dogcats" in result.stdout
@@ -4974,8 +4974,16 @@ class TestCLIGit:
 
     def test_git_guide_covers_gitignore(self) -> None:
         """Test that git guide includes .gitignore instructions."""
-        result = runner.invoke(app, ["git"])
+        result = runner.invoke(app, ["git", "guide"])
         assert ".gitignore" in result.stdout
+
+    def test_git_no_args_shows_help(self) -> None:
+        """Test that 'dcat git' with no subcommand shows help."""
+        result = runner.invoke(app, ["git"])
+        # Typer's no_args_is_help exits with code 0 after showing help
+        assert "guide" in result.stdout
+        assert "check" in result.stdout
+        assert "setup" in result.stdout
 
 
 class TestCLIGuide:

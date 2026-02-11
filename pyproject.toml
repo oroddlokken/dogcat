@@ -16,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 dcat = "dogcat.app:main"
+dcat-merge-jsonl = "dogcat.merge_driver:main"
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]

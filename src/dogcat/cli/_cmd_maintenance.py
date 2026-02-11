@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,7 @@ from dogcat.config import get_issue_prefix
 
 from ._formatting import format_issue_brief
 from ._helpers import get_default_operator, get_storage
+from ._validate import detect_concurrent_edits, validate_jsonl
 
 
 def register(app: typer.Typer) -> None:
@@ -201,28 +203,37 @@ def register(app: typer.Typer) -> None:
     def doctor(
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         fix: bool = typer.Option(False, "--fix", help="Automatically fix issues"),
+        post_merge: bool = typer.Option(
+            False,
+            "--post-merge",
+            help="Detect same-issue concurrent edits from the latest merge",
+        ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
-        """Diagnose dogcat installation and configuration.
+        """Diagnose dogcat installation, data integrity, and configuration.
 
-        Performs health checks and suggests fixes for common issues.
+        Performs health checks on the installation, validates JSONL data
+        integrity (fields, references, cycles), and suggests fixes.
+        Use --post-merge to detect concurrent edits after a git merge.
+        Exit code 0 = all OK, 1 = issues found.
         """
         import shutil
 
         checks: dict[str, dict[str, Any]] = {}
         all_passed = True
+        validation_details: list[dict[str, str]] = []
 
         # Check 1: .dogcats directory exists
         dogcats_path = Path(dogcats_dir)
         checks["dogcats_dir"] = {
             "description": f"{dogcats_dir}/ directory exists",
             "passed": dogcats_path.exists(),
-            "fix": f"Run 'dogcat init' to create {dogcats_dir}",
+            "fix": f"Run 'dcat init' to create {dogcats_dir}",
         }
         if not checks["dogcats_dir"]["passed"]:
             all_passed = False
 
-        # Check 2: issues.jsonl exists and is valid
+        # Check 2: issues.jsonl exists and is valid JSON
         issues_file = dogcats_path / "issues.jsonl"
         issues_valid = False
         if issues_file.exists():
@@ -238,32 +249,42 @@ def register(app: typer.Typer) -> None:
         checks["issues_jsonl"] = {
             "description": f"{dogcats_dir}/issues.jsonl is valid JSON",
             "passed": issues_file.exists() and issues_valid,
-            "fix": "Restore from backup or run 'dogcat init' to reset",
+            "fix": "Restore from backup or run 'dcat init' to reset",
         }
         if not checks["issues_jsonl"]["passed"]:
             all_passed = False
 
-        # Check 3: Git repository detected (informational only, not required)
-        git_dir = Path(".git")
-        checks["git_repo"] = {
-            "description": "In a Git repository (optional)",
-            "passed": git_dir.exists(),
-            "fix": "Run 'git init' if you want git integration",
-            "optional": True,
-        }
-        # Note: git repo is optional, so we don't set all_passed = False
+        # Check 3: Deep data validation (fields, refs, cycles)
+        data_valid = True
+        data_error_count = 0
+        if issues_file.exists() and issues_valid:
+            validation_details = validate_jsonl(issues_file)
+            data_error_count = sum(
+                1 for e in validation_details if e["level"] == "error"
+            )
+            if data_error_count > 0:
+                data_valid = False
 
-        # Check 4: dogcat binary is in PATH
+        checks["data_integrity"] = {
+            "description": "Data integrity (fields, references, cycles)",
+            "fail_description": (f"Data integrity: {data_error_count} error(s) found"),
+            "passed": data_valid,
+            "fix": "Review errors above and fix issues.jsonl",
+        }
+        if not data_valid:
+            all_passed = False
+
+        # Check 4: dcat in PATH
         dogcat_in_path = bool(shutil.which("dcat"))
         checks["dogcat_in_path"] = {
             "description": "dcat command is available in PATH",
             "passed": dogcat_in_path,
-            "fix": "Ensure dogcat is installed and dcat is in your PATH",
+            "fix": "Ensure dogcat is installed and dcat is in PATH",
         }
         if not checks["dogcat_in_path"]["passed"]:
             all_passed = False
 
-        # Check 5: Issue ID uniqueness
+        # Check 6: Issue ID uniqueness
         issue_ids_unique = True
         if issues_file.exists() and issues_valid:
             try:
@@ -275,12 +296,12 @@ def register(app: typer.Typer) -> None:
         checks["issue_ids"] = {
             "description": "All issue IDs are unique",
             "passed": issue_ids_unique,
-            "fix": "Manually review and fix duplicate IDs in issues.jsonl",
+            "fix": "Review and fix duplicate IDs in issues.jsonl",
         }
         if not checks["issue_ids"]["passed"]:
             all_passed = False
 
-        # Check 6: Dependency integrity
+        # Check 7: Dependency integrity (via storage API)
         deps_ok = True
         dangling_deps: list[Any] = []
         if issues_file.exists() and issues_valid:
@@ -309,49 +330,104 @@ def register(app: typer.Typer) -> None:
             "description": "Dependency references are valid",
             "fail_description": "Found dangling dependency references",
             "passed": deps_ok,
-            "fix": "Run 'dogcat doctor --fix' to clean up invalid dependencies",
+            "fix": "Run 'dcat doctor --fix' to clean up",
         }
         if not checks["dependencies"]["passed"]:
             all_passed = False
 
+        # Post-merge concurrent edit detection
+        merge_warnings: list[dict[str, Any]] = []
+        if post_merge:
+            # storage_rel must be relative to the git repo root
+            try:
+                repo_root = Path(
+                    subprocess.run(
+                        ["git", "rev-parse", "--show-toplevel"],
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    ).stdout.strip(),
+                )
+                storage_rel = str(
+                    dogcats_path.resolve().relative_to(repo_root) / "issues.jsonl",
+                )
+                merge_warnings = detect_concurrent_edits(
+                    storage_rel=storage_rel,
+                )
+            except (subprocess.CalledProcessError, ValueError):
+                pass  # Not in a git repo or path not relative
+
         # Output results
         if json_output:
-            output_data = {
+            output_data: dict[str, Any] = {
                 "status": "ok" if all_passed else "issues_found",
                 "checks": {
                     name: {
                         "passed": check["passed"],
                         "description": check["description"],
-                        "fix": check["fix"] if not check["passed"] else None,
+                        "fix": (check["fix"] if not check["passed"] else None),
                     }
                     for name, check in checks.items()
                 },
             }
-            typer.echo(orjson.dumps(output_data, option=orjson.OPT_INDENT_2).decode())
+            if validation_details:
+                output_data["validation_details"] = validation_details
+            if merge_warnings:
+                output_data["concurrent_edits"] = merge_warnings
+            typer.echo(
+                orjson.dumps(output_data, option=orjson.OPT_INDENT_2).decode(),
+            )
         else:
-            # Human-readable output
-            typer.echo("\nDogcat Health Check\n" + "=" * 40)
+            # Print validation detail errors first
+            if validation_details:
+                for entry in validation_details:
+                    lvl = entry["level"].upper()
+                    typer.echo(f"  [{lvl}] {entry['message']}")
+                typer.echo()
+
+            # Summary checks
+            typer.echo("Dogcat Health Check\n")
             for check in checks.values():
                 is_optional = check.get("optional", False)
                 if check["passed"]:
-                    status = "✓"
+                    desc = check["description"]
+                    line = typer.style(f"✓ {desc}", fg="green")
                 elif is_optional:
-                    status = "○"  # Optional check not met (info only)
+                    desc = check.get("fail_description", check["description"])
+                    line = typer.style(f"○ {desc}", fg="yellow")
                 else:
-                    status = "✗"
-                desc = (
-                    check.get("fail_description", check["description"])
-                    if not check["passed"]
-                    else check["description"]
-                )
-                typer.echo(f"{status} {desc}")
+                    desc = check.get("fail_description", check["description"])
+                    line = typer.style(f"✗ {desc}", fg="red")
+                typer.echo(line)
                 if not check["passed"] and not is_optional:
-                    typer.echo(f"  Fix: {check['fix']}")
-            typer.echo("=" * 40)
+                    typer.echo(typer.style(f"  Fix: {check['fix']}", fg="yellow"))
+                typer.echo()
+
+            # Post-merge concurrent edit warnings
+            if merge_warnings:
+                typer.echo(
+                    f"\nConcurrent edits detected"
+                    f" ({len(merge_warnings)} issue(s)):",
+                )
+                for warn in merge_warnings:
+                    typer.echo(f"  ⚠ {warn['message']}")
+                    fields = warn.get("fields", {})
+                    for fname, diff in fields.items():
+                        typer.echo(
+                            f"    {fname}:"
+                            f" branch_1={diff['branch_1']!r}"
+                            f"  branch_2={diff['branch_2']!r}",
+                        )
+
             if all_passed:
-                typer.echo("\n✓ All checks passed!")
+                typer.echo(typer.style("\n✓ All checks passed!", fg="green"))
             else:
-                typer.echo("\n✗ Some checks failed. See above for fixes.")
+                typer.echo(
+                    typer.style(
+                        "\n✗ Some checks failed. See above for fixes.",
+                        fg="red",
+                    ),
+                )
 
         raise typer.Exit(0 if all_passed else 1)
 

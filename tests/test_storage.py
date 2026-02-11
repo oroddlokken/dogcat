@@ -745,7 +745,7 @@ class TestCloseDeleteOperator:
         # Each close appends 2 lines: issue record + event record
         assert lines_after - lines_before == 2
 
-    def test_delete_includes_deleted_by_in_single_record(
+    def test_delete_includes_deleted_by_in_tombstone_record(
         self,
         temp_workspace: Path,
     ) -> None:
@@ -757,8 +757,7 @@ class TestCloseDeleteOperator:
         storage.create(issue)
         storage.delete("issue-1", reason="Dup", deleted_by="bob")
 
-        # After delete + _save, there should be exactly one record for this issue
-        # and it should contain deleted_by
+        # Delete is append-only: the last issue record should be the tombstone
         import orjson
 
         lines = storage_path.read_text().strip().split("\n")
@@ -767,8 +766,11 @@ class TestCloseDeleteOperator:
             for line in lines
             if orjson.loads(line).get("id") == "issue-1"
         ]
-        assert len(issue_records) == 1
-        assert issue_records[0]["deleted_by"] == "bob"
+        assert len(issue_records) >= 1
+        # Last-write-wins: the final record is the tombstone
+        tombstone = issue_records[-1]
+        assert tombstone["deleted_by"] == "bob"
+        assert tombstone["status"] == "tombstone"
 
 
 class TestAppendOnlyStorage:
