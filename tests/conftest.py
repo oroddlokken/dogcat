@@ -82,7 +82,11 @@ def git_repo() -> Generator[GitRepo]:
         storage_path = dogcats_dir / "issues.jsonl"
 
         # Initialize git repo with per-repo config
-        subprocess.run(["git", "init", str(repo_path)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "init", "-b", "main", str(repo_path)],
+            check=True,
+            capture_output=True,
+        )
         subprocess.run(
             ["git", "config", "user.email", "test@test.com"],
             cwd=repo_path,
