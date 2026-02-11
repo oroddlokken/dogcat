@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 0.7.2
+
+- **Merge driver is now a `dcat` subcommand** — replaced the separate `dcat-merge-jsonl` script with `dcat git merge-driver`, eliminating PATH/venv issues. `dcat git check` now validates the exact driver command.
+
 ## 0.7.1
 
 - **`dcat prime --opinionated`** — new flag that adds prescriptive workflow guidelines and runs inline git health checks with actionable fix suggestions.

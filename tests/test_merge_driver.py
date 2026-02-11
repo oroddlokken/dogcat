@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 import orjson
 
+from dogcat.constants import MERGE_DRIVER_CMD
 from dogcat.merge_driver import merge_jsonl
 from dogcat.models import DependencyType, Issue
 from dogcat.storage import JSONLStorage
@@ -182,7 +183,7 @@ class TestMergeJSONL:
 
 def _install_merge_driver(repo: GitRepo) -> None:
     """Configure the dcat-jsonl merge driver in a git repo."""
-    repo.git("config", "merge.dcat-jsonl.driver", "dcat-merge-jsonl %O %A %B")
+    repo.git("config", "merge.dcat-jsonl.driver", MERGE_DRIVER_CMD)
     # Write .gitattributes
     attrs = repo.path / ".gitattributes"
     attrs.write_text(".dogcats/*.jsonl merge=dcat-jsonl\n")

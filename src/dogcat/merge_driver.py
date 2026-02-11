@@ -4,18 +4,18 @@ Understands JSONL record semantics to auto-resolve merges that git's
 default text driver would flag as conflicts. Registered via .gitattributes
 and installed with ``dcat git setup``.
 
-Git calls this driver with three file paths: base (%O), ours (%A),
-theirs (%B). The merged result is written to the ours file (%A).
-Exit code 0 = clean merge, 1 = unresolved conflict.
+Invoked by git via ``dcat git merge-driver %O %A %B``.
+The merged result is written to the ours file (%A).
 """
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import orjson
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from dogcat.models import classify_record
 
@@ -143,35 +143,3 @@ def merge_jsonl(
     result.extend(sorted_events)
 
     return result
-
-
-def main() -> None:
-    """Entry point for the git merge driver.
-
-    Called by git with: dcat-merge-jsonl %O %A %B
-    """
-    if len(sys.argv) != 4:
-        print(f"Usage: {sys.argv[0]} <base> <ours> <theirs>", file=sys.stderr)
-        sys.exit(1)
-
-    base_path = Path(sys.argv[1])
-    ours_path = Path(sys.argv[2])
-    theirs_path = Path(sys.argv[3])
-
-    base_records = _parse_jsonl(base_path)
-    ours_records = _parse_jsonl(ours_path)
-    theirs_records = _parse_jsonl(theirs_path)
-
-    merged = merge_jsonl(base_records, ours_records, theirs_records)
-
-    # Write merged result to ours file (git expects this)
-    with ours_path.open("wb") as f:
-        for record in merged:
-            f.write(orjson.dumps(record))
-            f.write(b"\n")
-
-    sys.exit(0)
-
-
-if __name__ == "__main__":
-    main()

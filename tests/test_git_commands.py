@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from typer.testing import CliRunner
 
 from dogcat.cli import app
+from dogcat.constants import MERGE_DRIVER_CMD
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -43,7 +44,7 @@ class TestGitCheck:
         (repo.path / ".gitignore").write_text(".dogcats/.issues.lock\n")
 
         # Set up merge driver
-        repo.git("config", "merge.dcat-jsonl.driver", "dcat-merge-jsonl %O %A %B")
+        repo.git("config", "merge.dcat-jsonl.driver", MERGE_DRIVER_CMD)
 
         # Set up .gitattributes
         (repo.path / ".gitattributes").write_text(
@@ -64,7 +65,7 @@ class TestGitCheck:
         monkeypatch.chdir(repo.path)
 
         # Set up merge driver + gitattributes but no gitignore
-        repo.git("config", "merge.dcat-jsonl.driver", "dcat-merge-jsonl %O %A %B")
+        repo.git("config", "merge.dcat-jsonl.driver", MERGE_DRIVER_CMD)
         (repo.path / ".gitattributes").write_text(
             ".dogcats/*.jsonl merge=dcat-jsonl\n",
         )
@@ -98,7 +99,7 @@ class TestGitCheck:
         monkeypatch.chdir(repo.path)
 
         (repo.path / ".gitignore").write_text(".dogcats/.issues.lock\n")
-        repo.git("config", "merge.dcat-jsonl.driver", "dcat-merge-jsonl %O %A %B")
+        repo.git("config", "merge.dcat-jsonl.driver", MERGE_DRIVER_CMD)
 
         result = runner.invoke(app, ["git", "check"], catch_exceptions=False)
         assert result.exit_code == 1
@@ -142,7 +143,7 @@ class TestGitCheck:
         (repo.path / ".gitignore").write_text(".dogcats/.issues.lock\n")
 
         # Set up merge driver + gitattributes so those checks pass
-        repo.git("config", "merge.dcat-jsonl.driver", "dcat-merge-jsonl %O %A %B")
+        repo.git("config", "merge.dcat-jsonl.driver", MERGE_DRIVER_CMD)
         (repo.path / ".gitattributes").write_text(
             ".dogcats/*.jsonl merge=dcat-jsonl\n",
         )
@@ -167,6 +168,26 @@ class TestGitCheck:
         result = runner.invoke(app, ["git", "check"], catch_exceptions=False)
         # Optional check — shown as informational warning
         assert "not shared with team" in result.stdout
+
+    def test_check_fails_wrong_merge_driver_command(
+        self,
+        git_repo: GitRepo,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Fails when merge driver is configured with the old command."""
+        repo = git_repo
+        monkeypatch.chdir(repo.path)
+
+        (repo.path / ".gitignore").write_text(".dogcats/.issues.lock\n")
+        # Configure with old/wrong command
+        repo.git("config", "merge.dcat-jsonl.driver", "dcat-merge-jsonl %O %A %B")
+        (repo.path / ".gitattributes").write_text(
+            ".dogcats/*.jsonl merge=dcat-jsonl\n",
+        )
+
+        result = runner.invoke(app, ["git", "check"], catch_exceptions=False)
+        assert result.exit_code == 1
+        assert "wrong command" in result.stdout.lower()
 
     def test_check_fail_description_shown(
         self,
@@ -228,7 +249,7 @@ class TestGitSetup:
             check=False,
         )
         assert result.returncode == 0
-        assert "dcat-merge-jsonl" in result.stdout
+        assert MERGE_DRIVER_CMD in result.stdout
 
     def test_setup_idempotent(
         self,
@@ -283,6 +304,68 @@ class TestGitSetup:
 
 
 # ---------------------------------------------------------------------------
+# dcat git merge-driver
+# ---------------------------------------------------------------------------
+
+
+class TestGitMergeDriver:
+    """Test dcat git merge-driver subcommand."""
+
+    def test_merge_driver_merges_non_overlapping_issues(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Merge driver merges two files with non-overlapping issues."""
+        import orjson
+
+        base = tmp_path / "base.jsonl"
+        ours = tmp_path / "ours.jsonl"
+        theirs = tmp_path / "theirs.jsonl"
+
+        base.write_text("")
+        ours.write_bytes(
+            orjson.dumps(
+                {
+                    "record_type": "issue",
+                    "id": "aaa",
+                    "namespace": "dc",
+                    "title": "Issue A",
+                    "updated_at": "2025-01-01T00:00:00",
+                },
+            )
+            + b"\n",
+        )
+        theirs.write_bytes(
+            orjson.dumps(
+                {
+                    "record_type": "issue",
+                    "id": "bbb",
+                    "namespace": "dc",
+                    "title": "Issue B",
+                    "updated_at": "2025-01-01T00:00:00",
+                },
+            )
+            + b"\n",
+        )
+
+        result = runner.invoke(
+            app,
+            ["git", "merge-driver", str(base), str(ours), str(theirs)],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+
+        merged = [orjson.loads(line) for line in ours.read_bytes().splitlines() if line]
+        ids = {r["id"] for r in merged}
+        assert ids == {"aaa", "bbb"}
+
+    def test_merge_driver_is_hidden(self) -> None:
+        """Merge-driver command should not appear in git help output."""
+        result = runner.invoke(app, ["git", "--help"], catch_exceptions=False)
+        assert "merge-driver" not in result.stdout
+
+
+# ---------------------------------------------------------------------------
 # dcat prime --opinionated
 # ---------------------------------------------------------------------------
 
@@ -326,7 +409,7 @@ class TestPrimeOpinionated:
         monkeypatch.chdir(repo.path)
 
         (repo.path / ".gitignore").write_text(".dogcats/.issues.lock\n")
-        repo.git("config", "merge.dcat-jsonl.driver", "dcat-merge-jsonl %O %A %B")
+        repo.git("config", "merge.dcat-jsonl.driver", MERGE_DRIVER_CMD)
         (repo.path / ".gitattributes").write_text(
             ".dogcats/*.jsonl merge=dcat-jsonl\n",
         )

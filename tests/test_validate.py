@@ -21,6 +21,7 @@ from dogcat.cli._validate import (
     validate_jsonl,
     validate_references,
 )
+from dogcat.constants import MERGE_DRIVER_CMD
 from dogcat.models import Issue
 
 if TYPE_CHECKING:
@@ -373,7 +374,7 @@ class TestDoctorValidation:
 
 def _install_merge_driver(repo: GitRepo) -> None:
     """Configure the dcat-jsonl merge driver in a git repo."""
-    repo.git("config", "merge.dcat-jsonl.driver", "dcat-merge-jsonl %O %A %B")
+    repo.git("config", "merge.dcat-jsonl.driver", MERGE_DRIVER_CMD)
     attrs = repo.path / ".gitattributes"
     attrs.write_text(".dogcats/*.jsonl merge=dcat-jsonl\n")
     repo.commit_all("Add merge driver config")

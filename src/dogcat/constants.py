@@ -121,6 +121,13 @@ ID_LENGTH_MAX = 7
 # Config file for external .dogcats directory
 DOGCATRC_FILENAME = ".dogcatrc"
 
+# Git merge driver configuration
+MERGE_DRIVER_CMD = "dcat git merge-driver %O %A %B"
+MERGE_DRIVER_NAME = "dogcat JSONL merge driver"
+MERGE_DRIVER_GIT_KEY = "merge.dcat-jsonl.driver"
+MERGE_DRIVER_GIT_NAME_KEY = "merge.dcat-jsonl.name"
+GITATTRIBUTES_ENTRY = ".dogcats/*.jsonl merge=dcat-jsonl"
+
 # Fields tracked in the event log (content fields only)
 TRACKED_FIELDS: frozenset[str] = frozenset(
     {

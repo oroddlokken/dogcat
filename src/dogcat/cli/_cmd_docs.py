@@ -7,6 +7,14 @@ from pathlib import Path
 
 import typer
 
+from dogcat.constants import (
+    GITATTRIBUTES_ENTRY,
+    MERGE_DRIVER_CMD,
+    MERGE_DRIVER_GIT_KEY,
+    MERGE_DRIVER_GIT_NAME_KEY,
+    MERGE_DRIVER_NAME,
+)
+
 from ._helpers import SortedGroup
 
 # Sub-app for 'dcat git' subcommands
@@ -157,21 +165,26 @@ def _run_git_checks() -> tuple[bool, dict[str, dict[str, object]]]:
         "optional": True,
     }
 
-    # Check 4: Is the merge driver configured?
+    # Check 4: Is the merge driver configured with the correct command?
     driver_result = subprocess.run(
-        ["git", "config", "merge.dcat-jsonl.driver"],
+        ["git", "config", MERGE_DRIVER_GIT_KEY],
         capture_output=True,
         text=True,
         check=False,
     )
-    driver_installed = driver_result.returncode == 0 and driver_result.stdout.strip()
+    driver_value = driver_result.stdout.strip() if driver_result.returncode == 0 else ""
+    driver_correct = driver_value == MERGE_DRIVER_CMD
     checks["merge_driver"] = {
         "description": "JSONL merge driver is configured",
-        "fail_description": "JSONL merge driver is not configured",
-        "passed": bool(driver_installed),
+        "fail_description": (
+            "JSONL merge driver is not configured"
+            if not driver_value
+            else f"JSONL merge driver has wrong command: {driver_value}"
+        ),
+        "passed": driver_correct,
         "fix": "Run 'dcat git setup' to install the merge driver",
     }
-    if not driver_installed:
+    if not driver_correct:
         all_passed = False
 
     # Check 5: Does .gitattributes have the merge driver entry?
@@ -270,22 +283,17 @@ def register(app: typer.Typer) -> None:
 
         # Configure the merge driver
         subprocess.run(
-            ["git", "config", "merge.dcat-jsonl.driver", "dcat-merge-jsonl %O %A %B"],
+            ["git", "config", MERGE_DRIVER_GIT_KEY, MERGE_DRIVER_CMD],
             check=True,
         )
         subprocess.run(
-            [
-                "git",
-                "config",
-                "merge.dcat-jsonl.name",
-                "dogcat JSONL merge driver",
-            ],
+            ["git", "config", MERGE_DRIVER_GIT_NAME_KEY, MERGE_DRIVER_NAME],
             check=True,
         )
 
         # Ensure .gitattributes exists with the merge driver entry
         gitattrs = Path(".gitattributes")
-        entry = ".dogcats/*.jsonl merge=dcat-jsonl"
+        entry = GITATTRIBUTES_ENTRY
         if gitattrs.exists():
             content = gitattrs.read_text()
             if entry not in content:
@@ -300,6 +308,34 @@ def register(app: typer.Typer) -> None:
 
         typer.echo("✓ Merge driver configured in local git config")
         typer.echo("\nDone! The merge driver will auto-resolve JSONL conflicts.")
+
+    @git_app.command("merge-driver", hidden=True)
+    def git_merge_driver(
+        base: str = typer.Argument(..., help="Base version file path (%O)"),
+        ours: str = typer.Argument(..., help="Ours version file path (%A)"),
+        theirs: str = typer.Argument(..., help="Theirs version file path (%B)"),
+    ) -> None:
+        """JSONL merge driver invoked by git during merge conflicts."""
+        import orjson
+
+        from dogcat.merge_driver import _parse_jsonl, merge_jsonl
+
+        base_path = Path(base)
+        ours_path = Path(ours)
+        theirs_path = Path(theirs)
+
+        base_records = _parse_jsonl(base_path)
+        ours_records = _parse_jsonl(ours_path)
+        theirs_records = _parse_jsonl(theirs_path)
+
+        merged = merge_jsonl(base_records, ours_records, theirs_records)
+
+        with ours_path.open("wb") as f:
+            for record in merged:
+                f.write(orjson.dumps(record))
+                f.write(b"\n")
+
+        raise typer.Exit(0)
 
     @app.command()
     def guide() -> None:
