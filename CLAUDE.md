@@ -43,3 +43,5 @@ Use `just test` during development for fast feedback (excludes regression tests)
 Use `just lint` to check for linting errors. Run `just fmt-all` to automatically fix formatting issues. The CICD pipeline will fail if linting errors are present, so they must be fixed before pushing code.
 
 We are using uv for dependency management. NEVER use pip.
+
+We distribute the software with Homebrew. The formula is available at "../homebrew-tap/Formula/dogcat.rb". If you make changes to the CLI that would require a change to the Formula, please inform the user and ask if you should update the formula.
