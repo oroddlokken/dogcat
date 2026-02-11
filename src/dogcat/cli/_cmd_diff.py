@@ -29,11 +29,18 @@ def _get_git_root(cwd: Path | None = None) -> Path | None:
     return Path(result.stdout.strip())
 
 
-def _get_committed_issues(
+def _get_git_issues(
     storage_path: Path,
     git_root: Path,
+    ref: str = "HEAD",
 ) -> dict[str, dict[str, Any]]:
-    """Get issue states from the last git commit (HEAD)."""
+    """Get issue states from a git ref.
+
+    Args:
+        storage_path: Path to the issues.jsonl file.
+        git_root: Root directory of the git repository.
+        ref: Git ref to read from. "HEAD" for last commit, "" for index.
+    """
     from dogcat.models import classify_record, dict_to_issue, issue_to_dict
 
     # Compute relative path from git root
@@ -42,8 +49,9 @@ def _get_committed_issues(
     except ValueError:
         return {}
 
+    git_ref = f"{ref}:{rel_path}" if ref else f":{rel_path}"
     result = subprocess.run(
-        ["git", "show", f"HEAD:{rel_path}"],
+        ["git", "show", git_ref],
         capture_output=True,
         check=False,
         cwd=str(git_root),
@@ -98,6 +106,16 @@ def register(app: typer.Typer) -> None:
             "-v",
             help="Show full content of long-form fields",
         ),
+        staged: bool = typer.Option(
+            False,
+            "--staged",
+            help="Compare staged changes against HEAD",
+        ),
+        unstaged: bool = typer.Option(
+            False,
+            "--unstaged",
+            help="Compare working tree against staged",
+        ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Show issue changes in the git working tree.
@@ -105,9 +123,19 @@ def register(app: typer.Typer) -> None:
         Compares the current .dogcats/issues.jsonl against the last
         committed version (HEAD), showing created, updated, and closed
         issues with field-level changes.
+
+        Use --staged to compare the index (staged) against HEAD.
+        Use --unstaged to compare the working tree against the index.
         """
         try:
             from dogcat.event_log import EventRecord, _serialize
+
+            if staged and unstaged:
+                typer.echo(
+                    "Error: --staged and --unstaged are mutually exclusive",
+                    err=True,
+                )
+                raise typer.Exit(1)
 
             storage = get_storage(dogcats_dir)
             storage_path = storage.path
@@ -117,14 +145,21 @@ def register(app: typer.Typer) -> None:
                 typer.echo("Error: Not in a git repository", err=True)
                 raise typer.Exit(1)
 
-            committed = _get_committed_issues(storage_path, git_root)
-            current = _get_current_issues(dogcats_dir)
+            if staged:
+                old = _get_git_issues(storage_path, git_root, ref="HEAD")
+                new = _get_git_issues(storage_path, git_root, ref="")
+            elif unstaged:
+                old = _get_git_issues(storage_path, git_root, ref="")
+                new = _get_current_issues(dogcats_dir)
+            else:
+                old = _get_git_issues(storage_path, git_root, ref="HEAD")
+                new = _get_current_issues(dogcats_dir)
 
             events: list[EventRecord] = []
 
             # Check for new and updated issues
-            for issue_id, new_state in current.items():
-                if issue_id not in committed:
+            for issue_id, new_state in new.items():
+                if issue_id not in old:
                     # New issue
                     changes: dict[str, dict[str, Any]] = {}
                     for field_name in TRACKED_FIELDS:
@@ -146,7 +181,7 @@ def register(app: typer.Typer) -> None:
                     )
                 else:
                     # Existing issue - check for changes
-                    old_state = committed[issue_id]
+                    old_state = old[issue_id]
                     changes = {}
                     for field_name in TRACKED_FIELDS:
                         old_val = _field_value(old_state.get(field_name))
@@ -176,22 +211,22 @@ def register(app: typer.Typer) -> None:
                             ),
                         )
 
-            # Check for deleted issues (in committed but not in current)
+            # Check for deleted issues (in old but not in new)
             events.extend(
                 EventRecord(
                     event_type="deleted",
                     issue_id=issue_id,
                     timestamp="",
-                    title=committed[issue_id].get("title"),
+                    title=old[issue_id].get("title"),
                     changes={
                         "status": {
-                            "old": committed[issue_id].get("status"),
+                            "old": old[issue_id].get("status"),
                             "new": "removed",
                         },
                     },
                 )
-                for issue_id in committed
-                if issue_id not in current
+                for issue_id in old
+                if issue_id not in new
             )
 
             # Sort newest first

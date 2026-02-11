@@ -11,6 +11,11 @@ It is okay to work on multiple issues at the same time - just mark all of them a
 
 If the user brings up a new bug, feature or anything else that warrants changes to the code, ALWAYS ask if we should create an issue for it before you start working on the code.
 
+When research or discussion produces findings relevant to an existing issue, ask these as **separate questions in order**:
+1. First ask: "Should I update issue [id] with these findings?"
+2. Only after that, separately ask: "Should I start working on the implementation?"
+Do NOT combine these into one question. The user may want to update the issue without starting work.
+
 ### Closing Issues - IMPORTANT
 
 NEVER close issues without explicit user approval. When work is complete:
@@ -36,8 +41,5 @@ Use `just test` during development for fast feedback (excludes regression tests)
 
 Use `just lint` to check for linting errors. Run `just fmt-all` to automatically fix formatting issues. The CICD pipeline will fail if linting errors are present, so they must be fixed before pushing code.
 
-We are using uv for dependency management. Never call out to pip.
+We are using uv for dependency management. NEVER use pip.
 
-## Rules
-
-**NEVER** run any git operations on the .dogcats folder.

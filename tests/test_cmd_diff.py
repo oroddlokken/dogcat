@@ -191,3 +191,83 @@ class TestDiff:
         )
         assert result.exit_code == 1
         assert "git" in result.stdout.lower() or "git" in (result.stderr or "").lower()
+
+    def test_diff_staged_shows_staged_changes(self, git_workspace: Path) -> None:
+        """Test --staged shows changes between index and HEAD."""
+        dogcats_dir = git_workspace / ".dogcats"
+        _create_issue(dogcats_dir, "Staged issue")
+
+        # Stage the change but don't commit
+        subprocess.run(
+            ["git", "-C", str(git_workspace), "add", ".dogcats/"],
+            check=True,
+            capture_output=True,
+        )
+
+        result = runner.invoke(
+            app,
+            ["diff", "--staged", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Created" in result.stdout
+        assert "Staged issue" in result.stdout
+
+    def test_diff_unstaged_shows_unstaged_changes(self, git_workspace: Path) -> None:
+        """Test --unstaged shows changes between working tree and index."""
+        dogcats_dir = git_workspace / ".dogcats"
+        issue_id = _create_issue(dogcats_dir, "To modify")
+
+        # Commit the creation, then stage it
+        subprocess.run(
+            ["git", "-C", str(git_workspace), "add", ".dogcats/"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(git_workspace), "commit", "-m", "add issue"],
+            check=True,
+            capture_output=True,
+        )
+
+        # Now modify the issue (working tree changes, index stays at commit)
+        runner.invoke(
+            app,
+            [
+                "update",
+                issue_id,
+                "--status",
+                "in_progress",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["diff", "--unstaged", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Updated" in result.stdout
+        assert "status" in result.stdout
+
+    def test_diff_staged_no_changes(self, git_workspace: Path) -> None:
+        """Test --staged shows no changes when index matches HEAD."""
+        dogcats_dir = git_workspace / ".dogcats"
+        result = runner.invoke(
+            app,
+            ["diff", "--staged", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "No changes" in result.stdout
+
+    def test_diff_staged_and_unstaged_mutually_exclusive(
+        self,
+        git_workspace: Path,
+    ) -> None:
+        """Test that --staged and --unstaged cannot be used together."""
+        dogcats_dir = git_workspace / ".dogcats"
+        result = runner.invoke(
+            app,
+            ["diff", "--staged", "--unstaged", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 1

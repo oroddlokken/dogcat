@@ -335,7 +335,7 @@ def register(app: typer.Typer) -> None:
                 if children:
                     output_lines.append("\nChildren:")
                     for child in children:
-                        output_lines.append(f"  ↳ {child.id}: {child.title}")
+                        output_lines.append(f"  ↳ {format_issue_brief(child)}")
 
                 # Add metadata if present
                 if issue.metadata:

@@ -2134,6 +2134,9 @@ class TestCLIShow:
         assert "Children:" in result.stdout
         assert "Child issue 1" in result.stdout
         assert "Child issue 2" in result.stdout
+        # Children should use rich formatting with status emoji and type
+        assert "●" in result.stdout  # open status emoji
+        assert "[task]" in result.stdout  # default type
 
     def test_show_displays_parent(self, tmp_path: Path) -> None:
         """Test that show displays parent for child issues."""
