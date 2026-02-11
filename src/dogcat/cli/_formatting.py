@@ -68,6 +68,12 @@ def format_issue_brief(
     labels_str = ""
     if issue.labels:
         labels_str = " " + typer.style(f"[{', '.join(issue.labels)}]", fg="cyan")
+    ext_ref_str = ""
+    if issue.external_ref:
+        ext_ref_str = " " + typer.style(
+            f"[extref: {issue.external_ref}]",
+            fg="bright_black",
+        )
     manual_str = ""
     if issue.metadata.get("manual") or issue.metadata.get("no_agent"):
         manual_str = " " + typer.style("[manual]", fg="yellow")
@@ -77,7 +83,9 @@ def format_issue_brief(
         blocked_by_str = " " + typer.style(f"[blocked by: {blockers}]", fg="red")
     base = f"{status_emoji} {priority_str} {issue.full_id}: {issue.title} {type_str}"
 
-    return f"{base}{parent_str}{labels_str}{manual_str}{blocked_by_str}{closed_str}"
+    suffixes = parent_str + labels_str + manual_str
+    suffixes += blocked_by_str + ext_ref_str + closed_str
+    return f"{base}{suffixes}"
 
 
 def _styled_key(label: str) -> str:
@@ -107,6 +115,8 @@ def format_issue_full(issue: Issue, parent_title: str | None = None) -> str:
         lines.append(f"{key('Owner:')} {issue.owner}")
     if issue.labels:
         lines.append(f"{key('Labels:')} {', '.join(issue.labels)}")
+    if issue.external_ref:
+        lines.append(f"{key('External ref:')} {issue.external_ref}")
     if issue.duplicate_of:
         lines.append(f"{key('Duplicate of:')} {issue.duplicate_of}")
 
@@ -237,7 +247,8 @@ def format_issue_table(
     if not issues:
         return ""
 
-    # Only add Blocked By column if there are blocked issues in the list
+    # Only add optional columns when relevant data exists
+    has_ext_ref = any(issue.external_ref for issue in issues)
     has_blocked = blocked_ids and any(issue.full_id in blocked_ids for issue in issues)
 
     # Create Rich table with column dividers
@@ -257,6 +268,8 @@ def format_issue_table(
     table.add_column("Pri", width=3, no_wrap=True)
     table.add_column("Title", overflow="fold")  # Wrap long titles
     table.add_column("Labels", no_wrap=False)
+    if has_ext_ref:
+        table.add_column("Ext Ref", no_wrap=True)
     if has_blocked:
         table.add_column("Blocked By", no_wrap=False)
 
@@ -296,6 +309,9 @@ def format_issue_table(
             f"{escape(issue.title)}{manual_str}",
             f"[cyan]{labels_str}[/]" if labels_str else "",
         ]
+        if has_ext_ref:
+            ref = escape(issue.external_ref) if issue.external_ref else ""
+            row.append(f"[bright_black]{ref}[/]" if ref else "")
         if has_blocked:
             blockers = ""
             if blocked_by_map and issue.full_id in blocked_by_map:

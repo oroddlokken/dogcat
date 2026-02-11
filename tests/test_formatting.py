@@ -1,6 +1,11 @@
 """Tests for display and formatting functions."""
 
-from dogcat.cli._formatting import format_issue_table, format_issue_tree
+from dogcat.cli._formatting import (
+    format_issue_brief,
+    format_issue_full,
+    format_issue_table,
+    format_issue_tree,
+)
 from dogcat.models import Issue
 
 
@@ -141,3 +146,78 @@ class TestFormatIssueTreeOrphanedChildren:
 
         assert "Root issue" in output
         assert "Orphan issue" in output
+
+
+class TestExternalRefDisplay:
+    """Test that external_ref is shown in brief, full, and table formatting."""
+
+    def test_brief_shows_external_ref(self) -> None:
+        """External ref appears in brief output."""
+        issue = Issue(
+            id="ref1",
+            namespace="dc",
+            title="Has external ref",
+            external_ref="JIRA-123",
+        )
+        output = format_issue_brief(issue)
+        assert "extref: JIRA-123" in output
+
+    def test_brief_no_external_ref(self) -> None:
+        """No ext ref marker when external_ref is not set."""
+        issue = Issue(
+            id="ref2",
+            namespace="dc",
+            title="No external ref",
+        )
+        output = format_issue_brief(issue)
+        # Should not contain any ext ref marker
+        assert "JIRA" not in output
+
+    def test_full_shows_external_ref(self) -> None:
+        """External ref appears in full output."""
+        issue = Issue(
+            id="ref3",
+            namespace="dc",
+            title="Full display ref",
+            external_ref="PLAT-456",
+        )
+        output = format_issue_full(issue)
+        assert "External ref:" in output
+        assert "PLAT-456" in output
+
+    def test_full_no_external_ref(self) -> None:
+        """No External ref line when not set."""
+        issue = Issue(
+            id="ref4",
+            namespace="dc",
+            title="Full no ref",
+        )
+        output = format_issue_full(issue)
+        assert "External ref:" not in output
+
+    def test_table_shows_ext_ref_column_when_present(self) -> None:
+        """Ext Ref column appears when any issue has external_ref."""
+        issue_with = Issue(
+            id="ref5",
+            namespace="dc",
+            title="With ref",
+            external_ref="BUG-789",
+        )
+        issue_without = Issue(
+            id="ref6",
+            namespace="dc",
+            title="Without ref",
+        )
+        output = format_issue_table([issue_with, issue_without])
+        assert "Ext Ref" in output
+        assert "BUG-789" in output
+
+    def test_table_no_ext_ref_column_when_none_present(self) -> None:
+        """No Ext Ref column when no issues have external_ref."""
+        issue = Issue(
+            id="ref7",
+            namespace="dc",
+            title="Plain issue",
+        )
+        output = format_issue_table([issue])
+        assert "Ext Ref" not in output
