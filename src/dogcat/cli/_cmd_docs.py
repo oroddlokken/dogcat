@@ -115,6 +115,19 @@ _GIT_GUIDE_TEXT = """\
 """
 
 
+def _git_repo_root() -> Path | None:
+    """Return the git repository root, or ``None`` if not inside a repo."""
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    return Path(result.stdout.strip())
+
+
 def _run_git_checks() -> tuple[bool, dict[str, dict[str, object]]]:
     """Run git integration checks and return (all_passed, checks_dict).
 
@@ -124,12 +137,8 @@ def _run_git_checks() -> tuple[bool, dict[str, dict[str, object]]]:
     all_passed = True
 
     # Check 1: Are we in a git repo?
-    result = subprocess.run(
-        ["git", "rev-parse", "--git-dir"],
-        capture_output=True,
-        check=False,
-    )
-    in_git_repo = result.returncode == 0
+    repo_root = _git_repo_root()
+    in_git_repo = repo_root is not None
     checks["git_repo"] = {
         "description": "Inside a git repository",
         "fail_description": "Not in a git repository",
@@ -139,9 +148,12 @@ def _run_git_checks() -> tuple[bool, dict[str, dict[str, object]]]:
     if not in_git_repo:
         all_passed = False
 
+    # Resolve paths relative to repo root (fall back to CWD if not in a repo)
+    root = repo_root or Path()
+
     # Check 2: Is .issues.lock in .gitignore?
     lock_ignored = False
-    gitignore = Path(".gitignore")
+    gitignore = root / ".gitignore"
     if gitignore.exists():
         content = gitignore.read_text()
         lock_ignored = ".issues.lock" in content or ".dogcats/" in content
@@ -190,7 +202,7 @@ def _run_git_checks() -> tuple[bool, dict[str, dict[str, object]]]:
         all_passed = False
 
     # Check 5: Does .gitattributes have the merge driver entry?
-    gitattrs = Path(".gitattributes")
+    gitattrs = root / ".gitattributes"
     has_gitattrs = False
     if gitattrs.exists():
         has_gitattrs = "merge=dcat-jsonl" in gitattrs.read_text()
@@ -289,13 +301,9 @@ def register(app: typer.Typer) -> None:
     @git_app.command("setup")
     def git_setup() -> None:
         """Install the JSONL merge driver for git."""
-        # Check we're in a git repo
-        result = subprocess.run(
-            ["git", "rev-parse", "--git-dir"],
-            capture_output=True,
-            check=False,
-        )
-        if result.returncode != 0:
+        # Check we're in a git repo and get repo root
+        repo_root = _git_repo_root()
+        if repo_root is None:
             typer.echo("Error: Not in a git repository", err=True)
             raise typer.Exit(1)
 
@@ -309,8 +317,8 @@ def register(app: typer.Typer) -> None:
             check=True,
         )
 
-        # Ensure .gitattributes exists with the merge driver entry
-        gitattrs = Path(".gitattributes")
+        # Ensure .gitattributes exists with the merge driver entry at repo root
+        gitattrs = repo_root / ".gitattributes"
         entry = GITATTRIBUTES_ENTRY
         if gitattrs.exists():
             content = gitattrs.read_text()

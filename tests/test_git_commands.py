@@ -354,6 +354,49 @@ class TestGitSetup:
         assert result.exit_code == 0
         assert "All checks passed" in result.stdout
 
+    def test_setup_from_subdirectory_creates_gitattributes_at_root(
+        self,
+        git_repo: GitRepo,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Setup from a subdirectory creates .gitattributes at repo root."""
+        repo = git_repo
+        subdir = repo.path / "some" / "nested" / "dir"
+        subdir.mkdir(parents=True)
+        monkeypatch.chdir(subdir)
+
+        result = runner.invoke(app, ["git", "setup"], catch_exceptions=False)
+        assert result.exit_code == 0
+
+        # .gitattributes should be at repo root, NOT in subdirectory
+        assert (repo.path / ".gitattributes").exists()
+        assert "merge=dcat-jsonl" in (repo.path / ".gitattributes").read_text()
+        assert not (subdir / ".gitattributes").exists()
+
+    def test_check_from_subdirectory_finds_gitattributes_at_root(
+        self,
+        git_repo: GitRepo,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Check from a subdirectory finds .gitattributes at repo root."""
+        repo = git_repo
+
+        # Configure everything at repo root
+        (repo.path / ".gitignore").write_text(".dogcats/.issues.lock\n")
+        repo.git("config", "merge.dcat-jsonl.driver", MERGE_DRIVER_CMD)
+        (repo.path / ".gitattributes").write_text(
+            ".dogcats/*.jsonl merge=dcat-jsonl\n",
+        )
+
+        # Run check from subdirectory
+        subdir = repo.path / "src" / "lib"
+        subdir.mkdir(parents=True)
+        monkeypatch.chdir(subdir)
+
+        result = runner.invoke(app, ["git", "check"], catch_exceptions=False)
+        assert result.exit_code == 0
+        assert "All checks passed" in result.stdout
+
 
 # ---------------------------------------------------------------------------
 # dcat git merge-driver
