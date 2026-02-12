@@ -236,8 +236,8 @@ def register(app: typer.Typer) -> None:
                 if issue_id not in new
             )
 
-            # Sort newest first
-            events.sort(key=lambda e: e.timestamp, reverse=True)
+            # Sort oldest first (chronological)
+            events.sort(key=lambda e: e.timestamp)
 
             if json_output:
                 output = [_serialize(e) for e in events]

@@ -53,6 +53,7 @@ def register(app: typer.Typer) -> None:
                     raise typer.Exit(1)
 
             events = event_log.read(issue_id=resolved_issue, limit=limit)
+            events.reverse()  # Display oldest-first (chronological)
 
             # Fill in missing titles from storage
             for event in events:

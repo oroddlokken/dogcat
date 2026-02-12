@@ -391,9 +391,9 @@ def register(app: typer.Typer) -> None:
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
-        """Show recently closed issues (newest first).
+        """Show recently closed issues (oldest first).
 
-        Displays the last N closed issues, most recent at the top.
+        Displays the last N closed issues in chronological order.
         """
         try:
             from dogcat.event_log import EventLog, _serialize
@@ -403,6 +403,7 @@ def register(app: typer.Typer) -> None:
             storage = get_storage(dogcats_dir)
             event_log = EventLog(storage.dogcats_dir)
             events = [e for e in event_log.read() if e.event_type == "closed"][:limit]
+            events.reverse()  # Display oldest-first
 
             # Fill in missing titles from storage
             for event in events:
@@ -431,10 +432,10 @@ def register(app: typer.Typer) -> None:
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
-        """Show recently created issues in descending order (newest first).
+        """Show recently created issues in chronological order (oldest first).
 
         Displays the last N issues sorted by created_at date,
-        with the most recently created issue at the top.
+        with the oldest of the recent issues at the top.
         """
         try:
             storage = get_storage(dogcats_dir)
@@ -444,11 +445,12 @@ def register(app: typer.Typer) -> None:
                 if i.status.value not in ("closed", "tombstone")
             ]
 
-            # Sort by created_at descending (newest first)
+            # Sort descending to select the N most recent, then reverse for display
             issues.sort(key=lambda i: i.created_at, reverse=True)
 
-            # Take first N (most recent)
+            # Take first N (most recent), then reverse for oldest-first display
             recent = issues[:limit]
+            recent.reverse()
 
             if json_output:
                 from dogcat.models import issue_to_dict
