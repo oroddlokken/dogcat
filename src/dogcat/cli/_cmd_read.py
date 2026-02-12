@@ -333,9 +333,17 @@ def register(app: typer.Typer) -> None:
                 # Add children
                 children = storage.get_children(issue_id)
                 if children:
+                    from dogcat.deps import get_blocked_issues
+
+                    blocked_issues = get_blocked_issues(storage)
+                    blocked_by_map = {
+                        bi.issue_id: bi.blocking_ids for bi in blocked_issues
+                    }
+
                     output_lines.append("\nChildren:")
                     for child in children:
-                        output_lines.append(f"  ↳ {format_issue_brief(child)}")
+                        brief = format_issue_brief(child, blocked_by_map=blocked_by_map)
+                        output_lines.append(f"  ↳ {brief}")
 
                 # Add metadata if present
                 if issue.metadata:

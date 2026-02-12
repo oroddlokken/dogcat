@@ -708,7 +708,7 @@ def register(app: typer.Typer) -> None:
             for label, value in PRIORITY_OPTIONS:
                 typer.echo(f"  {value}  - {label}")
 
-            typer.echo("\nShorthands for create command:")
+            typer.echo("\nShorthands for c (create alias) command:")
             shorthand_list = ", ".join(
                 f"{k}={v}" for k, v in sorted(TYPE_SHORTHANDS.items())
             )
