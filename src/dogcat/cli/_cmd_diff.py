@@ -169,9 +169,16 @@ def register(app: typer.Typer) -> None:
                                 "old": None,
                                 "new": _field_value(value),
                             }
+                    status = _field_value(new_state.get("status"))
+                    if status == "closed":
+                        event_type = "closed"
+                    elif status == "tombstone":
+                        event_type = "deleted"
+                    else:
+                        event_type = "created"
                     events.append(
                         EventRecord(
-                            event_type="created",
+                            event_type=event_type,
                             issue_id=issue_id,
                             timestamp=new_state.get("created_at", ""),
                             by=new_state.get("created_by"),

@@ -470,6 +470,26 @@ def register(app: typer.Typer) -> None:
 
     dcat blocked
 
+── Issue Links ─────────────────────────────────────────────────────────
+
+  Links capture general relationships between issues (as opposed to
+  dependencies, which imply blocking). Common link types: relates_to,
+  duplicates.
+
+  Add a link between two issues:
+
+    dcat link <id> add --related <other_id>
+    dcat link <id> add --related <other_id> --type duplicates
+
+  Remove a link:
+
+    dcat link <id> remove --related <other_id>
+
+  List all links for an issue:
+
+    dcat link <id> list
+    dcat link <id> list --json
+
 ── Filtering & Advanced Usage ──────────────────────────────────────────────
 
   Filter by type, priority, label, or status:
@@ -526,6 +546,7 @@ def register(app: typer.Typer) -> None:
   dcat history     Show change history timeline
   dcat diff        Show uncommitted issue changes
   dcat doctor      Run health checks on your issue data
+  dcat link        Manage general issue relationships
   dcat export      Export all issues (for backup or migration)
   dcat prune       Permanently remove deleted issues
 

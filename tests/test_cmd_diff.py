@@ -160,6 +160,51 @@ class TestDiff:
         assert result.exit_code == 0
         assert "Closed" in result.stdout
 
+    def test_diff_new_and_closed_shows_closed(self, git_workspace: Path) -> None:
+        """Test diff shows closed symbol for issue created and closed since HEAD."""
+        dogcats_dir = git_workspace / ".dogcats"
+        issue_id = _create_issue(dogcats_dir, "Created then closed")
+
+        # Close the issue without committing creation first
+        runner.invoke(
+            app,
+            ["close", issue_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["diff", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Closed" in result.stdout
+        assert "Created then closed" in result.stdout
+        # First line should be the closed symbol, not created
+        lines = [
+            line
+            for line in result.stdout.splitlines()
+            if line.strip() and "Legend" not in line
+        ]
+        assert lines[0].startswith("\u2713")
+
+    def test_diff_new_and_closed_json(self, git_workspace: Path) -> None:
+        """Test diff JSON output shows closed event_type for new-and-closed issue."""
+        dogcats_dir = git_workspace / ".dogcats"
+        issue_id = _create_issue(dogcats_dir, "JSON closed test")
+
+        runner.invoke(
+            app,
+            ["close", issue_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["diff", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert len(data) >= 1
+        assert data[0]["event_type"] == "closed"
+
     def test_diff_json_output(self, git_workspace: Path) -> None:
         """Test diff json output."""
         dogcats_dir = git_workspace / ".dogcats"
