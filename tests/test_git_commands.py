@@ -202,8 +202,60 @@ class TestGitCheck:
         assert result.exit_code == 1
         # Should show fail descriptions
         assert "does not include .issues.lock" in result.stdout
+        assert "Not in a git repository" not in result.stdout  # we ARE in a git repo
         assert "not configured" in result.stdout
         assert "missing" in result.stdout.lower()
+
+    def test_check_not_in_git_repo_shows_fail_description(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Outside a git repo, shows 'Not in a git repository'."""
+        monkeypatch.chdir(tmp_path)
+        # Create .dogcats so find_dogcats_dir works
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        (dogcats_dir / "issues.jsonl").touch()
+
+        result = runner.invoke(app, ["git", "check"], catch_exceptions=False)
+        assert result.exit_code == 1
+        assert "Not in a git repository" in result.stdout
+
+    def test_check_skipped_when_git_tracking_disabled(
+        self,
+        git_repo: GitRepo,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Git check exits cleanly when git_tracking=false."""
+        from dogcat.config import save_config
+
+        monkeypatch.chdir(git_repo.path)
+        save_config(str(git_repo.dogcats_dir), {"git_tracking": False})
+
+        result = runner.invoke(app, ["git", "check"], catch_exceptions=False)
+        assert result.exit_code == 0
+        assert "Git tracking is disabled" in result.stdout
+
+    def test_check_skipped_json_when_git_tracking_disabled(
+        self,
+        git_repo: GitRepo,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Git check --json returns skipped status when git_tracking=false."""
+        from dogcat.config import save_config
+
+        monkeypatch.chdir(git_repo.path)
+        save_config(str(git_repo.dogcats_dir), {"git_tracking": False})
+
+        result = runner.invoke(
+            app,
+            ["git", "check", "--json"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["status"] == "skipped"
 
 
 # ---------------------------------------------------------------------------
@@ -370,36 +422,41 @@ class TestGitMergeDriver:
 # ---------------------------------------------------------------------------
 
 
-class TestPrimeOpinionated:
-    """Test dcat prime --opinionated flag."""
+class TestPrimeGitHealth:
+    """Test git health checks in dcat prime."""
 
-    def test_prime_without_opinionated_unchanged(self) -> None:
-        """Standard prime output does not include git health section."""
-        result = runner.invoke(app, ["prime"], catch_exceptions=False)
-        assert result.exit_code == 0
-        assert "DOGCAT WORKFLOW GUIDE" in result.stdout
-        assert "Git Integration Health" not in result.stdout
-
-    def test_prime_opinionated_in_git_repo_shows_failing_checks(
+    def test_prime_in_git_repo_shows_git_health(
         self,
         git_repo: GitRepo,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """In a git repo with issues, shows failing checks and fix suggestions."""
+        """Standard prime in a git repo shows git health section."""
+        monkeypatch.chdir(git_repo.path)
+        result = runner.invoke(app, ["prime"], catch_exceptions=False)
+        assert result.exit_code == 0
+        assert "DOGCAT WORKFLOW GUIDE" in result.stdout
+        assert "Git Integration Health" in result.stdout
+
+    def test_prime_shows_failing_checks_with_gentle_nudge(
+        self,
+        git_repo: GitRepo,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """In a git repo with issues, shows failing checks and gentle suggestions."""
         monkeypatch.chdir(git_repo.path)
         # No gitignore, no merge driver, no gitattributes
         result = runner.invoke(
             app,
-            ["prime", "--opinionated"],
+            ["prime"],
             catch_exceptions=False,
         )
         assert result.exit_code == 0
         assert "Git Integration Health" in result.stdout
-        assert "Fix:" in result.stdout
+        assert "Consider running:" in result.stdout
         assert "merge driver" in result.stdout.lower()
-        assert "Inform the user" in result.stdout
+        assert "dcat config set git_tracking false" in result.stdout
 
-    def test_prime_opinionated_in_git_repo_all_pass(
+    def test_prime_in_git_repo_all_pass(
         self,
         git_repo: GitRepo,
         monkeypatch: pytest.MonkeyPatch,
@@ -416,15 +473,14 @@ class TestPrimeOpinionated:
 
         result = runner.invoke(
             app,
-            ["prime", "--opinionated"],
+            ["prime"],
             catch_exceptions=False,
         )
         assert result.exit_code == 0
-        # All checks shown with pass marks, no nudge to fix
         assert "✓" in result.stdout
-        assert "Please fix" not in result.stdout
+        assert "dcat config set git_tracking false" not in result.stdout
 
-    def test_prime_opinionated_outside_git_repo(
+    def test_prime_outside_git_repo_skips_git_checks(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -433,8 +489,42 @@ class TestPrimeOpinionated:
         monkeypatch.chdir(tmp_path)
         result = runner.invoke(
             app,
-            ["prime", "--opinionated"],
+            ["prime"],
             catch_exceptions=False,
         )
         assert result.exit_code == 0
         assert "Git Integration Health" not in result.stdout
+
+    def test_prime_skips_git_checks_when_tracking_disabled(
+        self,
+        git_repo: GitRepo,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """When git_tracking=false in config, prime skips git health section."""
+        from dogcat.config import save_config
+
+        monkeypatch.chdir(git_repo.path)
+        save_config(str(git_repo.dogcats_dir), {"git_tracking": False})
+
+        result = runner.invoke(
+            app,
+            ["prime"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert "Git Integration Health" not in result.stdout
+
+    def test_prime_opinionated_still_works(
+        self,
+        git_repo: GitRepo,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """--opinionated flag still works (git checks run in standard prime)."""
+        monkeypatch.chdir(git_repo.path)
+        result = runner.invoke(
+            app,
+            ["prime", "--opinionated"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert "Git Integration Health" in result.stdout

@@ -10,7 +10,7 @@ from typing import Any
 import orjson
 import typer
 
-from dogcat.config import get_issue_prefix
+from dogcat.config import get_config_path, get_issue_prefix, load_config, save_config
 
 from ._formatting import format_issue_brief
 from ._helpers import get_default_operator, get_storage
@@ -253,6 +253,53 @@ def register(app: typer.Typer) -> None:
         }
         if not checks["issues_jsonl"]["passed"]:
             all_passed = False
+
+        # Check 2a: config.toml exists
+        config_path = get_config_path(dogcats_dir)
+        config_exists = config_path.exists()
+
+        if fix and not config_exists and dogcats_path.exists():
+            detected_prefix = get_issue_prefix(dogcats_dir)
+            save_config(dogcats_dir, {"issue_prefix": detected_prefix})
+            config_exists = True
+            typer.echo(
+                f"Fixed: Created {config_path.name}"
+                f" with issue_prefix='{detected_prefix}'",
+            )
+
+        checks["config_toml"] = {
+            "description": f"{dogcats_dir}/config.toml exists",
+            "fail_description": f"{dogcats_dir}/config.toml not found",
+            "passed": config_exists,
+            "fix": "Run 'dcat doctor --fix' to create config.toml",
+        }
+        if not checks["config_toml"]["passed"]:
+            all_passed = False
+
+        # Check 2b: issue_prefix is set and non-empty in config
+        # Only check if config.toml exists (skip if Check 2a failed)
+        if config_exists:
+            config = load_config(dogcats_dir)
+            prefix_value = config.get("issue_prefix")
+            prefix_ok = bool(prefix_value)
+
+            if fix and not prefix_ok:
+                detected_prefix = get_issue_prefix(dogcats_dir)
+                config["issue_prefix"] = detected_prefix
+                save_config(dogcats_dir, config)
+                prefix_ok = True
+                typer.echo(
+                    f"Fixed: Set issue_prefix='{detected_prefix}' in config.toml",
+                )
+
+            checks["config_issue_prefix"] = {
+                "description": "issue_prefix is configured in config.toml",
+                "fail_description": "issue_prefix is not configured in config.toml",
+                "passed": prefix_ok,
+                "fix": "Run 'dcat config set issue_prefix <prefix>'",
+            }
+            if not prefix_ok:
+                all_passed = False
 
         # Check 3: Deep data validation (fields, refs, cycles)
         data_valid = True

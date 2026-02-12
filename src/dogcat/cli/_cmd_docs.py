@@ -7,6 +7,7 @@ from pathlib import Path
 
 import typer
 
+from dogcat.config import load_config
 from dogcat.constants import (
     GITATTRIBUTES_ENTRY,
     MERGE_DRIVER_CMD,
@@ -15,7 +16,7 @@ from dogcat.constants import (
     MERGE_DRIVER_NAME,
 )
 
-from ._helpers import SortedGroup
+from ._helpers import SortedGroup, find_dogcats_dir
 
 # Sub-app for 'dcat git' subcommands
 git_app = typer.Typer(
@@ -131,6 +132,7 @@ def _run_git_checks() -> tuple[bool, dict[str, dict[str, object]]]:
     in_git_repo = result.returncode == 0
     checks["git_repo"] = {
         "description": "Inside a git repository",
+        "fail_description": "Not in a git repository",
         "passed": in_git_repo,
         "fix": "Run 'git init' to initialize a git repository",
     }
@@ -222,6 +224,22 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Check git-related configuration for dogcat."""
         import orjson
+
+        dogcats_dir = find_dogcats_dir()
+        config = load_config(dogcats_dir)
+        if config.get("git_tracking") is False:
+            if json_output:
+                typer.echo(
+                    orjson.dumps(
+                        {"status": "skipped", "reason": "git_tracking is disabled"},
+                    ).decode(),
+                )
+            else:
+                typer.echo("Git tracking is disabled (git_tracking = false).")
+                typer.echo(
+                    "To enable: dcat config set git_tracking true",
+                )
+            raise typer.Exit(0)
 
         all_passed, checks = _run_git_checks()
 
@@ -560,16 +578,17 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     def prime(
-        opinionated: bool = typer.Option(
+        opinionated: bool = typer.Option(  # noqa: ARG001
             False,
             "--opinionated",
-            help="Include prescriptive guidelines and git checks.",
+            help="Include stronger, prescriptive recommendations.",
         ),
     ) -> None:
         """Show dogcat workflow guide and best practices for AI agents.
 
         This command displays guidance for effective dogcat usage and workflows.
-        Use --opinionated for stronger recommendations and git health checks.
+        Git health checks are included automatically when in a git repo.
+        Disable with: dcat config set git_tracking false
         """
         guide = """
 DOGCAT WORKFLOW GUIDE
@@ -665,8 +684,12 @@ NOT tasks to work on.
 """
         typer.echo(guide)
 
-        if opinionated:
-            # Check if we're in a git repo and run checks if so
+        # Git health checks — always run unless git_tracking is disabled
+        dogcats_dir = find_dogcats_dir()
+        config = load_config(dogcats_dir)
+        git_tracking = config.get("git_tracking", True)
+
+        if git_tracking is not False:
             git_result = subprocess.run(
                 ["git", "rev-parse", "--git-dir"],
                 capture_output=True,
@@ -692,12 +715,16 @@ NOT tasks to work on.
                             check["description"],
                         )
                         typer.echo(f"  ✗ {desc}")
-                        typer.echo(f"    Fix: {check['fix']}")
+                        typer.echo(
+                            f"    Consider running: {check['fix']}",
+                        )
                 typer.echo()
                 if not all_passed:
                     typer.echo(
-                        "Inform the user of the errors above and ask"
-                        " if you should fix them.\n",
+                        "You may want to fix the issues above for"
+                        " smoother git integration.\n"
+                        "To disable git checks: dcat config set"
+                        " git_tracking false\n",
                     )
 
     @app.command()

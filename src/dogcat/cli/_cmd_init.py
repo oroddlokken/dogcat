@@ -6,7 +6,7 @@ from pathlib import Path
 
 import typer
 
-from dogcat.config import set_issue_prefix
+from dogcat.config import load_config, save_config, set_issue_prefix
 from dogcat.constants import DOGCATRC_FILENAME
 
 from ._helpers import get_storage
@@ -33,6 +33,14 @@ def register(app: typer.Typer) -> None:
             None,
             "--use-existing-folder",
             help="Link to an existing .dogcats directory (creates .dogcatrc)",
+        ),
+        no_git: bool = typer.Option(
+            False,
+            "--no-git",
+            help=(
+                "Disable git tracking"
+                " (sets git_tracking=false, adds .dogcats/ to .gitignore)"
+            ),
         ),
     ) -> None:
         """Initialize a new Dogcat repository.
@@ -115,6 +123,29 @@ def register(app: typer.Typer) -> None:
         # Save prefix to config
         set_issue_prefix(dogcats_dir, prefix)
         typer.echo(f"✓ Set issue prefix: {prefix}")
+
+        if no_git:
+            config = load_config(dogcats_dir)
+            config["git_tracking"] = False
+            save_config(dogcats_dir, config)
+            typer.echo("✓ Disabled git tracking (git_tracking = false)")
+
+            gitignore = Path(".gitignore")
+            entry = ".dogcats/"
+            if gitignore.exists():
+                content = gitignore.read_text()
+                lines = content.splitlines()
+                if not any(ln.strip() == entry for ln in lines):
+                    with gitignore.open("a") as f:
+                        if content and not content.endswith("\n"):
+                            f.write("\n")
+                        f.write(f"{entry}\n")
+                    typer.echo("✓ Added .dogcats/ to .gitignore")
+                else:
+                    typer.echo("✓ .dogcats/ already in .gitignore")
+            else:
+                gitignore.write_text(f"{entry}\n")
+                typer.echo("✓ Created .gitignore with .dogcats/")
 
         typer.echo(f"\n✓ Dogcat repository initialized in {dogcats_dir}")
         typer.echo(f"  Issues will be named: {prefix}-<hash> (e.g., {prefix}-a3f2)")

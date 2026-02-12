@@ -8,6 +8,7 @@ import pytest
 from typer.testing import CliRunner
 
 from dogcat.cli import app
+from dogcat.config import load_config
 
 runner = CliRunner()
 
@@ -4337,6 +4338,82 @@ class TestCLIDoctor:
         assert "is valid JSON" in result.stdout
         assert "✗" in result.stdout
 
+    def test_doctor_missing_config_toml(self, tmp_path: Path) -> None:
+        """Test doctor detects missing config.toml."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        issues_file = dogcats_dir / "issues.jsonl"
+        issues_file.touch()
+
+        result = runner.invoke(
+            app,
+            ["doctor", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code != 0
+        assert "config.toml not found" in result.stdout
+        assert "✗" in result.stdout
+        # Prefix check should be skipped when config.toml is missing
+        assert "issue_prefix is not configured" not in result.stdout
+
+    def test_doctor_empty_issue_prefix(self, tmp_path: Path) -> None:
+        """Test doctor detects empty issue_prefix in config.toml."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        issues_file = dogcats_dir / "issues.jsonl"
+        issues_file.touch()
+
+        # Create config.toml with empty issue_prefix
+        config_file = dogcats_dir / "config.toml"
+        config_file.write_text('issue_prefix = ""\n')
+
+        result = runner.invoke(
+            app,
+            ["doctor", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code != 0
+        assert "issue_prefix is not configured" in result.stdout
+        assert "✗" in result.stdout
+
+    def test_doctor_fix_missing_config(self, tmp_path: Path) -> None:
+        """Test doctor --fix creates config.toml with auto-detected prefix."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        issues_file = dogcats_dir / "issues.jsonl"
+        issues_file.touch()
+
+        config_file = dogcats_dir / "config.toml"
+        assert not config_file.exists()
+
+        result = runner.invoke(
+            app,
+            ["doctor", "--fix", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert config_file.exists()
+        assert "Fixed: Created config.toml" in result.stdout
+
+    def test_doctor_valid_config(self, tmp_path: Path) -> None:
+        """Test doctor passes when config.toml is properly set up."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["doctor", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert "config.toml exists" in result.stdout
+        assert "issue_prefix is configured" in result.stdout
+        # Both config checks should pass (green checkmarks)
+        # Count the ✗ marks - there should be none for config checks
+        lines = result.stdout.splitlines()
+        config_lines = [
+            ln for ln in lines if "config.toml" in ln or "issue_prefix" in ln
+        ]
+        for line in config_lines:
+            assert "✗" not in line
+
 
 class TestCLIComments:
     """Test comment functionality."""
@@ -5962,3 +6039,237 @@ class TestCLICommandAliases:
         )
         assert result.exit_code == 0
         assert "Deferred task" in result.stdout
+
+
+class TestCLIConfig:
+    """Test dcat config commands."""
+
+    def test_config_set_and_get(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test setting and getting a config value."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["config", "set", "issue_prefix", "myproject"],
+        )
+        assert result.exit_code == 0
+        assert "Set issue_prefix = myproject" in result.stdout
+
+        result = runner.invoke(app, ["config", "get", "issue_prefix"])
+        assert result.exit_code == 0
+        assert "myproject" in result.stdout
+
+    def test_config_set_bool_true(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test setting a boolean config value to true."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["config", "set", "git_tracking", "true"],
+        )
+        assert result.exit_code == 0
+        assert "Set git_tracking = True" in result.stdout
+
+        config = load_config(str(dogcats_dir))
+        assert config["git_tracking"] is True
+
+    def test_config_set_bool_false(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test setting a boolean config value to false."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["config", "set", "git_tracking", "false"],
+        )
+        assert result.exit_code == 0
+        assert "Set git_tracking = False" in result.stdout
+
+        config = load_config(str(dogcats_dir))
+        assert config["git_tracking"] is False
+
+    def test_config_set_bool_invalid(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test setting a boolean key with an invalid value."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["config", "set", "git_tracking", "maybe"],
+        )
+        assert result.exit_code != 0
+
+    def test_config_get_missing_key(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test getting a key that doesn't exist."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(app, ["config", "get", "nonexistent"])
+        assert result.exit_code == 1
+
+    def test_config_get_json(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test getting a config value as JSON."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["config", "get", "issue_prefix", "--json"],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert "issue_prefix" in data
+
+    def test_config_list(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test listing all config values."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(app, ["config", "list"])
+        assert result.exit_code == 0
+        assert "issue_prefix" in result.stdout
+
+    def test_config_list_json(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test listing all config values as JSON."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(app, ["config", "list", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert "issue_prefix" in data
+
+    def test_config_list_empty(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test listing config when no values are set."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir(parents=True)
+        (dogcats_dir / "issues.jsonl").touch()
+
+        result = runner.invoke(app, ["config", "list"])
+        assert result.exit_code == 0
+        assert "No configuration values set" in result.stdout
+
+
+class TestCLIInitNoGit:
+    """Test dcat init --no-git flag."""
+
+    def test_init_no_git_sets_config(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """--no-git sets git_tracking=false in config."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+
+        result = runner.invoke(
+            app,
+            ["init", "--dogcats-dir", str(dogcats_dir), "--no-git"],
+        )
+        assert result.exit_code == 0
+        assert (
+            "git_tracking = false" in result.stdout.lower()
+            or "Disabled git tracking" in result.stdout
+        )
+
+        config = load_config(str(dogcats_dir))
+        assert config["git_tracking"] is False
+
+    def test_init_no_git_creates_gitignore(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """--no-git creates .gitignore with .dogcats/ entry."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+
+        runner.invoke(
+            app,
+            ["init", "--dogcats-dir", str(dogcats_dir), "--no-git"],
+        )
+
+        gitignore = tmp_path / ".gitignore"
+        assert gitignore.exists()
+        assert ".dogcats/" in gitignore.read_text()
+
+    def test_init_no_git_appends_to_existing_gitignore(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """--no-git appends to existing .gitignore without overwriting."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text("*.pyc\n")
+
+        runner.invoke(
+            app,
+            ["init", "--dogcats-dir", str(dogcats_dir), "--no-git"],
+        )
+
+        content = gitignore.read_text()
+        assert "*.pyc" in content
+        assert ".dogcats/" in content
+
+    def test_init_no_git_skips_if_already_in_gitignore(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """--no-git skips if .dogcats/ is already in .gitignore."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text(".dogcats/\n")
+
+        result = runner.invoke(
+            app,
+            ["init", "--dogcats-dir", str(dogcats_dir), "--no-git"],
+        )
+        assert result.exit_code == 0
+        assert "already in .gitignore" in result.stdout
