@@ -7,6 +7,7 @@ integration with the ``dcat doctor`` command.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import orjson
@@ -206,6 +207,11 @@ class TestValidateIssue:
         assert len(errors) == 1
         assert "invalid issue_type" in errors[0]["message"]
 
+    def test_legacy_draft_issue_type_accepted(self) -> None:
+        """Legacy issue_type='draft' is accepted (migrated on load)."""
+        errors = validate_issue(_issue(issue_type="draft"), lineno=1)
+        assert errors == []
+
     def test_priority_out_of_range(self) -> None:
         """Detect priority values outside 0-4."""
         errors = validate_issue(_issue(priority=99), lineno=1)
@@ -365,6 +371,23 @@ class TestDoctorValidation:
         data = json.loads(result.stdout)
         assert "validation_details" in data
         assert len(data["validation_details"]) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Regression: validate real repo data
+# ---------------------------------------------------------------------------
+
+
+class TestValidateRepoData:
+    """Validate the actual repo issues.jsonl as a regression test."""
+
+    def test_repo_issues_jsonl_is_valid(self) -> None:
+        """The repo's own issues.jsonl passes validation."""
+        repo_jsonl = Path(__file__).resolve().parent.parent / ".dogcats" / "issues.jsonl"
+        if not repo_jsonl.exists():
+            pytest.skip("No .dogcats/issues.jsonl in repo root")
+        errors = _errors(validate_jsonl(repo_jsonl))
+        assert errors == [], f"Validation errors in repo issues.jsonl: {errors}"
 
 
 # ---------------------------------------------------------------------------
