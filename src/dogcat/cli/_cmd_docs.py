@@ -410,7 +410,8 @@ def register(app: typer.Typer) -> None:
     dcat c b 1 "Crash on empty input"
 
   Available types: task (t), bug (b), feature (f), story (s),
-                   chore (c), epic (e), question (q), draft (d)
+                   chore (c), epic (e), question (q)
+  Status shorthand: draft (d)
 
   Priority scale: 0 = Critical, 1 = High, 2 = Medium (default),
                   3 = Low, 4 = Minimal
@@ -604,9 +605,9 @@ DOGCAT WORKFLOW GUIDE
 ## Quick Start for AI agents
 
 0a. Allowed issue types, priorities, and statuses:
-      Types: bug, chore, draft, epic, feature, question, story, task
+      Types: bug, chore, epic, feature, question, story, subtask, task
       Priorities: 0 (Critical), 1 (High), 2 (Medium, default), 3 (Low), 4 (Minimal)
-      Statuses: open, in_progress, in_review, blocked, deferred, closed
+      Statuses: draft, open, in_progress, in_review, blocked, deferred, closed
 
 0b. `dcat create` and `dcat update` both support --title, --description,
     --priority, --acceptance, --notes, --labels, --parent, --manual,
@@ -683,7 +684,7 @@ Do NOT attempt to work on manual issues. Leave them for the user.
 
 ## Status Workflow
 
-  open -> in_progress -> in_review -> closed
+  draft -> open -> in_progress -> in_review -> closed
 
 ## Questions
 

@@ -422,6 +422,7 @@ def new_issue(
     title: str = "",
     priority: int | None = None,
     issue_type: str | None = None,
+    status: str | None = None,
 ) -> Issue | None:
     """Open the Textual editor to create a new issue.
 
@@ -432,11 +433,12 @@ def new_issue(
         title: Pre-filled title for the new issue.
         priority: Pre-filled priority (0-4) for the new issue.
         issue_type: Pre-filled issue type (e.g. "bug", "feature").
+        status: Pre-filled status (e.g. "draft").
 
     Returns:
         The created issue, or None if cancelled.
     """
-    from dogcat.models import Issue, IssueType
+    from dogcat.models import Issue, IssueType, Status
 
     kwargs: dict[str, Any] = {
         "id": "",
@@ -448,6 +450,8 @@ def new_issue(
         kwargs["priority"] = priority
     if issue_type is not None:
         kwargs["issue_type"] = IssueType(issue_type)
+    if status is not None:
+        kwargs["status"] = Status(status)
 
     skeleton = Issue(**kwargs)
 

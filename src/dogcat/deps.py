@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from dogcat.models import Issue, IssueType, Status
+from dogcat.models import Issue, Status
 
 if TYPE_CHECKING:
     from dogcat.storage import JSONLStorage
@@ -36,12 +36,9 @@ def get_ready_work(
     # Get all issues
     all_issues = storage.list(filters) if filters else storage.list()
 
-    # Filter to open/in_progress issues, excluding drafts
+    # Filter to open/in_progress issues (drafts excluded implicitly)
     work_issues = [
-        i
-        for i in all_issues
-        if i.status in (Status.OPEN, Status.IN_PROGRESS)
-        and i.issue_type != IssueType.DRAFT
+        i for i in all_issues if i.status in (Status.OPEN, Status.IN_PROGRESS)
     ]
 
     # Find issues with no blocking dependencies

@@ -466,7 +466,7 @@ class DeterministicIssueGenerator:
 
         # Issue type with realistic distribution
         type_weights = [
-            (IssueType.TASK, 0.25),
+            (IssueType.TASK, 0.27),
             (IssueType.BUG, 0.2),
             (IssueType.FEATURE, 0.2),
             (IssueType.STORY, 0.1),
@@ -474,12 +474,15 @@ class DeterministicIssueGenerator:
             (IssueType.EPIC, 0.05),
             (IssueType.SUBTASK, 0.05),
             (IssueType.QUESTION, 0.03),
-            (IssueType.DRAFT, 0.02),
         ]
         issue_type = self.rng.choices(
             [t for t, _ in type_weights],
             weights=[w for _, w in type_weights],
         )[0]
+
+        # ~2% of open issues become drafts
+        if status == Status.OPEN and self.rng.random() < 0.02:
+            status = Status.DRAFT
 
         if status == Status.CLOSED:
             closed_at = updated_at + timedelta(hours=self.rng.randint(1, 24))

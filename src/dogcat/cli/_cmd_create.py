@@ -51,12 +51,14 @@ _C_DOC = """\
 Create a new issue (quick create).
 
 Supports shorthand notation: use single characters (0-4 for priority,
-b/f/e/s for bug/feature/epic/story) before or after the title.
+b/f/e/s for bug/feature/epic/story, d for draft status) before or after the title.
 
 Examples:
     dcat c "Fix login bug"           # Default priority 2, type task
     dcat c "Fix login bug" 1         # Priority 1
-    dcat c 0 b "Critical bug"        # Priority 0, type bug\
+    dcat c 0 b "Critical bug"        # Priority 0, type bug
+    dcat c d "Initial thoughts"      # Draft status
+    dcat c e 0 d "Design v2"        # Epic, priority 0, draft status\
 """
 
 
@@ -73,6 +75,10 @@ def register(app: typer.Typer) -> None:
             help=_ARG_HELP_SHORTHAND,
         ),
         arg3: str | None = typer.Argument(
+            None,
+            help=_ARG_HELP_SHORTHAND,
+        ),
+        arg4: str | None = typer.Argument(
             None,
             help=_ARG_HELP_SHORTHAND,
         ),
@@ -100,14 +106,14 @@ def register(app: typer.Typer) -> None:
             None,
             "--type",
             "-t",
-            help="Issue type",
+            help="Issue type (task, bug, feature, story, chore, epic, question)",
             autocompletion=complete_types,
         ),
         status: str | None = typer.Option(
             None,
             "--status",
             "-s",
-            help="Initial status (open, in_progress, blocked, deferred)",
+            help="Initial status (draft, open, in_progress, blocked, deferred)",
             autocompletion=complete_statuses,
         ),
         owner: str | None = typer.Option(None, "--owner", "-o", help="Issue owner"),
@@ -183,9 +189,11 @@ def register(app: typer.Typer) -> None:
         """Create a new issue (implementation)."""
         try:
             # Parse arguments to extract title and shorthands
-            title, shorthand_priority, shorthand_type = _parse_args_for_create(
-                [arg1, arg2, arg3],
-                allow_shorthands=allow_shorthands,
+            title, shorthand_priority, shorthand_type, shorthand_status = (
+                _parse_args_for_create(
+                    [arg1, arg2, arg3, arg4],
+                    allow_shorthands=allow_shorthands,
+                )
             )
 
             # --title flag overrides positional title if no positional title given
@@ -210,6 +218,13 @@ def register(app: typer.Typer) -> None:
                 typer.echo(
                     "Error: Cannot use both type shorthand (b/f/e/s/q) and "
                     "--type flag together",
+                    err=True,
+                )
+                raise typer.Exit(1)
+            if shorthand_status is not None and status is not None:
+                typer.echo(
+                    "Error: Cannot use both status shorthand (d) and "
+                    "--status flag together",
                     err=True,
                 )
                 raise typer.Exit(1)
@@ -252,7 +267,12 @@ def register(app: typer.Typer) -> None:
             )
 
             # Determine initial status
-            initial_status = Status(status) if status else Status.OPEN
+            if status:
+                initial_status = Status(status)
+            elif shorthand_status:
+                initial_status = Status(shorthand_status)
+            else:
+                initial_status = Status.OPEN
 
             # Build metadata
             issue_metadata: dict[str, Any] = {}
@@ -366,10 +386,13 @@ def register(app: typer.Typer) -> None:
         _make_alias(
             _create_impl,
             doc=_CREATE_DOC,
-            exclude_params=frozenset({"arg2", "arg3", "allow_shorthands"}),
+            exclude_params=frozenset(
+                {"arg2", "arg3", "arg4", "allow_shorthands"},
+            ),
             param_defaults={
                 "arg2": None,
                 "arg3": None,
+                "arg4": None,
                 "allow_shorthands": False,
             },
             param_help={"arg1": _ARG_HELP},
@@ -389,10 +412,13 @@ def register(app: typer.Typer) -> None:
         _make_alias(
             _create_impl,
             doc="Create a new issue (alias for 'create' command).",
-            exclude_params=frozenset({"arg2", "arg3", "editor", "allow_shorthands"}),
+            exclude_params=frozenset(
+                {"arg2", "arg3", "arg4", "editor", "allow_shorthands"},
+            ),
             param_defaults={
                 "arg2": None,
                 "arg3": None,
+                "arg4": None,
                 "editor": False,
                 "allow_shorthands": False,
             },
@@ -405,13 +431,15 @@ def register(app: typer.Typer) -> None:
         arg1: str | None = typer.Argument(None, help=_ARG_HELP_SHORTHAND),
         arg2: str | None = typer.Argument(None, help=_ARG_HELP_SHORTHAND),
         arg3: str | None = typer.Argument(None, help=_ARG_HELP_SHORTHAND),
+        arg4: str | None = typer.Argument(None, help=_ARG_HELP_SHORTHAND),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     ) -> None:
         """Open an interactive Textual form to create a new issue.
 
         Supports shorthand notation: use single characters (0-4 for priority,
-        b/f/e/s for bug/feature/epic/story) before or after the title.
+        b/f/e/s for bug/feature/epic/story, d for draft status) before or after
+        the title.
 
         Examples:
             dcat new                           # Empty form
@@ -419,14 +447,18 @@ def register(app: typer.Typer) -> None:
             dcat new "Fix login bug" 1         # Pre-filled title + priority 1
             dcat new b "Fix crash"             # Pre-filled type bug + title
             dcat new 0 b "Critical bug"        # Priority 0 + type bug + title
+            dcat new d "Initial thoughts"      # Draft status + title
         """
         try:
             title = ""
             priority_sh: int | None = None
             type_sh: str | None = None
+            status_sh: str | None = None
 
             if arg1 is not None:
-                title, priority_sh, type_sh = _parse_args_for_create([arg1, arg2, arg3])
+                title, priority_sh, type_sh, status_sh = _parse_args_for_create(
+                    [arg1, arg2, arg3, arg4],
+                )
 
             storage = get_storage(dogcats_dir)
             namespace = get_issue_prefix(dogcats_dir)
@@ -441,6 +473,7 @@ def register(app: typer.Typer) -> None:
                 title=title,
                 priority=priority_sh,
                 issue_type=type_sh,
+                status=status_sh,
             )
             if created is not None:
                 if json_output:

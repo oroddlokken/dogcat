@@ -34,7 +34,7 @@ def register(app: typer.Typer) -> None:
             None,
             "--status",
             "-s",
-            help="New status",
+            help="New status (draft, open, in_progress, in_review, blocked, deferred)",
             autocompletion=complete_statuses,
         ),
         priority: int | None = typer.Option(
@@ -50,7 +50,7 @@ def register(app: typer.Typer) -> None:
             None,
             "--type",
             "-t",
-            help="New issue type",
+            help="New issue type (task, bug, feature, story, chore, epic, question)",
             autocompletion=complete_types,
         ),
         description: str | None = typer.Option(

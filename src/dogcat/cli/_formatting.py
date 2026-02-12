@@ -22,7 +22,7 @@ def get_legend() -> str:
     legend_lines = [
         "",
         "Legend:",
-        "  Status: ● Open  ◐ In Progress  ? In Review  ■ Blocked  ◇ Deferred",
+        "  Status: ✎ Draft  ● Open  ◐ In Progress  ? In Review  ■ Blocked  ◇ Deferred",
         "          ✓ Closed  ☠ Tombstone",
         "  Priority: 0 (Critical) → 4 (Low)",
     ]

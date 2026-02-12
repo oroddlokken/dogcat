@@ -18,6 +18,7 @@ from dogcat.constants import (
     DOGCATRC_FILENAME,
     PRIORITY_NAMES,
     PRIORITY_SHORTHANDS,
+    STATUS_SHORTHANDS,
     TYPE_SHORTHANDS,
 )
 from dogcat.storage import JSONLStorage
@@ -28,8 +29,12 @@ if TYPE_CHECKING:
     import click
 
 _type_keys = "/".join(sorted(TYPE_SHORTHANDS.keys()))
+_status_keys = "/".join(sorted(STATUS_SHORTHANDS.keys()))
 _ARG_HELP = "Issue title"
-_ARG_HELP_SHORTHAND = f"Title or shorthand (0-4 for priority, {_type_keys} for type)"
+_ARG_HELP_SHORTHAND = (
+    f"Title or shorthand (0-4 for priority,"
+    f" {_type_keys} for type, {_status_keys} for status)"
+)
 
 
 def _make_alias(
@@ -253,9 +258,18 @@ def _is_type_shorthand(value: str) -> bool:
     return len(value) == 1 and value.lower() in TYPE_SHORTHANDS
 
 
+def _is_status_shorthand(value: str) -> bool:
+    """Check if a string is a status shorthand (single char: d)."""
+    return len(value) == 1 and value.lower() in STATUS_SHORTHANDS
+
+
 def _is_shorthand(value: str) -> bool:
-    """Check if a string is any shorthand (priority or type)."""
-    return _is_priority_shorthand(value) or _is_type_shorthand(value)
+    """Check if a string is any shorthand (priority, type, or status)."""
+    return (
+        _is_priority_shorthand(value)
+        or _is_type_shorthand(value)
+        or _is_status_shorthand(value)
+    )
 
 
 def _is_invalid_single_char(value: str) -> bool:
@@ -267,8 +281,8 @@ def _parse_args_for_create(
     args: list[str | None],
     *,
     allow_shorthands: bool = True,
-) -> tuple[str, int | None, str | None]:
-    """Parse positional arguments to extract title, priority, and type shorthand.
+) -> tuple[str, int | None, str | None, str | None]:
+    """Parse positional args for title, priority, type, and status.
 
     Args:
         args: Positional arguments from the CLI.
@@ -276,12 +290,13 @@ def _parse_args_for_create(
             the user to ``dcat c``.
 
     Returns:
-        (title, priority_shorthand, type_shorthand)
+        (title, priority_shorthand, type_shorthand, status_shorthand)
     Raises: ValueError if arguments are ambiguous or invalid.
     """
     title_parts: list[str] = []
     priority_sh = None
     type_sh = None
+    status_sh = None
 
     for arg in args:
         if arg is None:
@@ -289,18 +304,22 @@ def _parse_args_for_create(
         if not allow_shorthands and _is_shorthand(arg):
             msg = (
                 "Shorthands are only available with 'dcat c'. "
-                "Use --type/--priority flags instead."
+                "Use --type/--priority/--status flags instead."
             )
             raise ValueError(msg)
         if _is_priority_shorthand(arg) and priority_sh is None:
             priority_sh = int(arg)
         elif _is_type_shorthand(arg) and type_sh is None:
             type_sh = TYPE_SHORTHANDS[arg.lower()]
+        elif _is_status_shorthand(arg) and status_sh is None:
+            status_sh = STATUS_SHORTHANDS[arg.lower()]
         elif _is_invalid_single_char(arg):
             valid_types = ", ".join(sorted(TYPE_SHORTHANDS.keys()))
+            valid_statuses = ", ".join(sorted(STATUS_SHORTHANDS.keys()))
             msg = (
                 f"Invalid shorthand '{arg}'. "
-                f"Valid priority: 0-4, valid type: {valid_types}"
+                f"Valid priority: 0-4, valid type: {valid_types}, "
+                f"valid status: {valid_statuses}"
             )
             raise ValueError(
                 msg,
@@ -316,8 +335,8 @@ def _parse_args_for_create(
         msg = (
             f"Ambiguous arguments: '{title}' looks like a shorthand "
             "but was used as title. Use a longer title or explicit "
-            "--type/--priority options."
+            "--type/--priority/--status options."
         )
         raise ValueError(msg)
 
-    return title, priority_sh, type_sh
+    return title, priority_sh, type_sh, status_sh

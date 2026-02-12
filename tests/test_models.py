@@ -27,6 +27,7 @@ class TestStatusEnum:
     def test_all_status_values_valid(self) -> None:
         """Test that all Status values are valid strings."""
         expected_values = {
+            "draft",
             "open",
             "in_progress",
             "in_review",
@@ -58,7 +59,6 @@ class TestIssueTypeEnum:
             "epic",
             "subtask",
             "question",
-            "draft",
         }
         actual_values = {issue_type.value for issue_type in IssueType}
         assert actual_values == expected_values
@@ -533,6 +533,79 @@ class TestMetadata:
         }
         issue = dict_to_issue(data)
         assert issue.id == "abc1"
+
+
+class TestDraftTypeMigration:
+    """Test migration of legacy issue_type=draft to status=draft."""
+
+    def test_draft_type_migrated_to_draft_status(self) -> None:
+        """Old records with issue_type=draft become status=draft, type=task."""
+        data = {
+            "namespace": "dc",
+            "id": "test1",
+            "title": "Draft issue",
+            "status": "open",
+            "issue_type": "draft",
+            "priority": 2,
+            "created_at": "2025-01-01T00:00:00+00:00",
+            "updated_at": "2025-01-01T00:00:00+00:00",
+        }
+        issue = dict_to_issue(data)
+        assert issue.status == Status.DRAFT
+        assert issue.issue_type == IssueType.TASK
+
+    def test_closed_draft_preserves_closed_status(self) -> None:
+        """Closed draft issues stay closed after migration."""
+        data = {
+            "namespace": "dc",
+            "id": "test2",
+            "title": "Closed draft",
+            "status": "closed",
+            "issue_type": "draft",
+            "priority": 2,
+            "created_at": "2025-01-01T00:00:00+00:00",
+            "updated_at": "2025-01-01T00:00:00+00:00",
+        }
+        issue = dict_to_issue(data)
+        assert issue.status == Status.CLOSED
+        assert issue.issue_type == IssueType.TASK
+
+    def test_tombstone_draft_preserves_tombstone_status(self) -> None:
+        """Tombstone draft issues stay tombstone after migration."""
+        data = {
+            "namespace": "dc",
+            "id": "test3",
+            "title": "Deleted draft",
+            "status": "tombstone",
+            "issue_type": "draft",
+            "priority": 2,
+            "created_at": "2025-01-01T00:00:00+00:00",
+            "updated_at": "2025-01-01T00:00:00+00:00",
+        }
+        issue = dict_to_issue(data)
+        assert issue.status == Status.TOMBSTONE
+        assert issue.issue_type == IssueType.TASK
+
+    def test_draft_original_type_migrated(self) -> None:
+        """Tombstones with original_type=draft get migrated to task."""
+        data = {
+            "namespace": "dc",
+            "id": "test4",
+            "title": "Deleted draft",
+            "status": "tombstone",
+            "issue_type": "task",
+            "original_type": "draft",
+            "priority": 2,
+            "created_at": "2025-01-01T00:00:00+00:00",
+            "updated_at": "2025-01-01T00:00:00+00:00",
+        }
+        issue = dict_to_issue(data)
+        assert issue.original_type == IssueType.TASK
+
+    def test_draft_status_emoji(self) -> None:
+        """Draft status has pencil emoji."""
+        issue = Issue(id="test", title="Test", status=Status.DRAFT)
+        assert issue.get_status_emoji() == "\u270e"
 
 
 class TestClassifyRecord:

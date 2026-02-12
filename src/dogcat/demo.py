@@ -1168,7 +1168,8 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         ),
         notes="Still gathering requirements from stakeholders.",
         priority=3,
-        issue_type=IssueType.DRAFT,
+        issue_type=IssueType.TASK,
+        status=Status.DRAFT,
         labels=["mobile", "ux", "draft"],
         created_by="diana@example.com",
     )

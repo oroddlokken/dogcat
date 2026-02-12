@@ -671,6 +671,7 @@ def register(app: typer.Typer) -> None:
         from dogcat.constants import (
             PRIORITY_OPTIONS,
             STATUS_OPTIONS,
+            STATUS_SHORTHANDS,
             TYPE_OPTIONS,
             TYPE_SHORTHANDS,
         )
@@ -681,6 +682,7 @@ def register(app: typer.Typer) -> None:
                     {"label": label, "value": value} for label, value in TYPE_OPTIONS
                 ],
                 "type_shorthands": TYPE_SHORTHANDS,
+                "status_shorthands": STATUS_SHORTHANDS,
                 "statuses": [
                     {"label": label, "value": value} for label, value in STATUS_OPTIONS
                 ],
@@ -702,17 +704,26 @@ def register(app: typer.Typer) -> None:
 
             typer.echo("\nStatuses:")
             for label, value in STATUS_OPTIONS:
-                typer.echo(f"  {value:<12} - {label}")
+                shorthand = next(
+                    (k for k, v in STATUS_SHORTHANDS.items() if v == value),
+                    None,
+                )
+                shorthand_str = f" (shorthand: {shorthand})" if shorthand else ""
+                typer.echo(f"  {value:<12} - {label}{shorthand_str}")
 
             typer.echo("\nPriorities:")
             for label, value in PRIORITY_OPTIONS:
                 typer.echo(f"  {value}  - {label}")
 
             typer.echo("\nShorthands for c (create alias) command:")
-            shorthand_list = ", ".join(
+            type_shorthand_list = ", ".join(
                 f"{k}={v}" for k, v in sorted(TYPE_SHORTHANDS.items())
             )
-            typer.echo(f"  Type: {shorthand_list}")
+            status_shorthand_list = ", ".join(
+                f"{k}={v}" for k, v in sorted(STATUS_SHORTHANDS.items())
+            )
+            typer.echo(f"  Type: {type_shorthand_list}")
+            typer.echo(f"  Status: {status_shorthand_list}")
             typer.echo("  Priority: 0-4 (0=Critical, 4=Minimal)")
 
     @app.command()

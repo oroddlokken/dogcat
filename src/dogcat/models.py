@@ -11,6 +11,7 @@ from dogcat._version import version as _dcat_version
 class Status(str, Enum):
     """Issue status enumeration."""
 
+    DRAFT = "draft"
     OPEN = "open"
     IN_PROGRESS = "in_progress"
     IN_REVIEW = "in_review"
@@ -31,7 +32,6 @@ class IssueType(str, Enum):
     EPIC = "epic"
     SUBTASK = "subtask"
     QUESTION = "question"
-    DRAFT = "draft"
 
 
 class DependencyType(str, Enum):
@@ -128,6 +128,7 @@ class Issue:
     def get_status_emoji(self) -> str:
         """Get an emoji representation of the status."""
         status_emojis = {
+            Status.DRAFT: "✎",
             Status.OPEN: "●",
             Status.IN_PROGRESS: "◐",
             Status.IN_REVIEW: "?",
@@ -284,15 +285,32 @@ def dict_to_issue(data: dict[str, Any]) -> Issue:
         )
         comments.append(comment)
 
+    # Migrate legacy issue_type=draft -> status=draft, issue_type=task
+    raw_issue_type = data.get("issue_type", IssueType.TASK.value)
+    raw_status = data.get("status", Status.OPEN.value)
+    if raw_issue_type == "draft":
+        raw_issue_type = IssueType.TASK.value
+        if raw_status not in (
+            Status.DRAFT.value,
+            Status.CLOSED.value,
+            Status.TOMBSTONE.value,
+        ):
+            raw_status = Status.DRAFT.value
+
+    # Migrate legacy original_type=draft for tombstones
+    raw_original_type = data.get("original_type")
+    if raw_original_type == "draft":
+        raw_original_type = IssueType.TASK.value
+
     # Create issue
     return Issue(
         id=issue_id,
         title=data["title"],
         namespace=namespace,
         description=data.get("description"),
-        status=Status(data.get("status", Status.OPEN.value)),
+        status=Status(raw_status),
         priority=data.get("priority", 2),  # Default priority defined in constants
-        issue_type=IssueType(data.get("issue_type", IssueType.TASK.value)),
+        issue_type=IssueType(raw_issue_type),
         owner=data.get("owner"),
         parent=data.get("parent"),
         labels=data.get("labels", []),
@@ -310,9 +328,7 @@ def dict_to_issue(data: dict[str, Any]) -> Issue:
         deleted_at=deleted_at,
         deleted_by=data.get("deleted_by"),
         delete_reason=data.get("delete_reason"),
-        original_type=(
-            IssueType(data["original_type"]) if data.get("original_type") else None
-        ),
+        original_type=(IssueType(raw_original_type) if raw_original_type else None),
         comments=comments,
         duplicate_of=data.get("duplicate_of"),
         metadata=data.get("metadata", {}),

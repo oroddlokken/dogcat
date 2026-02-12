@@ -28,7 +28,6 @@ PRIORITY_SHORTHANDS = frozenset("01234")
 TYPE_SHORTHANDS = {
     "b": "bug",
     "c": "chore",
-    "d": "draft",
     "e": "epic",
     "f": "feature",
     "q": "question",
@@ -36,8 +35,17 @@ TYPE_SHORTHANDS = {
     "t": "task",
 }
 
+# Status shorthands: single characters mapping to statuses
+STATUS_SHORTHANDS = {
+    "d": "draft",
+}
+
 # All valid shorthands
-ALL_SHORTHANDS = PRIORITY_SHORTHANDS | frozenset(TYPE_SHORTHANDS.keys())
+ALL_SHORTHANDS = (
+    PRIORITY_SHORTHANDS
+    | frozenset(TYPE_SHORTHANDS.keys())
+    | frozenset(STATUS_SHORTHANDS.keys())
+)
 
 # Color mappings for CLI/TUI display
 PRIORITY_COLORS = {
@@ -57,10 +65,10 @@ TYPE_COLORS = {
     "epic": "bright_magenta",
     "subtask": "cyan",
     "question": "bright_yellow",
-    "draft": "bright_black",
 }
 
 STATUS_COLORS = {
+    "draft": "bright_black",
     "open": "bright_green",
     "in_progress": "bright_blue",
     "in_review": "bright_yellow",
@@ -79,7 +87,6 @@ TYPE_OPTIONS = [
     ("Epic", "epic"),
     ("Subtask", "subtask"),
     ("Question", "question"),
-    ("Draft", "draft"),
 ]
 
 PRIORITY_OPTIONS = [
@@ -100,6 +107,7 @@ PRIORITY_NAMES: dict[str, int] = {
 }
 
 STATUS_OPTIONS = [
+    ("Draft", "draft"),
     ("Open", "open"),
     ("In Progress", "in_progress"),
     ("In Review", "in_review"),
