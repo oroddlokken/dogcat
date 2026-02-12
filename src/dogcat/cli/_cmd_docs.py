@@ -481,7 +481,7 @@ def register(app: typer.Typer) -> None:
 
   Issues can have parent-child relationships for organization:
 
-    dcat create "Subtask" --parent <parent_id>
+    dcat create "Child task" --parent <parent_id>
 
   Parent-child is purely organizational — children are NOT blocked by
   their parent. If a child genuinely needs its parent to finish first,
@@ -605,7 +605,7 @@ DOGCAT WORKFLOW GUIDE
 ## Quick Start for AI agents
 
 0a. Allowed issue types, priorities, and statuses:
-      Types: bug, chore, epic, feature, question, story, subtask, task
+      Types: bug, chore, epic, feature, question, story, task
       Priorities: 0 (Critical), 1 (High), 2 (Medium, default), 3 (Low), 4 (Minimal)
       Statuses: draft, open, in_progress, in_review, blocked, deferred, closed
 
@@ -655,16 +655,16 @@ Child issues appear in `dcat ready` even when their parent is still open.
 ## Breaking Down Large Tasks
 
 When the user requests a large or complex task, break it into an epic
-with subtasks rather than tackling it as a single issue:
+with child tasks rather than tackling it as a single issue:
 
 1. Create an epic for the overall goal:
    $ dcat create "Redesign auth system" --type epic
 
-2. Create subtasks under the epic:
+2. Create child tasks under the epic:
    $ dcat create "Add OAuth provider" --type task --parent <epic_id>
    $ dcat create "Migrate user sessions" --type task --parent <epic_id>
 
-3. Add dependencies between subtasks where ordering matters:
+3. Add dependencies between child tasks where ordering matters:
    $ dcat update <task_id> --depends-on <other_task_id>
 
 Prefer multiple small, focused issues over one large issue.

@@ -632,7 +632,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         subtask_id = _create(
             title,
             priority=2,
-            issue_type=IssueType.SUBTASK,
+            issue_type=IssueType.TASK,
             labels=labels,
             external_ref=ext_ref,
             parent=story1_id,

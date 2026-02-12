@@ -466,13 +466,12 @@ class DeterministicIssueGenerator:
 
         # Issue type with realistic distribution
         type_weights = [
-            (IssueType.TASK, 0.27),
+            (IssueType.TASK, 0.32),
             (IssueType.BUG, 0.2),
             (IssueType.FEATURE, 0.2),
             (IssueType.STORY, 0.1),
             (IssueType.CHORE, 0.1),
             (IssueType.EPIC, 0.05),
-            (IssueType.SUBTASK, 0.05),
             (IssueType.QUESTION, 0.03),
         ]
         issue_type = self.rng.choices(
@@ -556,7 +555,7 @@ class DeterministicIssueGenerator:
         """Add parent-child relationships to issues.
 
         Modifies issues in place to set parent field.
-        Epics become parents, subtasks and some tasks become children.
+        Epics become parents, some tasks and bugs become children.
 
         Args:
             issues: List of issues to modify
@@ -569,8 +568,8 @@ class DeterministicIssueGenerator:
         if not potential_parents:
             return
 
-        # Find potential children (subtasks, tasks, bugs)
-        child_types = {IssueType.SUBTASK, IssueType.TASK, IssueType.BUG}
+        # Find potential children (tasks, bugs)
+        child_types = {IssueType.TASK, IssueType.BUG}
         potential_children = [i for i in issues if i.issue_type in child_types]
 
         num_children = int(len(potential_children) * relation_ratio)

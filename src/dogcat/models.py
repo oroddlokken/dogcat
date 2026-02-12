@@ -30,7 +30,6 @@ class IssueType(str, Enum):
     STORY = "story"
     CHORE = "chore"
     EPIC = "epic"
-    SUBTASK = "subtask"
     QUESTION = "question"
 
 
@@ -87,7 +86,7 @@ class Issue:
     priority: int = 2  # 0-4 range, lower is higher priority
     issue_type: IssueType = IssueType.TASK
     owner: str | None = None
-    parent: str | None = None  # Parent issue ID for subtasks
+    parent: str | None = None  # Parent issue ID
     labels: list[str] = field(default_factory=list[str])
     external_ref: str | None = None
     design: str | None = None
@@ -297,9 +296,13 @@ def dict_to_issue(data: dict[str, Any]) -> Issue:
         ):
             raw_status = Status.DRAFT.value
 
-    # Migrate legacy original_type=draft for tombstones
+    # Migrate legacy issue_type=subtask -> issue_type=task
+    if raw_issue_type == "subtask":
+        raw_issue_type = IssueType.TASK.value
+
+    # Migrate legacy original_type for tombstones
     raw_original_type = data.get("original_type")
-    if raw_original_type == "draft":
+    if raw_original_type in ("draft", "subtask"):
         raw_original_type = IssueType.TASK.value
 
     # Create issue

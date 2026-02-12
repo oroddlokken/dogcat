@@ -63,7 +63,6 @@ TYPE_COLORS = {
     "story": "bright_blue",
     "chore": "bright_black",
     "epic": "bright_magenta",
-    "subtask": "cyan",
     "question": "bright_yellow",
 }
 
@@ -85,7 +84,6 @@ TYPE_OPTIONS = [
     ("Story", "story"),
     ("Chore", "chore"),
     ("Epic", "epic"),
-    ("Subtask", "subtask"),
     ("Question", "question"),
 ]
 

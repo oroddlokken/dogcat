@@ -151,7 +151,7 @@ def register(app: typer.Typer) -> None:
         parent: str | None = typer.Option(
             None,
             "--parent",
-            help="Parent issue ID (makes this a subtask)",
+            help="Parent issue ID (makes this a child issue)",
             autocompletion=complete_issue_ids,
         ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),

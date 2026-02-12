@@ -23,7 +23,7 @@ _REQUIRED_ISSUE_FIELDS = frozenset(
 
 _VALID_STATUSES = frozenset(s.value for s in Status)
 # Includes legacy values migrated on load (see models.dict_to_issue)
-_VALID_TYPES = frozenset(t.value for t in IssueType) | {"draft"}
+_VALID_TYPES = frozenset(t.value for t in IssueType) | {"draft", "subtask"}
 _MIN_PRIORITY = 0
 _MAX_PRIORITY = 4
 

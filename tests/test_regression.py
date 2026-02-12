@@ -59,7 +59,7 @@ class TestFixtureRegression:
         assert len(issues) > 0
 
     def test_has_all_issue_types(self, loaded_storage: JSONLStorage) -> None:
-        """Fixture covers all issue types (draft migrated to status)."""
+        """Fixture covers all issue types (draft/subtask migrated to task)."""
         issues = loaded_storage.list()
         types_found = {i.issue_type for i in issues}
         expected_types = {
@@ -69,7 +69,6 @@ class TestFixtureRegression:
             IssueType.BUG,
             IssueType.STORY,
             IssueType.CHORE,
-            IssueType.SUBTASK,
             IssueType.QUESTION,
         }
         assert (

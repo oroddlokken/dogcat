@@ -57,7 +57,6 @@ class TestIssueTypeEnum:
             "story",
             "chore",
             "epic",
-            "subtask",
             "question",
         }
         actual_values = {issue_type.value for issue_type in IssueType}
@@ -606,6 +605,74 @@ class TestDraftTypeMigration:
         """Draft status has pencil emoji."""
         issue = Issue(id="test", title="Test", status=Status.DRAFT)
         assert issue.get_status_emoji() == "\u270e"
+
+
+class TestSubtaskTypeMigration:
+    """Test migration of legacy issue_type=subtask to issue_type=task."""
+
+    def test_subtask_type_migrated_to_task(self) -> None:
+        """Old records with issue_type=subtask become type=task."""
+        data = {
+            "namespace": "dc",
+            "id": "test1",
+            "title": "Subtask issue",
+            "status": "open",
+            "issue_type": "subtask",
+            "priority": 2,
+            "created_at": "2025-01-01T00:00:00+00:00",
+            "updated_at": "2025-01-01T00:00:00+00:00",
+        }
+        issue = dict_to_issue(data)
+        assert issue.issue_type == IssueType.TASK
+        assert issue.status == Status.OPEN
+
+    def test_closed_subtask_preserves_closed_status(self) -> None:
+        """Closed subtask issues stay closed after migration."""
+        data = {
+            "namespace": "dc",
+            "id": "test2",
+            "title": "Closed subtask",
+            "status": "closed",
+            "issue_type": "subtask",
+            "priority": 2,
+            "created_at": "2025-01-01T00:00:00+00:00",
+            "updated_at": "2025-01-01T00:00:00+00:00",
+        }
+        issue = dict_to_issue(data)
+        assert issue.status == Status.CLOSED
+        assert issue.issue_type == IssueType.TASK
+
+    def test_tombstone_subtask_preserves_tombstone_status(self) -> None:
+        """Tombstone subtask issues stay tombstone after migration."""
+        data = {
+            "namespace": "dc",
+            "id": "test3",
+            "title": "Deleted subtask",
+            "status": "tombstone",
+            "issue_type": "subtask",
+            "priority": 2,
+            "created_at": "2025-01-01T00:00:00+00:00",
+            "updated_at": "2025-01-01T00:00:00+00:00",
+        }
+        issue = dict_to_issue(data)
+        assert issue.status == Status.TOMBSTONE
+        assert issue.issue_type == IssueType.TASK
+
+    def test_subtask_original_type_migrated(self) -> None:
+        """Tombstones with original_type=subtask get migrated to task."""
+        data = {
+            "namespace": "dc",
+            "id": "test4",
+            "title": "Deleted subtask",
+            "status": "tombstone",
+            "issue_type": "task",
+            "original_type": "subtask",
+            "priority": 2,
+            "created_at": "2025-01-01T00:00:00+00:00",
+            "updated_at": "2025-01-01T00:00:00+00:00",
+        }
+        issue = dict_to_issue(data)
+        assert issue.original_type == IssueType.TASK
 
 
 class TestClassifyRecord:

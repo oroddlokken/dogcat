@@ -26,7 +26,6 @@ from dogcat.constants import MERGE_DRIVER_CMD
 from dogcat.models import Issue
 
 if TYPE_CHECKING:
-    from pathlib import Path
 
     from conftest import GitRepo
 
@@ -212,6 +211,11 @@ class TestValidateIssue:
         errors = validate_issue(_issue(issue_type="draft"), lineno=1)
         assert errors == []
 
+    def test_legacy_subtask_issue_type_accepted(self) -> None:
+        """Legacy issue_type='subtask' is accepted (migrated on load)."""
+        errors = validate_issue(_issue(issue_type="subtask"), lineno=1)
+        assert errors == []
+
     def test_priority_out_of_range(self) -> None:
         """Detect priority values outside 0-4."""
         errors = validate_issue(_issue(priority=99), lineno=1)
@@ -383,7 +387,9 @@ class TestValidateRepoData:
 
     def test_repo_issues_jsonl_is_valid(self) -> None:
         """The repo's own issues.jsonl passes validation."""
-        repo_jsonl = Path(__file__).resolve().parent.parent / ".dogcats" / "issues.jsonl"
+        repo_jsonl = (
+            Path(__file__).resolve().parent.parent / ".dogcats" / "issues.jsonl"
+        )
         if not repo_jsonl.exists():
             pytest.skip("No .dogcats/issues.jsonl in repo root")
         errors = _errors(validate_jsonl(repo_jsonl))
