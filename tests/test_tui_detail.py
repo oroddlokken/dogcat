@@ -1,4 +1,4 @@
-"""Tests for the read-only TUI detail screen."""
+"""Tests for the IssueEditorScreen in view (read-only) mode."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from textual.widgets import (
+    Button,
     Checkbox,
     Collapsible,
     Header,
@@ -17,7 +18,7 @@ from textual.widgets import (
 )
 
 from dogcat.models import Issue
-from dogcat.tui.detail import IssueDetailScreen
+from dogcat.tui.editor import IssueEditorScreen
 
 
 def _make_issue(**kwargs: object) -> Issue:
@@ -43,17 +44,17 @@ def _make_storage() -> MagicMock:
     return storage
 
 
-async def _push_detail(
+async def _push_view(
     issue: Issue,
     storage: MagicMock | None = None,
-) -> tuple[Any, IssueDetailScreen, Any]:
-    """Create a test app and detail screen, return (app, screen, storage)."""
+) -> tuple[Any, IssueEditorScreen, Any]:
+    """Create a test app and editor screen in view mode."""
     from textual.app import App, ComposeResult
 
     if storage is None:
         storage = _make_storage()
 
-    screen = IssueDetailScreen(issue, storage)
+    screen = IssueEditorScreen(issue, storage, view_mode=True)
 
     class TestApp(App[None]):
         def compose(self) -> ComposeResult:
@@ -63,14 +64,14 @@ async def _push_detail(
     return app, screen, storage
 
 
-class TestDetailScreenLayout:
-    """Test that the detail screen renders the editor-like layout."""
+class TestViewModeLayout:
+    """Test that view mode renders a read-only editor layout."""
 
     @pytest.mark.asyncio
     async def test_title_bar_renders(self) -> None:
         """Title bar with ID display and disabled title input."""
         issue = _make_issue(id="abc1", title="My issue")
-        app, screen, _ = await _push_detail(issue)
+        app, screen, _ = await _push_view(issue)
 
         async with app.run_test() as pilot:
             app.push_screen(screen)
@@ -84,6 +85,21 @@ class TestDetailScreenLayout:
             assert title_input.disabled is True
 
     @pytest.mark.asyncio
+    async def test_buttons_hidden_in_view_mode(self) -> None:
+        """Cancel and Save buttons are hidden in view mode."""
+        issue = _make_issue()
+        app, screen, _ = await _push_view(issue)
+
+        async with app.run_test() as pilot:
+            app.push_screen(screen)
+            await pilot.pause()
+
+            cancel_btn = screen.query_one("#cancel-btn", Button)
+            save_btn = screen.query_one("#save-btn", Button)
+            assert cancel_btn.display is False
+            assert save_btn.display is False
+
+    @pytest.mark.asyncio
     async def test_field_row_selects_disabled(self) -> None:
         """Type, status, and priority selects are rendered and disabled."""
         from dogcat.models import IssueType, Status
@@ -93,7 +109,7 @@ class TestDetailScreenLayout:
             status=Status.IN_PROGRESS,
             priority=1,
         )
-        app, screen, _ = await _push_detail(issue)
+        app, screen, _ = await _push_view(issue)
 
         async with app.run_test() as pilot:
             app.push_screen(screen)
@@ -115,7 +131,7 @@ class TestDetailScreenLayout:
     async def test_manual_checkbox_disabled(self) -> None:
         """Manual checkbox is rendered and disabled."""
         issue = _make_issue(metadata={"manual": True})
-        app, screen, _ = await _push_detail(issue)
+        app, screen, _ = await _push_view(issue)
 
         async with app.run_test() as pilot:
             app.push_screen(screen)
@@ -133,7 +149,7 @@ class TestDetailScreenLayout:
             external_ref="JIRA-123",
             labels=["ui", "ux"],
         )
-        app, screen, _ = await _push_detail(issue)
+        app, screen, _ = await _push_view(issue)
 
         async with app.run_test() as pilot:
             app.push_screen(screen)
@@ -155,7 +171,7 @@ class TestDetailScreenLayout:
     async def test_description_textarea_readonly(self) -> None:
         """Description textarea is read-only."""
         issue = _make_issue(description="Some description")
-        app, screen, _ = await _push_detail(issue)
+        app, screen, _ = await _push_view(issue)
 
         async with app.run_test() as pilot:
             app.push_screen(screen)
@@ -166,14 +182,14 @@ class TestDetailScreenLayout:
             assert desc.read_only is True
 
 
-class TestDetailScreenCollapsibles:
-    """Test collapsible sections behavior."""
+class TestViewModeCollapsibles:
+    """Test collapsible sections behavior in view mode."""
 
     @pytest.mark.asyncio
     async def test_notes_expanded_when_set(self) -> None:
         """Notes collapsible is expanded when notes exist."""
         issue = _make_issue(notes="Some notes")
-        app, screen, _ = await _push_detail(issue)
+        app, screen, _ = await _push_view(issue)
 
         async with app.run_test() as pilot:
             app.push_screen(screen)
@@ -191,7 +207,7 @@ class TestDetailScreenCollapsibles:
     async def test_notes_collapsed_when_empty(self) -> None:
         """Notes collapsible is collapsed when notes is None."""
         issue = _make_issue(notes=None)
-        app, screen, _ = await _push_detail(issue)
+        app, screen, _ = await _push_view(issue)
 
         async with app.run_test() as pilot:
             app.push_screen(screen)
@@ -210,7 +226,7 @@ class TestDetailScreenCollapsibles:
             acceptance="criteria",
             design="design doc",
         )
-        app, screen, _ = await _push_detail(issue)
+        app, screen, _ = await _push_view(issue)
 
         async with app.run_test() as pilot:
             app.push_screen(screen)
@@ -223,8 +239,8 @@ class TestDetailScreenCollapsibles:
             assert "Design" in titles
 
 
-class TestDetailScreenExtraSections:
-    """Test dependencies, children, and comments sections."""
+class TestViewModeExtraSections:
+    """Test dependencies, children, and comments sections in view mode."""
 
     @pytest.mark.asyncio
     async def test_children_section_shown(self) -> None:
@@ -233,7 +249,7 @@ class TestDetailScreenExtraSections:
         child = _make_issue(id="ch1", title="Child issue")
         storage = _make_storage()
         storage.get_children.return_value = [child]
-        app, screen, _ = await _push_detail(issue, storage)
+        app, screen, _ = await _push_view(issue, storage)
 
         async with app.run_test() as pilot:
             app.push_screen(screen)
@@ -247,7 +263,7 @@ class TestDetailScreenExtraSections:
     async def test_children_section_hidden_when_no_children(self) -> None:
         """Children collapsible is not shown when no children exist."""
         issue = _make_issue()
-        app, screen, _ = await _push_detail(issue)
+        app, screen, _ = await _push_view(issue)
 
         async with app.run_test() as pilot:
             app.push_screen(screen)
@@ -271,7 +287,7 @@ class TestDetailScreenExtraSections:
                 dep_type=DependencyType.BLOCKS,
             ),
         ]
-        app, screen, _ = await _push_detail(issue, storage)
+        app, screen, _ = await _push_view(issue, storage)
 
         async with app.run_test() as pilot:
             app.push_screen(screen)
@@ -280,3 +296,102 @@ class TestDetailScreenExtraSections:
             collapsibles = screen.query(Collapsible)
             titles = [c.title for c in collapsibles]
             assert "Dependencies" in titles
+
+
+class TestViewToEditTransition:
+    """Test switching from view mode to edit mode."""
+
+    @pytest.mark.asyncio
+    async def test_enter_edit_enables_fields(self) -> None:
+        """Pressing e in view mode enables all form fields."""
+        issue = _make_issue(id="abc1", title="Test")
+        app, screen, _ = await _push_view(issue)
+
+        async with app.run_test() as pilot:
+            app.push_screen(screen)
+            await pilot.pause()
+
+            # Verify fields start disabled
+            assert screen.query_one("#title-input", Input).disabled is True
+
+            # Switch to edit mode
+            screen.action_enter_edit()
+            await pilot.pause()
+
+            # Fields should now be enabled
+            assert screen.query_one("#title-input", Input).disabled is False
+            assert screen.query_one("#owner-input", Input).disabled is False
+            assert screen.query_one("#type-input", Select).disabled is False
+            assert screen.query_one("#manual-input", Checkbox).disabled is False
+
+            # TextAreas should be writable
+            assert screen.query_one("#description-input", TextArea).read_only is False
+
+    @pytest.mark.asyncio
+    async def test_enter_edit_shows_buttons(self) -> None:
+        """Pressing e shows Save and Cancel buttons."""
+        issue = _make_issue(id="abc1", title="Test")
+        app, screen, _ = await _push_view(issue)
+
+        async with app.run_test() as pilot:
+            app.push_screen(screen)
+            await pilot.pause()
+
+            # Buttons hidden in view mode
+            assert screen.query_one("#cancel-btn", Button).display is False
+            assert screen.query_one("#save-btn", Button).display is False
+
+            # Switch to edit mode
+            screen.action_enter_edit()
+            await pilot.pause()
+
+            # Buttons now visible
+            assert screen.query_one("#cancel-btn", Button).display is True
+            assert screen.query_one("#save-btn", Button).display is True
+
+    @pytest.mark.asyncio
+    async def test_enter_edit_removes_view_sections(self) -> None:
+        """View-only sections (deps, children) are removed on edit."""
+        issue = _make_issue()
+        child = _make_issue(id="ch1", title="Child")
+        storage = _make_storage()
+        storage.get_children.return_value = [child]
+        app, screen, _ = await _push_view(issue, storage)
+
+        async with app.run_test() as pilot:
+            app.push_screen(screen)
+            await pilot.pause()
+
+            # Children section exists in view mode
+            collapsibles = [c.title for c in screen.query(Collapsible)]
+            assert "Children" in collapsibles
+
+            # Switch to edit mode
+            screen.action_enter_edit()
+            await pilot.pause()
+
+            # Children section removed
+            collapsibles = [c.title for c in screen.query(Collapsible)]
+            assert "Children" not in collapsibles
+
+    @pytest.mark.asyncio
+    async def test_check_action_controls_bindings(self) -> None:
+        """check_action hides save in view mode and edit in non-view mode."""
+        issue = _make_issue()
+        app, screen, _ = await _push_view(issue)
+
+        async with app.run_test() as pilot:
+            app.push_screen(screen)
+            await pilot.pause()
+
+            # In view mode: edit visible, save hidden
+            assert screen.check_action("enter_edit", ()) is True
+            assert screen.check_action("save", ()) is False
+
+            # Switch to edit mode
+            screen.action_enter_edit()
+            await pilot.pause()
+
+            # In edit mode: edit hidden, save visible
+            assert screen.check_action("enter_edit", ()) is False
+            assert screen.check_action("save", ()) is True

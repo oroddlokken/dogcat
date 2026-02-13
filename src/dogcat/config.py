@@ -231,7 +231,7 @@ def _detect_prefix_from_directory(dogcats_dir: str) -> str | None:
     sanitized = "".join(c if c.isalnum() or c == "-" else "-" for c in dir_name.lower())
     sanitized = sanitized.strip("-")
 
-    return sanitized if sanitized else None
+    return sanitized or None
 
 
 def extract_prefix(issue_id: str) -> str | None:

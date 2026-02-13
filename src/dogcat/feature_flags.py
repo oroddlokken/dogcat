@@ -21,9 +21,6 @@ class FeatureFlag(str, Enum):
     DCAT_FEATURE_<VALUE>.
     """
 
-    # Enable the interactive TUI dashboard (dcat tui).
-    TUI = "TUI"
-
 
 def _env_var_name(flag: FeatureFlag) -> str:
     """Return the environment variable name for a flag."""
