@@ -13,6 +13,7 @@ import typer
 from dogcat.config import (
     get_config_path,
     get_issue_prefix,
+    get_namespace_filter,
     load_config,
     migrate_config_keys,
     save_config,
@@ -205,6 +206,61 @@ def register(app: typer.Typer) -> None:
             typer.echo(f"Error: {e}", err=True)
             raise typer.Exit(1)
 
+    @app.command("namespaces")
+    def namespaces_list(
+        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+    ) -> None:
+        """List all namespaces used across issues with counts."""
+        try:
+            storage = get_storage(dogcats_dir)
+            actual_dogcats_dir = str(storage.dogcats_dir)
+            issues = storage.list()
+
+            ns_counts: dict[str, int] = {}
+            for issue in issues:
+                if issue.is_tombstone():
+                    continue
+                ns_counts[issue.namespace] = ns_counts.get(issue.namespace, 0) + 1
+
+            # Determine annotations
+            primary = get_issue_prefix(actual_dogcats_dir)
+            config = load_config(actual_dogcats_dir)
+            visible: list[str] | None = config.get("visible_namespaces")
+            hidden: list[str] | None = config.get("hidden_namespaces")
+
+            def _annotation(ns: str) -> str:
+                if ns == primary:
+                    return "primary"
+                if visible:
+                    return "visible" if ns in visible else "hidden"
+                if hidden:
+                    return "hidden" if ns in hidden else "visible"
+                return ""
+
+            if json_output:
+                result = [
+                    {
+                        "namespace": ns,
+                        "count": count,
+                        "visibility": _annotation(ns) or "visible",
+                    }
+                    for ns, count in sorted(ns_counts.items())
+                ]
+                typer.echo(orjson.dumps(result).decode())
+            else:
+                if ns_counts:
+                    for ns, count in sorted(ns_counts.items()):
+                        ann = _annotation(ns)
+                        suffix = f" ({ann})" if ann else ""
+                        typer.echo(f"  {ns} ({count}){suffix}")
+                else:
+                    typer.echo("No namespaces found")
+
+        except Exception as e:
+            typer.echo(f"Error: {e}", err=True)
+            raise typer.Exit(1)
+
     @app.command()
     def doctor(
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
@@ -331,6 +387,35 @@ def register(app: typer.Typer) -> None:
                 "fix": "Run 'dcat doctor --fix' to migrate",
             }
             if not deprecated_ok:
+                all_passed = False
+
+        # Check 2d: mutual exclusivity of visible/hidden namespaces
+        if config_exists:
+            config = load_config(dogcats_dir)
+            has_both = bool(
+                config.get("visible_namespaces") and config.get("hidden_namespaces"),
+            )
+            mutual_ok = not has_both
+
+            if fix and has_both:
+                del config["hidden_namespaces"]
+                save_config(dogcats_dir, config)
+                mutual_ok = True
+                typer.echo(
+                    "Fixed: Removed 'hidden_namespaces'"
+                    " (kept 'visible_namespaces' as whitelist)",
+                )
+
+            checks["namespace_config_mutual"] = {
+                "description": "Namespace visibility config is not contradictory",
+                "fail_description": (
+                    "Both 'visible_namespaces' and 'hidden_namespaces' are set"
+                    " (mutually exclusive)"
+                ),
+                "passed": mutual_ok,
+                "fix": "Run 'dcat doctor --fix' to remove hidden_namespaces",
+            }
+            if not mutual_ok:
                 all_passed = False
 
         # Check 3: Deep data validation (fields, refs, cycles)
@@ -858,6 +943,12 @@ def register(app: typer.Typer) -> None:
         try:
             storage = get_storage(dogcats_dir)
             issues = storage.list()
+
+            # Apply namespace filter
+            actual_dogcats_dir = str(storage.dogcats_dir)
+            ns_filter = get_namespace_filter(actual_dogcats_dir)
+            if ns_filter is not None:
+                issues = [i for i in issues if ns_filter(i.namespace)]
 
             # Apply status/type filters first
             if status:

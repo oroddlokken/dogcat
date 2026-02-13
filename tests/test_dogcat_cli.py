@@ -6271,3 +6271,512 @@ class TestCLIInitNoGit:
         )
         assert result.exit_code == 0
         assert "already in .gitignore" in result.stdout
+
+
+def _init_with_namespace(dogcats_dir: Path, namespace: str = "proj-a") -> None:
+    """Initialize a dogcats repo and set a specific namespace."""
+    from dogcat.config import save_config
+
+    runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+    save_config(str(dogcats_dir), {"namespace": namespace})
+
+
+def _create_issue(dogcats_dir: Path, title: str, **kwargs: str) -> None:
+    """Create an issue with optional extra flags."""
+    cmd: list[str] = ["create", title, "--dogcats-dir", str(dogcats_dir)]
+    for key, val in kwargs.items():
+        cmd.extend([f"--{key}", val])
+    result = runner.invoke(app, cmd)
+    assert result.exit_code == 0, result.stdout
+
+
+def _create_multi_ns_issues(dogcats_dir: Path) -> None:
+    """Create issues across two namespaces: proj-a (primary) and proj-b."""
+    from dogcat.config import load_config, save_config
+
+    _init_with_namespace(dogcats_dir, "proj-a")
+    _create_issue(dogcats_dir, "Issue A1")
+    _create_issue(dogcats_dir, "Issue A2")
+    # Switch namespace and create issues
+    config = load_config(str(dogcats_dir))
+    config["namespace"] = "proj-b"
+    save_config(str(dogcats_dir), config)
+    _create_issue(dogcats_dir, "Issue B1")
+    # Restore primary namespace
+    config = load_config(str(dogcats_dir))
+    config["namespace"] = "proj-a"
+    save_config(str(dogcats_dir), config)
+
+
+def _set_ns_config(
+    dogcats_dir: Path,
+    key: str,
+    value: list[str],
+) -> None:
+    """Set a namespace config key (visible_namespaces or hidden_namespaces)."""
+    from dogcat.config import load_config, save_config
+
+    config = load_config(str(dogcats_dir))
+    config[key] = value
+    save_config(str(dogcats_dir), config)
+
+
+class TestNamespacesCommand:
+    """Test dcat namespaces command."""
+
+    def test_single_namespace_shows_primary(self, tmp_path: Path) -> None:
+        """Single namespace → shows (primary) with count."""
+        dogcats_dir = tmp_path / ".dogcats"
+        _init_with_namespace(dogcats_dir, "proj-a")
+        _create_issue(dogcats_dir, "Issue 1")
+
+        result = runner.invoke(app, ["namespaces", "--dogcats-dir", str(dogcats_dir)])
+        assert result.exit_code == 0
+        assert "proj-a (1) (primary)" in result.stdout
+
+    def test_multiple_namespaces(self, tmp_path: Path) -> None:
+        """Multiple namespaces → lists all with counts."""
+        dogcats_dir = tmp_path / ".dogcats"
+        _create_multi_ns_issues(dogcats_dir)
+
+        result = runner.invoke(app, ["namespaces", "--dogcats-dir", str(dogcats_dir)])
+        assert result.exit_code == 0
+        assert "proj-a (2) (primary)" in result.stdout
+        assert "proj-b (1)" in result.stdout
+
+    def test_empty_issues(self, tmp_path: Path) -> None:
+        """Empty issues → "No namespaces found"."""
+        dogcats_dir = tmp_path / ".dogcats"
+        _init_with_namespace(dogcats_dir, "proj-a")
+
+        result = runner.invoke(app, ["namespaces", "--dogcats-dir", str(dogcats_dir)])
+        assert result.exit_code == 0
+        assert "No namespaces found" in result.stdout
+
+    def test_json_output(self, tmp_path: Path) -> None:
+        """--json → valid JSON with namespace, count, visibility."""
+        dogcats_dir = tmp_path / ".dogcats"
+        _create_multi_ns_issues(dogcats_dir)
+
+        result = runner.invoke(
+            app,
+            ["namespaces", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert len(data) == 2
+        ns_map = {item["namespace"]: item for item in data}
+        assert ns_map["proj-a"]["count"] == 2
+        assert ns_map["proj-a"]["visibility"] == "primary"
+        assert ns_map["proj-b"]["count"] == 1
+        assert ns_map["proj-b"]["visibility"] == "visible"
+
+    def test_tombstones_excluded(self, tmp_path: Path) -> None:
+        """Tombstones excluded from counts."""
+        dogcats_dir = tmp_path / ".dogcats"
+        _init_with_namespace(dogcats_dir, "proj-a")
+        _create_issue(dogcats_dir, "To delete")
+        _create_issue(dogcats_dir, "To keep")
+
+        # Get the issue ID of the first issue to delete it
+        list_result = runner.invoke(
+            app,
+            ["list", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issues = json.loads(list_result.stdout)
+        first_id = issues[0]["id"]
+        first_ns = issues[0]["namespace"]
+
+        full_id = f"{first_ns}-{first_id}"
+        runner.invoke(
+            app,
+            ["delete", full_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(app, ["namespaces", "--dogcats-dir", str(dogcats_dir)])
+        assert "proj-a (1)" in result.stdout
+
+    def test_with_visible_namespaces_annotation(self, tmp_path: Path) -> None:
+        """With visible_namespaces config → annotations correct."""
+        dogcats_dir = tmp_path / ".dogcats"
+        _create_multi_ns_issues(dogcats_dir)
+        _set_ns_config(dogcats_dir, "visible_namespaces", ["proj-a"])
+
+        result = runner.invoke(app, ["namespaces", "--dogcats-dir", str(dogcats_dir)])
+        assert "proj-a (2) (primary)" in result.stdout
+        assert "proj-b (1) (hidden)" in result.stdout
+
+    def test_with_hidden_namespaces_annotation(self, tmp_path: Path) -> None:
+        """With hidden_namespaces config → annotations correct."""
+        dogcats_dir = tmp_path / ".dogcats"
+        _create_multi_ns_issues(dogcats_dir)
+        _set_ns_config(dogcats_dir, "hidden_namespaces", ["proj-b"])
+
+        result = runner.invoke(app, ["namespaces", "--dogcats-dir", str(dogcats_dir)])
+        assert "proj-a (2) (primary)" in result.stdout
+        assert "proj-b (1) (hidden)" in result.stdout
+
+
+class TestListNamespaceFilter:
+    """Test namespace filtering in list command."""
+
+    def test_namespace_flag_filters(self, tmp_path: Path) -> None:
+        """--namespace proj-a → only that namespace's issues."""
+        dogcats_dir = tmp_path / ".dogcats"
+        _create_multi_ns_issues(dogcats_dir)
+
+        result = runner.invoke(
+            app,
+            [
+                "list",
+                "--namespace",
+                "proj-a",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        issues = json.loads(result.stdout)
+        assert len(issues) == 2
+        assert all(i["namespace"] == "proj-a" for i in issues)
+
+    def test_namespace_nonexistent_empty(self, tmp_path: Path) -> None:
+        """--namespace nonexistent → empty result, no error."""
+        dogcats_dir = tmp_path / ".dogcats"
+        _create_multi_ns_issues(dogcats_dir)
+
+        result = runner.invoke(
+            app,
+            [
+                "list",
+                "--namespace",
+                "nonexistent",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "No issues found" in result.stdout
+
+    def test_namespace_overrides_hidden_config(self, tmp_path: Path) -> None:
+        """--namespace overrides hidden_namespaces config."""
+        dogcats_dir = tmp_path / ".dogcats"
+        _create_multi_ns_issues(dogcats_dir)
+        _set_ns_config(dogcats_dir, "hidden_namespaces", ["proj-b"])
+
+        result = runner.invoke(
+            app,
+            [
+                "list",
+                "--namespace",
+                "proj-b",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        issues = json.loads(result.stdout)
+        assert len(issues) == 1
+        assert issues[0]["namespace"] == "proj-b"
+
+    def test_namespace_overrides_visible_config(self, tmp_path: Path) -> None:
+        """--namespace overrides visible_namespaces config."""
+        dogcats_dir = tmp_path / ".dogcats"
+        _create_multi_ns_issues(dogcats_dir)
+        _set_ns_config(dogcats_dir, "visible_namespaces", ["proj-a"])
+
+        result = runner.invoke(
+            app,
+            [
+                "list",
+                "--namespace",
+                "proj-b",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        issues = json.loads(result.stdout)
+        assert len(issues) == 1
+        assert issues[0]["namespace"] == "proj-b"
+
+    def test_namespace_combined_with_status(self, tmp_path: Path) -> None:
+        """--namespace combined with --status → both apply."""
+        dogcats_dir = tmp_path / ".dogcats"
+        _create_multi_ns_issues(dogcats_dir)
+
+        result = runner.invoke(
+            app,
+            [
+                "list",
+                "--namespace",
+                "proj-a",
+                "--status",
+                "open",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        issues = json.loads(result.stdout)
+        assert all(i["namespace"] == "proj-a" for i in issues)
+        assert all(i["status"] == "open" for i in issues)
+
+    def test_visible_config_filters_list(self, tmp_path: Path) -> None:
+        """visible_namespaces config → list excludes unlisted namespaces."""
+        dogcats_dir = tmp_path / ".dogcats"
+        _create_multi_ns_issues(dogcats_dir)
+        _set_ns_config(dogcats_dir, "visible_namespaces", ["proj-a"])
+
+        result = runner.invoke(
+            app,
+            ["list", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issues = json.loads(result.stdout)
+        assert all(i["namespace"] == "proj-a" for i in issues)
+
+    def test_hidden_config_filters_list(self, tmp_path: Path) -> None:
+        """hidden_namespaces config → list excludes hidden namespaces."""
+        dogcats_dir = tmp_path / ".dogcats"
+        _create_multi_ns_issues(dogcats_dir)
+        _set_ns_config(dogcats_dir, "hidden_namespaces", ["proj-b"])
+
+        result = runner.invoke(
+            app,
+            ["list", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issues = json.loads(result.stdout)
+        assert all(i["namespace"] != "proj-b" for i in issues)
+
+    def test_no_config_shows_all(self, tmp_path: Path) -> None:
+        """No config → shows all (backward compat)."""
+        dogcats_dir = tmp_path / ".dogcats"
+        _create_multi_ns_issues(dogcats_dir)
+
+        result = runner.invoke(
+            app,
+            ["list", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issues = json.loads(result.stdout)
+        namespaces = {i["namespace"] for i in issues}
+        assert "proj-a" in namespaces
+        assert "proj-b" in namespaces
+
+    def test_primary_visible_even_if_in_hidden(self, tmp_path: Path) -> None:
+        """Primary always visible even if in hidden_namespaces."""
+        dogcats_dir = tmp_path / ".dogcats"
+        _create_multi_ns_issues(dogcats_dir)
+        _set_ns_config(dogcats_dir, "hidden_namespaces", ["proj-a", "proj-b"])
+
+        result = runner.invoke(
+            app,
+            ["list", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issues = json.loads(result.stdout)
+        # Primary proj-a should still be visible
+        assert any(i["namespace"] == "proj-a" for i in issues)
+        # proj-b should be hidden
+        assert not any(i["namespace"] == "proj-b" for i in issues)
+
+
+class TestConfigArrayKeys:
+    """Test config array key handling."""
+
+    def test_set_visible_namespaces_stores_as_list(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Dcat config set visible_namespaces "a,b,c" → stores as list."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        _init_with_namespace(dogcats_dir, "proj")
+
+        result = runner.invoke(
+            app,
+            ["config", "set", "visible_namespaces", "a,b,c"],
+        )
+        assert result.exit_code == 0
+
+        from dogcat.config import load_config
+
+        config = load_config(str(dogcats_dir))
+        assert config["visible_namespaces"] == ["a", "b", "c"]
+
+    def test_get_visible_namespaces_displays(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Dcat config get visible_namespaces → displays correctly."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        _init_with_namespace(dogcats_dir, "proj")
+        _set_ns_config(dogcats_dir, "visible_namespaces", ["a", "b"])
+
+        result = runner.invoke(
+            app,
+            ["config", "get", "visible_namespaces"],
+        )
+        assert result.exit_code == 0
+        assert "a, b" in result.stdout
+
+    def test_config_list_shows_arrays(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Dcat config list → shows array values."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        _init_with_namespace(dogcats_dir, "proj")
+        _set_ns_config(dogcats_dir, "visible_namespaces", ["x", "y"])
+
+        result = runner.invoke(app, ["config", "list"])
+        assert result.exit_code == 0
+        assert "visible_namespaces = x, y" in result.stdout
+
+    def test_config_list_json_shows_array(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Dcat config list --json → JSON array."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        _init_with_namespace(dogcats_dir, "proj")
+        _set_ns_config(dogcats_dir, "visible_namespaces", ["a", "b"])
+
+        result = runner.invoke(app, ["config", "list", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["visible_namespaces"] == ["a", "b"]
+
+
+class TestDoctorNamespaceConfig:
+    """Test doctor checks for namespace config mutual exclusivity."""
+
+    def test_both_keys_warns(self, tmp_path: Path) -> None:
+        """Both keys set → doctor warns."""
+        dogcats_dir = tmp_path / ".dogcats"
+        _init_with_namespace(dogcats_dir, "proj")
+        _set_ns_config(dogcats_dir, "visible_namespaces", ["a"])
+        _set_ns_config(dogcats_dir, "hidden_namespaces", ["b"])
+
+        result = runner.invoke(app, ["doctor", "--dogcats-dir", str(dogcats_dir)])
+        assert result.exit_code == 1
+        assert "visible_namespaces" in result.stdout
+        assert "hidden_namespaces" in result.stdout
+
+    def test_both_keys_fix_removes_hidden(self, tmp_path: Path) -> None:
+        """Both keys set + --fix → removes hidden_namespaces."""
+        dogcats_dir = tmp_path / ".dogcats"
+        _init_with_namespace(dogcats_dir, "proj")
+        _set_ns_config(dogcats_dir, "visible_namespaces", ["a"])
+        _set_ns_config(dogcats_dir, "hidden_namespaces", ["b"])
+
+        result = runner.invoke(
+            app,
+            ["doctor", "--fix", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert "Removed 'hidden_namespaces'" in result.stdout
+
+        from dogcat.config import load_config
+
+        config = load_config(str(dogcats_dir))
+        assert "hidden_namespaces" not in config
+        assert "visible_namespaces" in config
+
+    def test_only_one_key_no_warning(self, tmp_path: Path) -> None:
+        """Only one set → no warning."""
+        dogcats_dir = tmp_path / ".dogcats"
+        _init_with_namespace(dogcats_dir, "proj")
+        _set_ns_config(dogcats_dir, "visible_namespaces", ["a"])
+
+        result = runner.invoke(
+            app,
+            ["doctor", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data = json.loads(result.stdout)
+        assert data["checks"]["namespace_config_mutual"]["passed"] is True
+
+
+class TestSearchNamespaceFilter:
+    """Test namespace filtering in search command."""
+
+    def test_search_respects_hidden_config(self, tmp_path: Path) -> None:
+        """Search respects config visibility."""
+        dogcats_dir = tmp_path / ".dogcats"
+        _create_multi_ns_issues(dogcats_dir)
+        _set_ns_config(dogcats_dir, "hidden_namespaces", ["proj-b"])
+
+        result = runner.invoke(
+            app,
+            ["search", "Issue", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        issues = json.loads(result.stdout)
+        assert all(i["namespace"] != "proj-b" for i in issues)
+
+    def test_search_respects_visible_config(self, tmp_path: Path) -> None:
+        """Hidden namespace issues not returned in search."""
+        dogcats_dir = tmp_path / ".dogcats"
+        _create_multi_ns_issues(dogcats_dir)
+        _set_ns_config(dogcats_dir, "visible_namespaces", ["proj-a"])
+
+        result = runner.invoke(
+            app,
+            ["search", "Issue", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issues = json.loads(result.stdout)
+        assert len(issues) == 2
+        assert all(i["namespace"] == "proj-a" for i in issues)
+
+
+class TestRecentlyNamespaceFilter:
+    """Test namespace filtering in recently-added and recently-closed."""
+
+    def test_recently_added_respects_config(self, tmp_path: Path) -> None:
+        """recently-added respects config visibility."""
+        dogcats_dir = tmp_path / ".dogcats"
+        _create_multi_ns_issues(dogcats_dir)
+        _set_ns_config(dogcats_dir, "hidden_namespaces", ["proj-b"])
+
+        result = runner.invoke(
+            app,
+            ["recently-added", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        issues = json.loads(result.stdout)
+        assert all(i["namespace"] != "proj-b" for i in issues)
+
+    def test_recently_closed_respects_config(self, tmp_path: Path) -> None:
+        """recently-closed respects config visibility."""
+        dogcats_dir = tmp_path / ".dogcats"
+        _create_multi_ns_issues(dogcats_dir)
+
+        # Close all issues
+        list_result = runner.invoke(
+            app,
+            ["list", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issues = json.loads(list_result.stdout)
+        for issue in issues:
+            full_id = f"{issue['namespace']}-{issue['id']}"
+            runner.invoke(
+                app,
+                ["close", full_id, "--dogcats-dir", str(dogcats_dir)],
+            )
+
+        # Hide proj-b
+        _set_ns_config(dogcats_dir, "hidden_namespaces", ["proj-b"])
+
+        result = runner.invoke(
+            app,
+            ["recently-closed", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        events = json.loads(result.stdout)
+        for event in events:
+            assert not event["issue_id"].startswith("proj-b-")

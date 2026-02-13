@@ -20,10 +20,15 @@ config_app = typer.Typer(
 # Keys that should be coerced to bool
 _BOOL_KEYS = frozenset({"git_tracking"})
 
+# Keys whose values are stored as arrays (list[str])
+_ARRAY_KEYS = frozenset({"visible_namespaces", "hidden_namespaces"})
+
 # All known config keys and their types (for help text)
 _KNOWN_KEYS = {
     "namespace": "str",
     "git_tracking": "bool",
+    "visible_namespaces": "list[str]",
+    "hidden_namespaces": "list[str]",
 }
 
 _TRUE_VALUES = frozenset({"true", "1", "yes", "on"})
@@ -40,6 +45,10 @@ def _coerce_value(key: str, value: str) -> Any:
             return False
         msg = f"Invalid boolean value '{value}' for key '{key}'. Use true/false."
         raise typer.BadParameter(msg)
+    if key in _ARRAY_KEYS:
+        from dogcat.constants import parse_labels
+
+        return parse_labels(value)
     return value
 
 
@@ -76,6 +85,8 @@ def register(app: typer.Typer) -> None:
         val = config[key]
         if json_output:
             typer.echo(orjson.dumps({key: val}).decode())
+        elif isinstance(val, list):
+            typer.echo(", ".join(str(i) for i in val))
         else:
             typer.echo(val)
 
@@ -95,4 +106,7 @@ def register(app: typer.Typer) -> None:
                 typer.echo("No configuration values set.")
             else:
                 for k, v in sorted(config.items()):
-                    typer.echo(f"{k} = {v}")
+                    if isinstance(v, list):
+                        typer.echo(f"{k} = {', '.join(str(i) for i in v)}")
+                    else:
+                        typer.echo(f"{k} = {v}")

@@ -13,6 +13,7 @@ from dogcat.config import (
     extract_prefix,
     get_config_path,
     get_issue_prefix,
+    get_namespace_filter,
     load_config,
     migrate_config_keys,
     parse_dogcatrc,
@@ -609,3 +610,87 @@ class TestParseDogcatrc:
 
         result = parse_dogcatrc(rc_file)
         assert result == (project_dir / "subdir" / ".dogcats").resolve()
+
+
+class TestGetNamespaceFilter:
+    """Tests for get_namespace_filter function."""
+
+    def test_no_config_returns_none(self, tmp_path: Path) -> None:
+        """No config → returns None (no filtering)."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        save_config(str(dogcats_dir), {"namespace": "a"})
+
+        result = get_namespace_filter(str(dogcats_dir))
+        assert result is None
+
+    def test_visible_namespaces_allows_primary_and_listed(self, tmp_path: Path) -> None:
+        """visible_namespaces = ["b"] with primary "a" → allows "a" and "b"."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        save_config(str(dogcats_dir), {"namespace": "a", "visible_namespaces": ["b"]})
+
+        ns_filter = get_namespace_filter(str(dogcats_dir))
+        assert ns_filter is not None
+        assert ns_filter("a") is True
+        assert ns_filter("b") is True
+        assert ns_filter("c") is False
+
+    def test_hidden_namespaces_blocks_listed(self, tmp_path: Path) -> None:
+        """hidden_namespaces = ["b"] → blocks "b", allows everything else."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        save_config(str(dogcats_dir), {"namespace": "a", "hidden_namespaces": ["b"]})
+
+        ns_filter = get_namespace_filter(str(dogcats_dir))
+        assert ns_filter is not None
+        assert ns_filter("a") is True
+        assert ns_filter("b") is False
+        assert ns_filter("c") is True
+
+    def test_primary_always_visible_even_if_hidden(self, tmp_path: Path) -> None:
+        """Primary namespace is always visible even if in hidden_namespaces."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        save_config(
+            str(dogcats_dir),
+            {"namespace": "a", "hidden_namespaces": ["a", "b"]},
+        )
+
+        ns_filter = get_namespace_filter(str(dogcats_dir))
+        assert ns_filter is not None
+        assert ns_filter("a") is True
+        assert ns_filter("b") is False
+
+    def test_explicit_namespace_overrides_config(self, tmp_path: Path) -> None:
+        """explicit_namespace overrides config settings."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        save_config(
+            str(dogcats_dir),
+            {"namespace": "a", "visible_namespaces": ["b"]},
+        )
+
+        ns_filter = get_namespace_filter(str(dogcats_dir), explicit_namespace="c")
+        assert ns_filter is not None
+        assert ns_filter("c") is True
+        assert ns_filter("a") is False
+        assert ns_filter("b") is False
+
+    def test_empty_visible_list_returns_none(self, tmp_path: Path) -> None:
+        """Empty visible_namespaces behaves as no filtering."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        save_config(str(dogcats_dir), {"namespace": "a", "visible_namespaces": []})
+
+        result = get_namespace_filter(str(dogcats_dir))
+        assert result is None
+
+    def test_empty_hidden_list_returns_none(self, tmp_path: Path) -> None:
+        """Empty hidden_namespaces behaves as no filtering."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        save_config(str(dogcats_dir), {"namespace": "a", "hidden_namespaces": []})
+
+        result = get_namespace_filter(str(dogcats_dir))
+        assert result is None

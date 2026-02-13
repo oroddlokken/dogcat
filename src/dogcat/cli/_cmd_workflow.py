@@ -5,6 +5,8 @@ from __future__ import annotations
 import orjson
 import typer
 
+from dogcat.config import extract_prefix, get_namespace_filter
+
 from ._completions import complete_issue_ids
 from ._formatting import format_issue_brief, format_issue_tree
 from ._helpers import get_default_operator, get_storage
@@ -402,7 +404,17 @@ def register(app: typer.Typer) -> None:
 
             storage = get_storage(dogcats_dir)
             event_log = EventLog(storage.dogcats_dir)
-            events = [e for e in event_log.read() if e.event_type == "closed"][:limit]
+            events = [e for e in event_log.read() if e.event_type == "closed"]
+
+            # Apply namespace filter
+            actual_dogcats_dir = str(storage.dogcats_dir)
+            ns_filter = get_namespace_filter(actual_dogcats_dir)
+            if ns_filter is not None:
+                events = [
+                    e for e in events if ns_filter(extract_prefix(e.issue_id) or "")
+                ]
+
+            events = events[:limit]
             events.reverse()  # Display oldest-first
 
             # Fill in missing titles from storage
@@ -444,6 +456,12 @@ def register(app: typer.Typer) -> None:
                 for i in storage.list()
                 if i.status.value not in ("closed", "tombstone")
             ]
+
+            # Apply namespace filter
+            actual_dogcats_dir = str(storage.dogcats_dir)
+            ns_filter = get_namespace_filter(actual_dogcats_dir)
+            if ns_filter is not None:
+                issues = [i for i in issues if ns_filter(i.namespace)]
 
             # Sort descending to select the N most recent, then reverse for display
             issues.sort(key=lambda i: i.created_at, reverse=True)

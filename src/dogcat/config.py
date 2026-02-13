@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 import orjson
 
@@ -246,6 +249,45 @@ def extract_prefix(issue_id: str) -> str | None:
     # Find the last hyphen and take everything before it
     last_hyphen = issue_id.rfind("-")
     return issue_id[:last_hyphen] if last_hyphen > 0 else None
+
+
+def get_namespace_filter(
+    dogcats_dir: str,
+    explicit_namespace: str | None = None,
+) -> Callable[[str], bool] | None:
+    """Return a predicate that tests whether a namespace is visible.
+
+    Args:
+        dogcats_dir: Path to .dogcats directory.
+        explicit_namespace: If set, filter to only this namespace.
+
+    Returns:
+        A callable taking a namespace string and returning True if visible,
+        or None when no filtering is needed.
+    """
+    if explicit_namespace is not None:
+        return lambda ns: ns == explicit_namespace
+
+    config = load_config(dogcats_dir)
+    visible: list[str] | None = config.get("visible_namespaces")
+    hidden: list[str] | None = config.get("hidden_namespaces")
+
+    if not visible and not hidden:
+        return None
+
+    primary = get_issue_prefix(dogcats_dir)
+
+    if visible:
+        allowed = set(visible)
+        allowed.add(primary)
+        return lambda ns: ns in allowed
+
+    if hidden:
+        blocked = set(hidden)
+        blocked.discard(primary)
+        return lambda ns: ns not in blocked
+
+    return None
 
 
 def migrate_config_keys(config: dict[str, Any]) -> bool:

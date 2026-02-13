@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 import orjson
 import typer
 
+from dogcat.config import get_namespace_filter
 from dogcat.constants import parse_labels
 
 from ._completions import (
@@ -86,6 +87,12 @@ def register(app: typer.Typer) -> None:
             help="Issues closed before date (ISO8601)",
         ),
         limit: int | None = typer.Option(None, "--limit", help="Limit results"),
+        namespace: str | None = typer.Option(
+            None,
+            "--namespace",
+            "-ns",
+            help="Filter by namespace",
+        ),
         agent_only: bool = typer.Option(
             False,
             "--agent-only",
@@ -133,6 +140,12 @@ def register(app: typer.Typer) -> None:
                 filters["owner"] = owner
 
             issues = storage.list(filters if filters else None)
+
+            # Apply namespace filtering
+            actual_dogcats_dir = str(storage.dogcats_dir)
+            ns_filter = get_namespace_filter(actual_dogcats_dir, namespace)
+            if ns_filter is not None:
+                issues = [i for i in issues if ns_filter(i.namespace)]
 
             # Exclude closed/tombstone issues by default (unless explicitly requested)
             # Also include closed issues when date filters are used
