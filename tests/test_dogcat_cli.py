@@ -4353,25 +4353,25 @@ class TestCLIDoctor:
         assert "config.toml not found" in result.stdout
         assert "✗" in result.stdout
         # Prefix check should be skipped when config.toml is missing
-        assert "issue_prefix is not configured" not in result.stdout
+        assert "namespace is not configured" not in result.stdout
 
-    def test_doctor_empty_issue_prefix(self, tmp_path: Path) -> None:
-        """Test doctor detects empty issue_prefix in config.toml."""
+    def test_doctor_empty_namespace(self, tmp_path: Path) -> None:
+        """Test doctor detects empty namespace in config.toml."""
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
         issues_file = dogcats_dir / "issues.jsonl"
         issues_file.touch()
 
-        # Create config.toml with empty issue_prefix
+        # Create config.toml with empty namespace
         config_file = dogcats_dir / "config.toml"
-        config_file.write_text('issue_prefix = ""\n')
+        config_file.write_text('namespace = ""\n')
 
         result = runner.invoke(
             app,
             ["doctor", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code != 0
-        assert "issue_prefix is not configured" in result.stdout
+        assert "namespace is not configured" in result.stdout
         assert "✗" in result.stdout
 
     def test_doctor_fix_missing_config(self, tmp_path: Path) -> None:
@@ -4404,13 +4404,11 @@ class TestCLIDoctor:
             ["doctor", "--dogcats-dir", str(dogcats_dir)],
         )
         assert "config.toml exists" in result.stdout
-        assert "issue_prefix is configured" in result.stdout
+        assert "namespace is configured" in result.stdout
         # Both config checks should pass (green checkmarks)
         # Count the ✗ marks - there should be none for config checks
         lines = result.stdout.splitlines()
-        config_lines = [
-            ln for ln in lines if "config.toml" in ln or "issue_prefix" in ln
-        ]
+        config_lines = [ln for ln in lines if "config.toml" in ln or "namespace" in ln]
         for line in config_lines:
             assert "✗" not in line
 
@@ -4655,7 +4653,7 @@ class TestCLIInitPrefix:
             ],
         )
         assert result.exit_code == 0
-        assert "Set issue prefix: myapp" in result.stdout
+        assert "Set namespace: myapp" in result.stdout
         assert "myapp-<hash>" in result.stdout
 
     def test_init_creates_config_file(self, tmp_path: Path) -> None:
@@ -4675,7 +4673,7 @@ class TestCLIInitPrefix:
         config_file = dogcats_dir / "config.toml"
         assert config_file.exists()
         content = config_file.read_text()
-        assert "issue_prefix" in content
+        assert "namespace" in content
         assert "testprefix" in content
 
     def test_init_auto_detects_prefix_from_directory(self, tmp_path: Path) -> None:
@@ -4689,7 +4687,7 @@ class TestCLIInitPrefix:
             ["init", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
-        assert "Set issue prefix: my-cool-project" in result.stdout
+        assert "Set namespace: my-cool-project" in result.stdout
 
     def test_init_prefix_strips_trailing_hyphens(self, tmp_path: Path) -> None:
         """Test init strips trailing hyphens from prefix."""
@@ -4705,7 +4703,7 @@ class TestCLIInitPrefix:
             ],
         )
         assert result.exit_code == 0
-        assert "Set issue prefix: myapp" in result.stdout
+        assert "Set namespace: myapp" in result.stdout
 
     def test_create_uses_config_prefix(self, tmp_path: Path) -> None:
         """Test that create uses prefix from config."""
@@ -4808,12 +4806,12 @@ class TestCLIImportBeadsPrefix:
             ],
         )
         assert result.exit_code == 0
-        assert "Set issue prefix: imported" in result.stdout
+        assert "Set namespace: imported" in result.stdout
 
         # Verify config was updated
         config_file = dogcats_dir / "config.toml"
         content = config_file.read_text()
-        assert 'issue_prefix = "imported"' in content
+        assert 'namespace = "imported"' in content
 
     def test_import_beads_new_issues_use_imported_prefix(self, tmp_path: Path) -> None:
         """Test that new issues after import-beads use the imported prefix."""
@@ -4873,7 +4871,7 @@ class TestCLIImportBeadsPrefix:
             ],
         )
         assert result.exit_code == 0
-        assert "Set issue prefix: latest" in result.stdout
+        assert "Set namespace: latest" in result.stdout
 
     def test_import_beads_handles_empty_file(self, tmp_path: Path) -> None:
         """Test that import-beads handles empty JSONL file gracefully."""
@@ -4937,7 +4935,7 @@ class TestCLIImportBeadsPrefix:
         # Prefix should remain unchanged (not changed to bd-)
         config_file = dogcats_dir / "config.toml"
         content = config_file.read_text()
-        assert 'issue_prefix = "keepme"' in content
+        assert 'namespace = "keepme"' in content
 
 
 class TestCLIStatus:
@@ -6056,12 +6054,12 @@ class TestCLIConfig:
 
         result = runner.invoke(
             app,
-            ["config", "set", "issue_prefix", "myproject"],
+            ["config", "set", "namespace", "myproject"],
         )
         assert result.exit_code == 0
-        assert "Set issue_prefix = myproject" in result.stdout
+        assert "Set namespace = myproject" in result.stdout
 
-        result = runner.invoke(app, ["config", "get", "issue_prefix"])
+        result = runner.invoke(app, ["config", "get", "namespace"])
         assert result.exit_code == 0
         assert "myproject" in result.stdout
 
@@ -6146,11 +6144,11 @@ class TestCLIConfig:
 
         result = runner.invoke(
             app,
-            ["config", "get", "issue_prefix", "--json"],
+            ["config", "get", "namespace", "--json"],
         )
         assert result.exit_code == 0
         data = json.loads(result.stdout)
-        assert "issue_prefix" in data
+        assert "namespace" in data
 
     def test_config_list(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test listing all config values."""
@@ -6160,7 +6158,7 @@ class TestCLIConfig:
 
         result = runner.invoke(app, ["config", "list"])
         assert result.exit_code == 0
-        assert "issue_prefix" in result.stdout
+        assert "namespace" in result.stdout
 
     def test_config_list_json(
         self,
@@ -6175,7 +6173,7 @@ class TestCLIConfig:
         result = runner.invoke(app, ["config", "list", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.stdout)
-        assert "issue_prefix" in data
+        assert "namespace" in data
 
     def test_config_list_empty(
         self,

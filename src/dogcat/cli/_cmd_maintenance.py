@@ -10,7 +10,13 @@ from typing import Any
 import orjson
 import typer
 
-from dogcat.config import get_config_path, get_issue_prefix, load_config, save_config
+from dogcat.config import (
+    get_config_path,
+    get_issue_prefix,
+    load_config,
+    migrate_config_keys,
+    save_config,
+)
 
 from ._formatting import format_issue_brief
 from ._helpers import get_default_operator, get_storage
@@ -260,11 +266,11 @@ def register(app: typer.Typer) -> None:
 
         if fix and not config_exists and dogcats_path.exists():
             detected_prefix = get_issue_prefix(dogcats_dir)
-            save_config(dogcats_dir, {"issue_prefix": detected_prefix})
+            save_config(dogcats_dir, {"namespace": detected_prefix})
             config_exists = True
             typer.echo(
                 f"Fixed: Created {config_path.name}"
-                f" with issue_prefix='{detected_prefix}'",
+                f" with namespace='{detected_prefix}'",
             )
 
         checks["config_toml"] = {
@@ -276,29 +282,55 @@ def register(app: typer.Typer) -> None:
         if not checks["config_toml"]["passed"]:
             all_passed = False
 
-        # Check 2b: issue_prefix is set and non-empty in config
+        # Check 2b: namespace is set and non-empty in config
         # Only check if config.toml exists (skip if Check 2a failed)
         if config_exists:
             config = load_config(dogcats_dir)
-            prefix_value = config.get("issue_prefix")
+            prefix_value = config.get("namespace") or config.get("issue_prefix")
             prefix_ok = bool(prefix_value)
 
             if fix and not prefix_ok:
                 detected_prefix = get_issue_prefix(dogcats_dir)
-                config["issue_prefix"] = detected_prefix
+                config["namespace"] = detected_prefix
                 save_config(dogcats_dir, config)
                 prefix_ok = True
                 typer.echo(
-                    f"Fixed: Set issue_prefix='{detected_prefix}' in config.toml",
+                    f"Fixed: Set namespace='{detected_prefix}' in config.toml",
                 )
 
-            checks["config_issue_prefix"] = {
-                "description": "issue_prefix is configured in config.toml",
-                "fail_description": "issue_prefix is not configured in config.toml",
+            checks["config_namespace"] = {
+                "description": "namespace is configured in config.toml",
+                "fail_description": "namespace is not configured in config.toml",
                 "passed": prefix_ok,
-                "fix": "Run 'dcat config set issue_prefix <prefix>'",
+                "fix": "Run 'dcat config set namespace <prefix>'",
             }
             if not prefix_ok:
+                all_passed = False
+
+        # Check 2c: deprecated issue_prefix key
+        if config_exists:
+            config = load_config(dogcats_dir)
+            has_deprecated = "issue_prefix" in config
+            deprecated_ok = not has_deprecated
+
+            if fix and has_deprecated:
+                migrate_config_keys(config)
+                save_config(dogcats_dir, config)
+                deprecated_ok = True
+                typer.echo(
+                    "Fixed: Renamed 'issue_prefix' to 'namespace' in config.toml",
+                )
+
+            checks["config_deprecated_keys"] = {
+                "description": "No deprecated config keys",
+                "fail_description": (
+                    "Config uses deprecated 'issue_prefix' key"
+                    " (renamed to 'namespace')"
+                ),
+                "passed": deprecated_ok,
+                "fix": "Run 'dcat doctor --fix' to migrate",
+            }
+            if not deprecated_ok:
                 all_passed = False
 
         # Check 3: Deep data validation (fields, refs, cycles)

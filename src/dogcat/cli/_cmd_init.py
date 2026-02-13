@@ -122,7 +122,7 @@ def register(app: typer.Typer) -> None:
 
         # Save prefix to config
         set_issue_prefix(dogcats_dir, prefix)
-        typer.echo(f"✓ Set issue prefix: {prefix}")
+        typer.echo(f"✓ Set namespace: {prefix}")
 
         if no_git:
             config = load_config(dogcats_dir)
@@ -224,7 +224,7 @@ def register(app: typer.Typer) -> None:
                     detected_prefix = newest_issue.namespace
                     if detected_prefix:
                         set_issue_prefix(dogcats_dir, detected_prefix)
-                        typer.echo(f"✓ Set issue prefix: {detected_prefix}")
+                        typer.echo(f"✓ Set namespace: {detected_prefix}")
 
             typer.echo("\n✓ Import complete!")
             typer.echo(f"  Imported: {migrated} issues")

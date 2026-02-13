@@ -132,8 +132,10 @@ def get_issue_prefix(dogcats_dir: str) -> str:
     Returns:
         Issue prefix string
     """
-    # Try config file first
+    # Try config file first ("namespace" key, with "issue_prefix" fallback)
     config = load_config(dogcats_dir)
+    if "namespace" in config:
+        return config["namespace"]
     if "issue_prefix" in config:
         return config["issue_prefix"]
 
@@ -158,7 +160,8 @@ def set_issue_prefix(dogcats_dir: str, prefix: str) -> None:
         prefix: Prefix to set
     """
     config = load_config(dogcats_dir)
-    config["issue_prefix"] = prefix
+    config["namespace"] = prefix
+    config.pop("issue_prefix", None)
     save_config(dogcats_dir, config)
 
 
@@ -243,3 +246,20 @@ def extract_prefix(issue_id: str) -> str | None:
     # Find the last hyphen and take everything before it
     last_hyphen = issue_id.rfind("-")
     return issue_id[:last_hyphen] if last_hyphen > 0 else None
+
+
+def migrate_config_keys(config: dict[str, Any]) -> bool:
+    """Rename deprecated config keys to their current names.
+
+    Renames ``issue_prefix`` → ``namespace`` in-place.
+
+    Returns:
+        True if any keys were migrated, False otherwise.
+    """
+    changed = False
+    if "issue_prefix" in config:
+        if "namespace" not in config:
+            config["namespace"] = config["issue_prefix"]
+        del config["issue_prefix"]
+        changed = True
+    return changed

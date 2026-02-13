@@ -1,6 +1,7 @@
 """Tests for config module."""
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -13,6 +14,7 @@ from dogcat.config import (
     get_config_path,
     get_issue_prefix,
     load_config,
+    migrate_config_keys,
     parse_dogcatrc,
     save_config,
     set_issue_prefix,
@@ -96,7 +98,7 @@ class TestLoadSaveConfig:
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
 
-        config = {"issue_prefix": "myproject", "other": "value"}
+        config = {"namespace": "myproject", "other": "value"}
         save_config(str(dogcats_dir), config)
 
         loaded = load_config(str(dogcats_dir))
@@ -107,7 +109,7 @@ class TestLoadSaveConfig:
         dogcats_dir = tmp_path / ".dogcats"
         assert not dogcats_dir.exists()
 
-        save_config(str(dogcats_dir), {"issue_prefix": "test"})
+        save_config(str(dogcats_dir), {"namespace": "test"})
 
         assert dogcats_dir.exists()
         assert (dogcats_dir / CONFIG_FILENAME).exists()
@@ -117,7 +119,7 @@ class TestLoadSaveConfig:
         dogcats_dir = tmp_path / "a" / "b" / ".dogcats"
         assert not dogcats_dir.exists()
 
-        save_config(str(dogcats_dir), {"issue_prefix": "test"})
+        save_config(str(dogcats_dir), {"namespace": "test"})
 
         assert dogcats_dir.exists()
 
@@ -144,11 +146,11 @@ class TestLoadSaveConfig:
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
 
-        save_config(str(dogcats_dir), {"issue_prefix": "first"})
-        save_config(str(dogcats_dir), {"issue_prefix": "second"})
+        save_config(str(dogcats_dir), {"namespace": "first"})
+        save_config(str(dogcats_dir), {"namespace": "second"})
 
         loaded = load_config(str(dogcats_dir))
-        assert loaded["issue_prefix"] == "second"
+        assert loaded["namespace"] == "second"
 
     def test_save_preserves_other_keys(self, tmp_path: Path) -> None:
         """Save preserves other configuration keys."""
@@ -156,7 +158,7 @@ class TestLoadSaveConfig:
         dogcats_dir.mkdir()
 
         config = {
-            "issue_prefix": "myapp",
+            "namespace": "myapp",
             "custom_setting": "value",
             "nested": {"key": "value"},
         }
@@ -177,12 +179,12 @@ class TestLoadSaveConfig:
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
 
-        save_config(str(dogcats_dir), {"issue_prefix": "test"})
+        save_config(str(dogcats_dir), {"namespace": "test"})
 
         # Should not raise
         with (dogcats_dir / CONFIG_FILENAME).open("rb") as f:
             parsed = tomllib.load(f)
-        assert parsed["issue_prefix"] == "test"
+        assert parsed["namespace"] == "test"
 
 
 class TestSetGetIssuePrefix:
@@ -211,13 +213,13 @@ class TestSetGetIssuePrefix:
         dogcats_dir.mkdir()
 
         # Save initial config with extra key
-        save_config(str(dogcats_dir), {"issue_prefix": "old", "other_key": "value"})
+        save_config(str(dogcats_dir), {"namespace": "old", "other_key": "value"})
 
         # Update just the prefix
         set_issue_prefix(str(dogcats_dir), "new")
 
         loaded = load_config(str(dogcats_dir))
-        assert loaded["issue_prefix"] == "new"
+        assert loaded["namespace"] == "new"
         assert loaded["other_key"] == "value"
 
     def test_get_prefix_no_config(self, tmp_path: Path) -> None:
@@ -459,6 +461,68 @@ class TestPrefixPrecedence:
         # Step 3: Add config -> config prefix
         set_issue_prefix(str(dogcats_dir), "config-prefix")
         assert get_issue_prefix(str(dogcats_dir)) == "config-prefix"
+
+
+class TestMigrateConfigKeys:
+    """Tests for migrate_config_keys function."""
+
+    def test_renames_issue_prefix_to_namespace(self) -> None:
+        """Renames issue_prefix to namespace."""
+        config: dict[str, Any] = {"issue_prefix": "myapp"}
+        changed = migrate_config_keys(config)
+        assert changed is True
+        assert config == {"namespace": "myapp"}
+
+    def test_no_change_when_already_namespace(self) -> None:
+        """No change when config already uses namespace."""
+        config: dict[str, Any] = {"namespace": "myapp"}
+        changed = migrate_config_keys(config)
+        assert changed is False
+        assert config == {"namespace": "myapp"}
+
+    def test_namespace_wins_over_issue_prefix(self) -> None:
+        """When both keys exist, namespace is kept and issue_prefix is removed."""
+        config: dict[str, Any] = {"namespace": "new", "issue_prefix": "old"}
+        changed = migrate_config_keys(config)
+        assert changed is True
+        assert config == {"namespace": "new"}
+
+    def test_preserves_other_keys(self) -> None:
+        """Other config keys are preserved."""
+        config: dict[str, Any] = {
+            "issue_prefix": "myapp",
+            "git_tracking": True,
+        }
+        changed = migrate_config_keys(config)
+        assert changed is True
+        assert config == {"namespace": "myapp", "git_tracking": True}
+
+    def test_empty_config(self) -> None:
+        """Empty config returns False."""
+        config: dict[str, Any] = {}
+        changed = migrate_config_keys(config)
+        assert changed is False
+        assert config == {}
+
+
+class TestGetIssuePrefixBackwardCompat:
+    """Tests for get_issue_prefix backward compatibility with issue_prefix key."""
+
+    def test_reads_legacy_issue_prefix(self, tmp_path: Path) -> None:
+        """get_issue_prefix reads legacy issue_prefix key."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        save_config(str(dogcats_dir), {"issue_prefix": "legacy"})
+
+        assert get_issue_prefix(str(dogcats_dir)) == "legacy"
+
+    def test_namespace_takes_precedence_over_issue_prefix(self, tmp_path: Path) -> None:
+        """Namespace key takes precedence over legacy issue_prefix."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        save_config(str(dogcats_dir), {"namespace": "new", "issue_prefix": "old"})
+
+        assert get_issue_prefix(str(dogcats_dir)) == "new"
 
 
 class TestParseDogcatrc:

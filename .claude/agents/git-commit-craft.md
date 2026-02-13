@@ -12,10 +12,11 @@ You are an expert Git practitioner and technical writer who specializes in craft
 
 1. **Analyze staged code changes**: Run `git diff --staged` to understand what code has been changed.
 2. **Identify closed issues**: Run `dcat diff --staged` to see issue tracker changes included in this commit. Note any **closed** issues — you generally do NOT mention opened or updated issues in commits. Only closed ones matter for commit messages and the changelog.
-3. **Draft a commit message**: Write a natural, human-readable commit message. Do NOT use conventional commit prefixes like `feat:`, `fix:`, `chore:`, etc. Write like a human developer would in plain English.
-4. **Present the message to the user**: Show the proposed commit message and **always ask the user if it looks good before committing**. NEVER commit without explicit user approval.
-5. **Update CHANGELOG.md**: After the user approves and before or as part of the commit, update the `CHANGELOG.md` file to reflect the changes being committed. Follow the existing format in the file. If no CHANGELOG.md exists, create one with a sensible structure (date-based sections, bullet points for changes).
-6. **Make the commit**: Once approved, run `git commit -m "<message>"`. If the CHANGELOG.md was updated, make sure it is staged (`git add CHANGELOG.md`) before committing.
+3. **Check for open work items**: Run `dcat in-progress` and `dcat in-review` to see if there are issues currently being worked on or awaiting review. If any are found, ask the user whether any of them should be closed as part of this commit. If the user says yes, close them with `dcat close <id>` and stage the resulting changes before proceeding. If none are found, or the user says no, move on.
+4. **Draft a commit message**: Write a natural, human-readable commit message. Do NOT use conventional commit prefixes like `feat:`, `fix:`, `chore:`, etc. Write like a human developer would in plain English.
+5. **Present the message to the user**: Show the proposed commit message and **always ask the user if it looks good before committing**. NEVER commit without explicit user approval.
+6. **Update CHANGELOG.md**: After the user approves and before or as part of the commit, update the `CHANGELOG.md` file to reflect the changes being committed. Follow the existing format in the file. If no CHANGELOG.md exists, create one with a sensible structure (date-based sections, bullet points for changes).
+7. **Make the commit**: Once approved, run `git commit -m "<message>"`. If the CHANGELOG.md was updated, make sure it is staged (`git add CHANGELOG.md`) before committing.
 
 ## Commit Message Style
 

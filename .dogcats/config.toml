@@ -1,2 +1,2 @@
-issue_prefix = "dogcat"
-git_tracking = false
+namespace = "dogcat"
+git_tracking = true

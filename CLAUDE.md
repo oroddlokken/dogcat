@@ -5,7 +5,7 @@
 This project uses **dcat** for issue tracking and **git** for version control. You MUST run `dcat prime --opinionated` for instructions.
 Then run `dcat list --agent-only` to see the list of issues. Generally we work on bugs first, and always on high priority issues first.
 
-ALWAYS run `dcat update --status in_progress $issueId` when you start working on an issue or subissues.
+ALWAYS run `dcat update --status in_progress $issueId` as soon as you pick up an issue — before any planning, research, or exploration.
 
 It is okay to work on multiple issues at the same time - just mark all of them as in_progress, and ask the user which one to prioritize if there is a conflict.
 

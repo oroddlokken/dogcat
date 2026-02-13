@@ -36,7 +36,7 @@ def test_demo_uses_configured_prefix() -> None:
 
         # Write a config with explicit prefix
         config_path = Path(dogcats_dir) / "config.toml"
-        config_path.write_text('issue_prefix = "testns"\n')
+        config_path.write_text('namespace = "testns"\n')
 
         storage = JSONLStorage(f"{dogcats_dir}/issues.jsonl", create_dir=True)
         generate_demo_issues(storage, dogcats_dir)

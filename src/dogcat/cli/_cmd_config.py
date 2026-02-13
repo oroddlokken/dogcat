@@ -22,7 +22,7 @@ _BOOL_KEYS = frozenset({"git_tracking"})
 
 # All known config keys and their types (for help text)
 _KNOWN_KEYS = {
-    "issue_prefix": "str",
+    "namespace": "str",
     "git_tracking": "bool",
 }
 
