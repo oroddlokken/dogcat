@@ -1248,6 +1248,20 @@ class TestPrimeCommand:
         assert "DOGCAT WORKFLOW GUIDE" in result.stdout
         assert "Quick Start" in result.stdout
 
+    def test_prime_includes_label_commands(self) -> None:
+        """Test that prime includes label commands in Essential Commands."""
+        result = runner.invoke(app, ["prime"])
+        assert result.exit_code == 0
+        assert "dcat label <id> add -l <label>" in result.stdout
+        assert "dcat label <id> remove -l <label>" in result.stdout
+
+    def test_prime_includes_labels_section(self) -> None:
+        """Test that prime includes the Labels section."""
+        result = runner.invoke(app, ["prime"])
+        assert result.exit_code == 0
+        assert "## Labels" in result.stdout
+        assert "freeform tags" in result.stdout
+
 
 class TestStatusCommand:
     """Test status command."""

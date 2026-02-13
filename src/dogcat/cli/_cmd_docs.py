@@ -642,6 +642,8 @@ DOGCAT WORKFLOW GUIDE
   dcat history                              - Show change history timeline
   dcat history -i <id>                      - History for a specific issue
   dcat diff                                 - Show uncommitted issue changes
+  dcat label <id> add -l <label>            - Add a label to an issue
+  dcat label <id> remove -l <label>         - Remove a label
 
 ## Parent-Child vs Dependencies
 
@@ -690,6 +692,11 @@ Do NOT attempt to work on manual issues. Leave them for the user.
 
 Questions (type: question) are used to track questions that need answers,
 NOT tasks to work on.
+
+## Labels
+
+Labels are freeform tags (e.g. "backend", "ui", "auth") that appear in
+`dcat list` and `dcat show`, and can be filtered with `--label`.
 """
         typer.echo(guide)
 

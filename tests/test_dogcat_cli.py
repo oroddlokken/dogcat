@@ -6654,6 +6654,52 @@ class TestConfigArrayKeys:
         assert data["visible_namespaces"] == ["a", "b"]
 
 
+class TestConfigKeys:
+    """Test config keys subcommand."""
+
+    def test_config_keys(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Dcat config keys → lists all known keys with descriptions."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        _init_with_namespace(dogcats_dir, "proj")
+
+        result = runner.invoke(app, ["config", "keys"])
+        assert result.exit_code == 0
+        for key in (
+            "namespace",
+            "git_tracking",
+            "visible_namespaces",
+            "hidden_namespaces",
+        ):
+            assert key in result.stdout
+        assert "Key" in result.stdout
+        assert "Type" in result.stdout
+        assert "Default" in result.stdout
+        assert "Description" in result.stdout
+
+    def test_config_keys_json(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Dcat config keys --json → JSON with all known keys."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        _init_with_namespace(dogcats_dir, "proj")
+
+        result = runner.invoke(app, ["config", "keys", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert "namespace" in data
+        assert "git_tracking" in data
+        assert "visible_namespaces" in data
+        assert "hidden_namespaces" in data
+        assert data["namespace"]["type"] == "str"
+        assert "description" in data["namespace"]
+        assert "default" in data["git_tracking"]
+        assert "values" in data["git_tracking"]
+
+
 class TestDoctorNamespaceConfig:
     """Test doctor checks for namespace config mutual exclusivity."""
 

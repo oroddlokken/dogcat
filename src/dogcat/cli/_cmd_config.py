@@ -23,12 +23,31 @@ _BOOL_KEYS = frozenset({"git_tracking"})
 # Keys whose values are stored as arrays (list[str])
 _ARRAY_KEYS = frozenset({"visible_namespaces", "hidden_namespaces"})
 
-# All known config keys and their types (for help text)
-_KNOWN_KEYS = {
-    "namespace": "str",
-    "git_tracking": "bool",
-    "visible_namespaces": "list[str]",
-    "hidden_namespaces": "list[str]",
+# All known config keys: type, description, default, and allowed values
+_KNOWN_KEYS: dict[str, dict[str, Any]] = {
+    "namespace": {
+        "type": "str",
+        "description": "Issue ID prefix / project namespace",
+        "default": "auto-detected",
+    },
+    "git_tracking": {
+        "type": "bool",
+        "description": "Enable git integration for issue tracking",
+        "default": True,
+        "values": "true, false (also: 1/0, yes/no, on/off)",
+    },
+    "visible_namespaces": {
+        "type": "list[str]",
+        "description": "Only show issues from these namespaces",
+        "default": "[] (show all)",
+        "values": "comma-separated namespace list",
+    },
+    "hidden_namespaces": {
+        "type": "list[str]",
+        "description": "Hide issues from these namespaces",
+        "default": "[] (show all)",
+        "values": "comma-separated namespace list",
+    },
 }
 
 _TRUE_VALUES = frozenset({"true", "1", "yes", "on"})
@@ -110,3 +129,47 @@ def register(app: typer.Typer) -> None:
                         typer.echo(f"{k} = {', '.join(str(i) for i in v)}")
                     else:
                         typer.echo(f"{k} = {v}")
+
+    @config_app.command("keys")
+    def config_keys(
+        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    ) -> None:
+        """List all available configuration keys and their descriptions."""
+        import orjson
+
+        if json_output:
+            typer.echo(orjson.dumps(_KNOWN_KEYS, option=orjson.OPT_INDENT_2).decode())
+            return
+
+        from rich import box
+        from rich.console import Console
+        from rich.table import Table
+
+        table = Table(
+            show_header=True,
+            header_style="bold",
+            box=box.ROUNDED,
+            pad_edge=False,
+            show_edge=False,
+        )
+        table.add_column("Key", no_wrap=True)
+        table.add_column("Type", no_wrap=True)
+        table.add_column("Default", no_wrap=True)
+        table.add_column("Description", overflow="fold")
+        table.add_column("Values", overflow="fold")
+
+        for key, info in _KNOWN_KEYS.items():
+            default = info["default"]
+            if isinstance(default, bool):
+                default = str(default).lower()
+            else:
+                default = str(default)
+            table.add_row(
+                key,
+                info["type"],
+                default,
+                info["description"],
+                info.get("values", ""),
+            )
+
+        Console().print(table)
