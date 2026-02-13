@@ -1,4 +1,4 @@
-"""Tests for the TUI dashboard create/edit keybindings."""
+"""Tests for the TUI dashboard keybindings."""
 
 from __future__ import annotations
 
@@ -6,10 +6,10 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from textual.widgets import OptionList
+from textual.widgets import Button, OptionList
 
 from dogcat.models import Issue
-from dogcat.tui.dashboard import DogcatTUI
+from dogcat.tui.dashboard import ConfirmDeleteScreen, DogcatTUI
 
 
 def _make_issue(**kwargs: object) -> Issue:
@@ -248,3 +248,147 @@ class TestGetSelectedIssueId:
         async with app.run_test() as _pilot:
             result = app._get_selected_issue_id()
             assert result == "dc-abc1"
+
+
+class TestDashboardDeleteBindings:
+    """Test that d and D keybindings are registered."""
+
+    @pytest.mark.asyncio
+    async def test_delete_bindings_registered(self) -> None:
+        """Dashboard has d (Delete) and D (Delete!) keybindings."""
+        storage = _make_storage()
+        app = DogcatTUI(storage)
+
+        async with app.run_test() as _pilot:
+            binding_keys = set(app.active_bindings.keys())
+            assert "d" in binding_keys
+            assert "D" in binding_keys
+
+
+class TestDashboardDeleteAction:
+    """Test the delete (d) keybinding with confirmation."""
+
+    @pytest.mark.asyncio
+    async def test_delete_no_selection_notifies(self) -> None:
+        """Pressing d with no issues shows warning notification."""
+        storage = _make_storage()
+        app = DogcatTUI(storage)
+
+        async with app.run_test() as pilot:
+            app.action_delete_issue()
+            await pilot.pause()
+            # Should not crash, no confirm screen pushed
+            assert not any(isinstance(s, ConfirmDeleteScreen) for s in app.screen_stack)
+
+    @pytest.mark.asyncio
+    async def test_delete_pushes_confirm_screen(self) -> None:
+        """Pressing d with a selected issue pushes the confirmation screen."""
+        issue = _make_issue(id="abc1", title="Deletable issue")
+        storage = _make_storage([issue])
+        app = DogcatTUI(storage)
+
+        async with app.run_test() as pilot:
+            app.action_delete_issue()
+            await pilot.pause()
+
+            assert any(isinstance(s, ConfirmDeleteScreen) for s in app.screen_stack)
+
+    @pytest.mark.asyncio
+    async def test_confirm_yes_deletes(self) -> None:
+        """Confirming Yes on the dialog calls storage.delete."""
+        issue = _make_issue(id="abc1", title="To delete")
+        storage = _make_storage([issue])
+        app = DogcatTUI(storage)
+
+        async with app.run_test() as pilot:
+            app.action_delete_issue()
+            await pilot.pause()
+
+            # Find the Yes button and click it
+            confirm_screen = next(
+                s for s in app.screen_stack if isinstance(s, ConfirmDeleteScreen)
+            )
+            yes_btn = confirm_screen.query_one("#yes-btn", Button)
+            yes_btn.press()
+            await pilot.pause()
+
+            storage.delete.assert_called_once_with("dc-abc1")
+
+    @pytest.mark.asyncio
+    async def test_confirm_cancel_does_not_delete(self) -> None:
+        """Pressing Escape on the dialog does not delete."""
+        issue = _make_issue(id="abc1", title="Keep this")
+        storage = _make_storage([issue])
+        app = DogcatTUI(storage)
+
+        async with app.run_test() as pilot:
+            app.action_delete_issue()
+            await pilot.pause()
+
+            # Cancel the dialog
+            confirm_screen = next(
+                s for s in app.screen_stack if isinstance(s, ConfirmDeleteScreen)
+            )
+            confirm_screen.action_cancel()
+            await pilot.pause()
+
+            storage.delete.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_delete_issue_not_found_notifies(self) -> None:
+        """Pressing d when storage.get returns None shows error."""
+        issue = _make_issue(id="abc1", title="Ghost")
+        storage = _make_storage([issue])
+        storage.get.return_value = None
+        app = DogcatTUI(storage)
+
+        async with app.run_test() as pilot:
+            app.action_delete_issue()
+            await pilot.pause()
+            assert not any(isinstance(s, ConfirmDeleteScreen) for s in app.screen_stack)
+
+
+class TestDashboardForceDeleteAction:
+    """Test the force delete (shift+d) keybinding."""
+
+    @pytest.mark.asyncio
+    async def test_force_delete_no_selection_notifies(self) -> None:
+        """Pressing D with no issues shows warning notification."""
+        storage = _make_storage()
+        app = DogcatTUI(storage)
+
+        async with app.run_test() as pilot:
+            app.action_force_delete_issue()
+            await pilot.pause()
+            storage.delete.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_force_delete_calls_storage(self) -> None:
+        """Pressing D deletes immediately without confirmation."""
+        issue = _make_issue(id="abc1", title="Force delete")
+        storage = _make_storage([issue])
+        app = DogcatTUI(storage)
+
+        async with app.run_test() as pilot:
+            app.action_force_delete_issue()
+            await pilot.pause()
+
+            # No confirmation screen pushed
+            assert not any(isinstance(s, ConfirmDeleteScreen) for s in app.screen_stack)
+            storage.delete.assert_called_once_with("dc-abc1")
+
+    @pytest.mark.asyncio
+    async def test_force_delete_refreshes_list(self) -> None:
+        """After force delete, the issue list is refreshed."""
+        issue = _make_issue(id="abc1", title="Delete me")
+        storage = _make_storage([issue])
+        app = DogcatTUI(storage)
+
+        async with app.run_test() as pilot:
+            initial_list_calls = storage.list.call_count
+
+            app.action_force_delete_issue()
+            await pilot.pause()
+
+            # list() should be called again for refresh
+            assert storage.list.call_count > initial_list_calls

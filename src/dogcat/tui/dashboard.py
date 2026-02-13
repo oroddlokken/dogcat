@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.widgets import Footer, Header, Input, OptionList
+from textual.containers import Horizontal, Vertical
+from textual.screen import Screen
+from textual.widgets import Button, Footer, Header, Input, OptionList, Static
 
 from dogcat.cli._formatting import build_hierarchy
 from dogcat.tui.shared import make_issue_label
@@ -17,16 +19,78 @@ if TYPE_CHECKING:
     from dogcat.storage import JSONLStorage
 
 
+class ConfirmDeleteScreen(Screen[bool]):
+    """Tiny confirmation dialog for issue deletion."""
+
+    BINDINGS: ClassVar = [
+        Binding("escape", "cancel", "Cancel", priority=True),
+    ]
+
+    CSS = """
+    ConfirmDeleteScreen {
+        align: center middle;
+    }
+
+    #confirm-dialog {
+        width: 50;
+        height: auto;
+        max-height: 10;
+        border: thick $accent;
+        padding: 1 2;
+    }
+
+    #confirm-buttons {
+        margin-top: 1;
+        height: auto;
+        align: center middle;
+    }
+
+    #confirm-buttons Button {
+        margin: 0 1;
+    }
+    """
+
+    def __init__(self, issue_id: str, title: str, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._issue_id = issue_id
+        self._title = title
+
+    def compose(self) -> ComposeResult:
+        """Build the confirmation dialog."""
+        with Vertical(id="confirm-dialog"):
+            yield Static(f"Delete [b]{self._issue_id}[/b]?")
+            yield Static(f"  {self._title}")
+            with Horizontal(id="confirm-buttons"):
+                yield Button("Yes", id="yes-btn", variant="error")
+                yield Button("No", id="no-btn", variant="default")
+
+    def on_mount(self) -> None:
+        """Focus the Yes button by default."""
+        self.query_one("#yes-btn", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle button clicks."""
+        self.dismiss(event.button.id == "yes-btn")
+
+    def action_cancel(self) -> None:
+        """Cancel deletion."""
+        self.dismiss(False)
+
+
 class DogcatTUI(App[None]):
     """Interactive issue dashboard."""
 
     TITLE = "dogcat"
+    ENABLE_COMMAND_PALETTE = False
 
     BINDINGS: ClassVar = [
         Binding("q", "quit", "Quit"),
+        Binding("escape", "quit", "Quit", show=False),
         Binding("r", "refresh", "Refresh"),
         Binding("n", "new_issue", "New"),
         Binding("e", "edit_issue", "Edit"),
+        Binding("d", "delete_issue", "Delete"),
+        Binding("D", "force_delete_issue", "Delete!", show=False),
     ]
 
     CSS = """
@@ -209,6 +273,48 @@ class DogcatTUI(App[None]):
             IssueEditorScreen(issue, self._storage),
             callback=self._on_editor_done,
         )
+
+    def action_delete_issue(self) -> None:
+        """Delete the selected issue after confirmation."""
+        full_id = self._get_selected_issue_id()
+        if full_id is None:
+            self.notify("No issue selected", severity="warning")
+            return
+
+        issue = self._storage.get(full_id)
+        if issue is None:
+            self.notify(f"Issue {full_id} not found", severity="error")
+            return
+
+        self.push_screen(
+            ConfirmDeleteScreen(full_id, issue.title),
+            callback=lambda confirmed: self._do_delete(full_id) if confirmed else None,
+        )
+
+    def action_force_delete_issue(self) -> None:
+        """Delete the selected issue immediately without confirmation."""
+        full_id = self._get_selected_issue_id()
+        if full_id is None:
+            self.notify("No issue selected", severity="warning")
+            return
+        self._do_delete(full_id)
+
+    def _do_delete(self, full_id: str) -> None:
+        """Execute the deletion and refresh the list."""
+        try:
+            self._storage.delete(full_id)
+            self.notify(f"Deleted {full_id}")
+        except Exception as e:
+            self.notify(f"Delete failed: {e}", severity="error")
+            return
+        self._load_issues()
+        option_list = self.query_one("#issue-list", OptionList)
+        if option_list.option_count > 0:
+            option_list.highlighted = min(
+                option_list.highlighted or 0,
+                option_list.option_count - 1,
+            )
+        option_list.focus()
 
     def action_refresh(self) -> None:
         """Reload issues from storage."""
