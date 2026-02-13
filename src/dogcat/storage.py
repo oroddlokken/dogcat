@@ -349,14 +349,6 @@ class JSONLStorage:
         ):
             self._save()
 
-    def compact(self) -> None:
-        """Explicitly compact the storage file.
-
-        Unlike automatic compaction, this always runs regardless of
-        branch or thresholds. Use for intentional maintenance operations.
-        """
-        self._save()
-
     # -- Event emission helpers ------------------------------------------
 
     def _emit_event(

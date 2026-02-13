@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import typer
 
-from dogcat.constants import EVENT_SYMBOLS, PRIORITY_COLORS, TYPE_COLORS
+from dogcat.constants import EVENT_SYMBOLS, PRIORITY_COLORS, STATUS_COLORS, TYPE_COLORS
 
 if TYPE_CHECKING:
     from dogcat.event_log import EventRecord
@@ -51,8 +51,11 @@ def format_issue_brief(
     # Use blocked symbol if issue has open dependencies
     if blocked_ids and issue.full_id in blocked_ids:
         status_emoji = "■"
+        status_color = STATUS_COLORS.get("blocked", "white")
     else:
         status_emoji = issue.get_status_emoji()
+        status_color = STATUS_COLORS.get(issue.status.value, "white")
+    status_emoji = typer.style(status_emoji, fg=status_color)
 
     priority_color = PRIORITY_COLORS.get(issue.priority, "white")
     priority_str = typer.style(f"[{issue.priority}]", fg=priority_color, bold=True)
@@ -118,7 +121,10 @@ def format_issue_full(issue: Issue, parent_title: str | None = None) -> str:
         f"{key('ID:')} {issue.full_id}",
         f"{key('Title:')} {issue.title}",
         "",
-        f"{key('Status:')} {issue.status.value}",
+        f"{key('Status:')} {typer.style(
+            issue.status.value,
+            fg=STATUS_COLORS.get(issue.status.value, 'white'),
+        )}",
         f"{key('Priority:')} {issue.priority}",
         f"{key('Type:')} {issue.issue_type.value}",
         "",
@@ -319,8 +325,10 @@ def format_issue_table(
         # Use blocked symbol if issue has open dependencies
         if blocked_ids and issue.full_id in blocked_ids:
             emoji = "■"
+            status_color = STATUS_COLORS.get("blocked", "white")
         else:
             emoji = issue.get_status_emoji()
+            status_color = STATUS_COLORS.get(issue.status.value, "white")
         priority_color = f"bold {PRIORITY_COLORS.get(issue.priority, 'white')}"
         issue_type = issue.issue_type.value
         type_color = TYPE_COLORS.get(issue_type, "white")
@@ -348,7 +356,7 @@ def format_issue_table(
             hidden_suffix = f" [yellow]\\[{count} hidden subtasks][/]"
 
         row = [
-            emoji,
+            f"[{status_color}]{emoji}[/]",
             issue.id,
             parent_id,
             f"[{type_color}]{issue_type}[/]",

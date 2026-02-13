@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from rich.text import Text
 
-from dogcat.constants import PRIORITY_COLORS, TYPE_COLORS
+from dogcat.constants import PRIORITY_COLORS, STATUS_COLORS, TYPE_COLORS
 
 if TYPE_CHECKING:
     from dogcat.models import Issue
@@ -70,7 +70,8 @@ def make_issue_label(issue: Issue) -> Text:
     priority_color = PRIORITY_COLORS.get(issue.priority, "white")
 
     label = Text()
-    label.append(f"{issue.get_status_emoji()} ", style="bold")
+    status_color = STATUS_COLORS.get(issue.status.value, "white")
+    label.append(f"{issue.get_status_emoji()} ", style=f"bold {status_color}")
     label.append(f"[{issue.priority}]", style=f"bold {priority_color}")
     label.append(" ")
     label.append(f"[{issue.issue_type.value}] ", style=type_color)

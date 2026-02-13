@@ -7,6 +7,8 @@
   - **Create and edit from the dashboard** — press `n` to create a new issue and `e` to edit the selected issue directly from the TUI dashboard.
   - **Delete from the dashboard** — press `d` to delete with confirmation or `D` to delete immediately.
   - **View mode replaces detail screen** — selecting an issue opens the editor in read-only view mode; press `e` to switch to editing.
+- **Status colors from constants** — CLI and TUI now use `STATUS_COLORS` from `constants.py` instead of hardcoded styles, keeping status coloring consistent and centralized.
+- **Remove unused `compact()` method** — removed the unused `compact()` method from `JSONLStorage`.
 
 ## 0.8.2
 
