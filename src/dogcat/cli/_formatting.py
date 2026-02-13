@@ -117,14 +117,13 @@ def _styled_key(label: str) -> str:
 def format_issue_full(issue: Issue, parent_title: str | None = None) -> str:
     """Format issue for full display."""
     key = _styled_key
+    status_color = STATUS_COLORS.get(issue.status.value, "white")
+    styled_status = typer.style(issue.status.value, fg=status_color)
     lines = [
         f"{key('ID:')} {issue.full_id}",
         f"{key('Title:')} {issue.title}",
         "",
-        f"{key('Status:')} {typer.style(
-            issue.status.value,
-            fg=STATUS_COLORS.get(issue.status.value, 'white'),
-        )}",
+        f"{key('Status:')} {styled_status}",
         f"{key('Priority:')} {issue.priority}",
         f"{key('Type:')} {issue.issue_type.value}",
         "",
