@@ -8,11 +8,13 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
+from textual.screen import Screen
 from textual.widgets import (
     Button,
     Checkbox,
     Collapsible,
     Footer,
+    Header,
     Input,
     Label,
     Select,
@@ -29,18 +31,21 @@ from dogcat.constants import (
 from dogcat.tui.shared import SHARED_CSS, make_issue_label
 
 if TYPE_CHECKING:
+    from textual.dom import DOMNode
+
     from dogcat.models import Issue
     from dogcat.storage import JSONLStorage
 
 
-class IssueEditorApp(App[bool]):
-    """Textual app for editing an issue."""
+class IssueEditorScreen(Screen["Issue | None"]):
+    """Screen for editing or creating an issue.
 
-    TITLE = "Edit Issue"
+    Dismisses with the saved ``Issue`` on success, or ``None`` on cancel.
+    """
 
     BINDINGS: ClassVar = [
         Binding("ctrl+s", "save", "Save", priority=True),
-        Binding("escape", "quit", "Cancel"),
+        Binding("escape", "go_back", "Cancel", priority=True),
     ]
 
     CSS = SHARED_CSS + """
@@ -78,8 +83,6 @@ class IssueEditorApp(App[bool]):
         self._create_mode = create_mode
         self._namespace = namespace
         self._existing_ids = existing_ids or set()
-        self.saved = False
-        self.updated_issue: Issue | None = None
 
     def _get_descendants(self, issue_id: str) -> set[str]:
         """Recursively collect all descendant IDs of an issue."""
@@ -108,6 +111,8 @@ class IssueEditorApp(App[bool]):
 
     def compose(self) -> ComposeResult:
         """Compose the editor form."""
+        yield Header()
+
         with Horizontal(id="title-bar"):
             id_text = "New Issue" if self._create_mode else self._issue.full_id
             yield Static(id_text, id="id-display")
@@ -214,20 +219,24 @@ class IssueEditorApp(App[bool]):
         """Focus the title input on mount."""
         self.query_one("#title-input", Input).focus()
         if self._create_mode:
-            self.title = "New Issue"
+            self.app.title = "New Issue"  # type: ignore[reportUnknownMemberType]
         else:
-            self.title = f"Edit: {self._issue.full_id} - {self._issue.title}"
+            self.app.title = f"Edit: {self._issue.full_id} - {self._issue.title}"  # type: ignore[reportUnknownMemberType]
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
         if event.button.id == "cancel-btn":
-            self.exit(False)
+            self.dismiss(None)
         elif event.button.id == "save-btn":
             self._do_save()
 
     def action_save(self) -> None:
         """Save the issue."""
         self._do_save()
+
+    def action_go_back(self) -> None:
+        """Cancel and return."""
+        self.dismiss(None)
 
     def _do_save(self) -> None:
         """Execute the save."""
@@ -305,9 +314,7 @@ class IssueEditorApp(App[bool]):
 
         try:
             self._storage.create(issue)
-            self.updated_issue = issue
-            self.saved = True
-            self.exit(True)
+            self.dismiss(issue)
         except Exception as e:
             self.notify(f"Create failed: {e}", severity="error")
 
@@ -381,15 +388,71 @@ class IssueEditorApp(App[bool]):
 
         if not updates:
             self.notify("No changes to save")
-            self.exit(False)
+            self.dismiss(None)
             return
 
         try:
-            self.updated_issue = self._storage.update(self._issue.full_id, updates)
-            self.saved = True
-            self.exit(True)
+            updated = self._storage.update(self._issue.full_id, updates)
+            self.dismiss(updated)
         except Exception as e:
             self.notify(f"Save failed: {e}", severity="error")
+
+
+class IssueEditorApp(App["Issue | None"]):
+    """Standalone Textual app wrapper for the editor screen.
+
+    Used by the ``dcat edit`` and ``dcat new`` CLI commands.  The dashboard
+    pushes ``IssueEditorScreen`` directly instead of going through this app.
+    """
+
+    TITLE = "Edit Issue"
+
+    CSS = IssueEditorScreen.CSS
+
+    def __init__(
+        self,
+        issue: Issue,
+        storage: JSONLStorage,
+        *,
+        create_mode: bool = False,
+        namespace: str = "dc",
+        existing_ids: set[str] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self._issue = issue
+        self._storage = storage
+        self._create_mode = create_mode
+        self._namespace = namespace
+        self._existing_ids = existing_ids
+        self.saved = False
+        self.updated_issue: Issue | None = None
+        self.result_issue: Issue | None = None
+
+    def _get_dom_base(self) -> DOMNode:  # type: ignore[override]
+        """Route queries to the active screen so tests can use app.query()."""
+        return self.screen
+
+    async def on_mount(self) -> None:
+        """Push the editor screen on startup."""
+        await self.push_screen(
+            IssueEditorScreen(
+                self._issue,
+                self._storage,
+                create_mode=self._create_mode,
+                namespace=self._namespace,
+                existing_ids=self._existing_ids,
+            ),
+            callback=self._on_editor_done,
+        )
+
+    def _on_editor_done(self, result: Issue | None) -> None:
+        """Handle editor screen dismissal."""
+        self.result_issue = result
+        if result is not None:
+            self.saved = True
+            self.updated_issue = result
+        self.exit(result)
 
 
 def edit_issue(issue_id: str, storage: JSONLStorage) -> Issue | None:
@@ -408,10 +471,7 @@ def edit_issue(issue_id: str, storage: JSONLStorage) -> Issue | None:
 
     editor = IssueEditorApp(issue, storage)
     editor.run()
-
-    if editor.saved and editor.updated_issue is not None:
-        return editor.updated_issue
-    return None
+    return editor.result_issue
 
 
 def new_issue(
@@ -463,7 +523,4 @@ def new_issue(
         existing_ids=storage.get_issue_ids(),
     )
     editor.run()
-
-    if editor.saved and editor.updated_issue is not None:
-        return editor.updated_issue
-    return None
+    return editor.result_issue

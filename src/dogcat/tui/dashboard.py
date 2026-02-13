@@ -25,6 +25,8 @@ class DogcatTUI(App[None]):
     BINDINGS: ClassVar = [
         Binding("q", "quit", "Quit"),
         Binding("r", "refresh", "Refresh"),
+        Binding("n", "new_issue", "New"),
+        Binding("e", "edit_issue", "Edit"),
     ]
 
     CSS = """
@@ -93,12 +95,41 @@ class DogcatTUI(App[None]):
             self._issues.append((label, issue.full_id))
             self._build_tree(hierarchy, issue.full_id, depth + 1)
 
+    def _get_selected_issue_id(self) -> str | None:
+        """Return the full_id of the currently highlighted issue, or None."""
+        option_list = self.query_one("#issue-list", OptionList)
+        if option_list.highlighted is None or option_list.option_count == 0:
+            return None
+        try:
+            selected_text = option_list.get_option_at_index(
+                option_list.highlighted,
+            ).prompt
+        except Exception:
+            return None
+        for label, full_id in self._issues:
+            if label == selected_text:
+                return full_id
+        return None
+
     def _on_detail_dismissed(self, _result: None) -> None:
         """Restore the dashboard after a detail screen is dismissed."""
         self.title = "dogcat"
         self._repopulate_option_list()
         option_list = self.query_one("#issue-list", OptionList)
         self._highlight_issue(option_list, self._last_selected_id)
+        option_list.focus()
+
+    def _on_editor_done(self, result: Issue | None) -> None:
+        """Restore the dashboard after the editor screen is dismissed."""
+        self.title = "dogcat"
+        self._load_issues()
+        option_list = self.query_one("#issue-list", OptionList)
+        if result is not None:
+            self._highlight_issue(option_list, result.full_id)
+        elif self._last_selected_id is not None:
+            self._highlight_issue(option_list, self._last_selected_id)
+        search = self.query_one("#dashboard-search", Input)
+        search.value = ""
         option_list.focus()
 
     def _highlight_issue(self, option_list: OptionList, full_id: str | None) -> None:
@@ -148,6 +179,53 @@ class DogcatTUI(App[None]):
                         callback=self._on_detail_dismissed,
                     )
                 return
+
+    def action_new_issue(self) -> None:
+        """Open the editor to create a new issue."""
+        from dogcat.cli._helpers import get_default_operator
+        from dogcat.config import get_issue_prefix
+        from dogcat.models import Issue
+        from dogcat.tui.editor import IssueEditorScreen
+
+        namespace = get_issue_prefix(str(self._storage.dogcats_dir))
+        owner = get_default_operator()
+
+        skeleton = Issue(
+            id="",
+            title="",
+            namespace=namespace,
+            owner=owner,
+        )
+        self.push_screen(
+            IssueEditorScreen(
+                skeleton,
+                self._storage,
+                create_mode=True,
+                namespace=namespace,
+                existing_ids=self._storage.get_issue_ids(),
+            ),
+            callback=self._on_editor_done,
+        )
+
+    def action_edit_issue(self) -> None:
+        """Open the editor for the currently selected issue."""
+        from dogcat.tui.editor import IssueEditorScreen
+
+        full_id = self._get_selected_issue_id()
+        if full_id is None:
+            self.notify("No issue selected", severity="warning")
+            return
+
+        issue = self._storage.get(full_id)
+        if issue is None:
+            self.notify(f"Issue {full_id} not found", severity="error")
+            return
+
+        self._last_selected_id = full_id
+        self.push_screen(
+            IssueEditorScreen(issue, self._storage),
+            callback=self._on_editor_done,
+        )
 
     def action_refresh(self) -> None:
         """Reload issues from storage."""
