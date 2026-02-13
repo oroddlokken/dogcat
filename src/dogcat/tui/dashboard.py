@@ -111,14 +111,6 @@ class DogcatTUI(App[None]):
                 return full_id
         return None
 
-    def _on_detail_dismissed(self, _result: None) -> None:
-        """Restore the dashboard after a detail screen is dismissed."""
-        self.title = "dogcat"
-        self._repopulate_option_list()
-        option_list = self.query_one("#issue-list", OptionList)
-        self._highlight_issue(option_list, self._last_selected_id)
-        option_list.focus()
-
     def _on_editor_done(self, result: Issue | None) -> None:
         """Restore the dashboard after the editor screen is dismissed."""
         self.title = "dogcat"
@@ -146,15 +138,6 @@ class DogcatTUI(App[None]):
                 return
             idx += 1
 
-    def _repopulate_option_list(self) -> None:
-        """Re-populate the OptionList from the current _issues and search query."""
-        query = self.query_one("#dashboard-search", Input).value.lower()
-        option_list = self.query_one("#issue-list", OptionList)
-        option_list.clear_options()
-        for label, full_id in self._issues:
-            if not query or query in full_id.lower() or query in label.plain.lower():
-                option_list.add_option(label)
-
     def on_input_changed(self, event: Input.Changed) -> None:
         """Filter the option list based on search input."""
         query = event.value.lower()
@@ -166,7 +149,7 @@ class DogcatTUI(App[None]):
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         """Show issue detail when Enter is pressed on an item."""
-        from dogcat.tui.detail import IssueDetailScreen
+        from dogcat.tui.editor import IssueEditorScreen
 
         selected_text = event.option.prompt
         for label, full_id in self._issues:
@@ -175,8 +158,8 @@ class DogcatTUI(App[None]):
                 issue = self._storage.get(full_id)
                 if issue is not None:
                     self.push_screen(
-                        IssueDetailScreen(issue, self._storage),
-                        callback=self._on_detail_dismissed,
+                        IssueEditorScreen(issue, self._storage, view_mode=True),
+                        callback=self._on_editor_done,
                     )
                 return
 

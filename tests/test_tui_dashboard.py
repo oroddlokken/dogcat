@@ -6,7 +6,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from textual.widgets import Input, OptionList
+from textual.widgets import OptionList
 
 from dogcat.models import Issue
 from dogcat.tui.dashboard import DogcatTUI
@@ -98,9 +98,7 @@ class TestDashboardEditAction:
             await pilot.pause()
 
             # Check that the editor screen was pushed
-            assert any(
-                isinstance(s, IssueEditorScreen) for s in app.screen_stack
-            )
+            assert any(isinstance(s, IssueEditorScreen) for s in app.screen_stack)
 
     @pytest.mark.asyncio
     async def test_edit_issue_not_found_notifies(self) -> None:
@@ -118,9 +116,7 @@ class TestDashboardEditAction:
             # Should not crash, editor screen should not be pushed
             from dogcat.tui.editor import IssueEditorScreen
 
-            assert not any(
-                isinstance(s, IssueEditorScreen) for s in app.screen_stack
-            )
+            assert not any(isinstance(s, IssueEditorScreen) for s in app.screen_stack)
 
 
 class TestDashboardNewAction:

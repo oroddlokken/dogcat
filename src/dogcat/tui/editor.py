@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
@@ -41,11 +42,16 @@ class IssueEditorScreen(Screen["Issue | None"]):
     """Screen for editing or creating an issue.
 
     Dismisses with the saved ``Issue`` on success, or ``None`` on cancel.
+
+    When *view_mode* is ``True`` the form is read-only and extra sections
+    (dependencies, children, comments) are shown.  Pressing ``e`` switches
+    to edit mode.
     """
 
     BINDINGS: ClassVar = [
         Binding("ctrl+s", "save", "Save", priority=True),
-        Binding("escape", "go_back", "Cancel", priority=True),
+        Binding("escape", "go_back", "Back", priority=True),
+        Binding("e", "enter_edit", "Edit"),
     ]
 
     CSS = SHARED_CSS + """
@@ -65,6 +71,11 @@ class IssueEditorScreen(Screen["Issue | None"]):
         min-height: 8;
         max-height: 20;
     }
+
+    .detail-section-body {
+        margin-left: 2;
+        margin-bottom: 1;
+    }
     """
 
     def __init__(
@@ -73,6 +84,7 @@ class IssueEditorScreen(Screen["Issue | None"]):
         storage: JSONLStorage,
         *,
         create_mode: bool = False,
+        view_mode: bool = False,
         namespace: str = "dc",
         existing_ids: set[str] | None = None,
         **kwargs: Any,
@@ -81,6 +93,7 @@ class IssueEditorScreen(Screen["Issue | None"]):
         self._issue = issue
         self._storage = storage
         self._create_mode = create_mode
+        self._view_mode = view_mode
         self._namespace = namespace
         self._existing_ids = existing_ids or set()
 
@@ -111,6 +124,7 @@ class IssueEditorScreen(Screen["Issue | None"]):
 
     def compose(self) -> ComposeResult:
         """Compose the editor form."""
+        ro = self._view_mode
         yield Header()
 
         with Horizontal(id="title-bar"):
@@ -120,6 +134,7 @@ class IssueEditorScreen(Screen["Issue | None"]):
                 value=self._issue.title,
                 placeholder="Title",
                 id="title-input",
+                disabled=ro,
             )
             yield Button("Cancel", id="cancel-btn", variant="default")
             yield Button("Save", id="save-btn", variant="primary")
@@ -131,18 +146,21 @@ class IssueEditorScreen(Screen["Issue | None"]):
                     value=self._issue.issue_type.value,
                     id="type-input",
                     allow_blank=False,
+                    disabled=ro,
                 )
                 yield Select(
                     options=[(label, val) for label, val in STATUS_OPTIONS],
                     value=self._issue.status.value,
                     id="status-input",
                     allow_blank=False,
+                    disabled=ro,
                 )
                 yield Select(
                     options=[(label, val) for label, val in PRIORITY_OPTIONS],
                     value=self._issue.priority,
                     id="priority-input",
                     allow_blank=False,
+                    disabled=ro,
                 )
                 yield Checkbox(
                     "Manual",
@@ -151,6 +169,7 @@ class IssueEditorScreen(Screen["Issue | None"]):
                         or self._issue.metadata.get("no_agent"),
                     ),
                     id="manual-input",
+                    disabled=ro,
                 )
 
             with Horizontal(classes="info-row"):
@@ -158,29 +177,34 @@ class IssueEditorScreen(Screen["Issue | None"]):
                     value=self._issue.owner or "",
                     placeholder="Owner",
                     id="owner-input",
+                    disabled=ro,
                 )
                 yield Select(
                     options=self._get_parent_options(),
-                    value=(self._issue.parent if self._issue.parent else Select.BLANK),
+                    value=(self._issue.parent or Select.BLANK),
                     prompt="Parent",
                     allow_blank=True,
                     id="parent-input",
+                    disabled=ro,
                 )
                 yield Input(
                     value=self._issue.external_ref or "",
                     placeholder="External ref",
                     id="external-ref-input",
+                    disabled=ro,
                 )
                 yield Input(
                     value=", ".join(self._issue.labels) if self._issue.labels else "",
                     placeholder="Labels (comma or space separated)",
                     id="labels-input",
+                    disabled=ro,
                 )
 
             yield Label("Description", classes="field-label")
             yield TextArea(
                 self._issue.description or "",
                 id="description-input",
+                read_only=ro,
             )
 
             with Collapsible(
@@ -191,6 +215,7 @@ class IssueEditorScreen(Screen["Issue | None"]):
                     self._issue.notes or "",
                     id="notes-input",
                     classes="collapsible-textarea",
+                    read_only=ro,
                 )
 
             with Collapsible(
@@ -201,6 +226,7 @@ class IssueEditorScreen(Screen["Issue | None"]):
                     self._issue.acceptance or "",
                     id="acceptance-input",
                     classes="collapsible-textarea",
+                    read_only=ro,
                 )
 
             with Collapsible(
@@ -211,16 +237,54 @@ class IssueEditorScreen(Screen["Issue | None"]):
                     self._issue.design or "",
                     id="design-input",
                     classes="collapsible-textarea",
+                    read_only=ro,
                 )
+
+            # View-only sections: deps, children, comments
+            if ro:
+                yield from self._compose_view_sections()
 
         yield Footer()
 
+    def _compose_view_sections(self) -> ComposeResult:
+        """Yield read-only dependency/children/comment sections."""
+        deps = self._storage.get_dependencies(self._issue.full_id)
+        if deps:
+            with Collapsible(title="Dependencies", collapsed=False, id="deps-section"):
+                for dep in deps:
+                    yield Static(
+                        f"  \u2192 {dep.depends_on_id} ({dep.dep_type.value})",
+                        classes="detail-section-body",
+                    )
+
+        children = self._storage.get_children(self._issue.full_id)
+        if children:
+            with Collapsible(title="Children", collapsed=False, id="children-section"):
+                for child in children:
+                    yield Static(
+                        f"  \u21b3 {child.id}: {child.title}",
+                        classes="detail-section-body",
+                    )
+
+        if self._issue.comments:
+            with Collapsible(title="Comments", collapsed=False, id="comments-section"):
+                for comment in self._issue.comments:
+                    yield Static(
+                        f"  [{comment.id}] {comment.author}\n    {comment.text}",
+                        classes="detail-section-body",
+                    )
+
     def on_mount(self) -> None:
-        """Focus the title input on mount."""
-        self.query_one("#title-input", Input).focus()
-        if self._create_mode:
+        """Set title and focus; hide buttons in view mode."""
+        if self._view_mode:
+            self.query_one("#cancel-btn", Button).display = False
+            self.query_one("#save-btn", Button).display = False
+            self.app.title = f"{self._issue.full_id}: {self._issue.title}"  # type: ignore[reportUnknownMemberType]
+        elif self._create_mode:
+            self.query_one("#title-input", Input).focus()
             self.app.title = "New Issue"  # type: ignore[reportUnknownMemberType]
         else:
+            self.query_one("#title-input", Input).focus()
             self.app.title = f"Edit: {self._issue.full_id} - {self._issue.title}"  # type: ignore[reportUnknownMemberType]
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -237,6 +301,45 @@ class IssueEditorScreen(Screen["Issue | None"]):
     def action_go_back(self) -> None:
         """Cancel and return."""
         self.dismiss(None)
+
+    def check_action(  # type: ignore[override]
+        self,
+        action: str,
+        parameters: tuple[object, ...],  # noqa: ARG002
+    ) -> bool | None:
+        """Conditionally enable bindings based on the current mode."""
+        if action == "enter_edit":
+            return self._view_mode
+        if action == "save":
+            return not self._view_mode
+        return True
+
+    def action_enter_edit(self) -> None:
+        """Switch from view mode to edit mode."""
+        self._view_mode = False
+
+        # Enable all form fields
+        for inp in self.query(Input):
+            inp.disabled = False
+        for sel in self.query(Select):
+            sel.disabled = False  # type: ignore[reportUnknownMemberType]
+        self.query_one("#manual-input", Checkbox).disabled = False
+        for ta in self.query(TextArea):
+            ta.read_only = False
+
+        # Show action buttons
+        self.query_one("#cancel-btn", Button).display = True
+        self.query_one("#save-btn", Button).display = True
+
+        # Remove view-only sections
+        for section_id in ("deps-section", "children-section", "comments-section"):
+            with contextlib.suppress(Exception):
+                self.query_one(f"#{section_id}").remove()
+
+        # Update title and bindings
+        self.app.title = f"Edit: {self._issue.full_id} - {self._issue.title}"  # type: ignore[reportUnknownMemberType]
+        self.refresh_bindings()
+        self.query_one("#title-input", Input).focus()
 
     def _do_save(self) -> None:
         """Execute the save."""

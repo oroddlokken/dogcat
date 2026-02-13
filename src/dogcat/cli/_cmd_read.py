@@ -139,7 +139,7 @@ def register(app: typer.Typer) -> None:
             if owner:
                 filters["owner"] = owner
 
-            issues = storage.list(filters if filters else None)
+            issues = storage.list(filters or None)
 
             # Apply namespace filtering
             actual_dogcats_dir = str(storage.dogcats_dir)
