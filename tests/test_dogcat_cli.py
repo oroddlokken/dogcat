@@ -6826,3 +6826,153 @@ class TestRecentlyNamespaceFilter:
         events = json.loads(result.stdout)
         for event in events:
             assert not event["issue_id"].startswith("proj-b-")
+
+
+class TestListCollapseDeferredSubtrees:
+    """Test that dcat list collapses children of deferred parents."""
+
+    def _setup_deferred_parent_with_children(
+        self,
+        tmp_path: Path,
+    ) -> tuple[str, str, str, str]:
+        """Create a deferred parent with two children.
+
+        Returns:
+            (dogcats_dir, parent_full_id, child1_full_id, child2_full_id)
+        """
+        dogcats_dir = str(tmp_path / ".dogcats")
+        runner.invoke(app, ["init", "--dogcats-dir", dogcats_dir])
+
+        # Create parent
+        result = runner.invoke(
+            app,
+            ["create", "Parent task", "--json", "--dogcats-dir", dogcats_dir],
+        )
+        parent_data = json.loads(result.stdout)
+        parent_full_id = f"{parent_data['namespace']}-{parent_data['id']}"
+
+        # Create child 1
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "Child one",
+                "--parent",
+                parent_data["id"],
+                "--json",
+                "--dogcats-dir",
+                dogcats_dir,
+            ],
+        )
+        child1_data = json.loads(result.stdout)
+        child1_full_id = f"{child1_data['namespace']}-{child1_data['id']}"
+
+        # Create child 2
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "Child two",
+                "--parent",
+                parent_data["id"],
+                "--json",
+                "--dogcats-dir",
+                dogcats_dir,
+            ],
+        )
+        child2_data = json.loads(result.stdout)
+        child2_full_id = f"{child2_data['namespace']}-{child2_data['id']}"
+
+        # Defer the parent
+        runner.invoke(
+            app,
+            [
+                "update",
+                parent_full_id,
+                "--status",
+                "deferred",
+                "--dogcats-dir",
+                dogcats_dir,
+            ],
+        )
+
+        return dogcats_dir, parent_full_id, child1_full_id, child2_full_id
+
+    def test_list_collapses_deferred_children(self, tmp_path: Path) -> None:
+        """Children of deferred parents are hidden with a count shown."""
+        dogcats_dir, parent_full_id, child1_full_id, child2_full_id = (
+            self._setup_deferred_parent_with_children(tmp_path)
+        )
+
+        result = runner.invoke(
+            app,
+            ["list", "--dogcats-dir", dogcats_dir],
+        )
+        assert result.exit_code == 0
+        # Parent should be visible with hidden count
+        assert parent_full_id in result.stdout
+        assert "2 hidden subtasks" in result.stdout
+        # Children should NOT be visible
+        assert child1_full_id not in result.stdout
+        assert child2_full_id not in result.stdout
+
+    def test_list_shows_deferred_blocker_annotation(self, tmp_path: Path) -> None:
+        """Non-child issue blocked by deferred gets annotation."""
+        dogcats_dir, parent_full_id, _child1, _child2 = (
+            self._setup_deferred_parent_with_children(tmp_path)
+        )
+
+        # Create an external issue that depends on the deferred parent
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "External blocked issue",
+                "--json",
+                "--dogcats-dir",
+                dogcats_dir,
+            ],
+        )
+        ext_data = json.loads(result.stdout)
+        ext_full_id = f"{ext_data['namespace']}-{ext_data['id']}"
+
+        # Add dependency: external issue depends on deferred parent
+        dep_result = runner.invoke(
+            app,
+            [
+                "dep",
+                ext_full_id,
+                "add",
+                "--depends-on",
+                parent_full_id,
+                "--dogcats-dir",
+                dogcats_dir,
+            ],
+        )
+        assert dep_result.exit_code == 0
+
+        result = runner.invoke(
+            app,
+            ["list", "--dogcats-dir", dogcats_dir],
+        )
+        assert result.exit_code == 0
+        assert "blocked by deferred" in result.stdout
+        assert parent_full_id in result.stdout
+
+    def test_list_json_not_affected_by_collapse(self, tmp_path: Path) -> None:
+        """JSON output still shows all issues including children of deferred."""
+        dogcats_dir, parent_full_id, child1_full_id, child2_full_id = (
+            self._setup_deferred_parent_with_children(tmp_path)
+        )
+
+        result = runner.invoke(
+            app,
+            ["list", "--json", "--dogcats-dir", dogcats_dir],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        all_ids = {f"{i['namespace']}-{i['id']}" for i in data}
+        # All issues should be present in JSON output
+        assert parent_full_id in all_ids
+        assert child1_full_id in all_ids
+        assert child2_full_id in all_ids

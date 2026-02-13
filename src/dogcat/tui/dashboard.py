@@ -227,6 +227,16 @@ class DogcatTUI(App[None]):
                     )
                 return
 
+    def check_action(  # type: ignore[override]
+        self,
+        action: str,
+        parameters: tuple[object, ...],  # noqa: ARG002
+    ) -> bool | None:
+        """Disable dashboard-only actions when a screen is pushed."""
+        if action in ("new_issue", "edit_issue", "delete_issue", "force_delete_issue"):
+            return self.screen is self.screen_stack[0]
+        return True
+
     def action_new_issue(self) -> None:
         """Open the editor to create a new issue."""
         from dogcat.cli._helpers import get_default_operator

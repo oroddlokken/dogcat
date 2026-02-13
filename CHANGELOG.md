@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 0.8.3
+
+- **Collapse deferred subtrees in `dcat list`** — children of deferred parents are hidden with a `[N hidden subtasks]` summary; external issues blocked by deferred subtrees are annotated. JSON output is unaffected.
+- **TUI is now generally available** — removed the feature gate; `dcat tui` works without enabling experimental flags.
+  - **Create and edit from the dashboard** — press `n` to create a new issue and `e` to edit the selected issue directly from the TUI dashboard.
+  - **Delete from the dashboard** — press `d` to delete with confirmation or `D` to delete immediately.
+  - **View mode replaces detail screen** — selecting an issue opens the editor in read-only view mode; press `e` to switch to editing.
+
 ## 0.8.2
 
 - **Namespace visibility** — control which namespaces appear in `list`, `search`, `recently-added`, and `recently-closed`. Set `visible_namespaces` (whitelist) or `hidden_namespaces` (blocklist) via `dcat config set`. The primary namespace is always visible.

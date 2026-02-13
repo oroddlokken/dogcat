@@ -265,6 +265,45 @@ class TestDashboardDeleteBindings:
             assert "D" in binding_keys
 
 
+class TestDashboardActionsDisabledInEditor:
+    """Test that n/d/D actions are disabled when editor screen is pushed."""
+
+    @pytest.mark.asyncio
+    async def test_actions_disabled_when_editor_open(self) -> None:
+        """n/d/D/e should be disabled when the editor screen is active."""
+        from dogcat.tui.editor import IssueEditorScreen
+
+        issue = _make_issue(id="abc1", title="Test issue")
+        storage = _make_storage([issue])
+        app = DogcatTUI(storage)
+
+        async with app.run_test() as pilot:
+            # Push editor screen (view mode)
+            app.action_edit_issue()
+            await pilot.pause()
+
+            # Verify editor is active
+            assert any(isinstance(s, IssueEditorScreen) for s in app.screen_stack)
+
+            # check_action should return False for dashboard-only actions
+            assert app.check_action("new_issue", ()) is False
+            assert app.check_action("delete_issue", ()) is False
+            assert app.check_action("force_delete_issue", ()) is False
+            assert app.check_action("edit_issue", ()) is False
+
+    @pytest.mark.asyncio
+    async def test_actions_enabled_on_dashboard(self) -> None:
+        """n/d/D/e should be enabled when on the dashboard screen."""
+        storage = _make_storage()
+        app = DogcatTUI(storage)
+
+        async with app.run_test() as _pilot:
+            assert app.check_action("new_issue", ()) is True
+            assert app.check_action("delete_issue", ()) is True
+            assert app.check_action("force_delete_issue", ()) is True
+            assert app.check_action("edit_issue", ()) is True
+
+
 class TestDashboardDeleteAction:
     """Test the delete (d) keybinding with confirmation."""
 

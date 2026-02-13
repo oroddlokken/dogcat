@@ -50,7 +50,8 @@ class IssueEditorScreen(Screen["Issue | None"]):
 
     BINDINGS: ClassVar = [
         Binding("ctrl+s", "save", "Save", priority=True),
-        Binding("escape", "go_back", "Back", priority=True),
+        Binding("escape", "go_back", "Back", priority=True, show=False),
+        Binding("q", "go_back", "Quit", show=False),
         Binding("e", "enter_edit", "Edit"),
     ]
 
@@ -299,7 +300,9 @@ class IssueEditorScreen(Screen["Issue | None"]):
         self._do_save()
 
     def action_go_back(self) -> None:
-        """Cancel and return."""
+        """Cancel and return.  Only allowed in view mode to prevent data loss."""
+        if not self._view_mode:
+            return
         self.dismiss(None)
 
     def check_action(  # type: ignore[override]
@@ -509,6 +512,7 @@ class IssueEditorApp(App["Issue | None"]):
     """
 
     TITLE = "Edit Issue"
+    ENABLE_COMMAND_PALETTE = False
 
     CSS = IssueEditorScreen.CSS
 

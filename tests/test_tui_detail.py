@@ -395,3 +395,40 @@ class TestViewToEditTransition:
             # In edit mode: edit hidden, save visible
             assert screen.check_action("enter_edit", ()) is False
             assert screen.check_action("save", ()) is True
+
+    @pytest.mark.asyncio
+    async def test_escape_blocked_in_edit_mode(self) -> None:
+        """Escape does not dismiss the screen after switching to edit mode."""
+        issue = _make_issue()
+        app, screen, _ = await _push_view(issue)
+
+        async with app.run_test() as pilot:
+            app.push_screen(screen)
+            await pilot.pause()
+
+            # Switch to edit mode
+            screen.action_enter_edit()
+            await pilot.pause()
+
+            # Escape should be a no-op — screen stays open
+            screen.action_go_back()
+            await pilot.pause()
+
+            # Screen should still be active (not dismissed)
+            assert screen in app.screen_stack
+
+    @pytest.mark.asyncio
+    async def test_escape_works_in_view_mode(self) -> None:
+        """Escape dismisses the screen in view mode."""
+        issue = _make_issue()
+        app, screen, _ = await _push_view(issue)
+
+        async with app.run_test() as pilot:
+            app.push_screen(screen)
+            await pilot.pause()
+
+            # Escape should dismiss in view mode
+            screen.action_go_back()
+            await pilot.pause()
+
+            assert screen not in app.screen_stack

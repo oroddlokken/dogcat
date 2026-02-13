@@ -29,6 +29,102 @@ from ._helpers import _make_alias, get_storage
 
 if TYPE_CHECKING:
     from dogcat.models import Issue
+    from dogcat.storage import JSONLStorage
+
+
+def _collect_descendants(storage: JSONLStorage, parent_id: str) -> set[str]:
+    """Recursively collect all descendant issue IDs of a parent.
+
+    Args:
+        storage: The storage instance
+        parent_id: The parent issue ID
+
+    Returns:
+        Set of all descendant issue full_ids
+    """
+    descendants: set[str] = set()
+    try:
+        children = storage.get_children(parent_id)
+    except ValueError:
+        return descendants
+    for child in children:
+        descendants.add(child.full_id)
+        descendants |= _collect_descendants(storage, child.full_id)
+    return descendants
+
+
+def _collapse_deferred_subtrees(
+    issues: list[Issue],
+    storage: JSONLStorage,
+) -> tuple[list[Issue], dict[str, int], dict[str, list[str]]]:
+    """Collapse children of deferred parents and annotate blocked externals.
+
+    Args:
+        issues: The list of issues to process
+        storage: The storage instance
+
+    Returns:
+        Tuple of (filtered issues, hidden_counts, deferred_blocker_map)
+        - filtered issues: children of deferred parents removed
+        - hidden_counts: deferred parent full_id -> count of hidden descendants
+        - deferred_blocker_map: issue full_id -> list of deferred blocker IDs
+    """
+    from dogcat.models import Status
+
+    visible_ids = {i.full_id for i in issues}
+
+    # Find deferred parents in the visible set
+    deferred_parents = {i.full_id for i in issues if i.status == Status.DEFERRED}
+
+    # Collect all descendants of deferred parents
+    all_deferred_descendants: set[str] = set()
+    # Map: descendant_id -> deferred ancestor id(s)
+    descendant_to_deferred: dict[str, set[str]] = {}
+    hidden_counts: dict[str, int] = {}
+
+    for dp_id in deferred_parents:
+        descendants = _collect_descendants(storage, dp_id)
+        visible_descendants = descendants & visible_ids
+        if visible_descendants:
+            hidden_counts[dp_id] = len(visible_descendants)
+            all_deferred_descendants |= visible_descendants
+            for desc_id in descendants:
+                descendant_to_deferred.setdefault(desc_id, set()).add(dp_id)
+
+    # Build deferred blocker map for non-child issues that depend on
+    # a deferred issue or a child-of-deferred issue
+    deferred_or_descendant_ids = deferred_parents | all_deferred_descendants
+    deferred_blocker_map: dict[str, list[str]] = {}
+
+    for issue in issues:
+        if issue.full_id in deferred_or_descendant_ids:
+            continue
+        try:
+            deps = storage.get_dependencies(issue.full_id)
+        except ValueError:
+            continue
+        deferred_blockers: list[str] = []
+        for dep in deps:
+            dep_id = dep.depends_on_id
+            if dep_id in deferred_parents:
+                deferred_blockers.append(dep_id)
+            elif dep_id in descendant_to_deferred:
+                # Attribute to the deferred ancestor
+                deferred_blockers.extend(descendant_to_deferred[dep_id])
+        if deferred_blockers:
+            # Deduplicate while preserving order
+            seen: set[str] = set()
+            unique: list[str] = []
+            for b in deferred_blockers:
+                if b not in seen:
+                    seen.add(b)
+                    unique.append(b)
+            deferred_blocker_map[issue.full_id] = unique
+
+    # Filter out descendants of deferred parents
+    filtered = [i for i in issues if i.full_id not in all_deferred_descendants]
+
+    return filtered, hidden_counts, deferred_blocker_map
 
 
 def register(app: typer.Typer) -> None:
@@ -233,15 +329,22 @@ def register(app: typer.Typer) -> None:
             # Sort by priority (lower number = higher priority)
             issues = sorted(issues, key=lambda i: (i.priority, i.id))
 
-            if limit:
-                issues = issues[:limit]
-
             if json_output:
+                if limit:
+                    issues = issues[:limit]
                 from dogcat.models import issue_to_dict
 
                 output = [issue_to_dict(issue) for issue in issues]
                 typer.echo(orjson.dumps(output).decode())
             else:
+                # Collapse children of deferred parents
+                issues, hidden_counts, deferred_blocker_map = (
+                    _collapse_deferred_subtrees(issues, storage)
+                )
+
+                if limit:
+                    issues = issues[:limit]
+
                 # Get blocked issue IDs to show correct status symbol
                 from dogcat.deps import get_blocked_issues
 
@@ -257,6 +360,8 @@ def register(app: typer.Typer) -> None:
                             issues,
                             blocked_ids=blocked_ids,
                             blocked_by_map=blocked_by_map,
+                            hidden_counts=hidden_counts,
+                            deferred_blocker_map=deferred_blocker_map,
                         ),
                     )
                     typer.echo(get_legend())
@@ -266,6 +371,8 @@ def register(app: typer.Typer) -> None:
                             issues,
                             blocked_ids=blocked_ids,
                             blocked_by_map=blocked_by_map,
+                            hidden_counts=hidden_counts,
+                            deferred_blocker_map=deferred_blocker_map,
                         ),
                     )
                     typer.echo(get_legend())
@@ -276,6 +383,12 @@ def register(app: typer.Typer) -> None:
                                 issue,
                                 blocked_ids=blocked_ids,
                                 blocked_by_map=blocked_by_map,
+                                hidden_subtask_count=hidden_counts.get(
+                                    issue.full_id,
+                                ),
+                                deferred_blockers=deferred_blocker_map.get(
+                                    issue.full_id,
+                                ),
                             ),
                         )
                     typer.echo(get_legend())

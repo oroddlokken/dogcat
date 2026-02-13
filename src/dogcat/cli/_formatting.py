@@ -33,6 +33,8 @@ def format_issue_brief(
     issue: Issue,
     blocked_ids: set[str] | None = None,
     blocked_by_map: dict[str, list[str]] | None = None,
+    hidden_subtask_count: int | None = None,
+    deferred_blockers: list[str] | None = None,
 ) -> str:
     """Format issue for brief display with color coding.
 
@@ -40,6 +42,8 @@ def format_issue_brief(
         issue: The issue to format
         blocked_ids: Set of issue IDs that are blocked by dependencies
         blocked_by_map: Mapping of issue ID to list of blocking issue IDs
+        hidden_subtask_count: Number of hidden subtasks (for deferred parents)
+        deferred_blockers: List of deferred issue IDs blocking this issue
 
     Returns:
         Formatted string with status emoji, priority, ID, title, and type
@@ -81,10 +85,24 @@ def format_issue_brief(
     if blocked_by_map and issue.full_id in blocked_by_map:
         blockers = ", ".join(blocked_by_map[issue.full_id])
         blocked_by_str = " " + typer.style(f"[blocked by: {blockers}]", fg="red")
+    hidden_str = ""
+    if hidden_subtask_count:
+        hidden_str = " " + typer.style(
+            f"[{hidden_subtask_count} hidden subtasks]",
+            fg="yellow",
+        )
+    deferred_blocker_str = ""
+    if deferred_blockers:
+        ids = ", ".join(deferred_blockers)
+        deferred_blocker_str = " " + typer.style(
+            f"[blocked by deferred: {ids}]",
+            fg="bright_black",
+        )
     base = f"{status_emoji} {priority_str} {issue.full_id}: {issue.title} {type_str}"
 
     suffixes = parent_str + labels_str + manual_str
-    suffixes += blocked_by_str + ext_ref_str + closed_str
+    suffixes += blocked_by_str + hidden_str + deferred_blocker_str
+    suffixes += ext_ref_str + closed_str
     return f"{base}{suffixes}"
 
 
@@ -172,6 +190,8 @@ def format_issue_tree(
     _indent: int = 0,
     blocked_ids: set[str] | None = None,
     blocked_by_map: dict[str, list[str]] | None = None,
+    hidden_counts: dict[str, int] | None = None,
+    deferred_blocker_map: dict[str, list[str]] | None = None,
 ) -> str:
     """Format issues as a tree based on parent-child relationships.
 
@@ -180,6 +200,8 @@ def format_issue_tree(
         _indent: Current indentation level (unused, kept for compatibility)
         blocked_ids: Set of issue IDs that are blocked by dependencies
         blocked_by_map: Mapping of issue ID to list of blocking issue IDs
+        hidden_counts: Deferred parent full_id -> count of hidden descendants
+        deferred_blocker_map: Issue full_id -> list of deferred blocker IDs
 
     Returns:
         Formatted tree string
@@ -196,6 +218,21 @@ def format_issue_tree(
         key=lambda i: (i.priority, i.full_id),
     )
 
+    def _brief(issue: Issue) -> str:
+        return format_issue_brief(
+            issue,
+            blocked_ids,
+            blocked_by_map,
+            hidden_subtask_count=(
+                hidden_counts.get(issue.full_id) if hidden_counts else None
+            ),
+            deferred_blockers=(
+                deferred_blocker_map.get(issue.full_id)
+                if deferred_blocker_map
+                else None
+            ),
+        )
+
     def format_recursive(parent_id: str | None, depth: int) -> list[str]:
         """Recursively format issues and their children."""
         lines: list[str] = []
@@ -205,7 +242,7 @@ def format_issue_tree(
 
         for issue in children:
             indent_str = "  " * depth
-            formatted = format_issue_brief(issue, blocked_ids, blocked_by_map)
+            formatted = _brief(issue)
             lines.append(f"{indent_str}{formatted}")
             # Recursively format children
             lines.extend(format_recursive(issue.full_id, depth + 1))
@@ -215,7 +252,7 @@ def format_issue_tree(
     # Format root issues and their children
     lines: list[str] = []
     for issue in roots:
-        formatted = format_issue_brief(issue, blocked_ids, blocked_by_map)
+        formatted = _brief(issue)
         lines.append(formatted)
         lines.extend(format_recursive(issue.full_id, 1))
 
@@ -226,6 +263,8 @@ def format_issue_table(
     issues: list[Issue],
     blocked_ids: set[str] | None = None,
     blocked_by_map: dict[str, list[str]] | None = None,
+    hidden_counts: dict[str, int] | None = None,
+    deferred_blocker_map: dict[str, list[str]] | None = None,
 ) -> str:
     """Format issues as an aligned table with columns using Rich.
 
@@ -233,6 +272,8 @@ def format_issue_table(
         issues: List of issues to format
         blocked_ids: Set of issue IDs that are blocked by dependencies
         blocked_by_map: Mapping of issue ID to list of blocking issue IDs
+        hidden_counts: Deferred parent full_id -> count of hidden descendants
+        deferred_blocker_map: Issue full_id -> list of deferred blocker IDs
 
     Returns:
         Formatted table string (rendered by Rich)
@@ -300,13 +341,19 @@ def format_issue_table(
             else ""
         )
 
+        # Add hidden subtask count suffix to title for deferred parents
+        hidden_suffix = ""
+        if hidden_counts and issue.full_id in hidden_counts:
+            count = hidden_counts[issue.full_id]
+            hidden_suffix = f" [yellow]\\[{count} hidden subtasks][/]"
+
         row = [
             emoji,
             issue.id,
             parent_id,
             f"[{type_color}]{issue_type}[/]",
             f"[{priority_color}]{issue.priority}[/]",
-            f"{escape(issue.title)}{manual_str}",
+            f"{escape(issue.title)}{manual_str}{hidden_suffix}",
             f"[cyan]{labels_str}[/]" if labels_str else "",
         ]
         if has_ext_ref:
@@ -316,7 +363,19 @@ def format_issue_table(
             blockers = ""
             if blocked_by_map and issue.full_id in blocked_by_map:
                 blockers = ", ".join(blocked_by_map[issue.full_id])
-            row.append(f"[red]{blockers}[/]" if blockers else "")
+            # Also include deferred blockers
+            deferred_suffix = ""
+            if deferred_blocker_map and issue.full_id in deferred_blocker_map:
+                deferred_ids = ", ".join(deferred_blocker_map[issue.full_id])
+                deferred_suffix = f"[bright_black]{deferred_ids} (deferred)[/]"
+            if blockers and deferred_suffix:
+                row.append(f"[red]{blockers}[/] {deferred_suffix}")
+            elif blockers:
+                row.append(f"[red]{blockers}[/]")
+            elif deferred_suffix:
+                row.append(deferred_suffix)
+            else:
+                row.append("")
         table.add_row(*row)
 
     # Render to string

@@ -6,7 +6,7 @@ from dogcat.cli._formatting import (
     format_issue_table,
     format_issue_tree,
 )
-from dogcat.models import Issue
+from dogcat.models import Issue, Status
 
 
 class TestFormatIssueTableMarkupEscaping:
@@ -221,3 +221,82 @@ class TestExternalRefDisplay:
         )
         output = format_issue_table([issue])
         assert "Ext Ref" not in output
+
+
+class TestDeferredAnnotations:
+    """Test deferred subtree collapse annotations in formatting."""
+
+    def test_brief_hidden_subtask_count(self) -> None:
+        """Hidden subtask count renders in brief output."""
+        issue = Issue(
+            id="def1",
+            namespace="dc",
+            title="Deferred parent",
+            status=Status.DEFERRED,
+        )
+        output = format_issue_brief(issue, hidden_subtask_count=3)
+        assert "3 hidden subtasks" in output
+
+    def test_brief_deferred_blocker_annotation(self) -> None:
+        """Deferred blocker annotation renders in brief output."""
+        issue = Issue(
+            id="ext1",
+            namespace="dc",
+            title="External issue",
+        )
+        output = format_issue_brief(
+            issue,
+            deferred_blockers=["dc-def1", "dc-def2"],
+        )
+        assert "blocked by deferred: dc-def1, dc-def2" in output
+
+    def test_brief_no_deferred_annotations_when_empty(self) -> None:
+        """No deferred annotations appear when params are None/empty."""
+        issue = Issue(
+            id="plain1",
+            namespace="dc",
+            title="Plain issue",
+        )
+        output = format_issue_brief(
+            issue,
+            hidden_subtask_count=None,
+            deferred_blockers=None,
+        )
+        assert "hidden subtasks" not in output
+        assert "blocked by deferred" not in output
+
+        output2 = format_issue_brief(
+            issue,
+            hidden_subtask_count=None,
+            deferred_blockers=[],
+        )
+        assert "hidden subtasks" not in output2
+        assert "blocked by deferred" not in output2
+
+    def test_tree_passes_hidden_counts(self) -> None:
+        """Tree mode renders hidden count on deferred parent."""
+        parent = Issue(
+            id="dp1",
+            namespace="dc",
+            title="Deferred parent",
+            status=Status.DEFERRED,
+        )
+        output = format_issue_tree(
+            [parent],
+            hidden_counts={"dc-dp1": 5},
+        )
+        assert "5 hidden subtasks" in output
+
+    def test_table_shows_hidden_count_in_title(self) -> None:
+        """Table renders hidden subtask count in title column."""
+        issue = Issue(
+            id="dp2",
+            namespace="dc",
+            title="Deferred parent",
+            status=Status.DEFERRED,
+        )
+        output = format_issue_table(
+            [issue],
+            hidden_counts={"dc-dp2": 2},
+        )
+        assert "2 hidden subtasks" in output
