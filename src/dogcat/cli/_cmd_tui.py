@@ -1,16 +1,12 @@
-"""TUI dashboard command for dogcat CLI (feature-gated)."""
+"""TUI dashboard command for dogcat CLI."""
 
 from __future__ import annotations
 
 import typer
 
-from dogcat.feature_flags import FeatureFlag, feature_enabled
-
 
 def register(app: typer.Typer) -> None:
-    """Register the TUI command only when DCAT_FEATURE_TUI is enabled."""
-    if not feature_enabled(FeatureFlag.TUI):
-        return
+    """Register the TUI dashboard command."""
 
     @app.command("tui")
     def tui(
