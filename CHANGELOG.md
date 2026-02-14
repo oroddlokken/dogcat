@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.8.4 (2026-02-14)
+
 ### Added
 
 - **`dcat list --expand`** — show subtasks of deferred parents inline without also revealing closed/deleted issues. The legend now shows how many issues are hidden and hints at `--expand`.
