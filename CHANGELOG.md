@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`dcat reopen` command** — dedicated command to reopen closed issues (`dcat reopen <id> [--reason]`). Validates the issue is closed, transitions to open, clears closed metadata, and emits a distinct `"reopened"` event in the audit trail.
+
 ## 0.8.5 (2026-02-14)
 
 ### Changed

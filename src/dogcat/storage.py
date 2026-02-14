@@ -733,6 +733,63 @@ class JSONLStorage:
 
         return issue
 
+    def reopen(
+        self,
+        issue_id: str,
+        reason: str | None = None,
+        reopened_by: str | None = None,
+    ) -> Issue:
+        """Reopen a closed issue.
+
+        Args:
+            issue_id: The ID of the issue to reopen (supports partial IDs)
+            reason: Optional reason for reopening
+            reopened_by: Optional operator who reopened the issue
+
+        Returns:
+            The reopened issue
+
+        Raises:
+            ValueError: If issue doesn't exist or is not closed
+        """
+        resolved_id = self.resolve_id(issue_id)
+        if resolved_id is None:
+            msg = f"Issue {issue_id} not found"
+            raise ValueError(msg)
+
+        issue = self._issues[resolved_id]
+        if issue.status != Status.CLOSED:
+            msg = f"Issue {issue.full_id} is not closed (status: {issue.status.value})"
+            raise ValueError(msg)
+
+        old_status = issue.status.value
+
+        now = datetime.now().astimezone()
+        issue.status = Status.OPEN
+        issue.updated_at = now
+        issue.closed_at = None
+        issue.close_reason = None
+        issue.closed_by = None
+        if reopened_by:
+            issue.updated_by = reopened_by
+
+        self._append([self._issue_record(issue)])
+
+        # Emit reopen event
+        changes: dict[str, dict[str, Any]] = {
+            "status": {"old": old_status, "new": "open"},
+        }
+        if reason:
+            changes["reopen_reason"] = {"old": None, "new": reason}
+        self._emit_event(
+            "reopened",
+            issue,
+            changes,
+            by=reopened_by,
+        )
+
+        return issue
+
     def delete(
         self,
         issue_id: str,

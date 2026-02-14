@@ -17,7 +17,7 @@ from dogcat._version import version as _dcat_version
 class EventRecord:
     """A single event recording a change to an issue."""
 
-    event_type: str  # "created", "updated", "closed", "deleted"
+    event_type: str  # "created", "updated", "closed", "reopened", "deleted"
     issue_id: str  # full_id, e.g. "dc-4kzj"
     timestamp: str  # ISO-8601
     by: str | None = None

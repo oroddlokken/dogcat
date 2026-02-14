@@ -111,6 +111,10 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         storage.close(issue_id, reason)
         storage.update(issue_id, {"closed_by": closed_by})
 
+    def _reopen(issue_id: str, reason: str, *, reopened_by: str) -> None:
+        """Reopen a closed issue (same as ``dcat reopen``)."""
+        storage.reopen(issue_id, reason=reason, reopened_by=reopened_by)
+
     def _delete(issue_id: str, reason: str, *, deleted_by: str) -> None:
         """Tombstone an issue (same as ``dcat delete``)."""
         storage.delete(issue_id, reason)
@@ -759,6 +763,27 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         bug3_id,
         "Fixed HTML encoding in auth form. Added regression test.",
         closed_by="eve@example.com",
+    )
+    _comment(
+        bug3_id,
+        "igor@example.com",
+        "Reopening — same issue with Unicode characters (e.g. é, ñ, ü). "
+        "The fix only covered HTML special chars.",
+    )
+    _reopen(
+        bug3_id,
+        "Same encoding issue with Unicode characters (é, ñ, ü)",
+        reopened_by="igor@example.com",
+    )
+    _update(
+        bug3_id,
+        {"owner": "eve@example.com", "status": "in_progress"},
+        updated_by="eve@example.com",
+    )
+    _comment(
+        bug3_id,
+        "eve@example.com",
+        "On it. Switching to proper UTF-8 encoding for the entire auth flow.",
     )
 
     # Feature 2.2: Accessibility compliance

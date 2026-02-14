@@ -48,8 +48,6 @@ Import from this module rather than hardcoding values in multiple places.
 
 ## Development
 
-Remember to run "$PROJECT_FOLDER/.venv/bin/activate &&" before running any commands that runs Python. This is to ensure the virtual environment is loaded and all dependencies are installed.
-
 Always write tests for new features or when changing functionality.
 
 Use `just test` during development for fast feedback (excludes regression and TUI tests). Run `just test-tui` for TUI-specific tests. Run `just test-regression` once you're happy with the changes to verify nothing is broken across versions. Use `just test-all` to run everything.
