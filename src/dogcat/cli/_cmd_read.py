@@ -451,18 +451,24 @@ def register(app: typer.Typer) -> None:
                 if deps:
                     output_lines.append("\nDependencies:")
                     for dep in deps:
-                        output_lines.append(
-                            f"  → {dep.depends_on_id} ({dep.dep_type.value})",
-                        )
+                        dep_issue = storage.get(dep.depends_on_id)
+                        if dep_issue:
+                            brief = format_issue_brief(dep_issue)
+                            output_lines.append(f"  → {brief}")
+                        else:
+                            output_lines.append(f"  → {dep.depends_on_id}")
 
                 # Add blocks (issues that depend on this one)
                 dependents = storage.get_dependents(issue_id)
                 if dependents:
                     output_lines.append("\nBlocks:")
                     for dep in dependents:
-                        output_lines.append(
-                            f"  ← {dep.issue_id} ({dep.dep_type.value})",
-                        )
+                        dep_issue = storage.get(dep.issue_id)
+                        if dep_issue:
+                            brief = format_issue_brief(dep_issue)
+                            output_lines.append(f"  ← {brief}")
+                        else:
+                            output_lines.append(f"  ← {dep.issue_id}")
 
                 # Add links
                 links = storage.get_links(issue_id)

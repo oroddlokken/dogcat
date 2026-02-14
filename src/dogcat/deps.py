@@ -41,6 +41,20 @@ def get_ready_work(
         i for i in all_issues if i.status in (Status.OPEN, Status.IN_PROGRESS)
     ]
 
+    # Exclude children of deferred parents (walk up the parent chain)
+    def _has_deferred_ancestor(issue: Issue) -> bool:
+        current_parent = issue.parent
+        while current_parent:
+            parent_issue = storage.get(current_parent)
+            if parent_issue is None:
+                break
+            if parent_issue.status == Status.DEFERRED:
+                return True
+            current_parent = parent_issue.parent
+        return False
+
+    work_issues = [i for i in work_issues if not _has_deferred_ancestor(i)]
+
     # Find issues with no blocking dependencies
     ready: list[Issue] = []
     for issue in work_issues:

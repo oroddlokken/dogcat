@@ -79,6 +79,75 @@ class TestGetReadyWork:
         assert len(ready) == 1
         assert ready[0].full_id == "t-i3"
 
+    def test_ready_work_excludes_children_of_deferred_parent(
+        self,
+        storage_with_issues: JSONLStorage,
+    ) -> None:
+        """Test that children of deferred parents are excluded from ready work."""
+        # Create a deferred parent epic
+        parent = Issue(id="epic1", namespace="t", title="Deferred Epic", priority=2)
+        storage_with_issues.create(parent)
+        storage_with_issues.update("t-epic1", {"status": "deferred"})
+
+        # Create an open child under the deferred parent
+        child = Issue(
+            id="child1",
+            namespace="t",
+            title="Child Task",
+            priority=2,
+            parent="t-epic1",
+        )
+        storage_with_issues.create(child)
+
+        ready = get_ready_work(storage_with_issues)
+
+        # The child of the deferred parent should NOT be in ready work
+        ready_ids = [i.full_id for i in ready]
+        assert "t-child1" not in ready_ids
+        # The deferred parent itself is also excluded (status != open/in_progress)
+        assert "t-epic1" not in ready_ids
+
+    def test_ready_work_excludes_grandchildren_of_deferred_parent(
+        self,
+        storage_with_issues: JSONLStorage,
+    ) -> None:
+        """Test that grandchildren of deferred parents are also excluded."""
+        # Deferred grandparent
+        grandparent = Issue(
+            id="gp1",
+            namespace="t",
+            title="Deferred Grandparent",
+            priority=2,
+        )
+        storage_with_issues.create(grandparent)
+        storage_with_issues.update("t-gp1", {"status": "deferred"})
+
+        # Open parent under deferred grandparent
+        parent = Issue(
+            id="p1",
+            namespace="t",
+            title="Parent Task",
+            priority=2,
+            parent="t-gp1",
+        )
+        storage_with_issues.create(parent)
+
+        # Open grandchild
+        grandchild = Issue(
+            id="gc1",
+            namespace="t",
+            title="Grandchild Task",
+            priority=2,
+            parent="t-p1",
+        )
+        storage_with_issues.create(grandchild)
+
+        ready = get_ready_work(storage_with_issues)
+
+        ready_ids = [i.full_id for i in ready]
+        assert "t-p1" not in ready_ids
+        assert "t-gc1" not in ready_ids
+
 
 class TestGetBlockedIssues:
     """Test blocked issues detection."""

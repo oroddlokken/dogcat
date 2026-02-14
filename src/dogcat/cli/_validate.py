@@ -198,10 +198,14 @@ def validate_references(
         if classify_record(record) != "dependency":
             continue
         op = record.get("op", "add")
-        if op == "remove":
-            continue
         issue_id = record.get("issue_id", "")
         depends_on = record.get("depends_on_id", "")
+
+        if op == "remove":
+            # Remove edge from graph when dependency is removed
+            if issue_id and depends_on and issue_id in dep_graph:
+                dep_graph[issue_id].discard(depends_on)
+            continue
 
         if issue_id and issue_id not in known_issues:
             errors.append(
