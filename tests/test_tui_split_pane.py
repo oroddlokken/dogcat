@@ -28,9 +28,10 @@ def _make_storage(issues: list[Issue] | None = None) -> MagicMock:
     storage = MagicMock()
     issue_list = issues or []
     storage.list.return_value = issue_list
-    storage.get.side_effect = lambda fid: next(
-        (i for i in issue_list if i.full_id == fid), None
-    )
+    def _get_by_id(fid: str) -> Issue | None:
+        return next((i for i in issue_list if i.full_id == fid), None)
+
+    storage.get.side_effect = _get_by_id
     storage.get_children.return_value = []
     storage.get_dependencies.return_value = []
     storage.get_issue_ids.return_value = {i.full_id for i in issue_list}

@@ -364,12 +364,12 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
         self._view_mode = True
         self.post_message(self.Cancelled())
 
-    def load_issue(self, issue: Issue) -> None:
+    async def load_issue(self, issue: Issue) -> None:
         """Load a new issue into the panel, recomposing the widget."""
         self._issue = issue
         self._view_mode = True
         self._create_mode = False
-        self.recompose()
+        await self.recompose()
 
     def do_save(self) -> None:
         """Execute the save."""

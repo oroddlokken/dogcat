@@ -7085,7 +7085,7 @@ class TestListCollapseDeferredSubtrees:
         parent_full_id = f"{parent_data['namespace']}-{parent_id}"
 
         # Create 5 children
-        child_full_ids = []
+        child_full_ids: list[str] = []
         for i in range(5):
             result = runner.invoke(
                 app,
