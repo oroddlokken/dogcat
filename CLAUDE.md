@@ -25,6 +25,7 @@ NEVER close issues without explicit user approval. When work is complete:
 2. Ask the user to test
 3. Ask if we can close it: "Can I close issue [id] '[title]'?"
 4. Only run `dcat close` after user confirms
+5. After closing, ask: "Should I add this to CHANGELOG.md?"
 
 ## Constants
 

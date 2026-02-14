@@ -99,19 +99,38 @@ def format_issue_brief(
     Returns:
         Formatted string with status emoji, priority, ID, title, and type
     """
+    # Dim entire line for closed issues
+    is_closed = issue.closed_at is not None
+
     # Use blocked symbol if issue has open dependencies
     if blocked_ids and issue.full_id in blocked_ids:
         status_emoji = "■"
-        status_color = STATUS_COLORS.get("blocked", "white")
+        status_color = (
+            "bright_black" if is_closed else STATUS_COLORS.get("blocked", "white")
+        )
     else:
         status_emoji = issue.get_status_emoji()
-        status_color = STATUS_COLORS.get(issue.status.value, "white")
+        status_color = (
+            "bright_black"
+            if is_closed
+            else STATUS_COLORS.get(issue.status.value, "white")
+        )
     status_emoji = typer.style(status_emoji, fg=status_color)
 
-    priority_color = PRIORITY_COLORS.get(issue.priority, "white")
-    priority_str = typer.style(f"[{issue.priority}]", fg=priority_color, bold=True)
+    priority_color = (
+        "bright_black" if is_closed else PRIORITY_COLORS.get(issue.priority, "white")
+    )
+    priority_str = typer.style(
+        f"[{issue.priority}]",
+        fg=priority_color,
+        bold=not is_closed,
+    )
 
-    type_color = TYPE_COLORS.get(issue.issue_type.value, "white")
+    type_color = (
+        "bright_black"
+        if is_closed
+        else TYPE_COLORS.get(issue.issue_type.value, "white")
+    )
     type_str = typer.style(f"[{issue.issue_type.value}]", fg=type_color)
 
     parent_str = (
@@ -125,7 +144,8 @@ def format_issue_brief(
         closed_str = typer.style(f" [closed {closed_ts}]", fg="bright_black")
     labels_str = ""
     if issue.labels:
-        labels_str = " " + typer.style(f"[{', '.join(issue.labels)}]", fg="cyan")
+        label_color = "bright_black" if is_closed else "cyan"
+        labels_str = " " + typer.style(f"[{', '.join(issue.labels)}]", fg=label_color)
     ext_ref_str = ""
     if issue.external_ref:
         ext_ref_str = " " + typer.style(
@@ -134,11 +154,16 @@ def format_issue_brief(
         )
     manual_str = ""
     if issue.metadata.get("manual") or issue.metadata.get("no_agent"):
-        manual_str = " " + typer.style("[manual]", fg="yellow")
+        manual_color = "bright_black" if is_closed else "yellow"
+        manual_str = " " + typer.style("[manual]", fg=manual_color)
     blocked_by_str = ""
     if blocked_by_map and issue.full_id in blocked_by_map:
         blockers = ", ".join(blocked_by_map[issue.full_id])
-        blocked_by_str = " " + typer.style(f"[blocked by: {blockers}]", fg="red")
+        blocked_color = "bright_black" if is_closed else "red"
+        blocked_by_str = " " + typer.style(
+            f"[blocked by: {blockers}]",
+            fg=blocked_color,
+        )
     hidden_str = ""
     if hidden_subtask_count:
         hidden_str = " " + typer.style(
@@ -152,7 +177,11 @@ def format_issue_brief(
             f"[blocked by deferred: {ids}]",
             fg="bright_black",
         )
-    base = f"{status_emoji} {priority_str} {issue.full_id}: {issue.title} {type_str}"
+    if is_closed:
+        id_title = typer.style(f"{issue.full_id}: {issue.title}", fg="bright_black")
+    else:
+        id_title = f"{issue.full_id}: {issue.title}"
+    base = f"{status_emoji} {priority_str} {id_title} {type_str}"
 
     suffixes = parent_str + labels_str + manual_str
     suffixes += blocked_by_str + hidden_str + deferred_blocker_str
