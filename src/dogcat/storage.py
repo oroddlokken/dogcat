@@ -595,6 +595,7 @@ class JSONLStorage:
             "labels",
             "external_ref",
             "design",
+            "plan",
             "acceptance",
             "notes",
             "close_reason",

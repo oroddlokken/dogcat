@@ -89,6 +89,7 @@ def register(app: typer.Typer) -> None:
             autocompletion=complete_labels,
         ),
         design: str | None = typer.Option(None, "--design", help="New design notes"),
+        plan: str | None = typer.Option(None, "--plan", help="New implementation plan"),
         external_ref: str | None = typer.Option(
             None,
             "--external-ref",
@@ -161,6 +162,8 @@ def register(app: typer.Typer) -> None:
                 updates["notes"] = notes
             if design is not None:
                 updates["design"] = design
+            if plan is not None:
+                updates["plan"] = plan
             if external_ref is not None:
                 updates["external_ref"] = external_ref
             if duplicate_of is not None:

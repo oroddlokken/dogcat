@@ -268,6 +268,17 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
                     read_only=ro,
                 )
 
+            with Collapsible(
+                title="Plan",
+                collapsed=not self._issue.plan,
+            ):
+                yield TextArea(
+                    self._issue.plan or "",
+                    id="plan-input",
+                    classes="collapsible-textarea",
+                    read_only=ro,
+                )
+
             if ro:
                 yield from self._compose_view_sections()
 
@@ -440,6 +451,7 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
                 self.query_one("#acceptance-input", TextArea).text.strip() or None
             ),
             design=self.query_one("#design-input", TextArea).text.strip() or None,
+            plan=self.query_one("#plan-input", TextArea).text.strip() or None,
             metadata=metadata,
             created_at=timestamp,
             updated_at=timestamp,
@@ -505,6 +517,10 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
         new_design = self.query_one("#design-input", TextArea).text.strip() or None
         if new_design != self._issue.design:
             updates["design"] = new_design
+
+        new_plan = self.query_one("#plan-input", TextArea).text.strip() or None
+        if new_plan != self._issue.plan:
+            updates["plan"] = new_plan
 
         manual_val = self.query_one("#manual-input", Checkbox).value
         was_manual = bool(

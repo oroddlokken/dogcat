@@ -66,6 +66,7 @@ class TestCollapsibleFields:
             notes="some notes",
             acceptance="some criteria",
             design="some design",
+            plan="some plan",
         )
         app = IssueEditorApp(issue, _make_storage())
 

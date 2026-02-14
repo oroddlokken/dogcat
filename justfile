@@ -48,8 +48,8 @@ test-regression:
 test-all:
     uv run pytest --timeout 60 -n 8 tests --cov-config=.coveragerc --cov-report=html --cov=src/dogcat
 
-# run tests across Python 3.10-3.14 (installs missing interpreters automatically)
-test-matrix *args:
+# run lints + tests across Python 3.10-3.14 (installs missing interpreters automatically)
+matrix *args:
     tox {{args}}
 
 # run tests on a single Python version (e.g. just test-py 3.12)

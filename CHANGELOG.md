@@ -8,8 +8,14 @@
 
 ### Added
 
+- **`--plan` option for create and update** — new `--plan` / implementation plan field on issues, available via `dcat create --plan`, `dcat update --plan`, TUI editing, and full-text search. Tracks step-by-step implementation approach, distinct from `--design` (architecture) and `--acceptance` (verification).
+- **`dcat prime --opinionated` includes planning guidance** — the opinionated prime output now instructs agents to record an implementation plan on the issue before writing code.
 - **`--json` output flag on all commands** — global `dcat --json <command>` and per-command `dcat <command> --json` flags output machine-readable JSON. List/search return arrays, show/create/update return objects, and errors return `{"error": "..."}` to stderr with non-zero exit.
 - **`dcat reopen` command** — dedicated command to reopen closed issues (`dcat reopen <id> [--reason]`). Validates the issue is closed, transitions to open, clears closed metadata, and emits a distinct `"reopened"` event in the audit trail.
+
+### Development
+
+- **Rename `just test-matrix` to `just matrix`** — the matrix command now also runs ruff linting in each Python version environment via tox.
 
 ## 0.8.5 (2026-02-14)
 
