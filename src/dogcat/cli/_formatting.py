@@ -13,21 +13,63 @@ if TYPE_CHECKING:
     from dogcat.models import Issue
 
 
-def get_legend(hidden_count: int = 0) -> str:
+def get_legend(hidden_count: int = 0, *, color: bool = True) -> str:
     """Get a legend explaining status symbols and colors.
 
     Args:
         hidden_count: Total number of issues hidden under deferred parents
+        color: Whether to apply color styling to legend symbols and priorities
 
     Returns:
         Multi-line legend string
     """
+    status_items = [
+        ("✎", "draft", "Draft"),
+        ("●", "open", "Open"),
+        ("◐", "in_progress", "In Progress"),
+        ("?", "in_review", "In Review"),
+        ("■", "blocked", "Blocked"),
+        ("◇", "deferred", "Deferred"),
+        ("✓", "closed", "Closed"),
+        ("☠", "tombstone", "Tombstone"),
+    ]
+    if color:
+        styled_statuses = [
+            f"{typer.style(symbol, fg=STATUS_COLORS.get(key, 'white'))} {label}"
+            for symbol, key, label in status_items
+        ]
+    else:
+        styled_statuses = [f"{symbol} {label}" for symbol, _, label in status_items]
+    # Split into two lines for readability
+    status_line1 = "  Status: " + "  ".join(styled_statuses[:6])
+    status_line2 = "          " + "  ".join(styled_statuses[6:])
+
+    priority_items = [
+        (0, "Critical"),
+        (1, "High"),
+        (2, "Medium"),
+        (3, "Low"),
+        (4, "Minimal"),
+    ]
+    if color:
+        styled_priorities = [
+            typer.style(
+                f"{pri} ({label})",
+                fg=PRIORITY_COLORS.get(pri, "white"),
+                bold=True,
+            )
+            for pri, label in priority_items
+        ]
+    else:
+        styled_priorities = [f"{pri} ({label})" for pri, label in priority_items]
+    priority_line = "  Priority: " + "  ".join(styled_priorities)
+
     legend_lines = [
         "",
         "Legend:",
-        "  Status: ✎ Draft  ● Open  ◐ In Progress  ? In Review  ■ Blocked  ◇ Deferred",
-        "          ✓ Closed  ☠ Tombstone",
-        "  Priority: 0 (Critical) → 4 (Low)",
+        status_line1,
+        status_line2,
+        priority_line,
     ]
     if hidden_count > 0:
         s = "s" if hidden_count != 1 else ""

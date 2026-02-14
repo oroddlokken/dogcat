@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 import orjson
 import typer
 
-from dogcat.config import get_namespace_filter
+from dogcat.config import get_namespace_filter, load_config
 from dogcat.constants import parse_labels
 
 from ._completions import (
@@ -362,6 +362,8 @@ def register(app: typer.Typer) -> None:
                 blocked_by_map = {bi.issue_id: bi.blocking_ids for bi in blocked_issues}
 
                 total_hidden = sum(hidden_counts.values())
+                config = load_config(actual_dogcats_dir)
+                legend_color = not config.get("disable_legend_colors", False)
 
                 if not issues:
                     typer.echo("No issues found")
@@ -375,7 +377,7 @@ def register(app: typer.Typer) -> None:
                             deferred_blocker_map=deferred_blocker_map,
                         ),
                     )
-                    typer.echo(get_legend(total_hidden))
+                    typer.echo(get_legend(total_hidden, color=legend_color))
                 elif table:
                     typer.echo(
                         format_issue_table(
@@ -386,7 +388,7 @@ def register(app: typer.Typer) -> None:
                             deferred_blocker_map=deferred_blocker_map,
                         ),
                     )
-                    typer.echo(get_legend(total_hidden))
+                    typer.echo(get_legend(total_hidden, color=legend_color))
                 else:
                     for issue in issues:
                         typer.echo(
@@ -402,7 +404,7 @@ def register(app: typer.Typer) -> None:
                                 ),
                             ),
                         )
-                    typer.echo(get_legend(total_hidden))
+                    typer.echo(get_legend(total_hidden, color=legend_color))
 
         except Exception as e:
             typer.echo(f"Error: {e}", err=True)

@@ -303,6 +303,43 @@ class TestDeferredAnnotations:
         assert "2 hidden subtasks" in output
 
 
+class TestLegendColors:
+    """Test legend uses colored status symbols and priority labels."""
+
+    def test_legend_contains_all_status_symbols(self) -> None:
+        """Legend includes all status symbols."""
+        output = get_legend()
+        for symbol in ("✎", "●", "◐", "?", "■", "◇", "✓", "☠"):
+            assert symbol in output
+
+    def test_legend_contains_all_priority_levels(self) -> None:
+        """Legend lists all five priority levels."""
+        output = get_legend()
+        for label in (
+            "0 (Critical)",
+            "1 (High)",
+            "2 (Medium)",
+            "3 (Low)",
+            "4 (Minimal)",
+        ):
+            assert label in output
+
+    def test_legend_status_symbols_are_styled(self) -> None:
+        """Legend status symbols include ANSI escape codes (are colored)."""
+        output = get_legend()
+        # ANSI escape sequence marker
+        assert "\x1b[" in output
+
+    def test_legend_no_color_disables_ansi(self) -> None:
+        """Legend with color=False has no ANSI escape codes."""
+        output = get_legend(color=False)
+        assert "\x1b[" not in output
+        # But still contains all status symbols and priorities
+        assert "● Open" in output
+        assert "0 (Critical)" in output
+        assert "4 (Minimal)" in output
+
+
 class TestLegendHiddenCount:
     """Test legend displays hidden issue count for deferred parents."""
 
