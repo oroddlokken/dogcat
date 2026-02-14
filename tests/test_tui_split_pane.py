@@ -28,6 +28,7 @@ def _make_storage(issues: list[Issue] | None = None) -> MagicMock:
     storage = MagicMock()
     issue_list = issues or []
     storage.list.return_value = issue_list
+
     def _get_by_id(fid: str) -> Issue | None:
         return next((i for i in issue_list if i.full_id == fid), None)
 
