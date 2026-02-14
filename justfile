@@ -58,13 +58,14 @@ test-py version *args:
 generate-fixture tag="":
     python tests/generate_fixture.py {{tag}}
 
-# prepare a release: create RC tag, push branch, open PR
+# prepare a release: create RC tag, push branch, open PR (stays on current branch)
 release-prep version:
     #!/usr/bin/env bash
     set -euo pipefail
     VERSION="{{version}}"
     BRANCH="release/v${VERSION}"
     TAG_PREFIX="v${VERSION}-rc"
+    WORKTREE_DIR=".release-worktree"
 
     # Determine next RC number
     LAST_RC=$(git tag -l "${TAG_PREFIX}.*" | sed "s/${TAG_PREFIX}\.//" | sort -n | tail -1)
@@ -77,29 +78,37 @@ release-prep version:
 
     echo "Preparing ${RC_TAG} on branch ${BRANCH}"
 
-    # Create or switch to release branch
-    if git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
-        git checkout "${BRANCH}"
-    else
-        git checkout -b "${BRANCH}"
+    # Clean up any stale worktree
+    if [ -d "$WORKTREE_DIR" ]; then
+        git worktree remove --force "$WORKTREE_DIR" 2>/dev/null || true
     fi
+
+    # Create or reuse release branch in a temporary worktree
+    if git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
+        git worktree add "$WORKTREE_DIR" "${BRANCH}"
+    else
+        git worktree add -b "${BRANCH}" "$WORKTREE_DIR"
+    fi
+
+    trap 'git worktree remove --force "$WORKTREE_DIR" 2>/dev/null || true' EXIT
 
     # Stamp CHANGELOG: insert version header after [Unreleased]
     DATE=$(date +%Y-%m-%d)
-    if ! grep -q "^## ${VERSION}" CHANGELOG.md; then
-        sed -i.bak "s/^## \[Unreleased\]/## [Unreleased]\n\n## ${VERSION} (${DATE})/" CHANGELOG.md
-        rm -f CHANGELOG.md.bak
-        git add CHANGELOG.md
-        git commit -m "Prepare changelog for v${VERSION}"
+    if ! grep -q "^## ${VERSION}" "${WORKTREE_DIR}/CHANGELOG.md"; then
+        sed -i.bak "s/^## \[Unreleased\]/## [Unreleased]\n\n## ${VERSION} (${DATE})/" "${WORKTREE_DIR}/CHANGELOG.md"
+        rm -f "${WORKTREE_DIR}/CHANGELOG.md.bak"
+        git -C "$WORKTREE_DIR" add CHANGELOG.md
+        git -C "$WORKTREE_DIR" commit -m "Prepare changelog for v${VERSION}"
     fi
 
     # Tag and push
-    git tag -a "${RC_TAG}" -m "Release candidate ${RC_TAG}"
+    git -C "$WORKTREE_DIR" tag -a "${RC_TAG}" -m "Release candidate ${RC_TAG}"
     git push -u origin "${BRANCH}" --tags
 
     # Open PR if one doesn't exist yet
     if ! gh pr view "${BRANCH}" > /dev/null 2>&1; then
         gh pr create \
+            --head "${BRANCH}" \
             --title "Release v${VERSION}" \
             --body "$(cat <<EOF
     ## Release v${VERSION}
