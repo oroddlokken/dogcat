@@ -27,6 +27,18 @@ NEVER close issues without explicit user approval. When work is complete:
 4. Only run `dcat close` after user confirms
 5. After closing, ask: "Should I add this to CHANGELOG.md?"
 
+## Changelog
+
+`CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/) format. Use these section tags under each version heading:
+
+- **Added** — new features
+- **Changed** — changes to existing functionality
+- **Deprecated** — features that will be removed
+- **Removed** — features that were removed
+- **Fixed** — bug fixes
+- **Security** — vulnerability fixes
+- **Development** — tooling, CI, dev workflow (custom extension)
+
 ## Constants
 
 `src/dogcat/constants.py` is the single source of truth for shared values used by dogcat (CLI):

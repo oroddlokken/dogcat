@@ -277,6 +277,7 @@ def format_issue_tree(
     blocked_by_map: dict[str, list[str]] | None = None,
     hidden_counts: dict[str, int] | None = None,
     deferred_blocker_map: dict[str, list[str]] | None = None,
+    preview_subtasks: dict[str, list[Issue]] | None = None,
 ) -> str:
     """Format issues as a tree based on parent-child relationships.
 
@@ -287,6 +288,7 @@ def format_issue_tree(
         blocked_by_map: Mapping of issue ID to list of blocking issue IDs
         hidden_counts: Deferred parent full_id -> count of hidden descendants
         deferred_blocker_map: Issue full_id -> list of deferred blocker IDs
+        preview_subtasks: Deferred parent full_id -> list of preview child issues
 
     Returns:
         Formatted tree string
@@ -304,12 +306,17 @@ def format_issue_tree(
     )
 
     def _brief(issue: Issue) -> str:
+        has_previews = (
+            preview_subtasks is not None and issue.full_id in preview_subtasks
+        )
         return format_issue_brief(
             issue,
             blocked_ids,
             blocked_by_map,
             hidden_subtask_count=(
-                hidden_counts.get(issue.full_id) if hidden_counts else None
+                None
+                if has_previews
+                else (hidden_counts.get(issue.full_id) if hidden_counts else None)
             ),
             deferred_blockers=(
                 deferred_blocker_map.get(issue.full_id)
@@ -317,6 +324,30 @@ def format_issue_tree(
                 else None
             ),
         )
+
+    def _preview_lines(issue_id: str, depth: int) -> list[str]:
+        """Render preview subtask lines for a deferred parent."""
+        if not preview_subtasks or issue_id not in preview_subtasks:
+            return []
+        lines: list[str] = []
+        previews = preview_subtasks[issue_id]
+        indent_str = "  " * depth
+        for preview in previews:
+            formatted = format_issue_brief(
+                preview,
+                blocked_ids,
+                blocked_by_map,
+            )
+            lines.append(f"{indent_str}{formatted}")
+        total = hidden_counts.get(issue_id, 0) if hidden_counts else 0
+        remaining = total - len(previews)
+        if remaining > 0:
+            summary = typer.style(
+                f"[...and {remaining} more hidden subtasks]",
+                fg="yellow",
+            )
+            lines.append(f"{indent_str}{summary}")
+        return lines
 
     def format_recursive(parent_id: str | None, depth: int) -> list[str]:
         """Recursively format issues and their children."""
@@ -329,6 +360,8 @@ def format_issue_tree(
             indent_str = "  " * depth
             formatted = _brief(issue)
             lines.append(f"{indent_str}{formatted}")
+            # Add preview subtasks for deferred parents
+            lines.extend(_preview_lines(issue.full_id, depth + 1))
             # Recursively format children
             lines.extend(format_recursive(issue.full_id, depth + 1))
 
@@ -339,6 +372,8 @@ def format_issue_tree(
     for issue in roots:
         formatted = _brief(issue)
         lines.append(formatted)
+        # Add preview subtasks for deferred parents
+        lines.extend(_preview_lines(issue.full_id, 1))
         lines.extend(format_recursive(issue.full_id, 1))
 
     return "\n".join(lines)
@@ -350,6 +385,7 @@ def format_issue_table(
     blocked_by_map: dict[str, list[str]] | None = None,
     hidden_counts: dict[str, int] | None = None,
     deferred_blocker_map: dict[str, list[str]] | None = None,
+    preview_subtasks: dict[str, list[Issue]] | None = None,
 ) -> str:
     """Format issues as an aligned table with columns using Rich.
 
@@ -359,6 +395,7 @@ def format_issue_table(
         blocked_by_map: Mapping of issue ID to list of blocking issue IDs
         hidden_counts: Deferred parent full_id -> count of hidden descendants
         deferred_blocker_map: Issue full_id -> list of deferred blocker IDs
+        preview_subtasks: Deferred parent full_id -> list of preview child issues
 
     Returns:
         Formatted table string (rendered by Rich)
@@ -399,8 +436,8 @@ def format_issue_table(
     if has_blocked:
         table.add_column("Blocked By", no_wrap=False)
 
-    # Add rows
-    for issue in issues:
+    def _add_issue_row(issue: Issue, *, dimmed: bool = False) -> None:
+        """Add a single issue as a row to the table."""
         # Use blocked symbol if issue has open dependencies
         if blocked_ids and issue.full_id in blocked_ids:
             emoji = "■"
@@ -411,6 +448,11 @@ def format_issue_table(
         priority_color = f"bold {PRIORITY_COLORS.get(issue.priority, 'white')}"
         issue_type = issue.issue_type.value
         type_color = TYPE_COLORS.get(issue_type, "white")
+
+        if dimmed:
+            status_color = "bright_black"
+            priority_color = "bright_black"
+            type_color = "bright_black"
 
         # Extract just the ID part from parent if it has a prefix
         parent_id = ""
@@ -429,18 +471,26 @@ def format_issue_table(
         )
 
         # Add hidden subtask count suffix to title for deferred parents
+        # (only when there are no preview subtasks to show)
         hidden_suffix = ""
-        if hidden_counts and issue.full_id in hidden_counts:
+        has_previews = (
+            preview_subtasks is not None and issue.full_id in preview_subtasks
+        )
+        if not has_previews and hidden_counts and issue.full_id in hidden_counts:
             count = hidden_counts[issue.full_id]
             hidden_suffix = f" [yellow]\\[{count} hidden subtasks][/]"
 
+        title_text = escape(issue.title)
+        if dimmed:
+            title_text = f"[bright_black]{title_text}[/]"
+
         row = [
             f"[{status_color}]{emoji}[/]",
-            issue.id,
-            parent_id,
+            f"[bright_black]{issue.id}[/]" if dimmed else issue.id,
+            f"[bright_black]{parent_id}[/]" if dimmed else parent_id,
             f"[{type_color}]{issue_type}[/]",
             f"[{priority_color}]{issue.priority}[/]",
-            f"{escape(issue.title)}{manual_str}{hidden_suffix}",
+            f"{title_text}{manual_str}{hidden_suffix}",
             f"[cyan]{labels_str}[/]" if labels_str else "",
         ]
         if has_ext_ref:
@@ -464,6 +514,33 @@ def format_issue_table(
             else:
                 row.append("")
         table.add_row(*row)
+
+    def _add_summary_row(remaining: int) -> None:
+        """Add a summary row for remaining hidden subtasks."""
+        # Build a row with the summary text in the Title column
+        num_cols_before_title = 5  # emoji, ID, Parent, Type, Pri
+        num_cols_after_title = 1  # Labels
+        if has_ext_ref:
+            num_cols_after_title += 1
+        if has_blocked:
+            num_cols_after_title += 1
+        row = [""] * num_cols_before_title
+        row.append(f"[yellow]\\[...and {remaining} more hidden subtasks][/]")
+        row.extend([""] * num_cols_after_title)
+        table.add_row(*row)
+
+    # Add rows
+    for issue in issues:
+        _add_issue_row(issue)
+        # Add preview subtask rows for deferred parents
+        if preview_subtasks and issue.full_id in preview_subtasks:
+            previews = preview_subtasks[issue.full_id]
+            for preview in previews:
+                _add_issue_row(preview, dimmed=True)
+            total = hidden_counts.get(issue.full_id, 0) if hidden_counts else 0
+            remaining = total - len(previews)
+            if remaining > 0:
+                _add_summary_row(remaining)
 
     # Render to string
     string_io = StringIO()

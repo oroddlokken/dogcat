@@ -303,6 +303,183 @@ class TestDeferredAnnotations:
         assert "2 hidden subtasks" in output
 
 
+class TestPreviewSubtasks:
+    """Test preview subtasks under deferred parents in all formats."""
+
+    def _make_deferred_parent(self, pid: str = "dp1") -> Issue:
+        return Issue(
+            id=pid,
+            namespace="dc",
+            title="Deferred parent",
+            status=Status.DEFERRED,
+        )
+
+    def _make_children(self, parent_id: str, count: int) -> list[Issue]:
+        return [
+            Issue(
+                id=f"ch{i}",
+                namespace="dc",
+                title=f"Child {i}",
+                parent=f"dc-{parent_id}",
+                priority=i,
+            )
+            for i in range(count)
+        ]
+
+    # --- Brief format ---
+
+    def test_brief_preview_subtasks_indented(self) -> None:
+        """Preview subtasks are rendered indented below deferred parent in brief."""
+        parent = self._make_deferred_parent()
+        self._make_children("dp1", 2)
+        # Brief format with previews is handled in list_issues,
+        # not format_issue_brief. Here we test that format_issue_brief
+        # suppresses hidden count when previews exist.
+        output = format_issue_brief(parent, hidden_subtask_count=None)
+        assert "hidden subtasks" not in output
+
+    def test_brief_hidden_count_suppressed_when_previews_exist(self) -> None:
+        """Hidden subtask count on parent line is suppressed when previews exist."""
+        parent = self._make_deferred_parent()
+        # When previews exist, list_issues passes hidden_subtask_count=None
+        output = format_issue_brief(parent, hidden_subtask_count=None)
+        assert "hidden subtasks" not in output
+
+    # --- Tree format ---
+
+    def test_tree_preview_subtasks_rendered(self) -> None:
+        """Tree mode renders preview subtasks indented below deferred parent."""
+        parent = self._make_deferred_parent()
+        children = self._make_children("dp1", 2)
+        output = format_issue_tree(
+            [parent],
+            hidden_counts={"dc-dp1": 2},
+            preview_subtasks={"dc-dp1": children},
+        )
+        assert "Child 0" in output
+        assert "Child 1" in output
+        # No hidden count annotation on parent line (previews replace it)
+        assert "hidden subtasks" not in output
+
+    def test_tree_preview_with_summary_line(self) -> None:
+        """Tree shows summary line when more subtasks than previewed."""
+        parent = self._make_deferred_parent()
+        children = self._make_children("dp1", 3)
+        output = format_issue_tree(
+            [parent],
+            hidden_counts={"dc-dp1": 5},
+            preview_subtasks={"dc-dp1": children},
+        )
+        assert "Child 0" in output
+        assert "Child 1" in output
+        assert "Child 2" in output
+        assert "...and 2 more hidden subtasks" in output
+
+    def test_tree_no_summary_when_all_fit(self) -> None:
+        """Tree shows no summary line when all subtasks fit in preview."""
+        parent = self._make_deferred_parent()
+        children = self._make_children("dp1", 2)
+        output = format_issue_tree(
+            [parent],
+            hidden_counts={"dc-dp1": 2},
+            preview_subtasks={"dc-dp1": children},
+        )
+        assert "more hidden subtasks" not in output
+
+    def test_tree_preview_sorted_by_priority(self) -> None:
+        """Preview subtasks are sorted by priority (highest first)."""
+        parent = self._make_deferred_parent()
+        # Children already sorted by priority in _collapse_deferred_subtrees
+        children = [
+            Issue(
+                id="hi",
+                namespace="dc",
+                title="High priority",
+                parent="dc-dp1",
+                priority=0,
+            ),
+            Issue(
+                id="lo",
+                namespace="dc",
+                title="Low priority",
+                parent="dc-dp1",
+                priority=3,
+            ),
+        ]
+        output = format_issue_tree(
+            [parent],
+            hidden_counts={"dc-dp1": 2},
+            preview_subtasks={"dc-dp1": children},
+        )
+        lines = output.splitlines()
+        hi_idx = next(i for i, line in enumerate(lines) if "High priority" in line)
+        lo_idx = next(i for i, line in enumerate(lines) if "Low priority" in line)
+        assert hi_idx < lo_idx
+
+    def test_tree_hidden_count_on_parent_suppressed_with_previews(self) -> None:
+        """Tree: no [N hidden subtasks] on parent line when previews exist."""
+        parent = self._make_deferred_parent()
+        children = self._make_children("dp1", 1)
+        output = format_issue_tree(
+            [parent],
+            hidden_counts={"dc-dp1": 5},
+            preview_subtasks={"dc-dp1": children},
+        )
+        # The parent line should NOT have "5 hidden subtasks"
+        parent_line = next(ln for ln in output.splitlines() if "Deferred parent" in ln)
+        assert "hidden subtasks" not in parent_line
+
+    # --- Table format ---
+
+    def test_table_preview_subtasks_rendered(self) -> None:
+        """Table renders preview subtask rows below deferred parent."""
+        parent = self._make_deferred_parent()
+        children = self._make_children("dp1", 2)
+        output = format_issue_table(
+            [parent],
+            hidden_counts={"dc-dp1": 2},
+            preview_subtasks={"dc-dp1": children},
+        )
+        assert "Child 0" in output
+        assert "Child 1" in output
+        # No hidden count on parent when previews exist
+        assert "hidden subtasks" not in output
+
+    def test_table_preview_with_summary_line(self) -> None:
+        """Table shows summary row when more subtasks than previewed."""
+        parent = self._make_deferred_parent()
+        children = self._make_children("dp1", 3)
+        output = format_issue_table(
+            [parent],
+            hidden_counts={"dc-dp1": 5},
+            preview_subtasks={"dc-dp1": children},
+        )
+        assert "Child 0" in output
+        assert "...and 2 more hidden subtasks" in output
+
+    def test_table_no_summary_when_all_fit(self) -> None:
+        """Table shows no summary row when all subtasks fit in preview."""
+        parent = self._make_deferred_parent()
+        children = self._make_children("dp1", 2)
+        output = format_issue_table(
+            [parent],
+            hidden_counts={"dc-dp1": 2},
+            preview_subtasks={"dc-dp1": children},
+        )
+        assert "more hidden subtasks" not in output
+
+    def test_table_hidden_count_suppressed_with_previews(self) -> None:
+        """Table: no [N hidden subtasks] in title when previews exist."""
+        parent = self._make_deferred_parent()
+        children = self._make_children("dp1", 1)
+        output = format_issue_table(
+            [parent],
+            hidden_counts={"dc-dp1": 3},
+            preview_subtasks={"dc-dp1": children},
+        )
+        assert "3 hidden subtasks" not in output
+
+
 class TestLegendColors:
     """Test legend uses colored status symbols and priority labels."""
 

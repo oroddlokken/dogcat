@@ -9,7 +9,7 @@ import orjson
 import typer
 
 from dogcat.config import get_namespace_filter, load_config
-from dogcat.constants import parse_labels
+from dogcat.constants import MAX_PREVIEW_SUBTASKS, parse_labels
 
 from ._completions import (
     complete_issue_ids,
@@ -56,7 +56,7 @@ def _collect_descendants(storage: JSONLStorage, parent_id: str) -> set[str]:
 def _collapse_deferred_subtrees(
     issues: list[Issue],
     storage: JSONLStorage,
-) -> tuple[list[Issue], dict[str, int], dict[str, list[str]]]:
+) -> tuple[list[Issue], dict[str, int], dict[str, list[str]], dict[str, list[Issue]]]:
     """Collapse children of deferred parents and annotate blocked externals.
 
     Args:
@@ -64,10 +64,11 @@ def _collapse_deferred_subtrees(
         storage: The storage instance
 
     Returns:
-        Tuple of (filtered issues, hidden_counts, deferred_blocker_map)
+        4-tuple of (filtered, hidden_counts, deferred_blocker_map, preview)
         - filtered issues: children of deferred parents removed
         - hidden_counts: deferred parent full_id -> count of hidden descendants
         - deferred_blocker_map: issue full_id -> list of deferred blocker IDs
+        - preview_subtasks: deferred parent full_id -> list of preview child issues
     """
     from dogcat.models import Status
 
@@ -90,6 +91,21 @@ def _collapse_deferred_subtrees(
             all_deferred_descendants |= visible_descendants
             for desc_id in descendants:
                 descendant_to_deferred.setdefault(desc_id, set()).add(dp_id)
+
+    # Build preview subtasks for each deferred parent
+    preview_subtasks: dict[str, list[Issue]] = {}
+    for dp_id in deferred_parents:
+        if dp_id not in hidden_counts:
+            continue
+        try:
+            children = storage.get_children(dp_id)
+        except ValueError:
+            continue
+        # Filter to only visible (non-closed/tombstone) direct children
+        visible_children = [c for c in children if c.full_id in visible_ids]
+        # Sort by priority (highest first = lowest number)
+        visible_children.sort(key=lambda i: (i.priority, i.id))
+        preview_subtasks[dp_id] = visible_children[:MAX_PREVIEW_SUBTASKS]
 
     # Build deferred blocker map for non-child issues that depend on
     # a deferred issue or a child-of-deferred issue
@@ -124,7 +140,7 @@ def _collapse_deferred_subtrees(
     # Filter out descendants of deferred parents
     filtered = [i for i in issues if i.full_id not in all_deferred_descendants]
 
-    return filtered, hidden_counts, deferred_blocker_map
+    return filtered, hidden_counts, deferred_blocker_map, preview_subtasks
 
 
 def register(app: typer.Typer) -> None:
@@ -343,11 +359,12 @@ def register(app: typer.Typer) -> None:
                 typer.echo(orjson.dumps(output).decode())
             else:
                 # Collapse children of deferred parents (unless --expand)
+                preview_subtasks: dict[str, list[Issue]] = {}
                 if expand:
                     hidden_counts: dict[str, int] = {}
                     deferred_blocker_map: dict[str, list[str]] = {}
                 else:
-                    issues, hidden_counts, deferred_blocker_map = (
+                    issues, hidden_counts, deferred_blocker_map, preview_subtasks = (
                         _collapse_deferred_subtrees(issues, storage)
                     )
 
@@ -361,7 +378,9 @@ def register(app: typer.Typer) -> None:
                 blocked_ids = {bi.issue_id for bi in blocked_issues}
                 blocked_by_map = {bi.issue_id: bi.blocking_ids for bi in blocked_issues}
 
-                total_hidden = sum(hidden_counts.values())
+                total_hidden = sum(hidden_counts.values()) - sum(
+                    len(p) for p in preview_subtasks.values()
+                )
                 config = load_config(actual_dogcats_dir)
                 legend_color = not config.get("disable_legend_colors", False)
 
@@ -375,6 +394,7 @@ def register(app: typer.Typer) -> None:
                             blocked_by_map=blocked_by_map,
                             hidden_counts=hidden_counts,
                             deferred_blocker_map=deferred_blocker_map,
+                            preview_subtasks=preview_subtasks,
                         ),
                     )
                     typer.echo(get_legend(total_hidden, color=legend_color))
@@ -386,24 +406,49 @@ def register(app: typer.Typer) -> None:
                             blocked_by_map=blocked_by_map,
                             hidden_counts=hidden_counts,
                             deferred_blocker_map=deferred_blocker_map,
+                            preview_subtasks=preview_subtasks,
                         ),
                     )
                     typer.echo(get_legend(total_hidden, color=legend_color))
                 else:
                     for issue in issues:
+                        has_previews = issue.full_id in preview_subtasks
                         typer.echo(
                             format_issue_brief(
                                 issue,
                                 blocked_ids=blocked_ids,
                                 blocked_by_map=blocked_by_map,
-                                hidden_subtask_count=hidden_counts.get(
-                                    issue.full_id,
+                                hidden_subtask_count=(
+                                    None
+                                    if has_previews
+                                    else hidden_counts.get(issue.full_id)
                                 ),
                                 deferred_blockers=deferred_blocker_map.get(
                                     issue.full_id,
                                 ),
                             ),
                         )
+                        if has_previews:
+                            previews = preview_subtasks[issue.full_id]
+                            for preview in previews:
+                                typer.echo(
+                                    "  "
+                                    + format_issue_brief(
+                                        preview,
+                                        blocked_ids=blocked_ids,
+                                        blocked_by_map=blocked_by_map,
+                                    ),
+                                )
+                            total = hidden_counts.get(issue.full_id, 0)
+                            remaining = total - len(previews)
+                            if remaining > 0:
+                                typer.echo(
+                                    "  "
+                                    + typer.style(
+                                        f"[...and {remaining} more hidden subtasks]",
+                                        fg="yellow",
+                                    ),
+                                )
                     typer.echo(get_legend(total_hidden, color=legend_color))
 
         except Exception as e:

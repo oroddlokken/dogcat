@@ -6899,7 +6899,7 @@ class TestListCollapseDeferredSubtrees:
         return dogcats_dir, parent_full_id, child1_full_id, child2_full_id
 
     def test_list_collapses_deferred_children(self, tmp_path: Path) -> None:
-        """Children of deferred parents are hidden with a count shown."""
+        """Children of deferred parents are shown as preview subtasks."""
         dogcats_dir, parent_full_id, child1_full_id, child2_full_id = (
             self._setup_deferred_parent_with_children(tmp_path)
         )
@@ -6909,12 +6909,13 @@ class TestListCollapseDeferredSubtrees:
             ["list", "--dogcats-dir", dogcats_dir],
         )
         assert result.exit_code == 0
-        # Parent should be visible with hidden count
+        # Parent should be visible
         assert parent_full_id in result.stdout
-        assert "2 hidden subtasks" in result.stdout
-        # Children should NOT be visible
-        assert child1_full_id not in result.stdout
-        assert child2_full_id not in result.stdout
+        # With ≤3 children, all are shown as previews (no hidden count on parent)
+        assert "hidden subtasks" not in result.stdout
+        # Children should be visible as preview subtasks
+        assert child1_full_id in result.stdout
+        assert child2_full_id in result.stdout
 
     def test_list_shows_deferred_blocker_annotation(self, tmp_path: Path) -> None:
         """Non-child issue blocked by deferred gets annotation."""
@@ -7023,7 +7024,7 @@ class TestListCollapseDeferredSubtrees:
         assert closed_full_id not in result.stdout
 
     def test_list_legend_shows_hidden_count(self, tmp_path: Path) -> None:
-        """Legend shows hidden issue count when subtasks are collapsed."""
+        """Legend shows hidden count only for non-previewed subtasks."""
         dogcats_dir, _parent, _child1, _child2 = (
             self._setup_deferred_parent_with_children(tmp_path)
         )
@@ -7033,8 +7034,8 @@ class TestListCollapseDeferredSubtrees:
             ["list", "--dogcats-dir", dogcats_dir],
         )
         assert result.exit_code == 0
-        assert "2 issues hidden under deferred parents" in result.stdout
-        assert "--expand" in result.stdout
+        # With 2 children, both shown as previews, no hidden line in legend
+        assert "hidden under deferred" not in result.stdout
 
     def test_list_legend_no_hidden_line_when_no_deferred(
         self,
@@ -7068,3 +7069,82 @@ class TestListCollapseDeferredSubtrees:
         )
         assert result.exit_code == 0
         assert "hidden under deferred" not in result.stdout
+
+    def test_list_preview_subtasks_with_summary(self, tmp_path: Path) -> None:
+        """Deferred parent with >3 children shows preview + summary line."""
+        dogcats_dir = str(tmp_path / ".dogcats")
+        runner.invoke(app, ["init", "--dogcats-dir", dogcats_dir])
+
+        # Create parent
+        result = runner.invoke(
+            app,
+            ["create", "Big parent", "--json", "--dogcats-dir", dogcats_dir],
+        )
+        parent_data = json.loads(result.stdout)
+        parent_id = parent_data["id"]
+        parent_full_id = f"{parent_data['namespace']}-{parent_id}"
+
+        # Create 5 children
+        child_full_ids = []
+        for i in range(5):
+            result = runner.invoke(
+                app,
+                [
+                    "create",
+                    f"Child {i}",
+                    "--parent",
+                    parent_id,
+                    "--json",
+                    "--dogcats-dir",
+                    dogcats_dir,
+                ],
+            )
+            cdata = json.loads(result.stdout)
+            child_full_ids.append(f"{cdata['namespace']}-{cdata['id']}")
+
+        # Defer the parent
+        runner.invoke(
+            app,
+            [
+                "update",
+                parent_full_id,
+                "--status",
+                "deferred",
+                "--dogcats-dir",
+                dogcats_dir,
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["list", "--dogcats-dir", dogcats_dir],
+        )
+        assert result.exit_code == 0
+        assert parent_full_id in result.stdout
+        # Should show 3 preview children
+        shown_count = sum(1 for cid in child_full_ids if cid in result.stdout)
+        assert shown_count == 3
+        # Should show summary line for the remaining 2
+        assert "...and 2 more hidden subtasks" in result.stdout
+        # Legend should reflect only the truly hidden count (5 - 3 = 2)
+        assert "2 issues hidden under deferred parents" in result.stdout
+
+    def test_list_preview_subtasks_no_summary_when_all_fit(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Deferred parent with <=3 children shows all with no summary."""
+        dogcats_dir, _parent_full_id, child1_full_id, child2_full_id = (
+            self._setup_deferred_parent_with_children(tmp_path)
+        )
+
+        result = runner.invoke(
+            app,
+            ["list", "--dogcats-dir", dogcats_dir],
+        )
+        assert result.exit_code == 0
+        # Both children shown as previews
+        assert child1_full_id in result.stdout
+        assert child2_full_id in result.stdout
+        # No summary line
+        assert "more hidden subtasks" not in result.stdout

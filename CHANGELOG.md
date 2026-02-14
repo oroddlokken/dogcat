@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Preview subtasks under deferred parents in `dcat list`** — deferred parents now show up to 3 highest-priority subtasks indented below them, with a `[...and N more hidden subtasks]` summary when there are more. Applies to brief, tree, and table formats. `--expand` still shows all subtasks.
+
 ### Development
 
+- **Replace isort with ruff's built-in import sorting** — removed the `isort` dependency and `[tool.isort]` config in favor of ruff's `I` rules, simplifying the toolchain.
 - **Two-step release workflow** — `just release-prep <version>` creates an RC tag, stamps the changelog, and opens a PR. Merging the PR triggers `publish.yml` which creates the final tag, builds, publishes the GitHub release with changelog body, and updates the Homebrew formula.
 - **CI concurrency groups** — concurrent CI and release workflow runs on the same ref are cancelled automatically.
 

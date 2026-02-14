@@ -33,7 +33,6 @@ packages = ["src/dogcat"]
 
 [dependency-groups]
 dev = [
-    "isort>=7.0.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "pytest-cov==7.0.0",
@@ -46,17 +45,6 @@ dev = [
     "tox>=4.0",
     "tox-uv>=1.25",
 ]
-
-[tool.isort]
-include_trailing_comma = true
-use_parentheses = true
-ensure_newline_before_comments = true
-atomic = true
-profile = "black"
-line_length = 88
-skip_gitignore = true
-multi_line_output = 3
-force_grid_wrap = 0
 
 [tool.ruff]
 line-length = 88
@@ -78,6 +66,7 @@ select = [
   "ERA",  # flake8-eradicate
   "EXE",  # flake8-executable
   "F",    # Pyflakes
+  "I",    # isort
   "FLY",  # flynt
   "FURB", # refurb
   "G",    # flake8-logging-format 

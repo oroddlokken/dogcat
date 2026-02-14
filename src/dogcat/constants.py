@@ -21,6 +21,9 @@ def parse_labels(raw: str) -> list[str]:
 DEFAULT_TYPE = "task"
 DEFAULT_PRIORITY = 2
 
+# Maximum number of preview subtasks shown under deferred parents in list view
+MAX_PREVIEW_SUBTASKS = 3
+
 # Priority shorthand: single digits 0-4
 PRIORITY_SHORTHANDS = frozenset("01234")
 
