@@ -4,6 +4,7 @@
 
 ### Added
 
+- **`--acceptance-criteria` alias** — `dcat create` and `dcat update` now accept `--acceptance-criteria` as an alias for `--acceptance`, matching the underlying model field name.
 - **Preview subtasks under deferred parents in `dcat list`** — deferred parents now show up to 3 highest-priority subtasks indented below them, with a `[...and N more hidden subtasks]` summary when there are more. Applies to brief, tree, and table formats. `--expand` still shows all subtasks.
 
 ### Development

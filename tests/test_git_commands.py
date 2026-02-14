@@ -17,6 +17,7 @@ from dogcat.constants import (
     MAX_PRIME_TOKENS_OPINIONATED,
     MERGE_DRIVER_CMD,
 )
+from dogcat.utils import estimate_tokens
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -595,9 +596,9 @@ class TestPrimeGitHealth:
         result = runner.invoke(app, ["prime"], catch_exceptions=False)
         assert result.exit_code == 0
 
-        estimated_tokens = len(result.stdout) / 4
+        estimated_tokens = estimate_tokens(result.stdout)
         assert estimated_tokens <= MAX_PRIME_TOKENS, (
-            f"dcat prime output is ~{estimated_tokens:.0f} estimated tokens, "
+            f"dcat prime output is ~{estimated_tokens} estimated tokens, "
             f"exceeds limit of {MAX_PRIME_TOKENS}"
         )
 
@@ -624,9 +625,9 @@ class TestPrimeGitHealth:
         )
         assert result.exit_code == 0
 
-        estimated_tokens = len(result.stdout) / 4
+        estimated_tokens = estimate_tokens(result.stdout)
         assert estimated_tokens <= MAX_PRIME_TOKENS_OPINIONATED, (
             f"dcat prime --opinionated output is "
-            f"~{estimated_tokens:.0f} estimated tokens, "
+            f"~{estimated_tokens} estimated tokens, "
             f"exceeds limit of {MAX_PRIME_TOKENS_OPINIONATED}"
         )

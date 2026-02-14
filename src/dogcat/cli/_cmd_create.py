@@ -127,6 +127,7 @@ def register(app: typer.Typer) -> None:
         acceptance: str | None = typer.Option(
             None,
             "--acceptance",
+            "--acceptance-criteria",
             "-a",
             help="Acceptance criteria",
         ),
