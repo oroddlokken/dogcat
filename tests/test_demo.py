@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 
 from dogcat.demo import generate_demo_issues
+from dogcat.models import IssueType, Status
 from dogcat.storage import JSONLStorage
 
 
@@ -51,3 +52,29 @@ def test_demo_uses_configured_prefix() -> None:
             assert issue.full_id.startswith(
                 "testns-",
             ), f"Issue full_id {issue.full_id} does not start with 'testns-'"
+
+
+def test_demo_has_deferred_epic_with_subtasks() -> None:
+    """Demo creates a deferred epic with subtasks."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        dogcats_dir = str(Path(tmpdir) / ".dogcats")
+        storage = JSONLStorage(f"{dogcats_dir}/issues.jsonl", create_dir=True)
+
+        generate_demo_issues(storage, dogcats_dir)
+
+        issues = storage.list()
+
+        # Find deferred epics
+        deferred_epics = [
+            i
+            for i in issues
+            if i.issue_type == IssueType.EPIC and i.status == Status.DEFERRED
+        ]
+        assert len(deferred_epics) >= 1, "Expected at least one deferred epic"
+
+        # Check that the deferred epic has children
+        deferred_epic = deferred_epics[0]
+        children = storage.get_children(deferred_epic.full_id)
+        assert (
+            len(children) > 0
+        ), f"Deferred epic {deferred_epic.full_id} should have children"

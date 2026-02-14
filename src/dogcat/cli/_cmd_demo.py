@@ -63,7 +63,7 @@ def register(app: typer.Typer) -> None:
             created_issues = generate_demo_issues(storage, dogcats_dir)
 
             typer.echo(f"\n✓ Created {len(created_issues)} demo issues")
-            typer.echo("  - 3 epics (Platform, UX, Performance)")
+            typer.echo("  - 4 epics (Platform, UX, Performance, Analytics)")
             typer.echo("  - Features, stories, tasks, bugs, chores, and questions")
             typer.echo("  - With parent-child relationships and dependencies")
             typer.echo("  - Labels, external refs (Jira-style), and comments")

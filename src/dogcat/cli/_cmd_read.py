@@ -204,6 +204,11 @@ def register(app: typer.Typer) -> None:
             "--table",
             help="Display issues in aligned columns",
         ),
+        expand: bool = typer.Option(
+            False,
+            "--expand",
+            help="Show subtasks of deferred parents (hidden by default)",
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
@@ -337,10 +342,14 @@ def register(app: typer.Typer) -> None:
                 output = [issue_to_dict(issue) for issue in issues]
                 typer.echo(orjson.dumps(output).decode())
             else:
-                # Collapse children of deferred parents
-                issues, hidden_counts, deferred_blocker_map = (
-                    _collapse_deferred_subtrees(issues, storage)
-                )
+                # Collapse children of deferred parents (unless --expand)
+                if expand:
+                    hidden_counts: dict[str, int] = {}
+                    deferred_blocker_map: dict[str, list[str]] = {}
+                else:
+                    issues, hidden_counts, deferred_blocker_map = (
+                        _collapse_deferred_subtrees(issues, storage)
+                    )
 
                 if limit:
                     issues = issues[:limit]
@@ -351,6 +360,8 @@ def register(app: typer.Typer) -> None:
                 blocked_issues = get_blocked_issues(storage)
                 blocked_ids = {bi.issue_id for bi in blocked_issues}
                 blocked_by_map = {bi.issue_id: bi.blocking_ids for bi in blocked_issues}
+
+                total_hidden = sum(hidden_counts.values())
 
                 if not issues:
                     typer.echo("No issues found")
@@ -364,7 +375,7 @@ def register(app: typer.Typer) -> None:
                             deferred_blocker_map=deferred_blocker_map,
                         ),
                     )
-                    typer.echo(get_legend())
+                    typer.echo(get_legend(total_hidden))
                 elif table:
                     typer.echo(
                         format_issue_table(
@@ -375,7 +386,7 @@ def register(app: typer.Typer) -> None:
                             deferred_blocker_map=deferred_blocker_map,
                         ),
                     )
-                    typer.echo(get_legend())
+                    typer.echo(get_legend(total_hidden))
                 else:
                     for issue in issues:
                         typer.echo(
@@ -391,7 +402,7 @@ def register(app: typer.Typer) -> None:
                                 ),
                             ),
                         )
-                    typer.echo(get_legend())
+                    typer.echo(get_legend(total_hidden))
 
         except Exception as e:
             typer.echo(f"Error: {e}", err=True)

@@ -909,6 +909,110 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         )
 
     # =========================================================================
+    # Epic 4: Data Analytics Platform (DEFERRED)
+    # =========================================================================
+    epic4_id = _create(
+        "Data Analytics Platform",
+        description=(
+            "Build a comprehensive analytics platform for business intelligence "
+            "and data-driven decision making.\n\n"
+            "Key deliverables:\n"
+            "- Real-time analytics dashboard\n"
+            "- Data pipeline for ETL processing\n"
+            "- Self-service reporting tools\n"
+            "- ML-powered anomaly detection"
+        ),
+        notes=(
+            "Deferred to Q3 after leadership decided to prioritize platform "
+            "modernization and performance work first. Revisit after microservices "
+            "migration is complete."
+        ),
+        priority=2,
+        issue_type=IssueType.EPIC,
+        labels=["analytics", "strategic", "q3-2026", "data"],
+        external_ref="DATA-900",
+        created_by="alice@example.com",
+    )
+    _update(epic4_id, {"owner": "charlie@example.com"}, updated_by="bob@example.com")
+    _update(epic4_id, {"status": "deferred"}, updated_by="alice@example.com")
+    _comment(
+        epic4_id,
+        "alice@example.com",
+        "Deferring to Q3. Platform modernization needs to land first.",
+    )
+    _comment(
+        epic4_id,
+        "bob@example.com",
+        "Agreed. Let's revisit once the microservices migration is stable.",
+    )
+
+    # Feature 4.1: Data pipeline
+    feature6_id = _create(
+        "Build ETL data pipeline",
+        description=(
+            "Design and implement an ETL pipeline for ingesting, transforming, "
+            "and loading data from multiple sources into the analytics warehouse."
+        ),
+        acceptance=(
+            "- Pipeline handles 1M+ records/hour\n"
+            "- Supports at-least-once delivery\n"
+            "- Schema evolution handled gracefully\n"
+            "- Monitoring and alerting for pipeline failures"
+        ),
+        priority=2,
+        issue_type=IssueType.FEATURE,
+        labels=["analytics", "data", "backend"],
+        external_ref="DATA-901",
+        parent=epic4_id,
+        created_by="charlie@example.com",
+    )
+
+    # Tasks under feature 4.1
+    _create(
+        "Evaluate streaming frameworks",
+        priority=2,
+        issue_type=IssueType.TASK,
+        labels=["analytics", "research"],
+        external_ref="DATA-902",
+        parent=feature6_id,
+        created_by="charlie@example.com",
+    )
+    _create(
+        "Design data warehouse schema",
+        priority=2,
+        issue_type=IssueType.TASK,
+        labels=["analytics", "database", "design"],
+        external_ref="DATA-903",
+        parent=feature6_id,
+        created_by="charlie@example.com",
+    )
+
+    # Feature 4.2: Analytics dashboard
+    feature7_id = _create(
+        "Real-time analytics dashboard",
+        description=(
+            "Interactive dashboard with real-time data visualization, "
+            "customizable charts, and drill-down capabilities."
+        ),
+        priority=2,
+        issue_type=IssueType.FEATURE,
+        labels=["analytics", "frontend", "dashboard"],
+        external_ref="DATA-910",
+        parent=epic4_id,
+        created_by="diana@example.com",
+    )
+
+    _create(
+        "Design analytics widget library",
+        priority=2,
+        issue_type=IssueType.TASK,
+        labels=["analytics", "frontend", "design"],
+        external_ref="DATA-911",
+        parent=feature7_id,
+        created_by="diana@example.com",
+    )
+
+    # =========================================================================
     # Chores
     # =========================================================================
     _create(

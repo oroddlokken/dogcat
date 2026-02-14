@@ -5,6 +5,7 @@ from dogcat.cli._formatting import (
     format_issue_full,
     format_issue_table,
     format_issue_tree,
+    get_legend,
 )
 from dogcat.models import Issue, Status
 
@@ -300,3 +301,30 @@ class TestDeferredAnnotations:
             hidden_counts={"dc-dp2": 2},
         )
         assert "2 hidden subtasks" in output
+
+
+class TestLegendHiddenCount:
+    """Test legend displays hidden issue count for deferred parents."""
+
+    def test_legend_no_hidden_count(self) -> None:
+        """Legend has no hidden line when count is zero."""
+        output = get_legend()
+        assert "hidden under deferred" not in output
+
+    def test_legend_with_hidden_count(self) -> None:
+        """Legend shows hidden count when issues are hidden."""
+        output = get_legend(hidden_count=5)
+        assert "5 issues hidden under deferred parents" in output
+        assert "--expand" in output
+
+    def test_legend_singular_hidden_count(self) -> None:
+        """Legend uses singular form for 1 hidden issue."""
+        output = get_legend(hidden_count=1)
+        assert "1 issue hidden under deferred parents" in output
+        # Should NOT say "issues" (plural)
+        assert "1 issues" not in output
+
+    def test_legend_zero_hidden_count(self) -> None:
+        """Legend has no hidden line when count is explicitly zero."""
+        output = get_legend(hidden_count=0)
+        assert "hidden under deferred" not in output

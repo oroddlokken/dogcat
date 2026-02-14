@@ -13,8 +13,11 @@ if TYPE_CHECKING:
     from dogcat.models import Issue
 
 
-def get_legend() -> str:
+def get_legend(hidden_count: int = 0) -> str:
     """Get a legend explaining status symbols and colors.
+
+    Args:
+        hidden_count: Total number of issues hidden under deferred parents
 
     Returns:
         Multi-line legend string
@@ -26,6 +29,12 @@ def get_legend() -> str:
         "          ✓ Closed  ☠ Tombstone",
         "  Priority: 0 (Critical) → 4 (Low)",
     ]
+    if hidden_count > 0:
+        s = "s" if hidden_count != 1 else ""
+        legend_lines.append(
+            f"  {hidden_count} issue{s} hidden under deferred parents"
+            " — use --expand to show",
+        )
     return "\n".join(legend_lines)
 
 

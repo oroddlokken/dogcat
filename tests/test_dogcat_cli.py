@@ -6976,3 +6976,95 @@ class TestListCollapseDeferredSubtrees:
         assert parent_full_id in all_ids
         assert child1_full_id in all_ids
         assert child2_full_id in all_ids
+
+    def test_list_expand_shows_deferred_children(self, tmp_path: Path) -> None:
+        """--expand shows children of deferred parents."""
+        dogcats_dir, parent_full_id, child1_full_id, child2_full_id = (
+            self._setup_deferred_parent_with_children(tmp_path)
+        )
+
+        result = runner.invoke(
+            app,
+            ["list", "--expand", "--dogcats-dir", dogcats_dir],
+        )
+        assert result.exit_code == 0
+        assert parent_full_id in result.stdout
+        assert child1_full_id in result.stdout
+        assert child2_full_id in result.stdout
+        # No hidden subtasks annotation when expanded
+        assert "hidden subtasks" not in result.stdout
+
+    def test_list_expand_does_not_show_closed(self, tmp_path: Path) -> None:
+        """--expand does not show closed or deleted issues."""
+        dogcats_dir, _parent_full_id, child1_full_id, _child2_full_id = (
+            self._setup_deferred_parent_with_children(tmp_path)
+        )
+
+        # Create and close an unrelated issue
+        result = runner.invoke(
+            app,
+            ["create", "Closed issue", "--json", "--dogcats-dir", dogcats_dir],
+        )
+        closed_data = json.loads(result.stdout)
+        closed_full_id = f"{closed_data['namespace']}-{closed_data['id']}"
+        runner.invoke(
+            app,
+            ["close", closed_full_id, "--dogcats-dir", dogcats_dir],
+        )
+
+        result = runner.invoke(
+            app,
+            ["list", "--expand", "--dogcats-dir", dogcats_dir],
+        )
+        assert result.exit_code == 0
+        # Deferred children are visible
+        assert child1_full_id in result.stdout
+        # Closed issue should NOT be visible
+        assert closed_full_id not in result.stdout
+
+    def test_list_legend_shows_hidden_count(self, tmp_path: Path) -> None:
+        """Legend shows hidden issue count when subtasks are collapsed."""
+        dogcats_dir, _parent, _child1, _child2 = (
+            self._setup_deferred_parent_with_children(tmp_path)
+        )
+
+        result = runner.invoke(
+            app,
+            ["list", "--dogcats-dir", dogcats_dir],
+        )
+        assert result.exit_code == 0
+        assert "2 issues hidden under deferred parents" in result.stdout
+        assert "--expand" in result.stdout
+
+    def test_list_legend_no_hidden_line_when_no_deferred(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Legend does not show hidden line when no deferred parents exist."""
+        dogcats_dir = str(tmp_path / ".dogcats")
+        runner.invoke(app, ["init", "--dogcats-dir", dogcats_dir])
+
+        runner.invoke(
+            app,
+            ["create", "Normal issue", "--dogcats-dir", dogcats_dir],
+        )
+
+        result = runner.invoke(
+            app,
+            ["list", "--dogcats-dir", dogcats_dir],
+        )
+        assert result.exit_code == 0
+        assert "hidden under deferred" not in result.stdout
+
+    def test_list_expand_legend_no_hidden_line(self, tmp_path: Path) -> None:
+        """--expand should not show hidden count in legend."""
+        dogcats_dir, _parent, _child1, _child2 = (
+            self._setup_deferred_parent_with_children(tmp_path)
+        )
+
+        result = runner.invoke(
+            app,
+            ["list", "--expand", "--dogcats-dir", dogcats_dir],
+        )
+        assert result.exit_code == 0
+        assert "hidden under deferred" not in result.stdout
