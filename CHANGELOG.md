@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Improved git health check messaging** — fix suggestions now use "Suggestion:" instead of the misleading "Consider running:" prefix, and the agent nudge tells the agent to inform the user and ask before fixing issues.
+
 ### Added
 
+- **`--json` output flag on all commands** — global `dcat --json <command>` and per-command `dcat <command> --json` flags output machine-readable JSON. List/search return arrays, show/create/update return objects, and errors return `{"error": "..."}` to stderr with non-zero exit.
 - **`dcat reopen` command** — dedicated command to reopen closed issues (`dcat reopen <id> [--reason]`). Validates the issue is closed, transitions to open, clears closed metadata, and emits a distinct `"reopened"` event in the audit trail.
 
 ## 0.8.5 (2026-02-14)

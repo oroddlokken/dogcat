@@ -10,6 +10,7 @@ from dogcat.config import extract_prefix, get_namespace_filter
 from ._completions import complete_issue_ids
 from ._formatting import format_issue_brief, format_issue_tree
 from ._helpers import get_default_operator, get_storage
+from ._json_state import echo_error, is_json_output
 
 
 def register(app: typer.Typer) -> None:
@@ -43,7 +44,7 @@ def register(app: typer.Typer) -> None:
             if limit:
                 ready_issues = ready_issues[:limit]
 
-            if json_output:
+            if is_json_output(json_output):
                 from dogcat.models import issue_to_dict
 
                 output = [issue_to_dict(issue) for issue in ready_issues]
@@ -55,8 +56,10 @@ def register(app: typer.Typer) -> None:
                     for issue in ready_issues:
                         typer.echo(format_issue_brief(issue))
 
+        except typer.Exit:
+            raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
 
     @app.command()
@@ -71,7 +74,7 @@ def register(app: typer.Typer) -> None:
             storage = get_storage(dogcats_dir)
             blocked_issues = get_blocked_issues(storage)
 
-            if json_output:
+            if is_json_output(json_output):
                 output = [
                     {
                         "issue_id": bi.issue_id,
@@ -106,8 +109,10 @@ def register(app: typer.Typer) -> None:
                                     ),
                                 )
 
+        except typer.Exit:
+            raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
 
     @app.command("in-progress")
@@ -121,7 +126,7 @@ def register(app: typer.Typer) -> None:
             issues = storage.list({"status": "in_progress"})
             issues.sort(key=lambda i: i.priority)
 
-            if json_output:
+            if is_json_output(json_output):
                 from dogcat.models import issue_to_dict
 
                 output = [issue_to_dict(issue) for issue in issues]
@@ -137,8 +142,10 @@ def register(app: typer.Typer) -> None:
                         for issue in issues:
                             typer.echo(format_issue_brief(issue))
 
+        except typer.Exit:
+            raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
 
     @app.command("in-review")
@@ -152,7 +159,7 @@ def register(app: typer.Typer) -> None:
             issues = storage.list({"status": "in_review"})
             issues.sort(key=lambda i: i.priority)
 
-            if json_output:
+            if is_json_output(json_output):
                 from dogcat.models import issue_to_dict
 
                 output = [issue_to_dict(issue) for issue in issues]
@@ -168,8 +175,10 @@ def register(app: typer.Typer) -> None:
                         for issue in issues:
                             typer.echo(format_issue_brief(issue))
 
+        except typer.Exit:
+            raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
 
     def _set_status(
@@ -191,7 +200,7 @@ def register(app: typer.Typer) -> None:
                 {"status": status, "updated_by": final_operator},
             )
 
-            if json_output:
+            if is_json_output(json_output):
                 from dogcat.models import issue_to_dict
 
                 typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
@@ -199,10 +208,12 @@ def register(app: typer.Typer) -> None:
                 typer.echo(f"✓ {label} {issue.full_id}: {issue.title}")
 
         except ValueError as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
+        except typer.Exit:
+            raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
 
     @app.command(name="ir", hidden=True)
@@ -266,7 +277,7 @@ def register(app: typer.Typer) -> None:
             issues = storage.list({"status": "deferred"})
             issues.sort(key=lambda i: i.priority)
 
-            if json_output:
+            if is_json_output(json_output):
                 from dogcat.models import issue_to_dict
 
                 output = [issue_to_dict(issue) for issue in issues]
@@ -278,8 +289,10 @@ def register(app: typer.Typer) -> None:
                     for issue in issues:
                         typer.echo(format_issue_brief(issue))
 
+        except typer.Exit:
+            raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
 
     @app.command(name="defer", hidden=True)
@@ -324,7 +337,7 @@ def register(app: typer.Typer) -> None:
             ]
             issues.sort(key=lambda i: i.priority)
 
-            if json_output:
+            if is_json_output(json_output):
                 from dogcat.models import issue_to_dict
 
                 output = [issue_to_dict(issue) for issue in issues]
@@ -336,8 +349,10 @@ def register(app: typer.Typer) -> None:
                     for issue in issues:
                         typer.echo(format_issue_brief(issue))
 
+        except typer.Exit:
+            raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
 
     @app.command(name="mark-manual", hidden=True)
@@ -357,13 +372,14 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Mark an issue as manual (not for agents)."""
         try:
+            is_json_output(json_output)  # sync local flag for echo_error
             storage = get_storage(dogcats_dir)
             final_operator = (
                 operator if operator is not None else get_default_operator()
             )
             current = storage.get(issue_id)
             if current is None:
-                typer.echo(f"Error: Issue {issue_id} not found", err=True)
+                echo_error(f"Issue {issue_id} not found")
                 raise typer.Exit(1)
             new_metadata = dict(current.metadata) if current.metadata else {}
             new_metadata["manual"] = True
@@ -373,7 +389,7 @@ def register(app: typer.Typer) -> None:
                 {"metadata": new_metadata, "operator": final_operator},
             )
 
-            if json_output:
+            if is_json_output(json_output):
                 from dogcat.models import issue_to_dict
 
                 typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
@@ -381,10 +397,12 @@ def register(app: typer.Typer) -> None:
                 typer.echo(f"✓ Marked manual {issue.full_id}: {issue.title}")
 
         except ValueError as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
+        except typer.Exit:
+            raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
 
     @app.command("recently-closed")
@@ -424,7 +442,7 @@ def register(app: typer.Typer) -> None:
                     if issue_obj:
                         event.title = issue_obj.title
 
-            if json_output:
+            if is_json_output(json_output):
                 output = [_serialize(e) for e in events]
                 typer.echo(orjson.dumps(output).decode())
             elif not events:
@@ -434,8 +452,10 @@ def register(app: typer.Typer) -> None:
                     typer.echo(format_event(event))
                 typer.echo(get_event_legend())
 
+        except typer.Exit:
+            raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
 
     @app.command("recently-added")
@@ -470,7 +490,7 @@ def register(app: typer.Typer) -> None:
             recent = issues[:limit]
             recent.reverse()
 
-            if json_output:
+            if is_json_output(json_output):
                 from dogcat.models import issue_to_dict
 
                 output = [issue_to_dict(issue) for issue in recent]
@@ -486,8 +506,10 @@ def register(app: typer.Typer) -> None:
                         )
                         typer.echo(f"{format_issue_brief(issue)} {created_str}")
 
+        except typer.Exit:
+            raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
 
     @app.command(name="rc", hidden=True)
@@ -537,7 +559,7 @@ def register(app: typer.Typer) -> None:
             ir_issues = storage.list({"status": "in_review"})
             ir_issues.sort(key=lambda i: i.priority)
 
-            if json_output:
+            if is_json_output(json_output):
                 from dogcat.models import issue_to_dict
 
                 output = {
@@ -573,6 +595,8 @@ def register(app: typer.Typer) -> None:
                         for issue in ir_issues:
                             typer.echo(f"  {format_issue_brief(issue)}")
 
+        except typer.Exit:
+            raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)

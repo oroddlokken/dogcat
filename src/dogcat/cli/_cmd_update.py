@@ -17,6 +17,7 @@ from ._completions import (
     complete_types,
 )
 from ._helpers import _parse_priority_value, get_default_operator, get_storage
+from ._json_state import echo_error, is_json_output
 
 
 def register(app: typer.Typer) -> None:
@@ -168,7 +169,7 @@ def register(app: typer.Typer) -> None:
                 else:
                     resolved_dup = storage.resolve_id(duplicate_of)
                     if resolved_dup is None:
-                        typer.echo(f"Error: Issue {duplicate_of} not found", err=True)
+                        echo_error(f"Issue {duplicate_of} not found")
                         raise typer.Exit(1)
                     updates["duplicate_of"] = resolved_dup
             if parent is not None:
@@ -177,7 +178,7 @@ def register(app: typer.Typer) -> None:
                 else:
                     resolved_parent = storage.resolve_id(parent)
                     if resolved_parent is None:
-                        typer.echo(f"Error: Parent issue {parent} not found", err=True)
+                        echo_error(f"Parent issue {parent} not found")
                         raise typer.Exit(1)
                     updates["parent"] = resolved_parent
             if labels is not None:
@@ -186,7 +187,7 @@ def register(app: typer.Typer) -> None:
                 # Get current issue to preserve existing metadata
                 current = storage.get(issue_id)
                 if current is None:
-                    typer.echo(f"Issue {issue_id} not found", err=True)
+                    echo_error(f"Issue {issue_id} not found")
                     raise typer.Exit(1)
                 new_metadata = dict(current.metadata) if current.metadata else {}
                 if manual:
@@ -205,7 +206,7 @@ def register(app: typer.Typer) -> None:
                 and not remove_blocks
                 and not editor
             ):
-                typer.echo("No updates provided", err=True)
+                echo_error("No updates provided")
                 raise typer.Exit(1)
 
             # Set updated_by to default operator if not provided
@@ -219,7 +220,7 @@ def register(app: typer.Typer) -> None:
             else:
                 issue = storage.get(issue_id)
                 if issue is None:
-                    typer.echo(f"Issue {issue_id} not found", err=True)
+                    echo_error(f"Issue {issue_id} not found")
                     raise typer.Exit(1)
 
             # Add dependencies if specified
@@ -242,34 +243,28 @@ def register(app: typer.Typer) -> None:
             if remove_depends_on:
                 resolved_target = storage.resolve_id(remove_depends_on)
                 if resolved_target is None:
-                    typer.echo(f"Error: Issue {remove_depends_on} not found", err=True)
+                    echo_error(f"Issue {remove_depends_on} not found")
                     raise typer.Exit(1)
                 # Check the dependency exists before removing
                 deps = storage.get_dependencies(issue.full_id)
                 if not any(d.depends_on_id == resolved_target for d in deps):
-                    typer.echo(
-                        f"Error: {issue.full_id} does not depend on {resolved_target}",
-                        err=True,
-                    )
+                    echo_error(f"{issue.full_id} does not depend on {resolved_target}")
                     raise typer.Exit(1)
                 storage.remove_dependency(issue.full_id, resolved_target)
 
             if remove_blocks:
                 resolved_target = storage.resolve_id(remove_blocks)
                 if resolved_target is None:
-                    typer.echo(f"Error: Issue {remove_blocks} not found", err=True)
+                    echo_error(f"Issue {remove_blocks} not found")
                     raise typer.Exit(1)
                 # Check the dependency exists before removing (reversed direction)
                 deps = storage.get_dependencies(resolved_target)
                 if not any(d.depends_on_id == issue.full_id for d in deps):
-                    typer.echo(
-                        f"Error: {issue.full_id} does not block {resolved_target}",
-                        err=True,
-                    )
+                    echo_error(f"{issue.full_id} does not block {resolved_target}")
                     raise typer.Exit(1)
                 storage.remove_dependency(resolved_target, issue.full_id)
 
-            if json_output:
+            if is_json_output(json_output):
                 from dogcat.models import issue_to_dict
 
                 typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
@@ -286,10 +281,10 @@ def register(app: typer.Typer) -> None:
                     typer.echo("Edit cancelled")
 
         except ValueError as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
         except typer.Exit:
             raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)

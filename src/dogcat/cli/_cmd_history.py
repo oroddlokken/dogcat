@@ -8,6 +8,7 @@ import typer
 from ._completions import complete_issue_ids
 from ._formatting import format_event, get_event_legend
 from ._helpers import get_storage
+from ._json_state import echo_error, is_json_output
 
 
 def register(app: typer.Typer) -> None:
@@ -49,7 +50,7 @@ def register(app: typer.Typer) -> None:
             if issue:
                 resolved_issue = storage.resolve_id(issue)
                 if resolved_issue is None:
-                    typer.echo(f"Issue {issue} not found", err=True)
+                    echo_error(f"Issue {issue} not found")
                     raise typer.Exit(1)
 
             events = event_log.read(issue_id=resolved_issue, limit=limit)
@@ -62,7 +63,7 @@ def register(app: typer.Typer) -> None:
                     if issue_obj:
                         event.title = issue_obj.title
 
-            if json_output:
+            if is_json_output(json_output):
                 output = [_serialize(e) for e in events]
                 typer.echo(orjson.dumps(output).decode())
             elif not events:
@@ -75,7 +76,7 @@ def register(app: typer.Typer) -> None:
         except typer.Exit:
             raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1) from e
 
     @app.command(name="h", hidden=True)

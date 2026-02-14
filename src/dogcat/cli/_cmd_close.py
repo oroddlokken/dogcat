@@ -9,6 +9,7 @@ import typer
 
 from ._completions import complete_issue_ids
 from ._helpers import get_default_operator, get_storage
+from ._json_state import echo_error, is_json_output
 
 if TYPE_CHECKING:
     from dogcat.storage import JSONLStorage
@@ -32,14 +33,14 @@ def register(app: typer.Typer) -> None:
                 closed_by=closed_by,
             )
 
-            if json_output:
+            if is_json_output(json_output):
                 from dogcat.models import issue_to_dict
 
                 typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
             else:
                 typer.echo(f"✓ Closed {issue.full_id}: {issue.title}")
         except (ValueError, Exception) as e:
-            typer.echo(f"Error closing {issue_id}: {e}", err=True)
+            echo_error(f"closing {issue_id}: {e}")
             return True
         return False
 
@@ -99,14 +100,14 @@ def register(app: typer.Typer) -> None:
                 deleted_by=deleted_by,
             )
 
-            if json_output:
+            if is_json_output(json_output):
                 from dogcat.models import issue_to_dict
 
                 typer.echo(orjson.dumps(issue_to_dict(deleted_issue)).decode())
             else:
                 typer.echo(f"✓ Deleted {deleted_issue.full_id}: {deleted_issue.title}")
         except (ValueError, Exception) as e:
-            typer.echo(f"Error deleting {issue_id}: {e}", err=True)
+            echo_error(f"deleting {issue_id}: {e}")
             return True
         return False
 

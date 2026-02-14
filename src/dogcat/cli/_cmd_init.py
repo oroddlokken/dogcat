@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import orjson
 import typer
 
 from dogcat.config import load_config, save_config, set_issue_prefix
 from dogcat.constants import DOGCATRC_FILENAME
 
 from ._helpers import get_storage
+from ._json_state import echo_error, is_json_output
 
 
 def register(app: typer.Typer) -> None:
@@ -42,6 +44,7 @@ def register(app: typer.Typer) -> None:
                 " (sets git_tracking=false, adds .dogcats/ to .gitignore)"
             ),
         ),
+        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     ) -> None:
         """Initialize a new Dogcat repository.
 
@@ -56,26 +59,19 @@ def register(app: typer.Typer) -> None:
         without reinitializing it. Only creates the .dogcatrc file.
         """
         if use_existing is not None and external_dir is not None:
-            typer.echo(
-                "Error: --dir and --use-existing-folder are mutually exclusive",
-                err=True,
-            )
+            echo_error("--dir and --use-existing-folder are mutually exclusive")
             raise SystemExit(1)
 
         if use_existing is not None:
             existing_path = Path(use_existing)
             if not existing_path.is_dir():
-                typer.echo(
-                    f"Error: directory does not exist: {existing_path}",
-                    err=True,
-                )
+                echo_error(f"directory does not exist: {existing_path}")
                 raise SystemExit(1)
             issues_file = existing_path / "issues.jsonl"
             if not issues_file.exists():
-                typer.echo(
-                    f"Error: not a valid dogcat directory "
-                    f"(missing issues.jsonl): {existing_path}",
-                    err=True,
+                echo_error(
+                    f"not a valid dogcat directory "
+                    f"(missing issues.jsonl): {existing_path}"
                 )
                 raise SystemExit(1)
             rc_path = Path.cwd() / DOGCATRC_FILENAME
@@ -147,8 +143,16 @@ def register(app: typer.Typer) -> None:
                 gitignore.write_text(f"{entry}\n")
                 typer.echo("✓ Created .gitignore with .dogcats/")
 
-        typer.echo(f"\n✓ Dogcat repository initialized in {dogcats_dir}")
-        typer.echo(f"  Issues will be named: {prefix}-<hash> (e.g., {prefix}-a3f2)")
+        if is_json_output(json_output):
+            output = {
+                "status": "initialized",
+                "prefix": prefix,
+                "path": str(dogcats_path.resolve()),
+            }
+            typer.echo(orjson.dumps(output).decode())
+        else:
+            typer.echo(f"\n✓ Dogcat repository initialized in {dogcats_dir}")
+            typer.echo(f"  Issues will be named: {prefix}-<hash> (e.g., {prefix}-a3f2)")
 
     @app.command("import-beads")
     def import_beads(
@@ -191,10 +195,9 @@ def register(app: typer.Typer) -> None:
                     if verbose:
                         typer.echo("Importing into existing project (merge mode)...")
                 else:
-                    typer.echo(
-                        "Error: .dogcats/issues.jsonl already exists.\n"
-                        "  Use --force to import into existing project (merge)",
-                        err=True,
+                    echo_error(
+                        ".dogcats/issues.jsonl already exists. "
+                        "Use --force to import into existing project (merge)"
                     )
                     raise typer.Exit(1)
 
@@ -234,11 +237,13 @@ def register(app: typer.Typer) -> None:
                 typer.echo(f"  Failed: {failed} issues")
 
         except FileNotFoundError as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
         except ValueError as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
+        except typer.Exit:
+            raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)

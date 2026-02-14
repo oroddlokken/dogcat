@@ -11,6 +11,7 @@ import typer
 from dogcat.models import Issue, Status, classify_record
 
 from ._helpers import get_storage
+from ._json_state import echo_error, is_json_output
 
 
 def register(app: typer.Typer) -> None:
@@ -33,6 +34,7 @@ def register(app: typer.Typer) -> None:
             "--confirm",
             help="Skip confirmation prompt",
         ),
+        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Archive closed issues to reduce startup load.
@@ -59,10 +61,7 @@ def register(app: typer.Typer) -> None:
         if older_than:
             match = re.match(r"^(\d+)d$", older_than)
             if not match:
-                typer.echo(
-                    "Error: --older-than must be in format Nd (e.g. 30d)",
-                    err=True,
-                )
+                echo_error("--older-than must be in format Nd (e.g. 30d)")
                 raise typer.Exit(1)
             days = int(match.group(1))
 
@@ -294,6 +293,8 @@ def register(app: typer.Typer) -> None:
                     for line in archived_lines:
                         tmp_file.write(line if line.endswith(b"\n") else line + b"\n")
                     tmp_file.flush()
+                except typer.Exit:
+                    raise
                 except Exception as e:
                     tmp_path.unlink(missing_ok=True)
                     msg = f"Failed to write archive file: {e}"
@@ -320,6 +321,8 @@ def register(app: typer.Typer) -> None:
                     for line in remaining_lines:
                         tmp_file.write(line if line.endswith(b"\n") else line + b"\n")
                     tmp_file.flush()
+                except typer.Exit:
+                    raise
                 except Exception as e:
                     tmp_main_path.unlink(missing_ok=True)
                     msg = f"Failed to rewrite storage file: {e}"
@@ -335,12 +338,22 @@ def register(app: typer.Typer) -> None:
             # Update in-memory state
             storage.remove_archived(archivable_ids, len(remaining_lines))
 
-            typer.echo(f"\n✓ Archived {len(archivable)} issue(s) to {archive_path}")
-            if archived_dep_count:
-                typer.echo(f"  Including {archived_dep_count} dependency record(s)")
-            if archived_link_count:
-                typer.echo(f"  Including {archived_link_count} link record(s)")
+            if is_json_output(json_output):
+                output = {
+                    "archived": len(archivable),
+                    "skipped": len(skipped),
+                    "archive_path": str(archive_path),
+                }
+                typer.echo(orjson.dumps(output).decode())
+            else:
+                typer.echo(f"\n✓ Archived {len(archivable)} issue(s) to {archive_path}")
+                if archived_dep_count:
+                    typer.echo(f"  Including {archived_dep_count} dependency record(s)")
+                if archived_link_count:
+                    typer.echo(f"  Including {archived_link_count} link record(s)")
 
+        except typer.Exit:
+            raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)

@@ -9,6 +9,7 @@ import typer
 from dogcat.config import load_config, save_config
 
 from ._helpers import SortedGroup, find_dogcats_dir
+from ._json_state import echo_error, is_json_output
 
 # Sub-app for 'dcat config' subcommands
 config_app = typer.Typer(
@@ -102,13 +103,14 @@ def register(app: typer.Typer) -> None:
         """Get a configuration value."""
         import orjson
 
+        is_json_output(json_output)  # sync local flag for echo_error
         dogcats_dir = find_dogcats_dir()
         config = load_config(dogcats_dir)
         if key not in config:
-            typer.echo(f"Key '{key}' not found in config", err=True)
+            echo_error(f"Key '{key}' not found in config")
             raise typer.Exit(1)
         val = config[key]
-        if json_output:
+        if is_json_output(json_output):
             typer.echo(orjson.dumps({key: val}).decode())
         elif isinstance(val, list):
             typer.echo(", ".join(str(i) for i in val))  # type: ignore[reportUnknownArgumentType, reportUnknownVariableType]
@@ -124,7 +126,7 @@ def register(app: typer.Typer) -> None:
 
         dogcats_dir = find_dogcats_dir()
         config = load_config(dogcats_dir)
-        if json_output:
+        if is_json_output(json_output):
             typer.echo(orjson.dumps(config, option=orjson.OPT_INDENT_2).decode())
         else:
             if not config:
@@ -143,7 +145,7 @@ def register(app: typer.Typer) -> None:
         """List all available configuration keys and their descriptions."""
         import orjson
 
-        if json_output:
+        if is_json_output(json_output):
             typer.echo(orjson.dumps(_KNOWN_KEYS, option=orjson.OPT_INDENT_2).decode())
             return
 

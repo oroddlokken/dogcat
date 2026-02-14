@@ -29,6 +29,7 @@ from ._helpers import (
     get_default_operator,
     get_storage,
 )
+from ._json_state import echo_error, is_json_output
 
 _CREATE_DOC = """\
 Create a new issue.
@@ -201,37 +202,30 @@ def register(app: typer.Typer) -> None:
             if not title and title_opt:
                 title = title_opt
             elif title and title_opt:
-                typer.echo(
-                    "Error: Cannot use both positional title and --title flag",
-                    err=True,
-                )
+                echo_error("Cannot use both positional title and --title flag")
                 raise typer.Exit(1)
 
             # Validate that shorthands and explicit options aren't used together
             if shorthand_priority is not None and priority is not None:
-                typer.echo(
-                    "Error: Cannot use both priority shorthand (0-4) and "
-                    "--priority flag together",
-                    err=True,
+                echo_error(
+                    "Cannot use both priority shorthand (0-4) and "
+                    "--priority flag together"
                 )
                 raise typer.Exit(1)
             if shorthand_type is not None and issue_type is not None:
-                typer.echo(
-                    "Error: Cannot use both type shorthand (b/f/e/s/q) and "
-                    "--type flag together",
-                    err=True,
+                echo_error(
+                    "Cannot use both type shorthand (b/f/e/s/q) and "
+                    "--type flag together"
                 )
                 raise typer.Exit(1)
             if shorthand_status is not None and status is not None:
-                typer.echo(
-                    "Error: Cannot use both status shorthand (d) and "
-                    "--status flag together",
-                    err=True,
+                echo_error(
+                    "Cannot use both status shorthand (d) and --status flag together"
                 )
                 raise typer.Exit(1)
 
             if not title:
-                typer.echo("Error: Title is required", err=True)
+                echo_error("Title is required")
                 raise typer.Exit(1)
 
             storage = get_storage(dogcats_dir)
@@ -292,19 +286,19 @@ def register(app: typer.Typer) -> None:
             if depends_on:
                 resolved_depends_on = storage.resolve_id(depends_on)
                 if resolved_depends_on is None:
-                    typer.echo(f"Error: Issue {depends_on} not found", err=True)
+                    echo_error(f"Issue {depends_on} not found")
                     raise typer.Exit(1)
             if blocks:
                 resolved_blocks = storage.resolve_id(blocks)
                 if resolved_blocks is None:
-                    typer.echo(f"Error: Issue {blocks} not found", err=True)
+                    echo_error(f"Issue {blocks} not found")
                     raise typer.Exit(1)
 
             # Resolve duplicate_of if provided
             if duplicate_of:
                 resolved_dup = storage.resolve_id(duplicate_of)
                 if resolved_dup is None:
-                    typer.echo(f"Error: Issue {duplicate_of} not found", err=True)
+                    echo_error(f"Issue {duplicate_of} not found")
                     raise typer.Exit(1)
                 duplicate_of = resolved_dup
 
@@ -312,7 +306,7 @@ def register(app: typer.Typer) -> None:
             if parent:
                 resolved_parent = storage.resolve_id(parent)
                 if resolved_parent is None:
-                    typer.echo(f"Error: Parent issue {parent} not found", err=True)
+                    echo_error(f"Parent issue {parent} not found")
                     raise typer.Exit(1)
                 parent = resolved_parent
 
@@ -355,7 +349,7 @@ def register(app: typer.Typer) -> None:
                     created_by=created_by,
                 )
 
-            if json_output:
+            if is_json_output(json_output):
                 from dogcat.models import issue_to_dict
 
                 typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
@@ -375,12 +369,12 @@ def register(app: typer.Typer) -> None:
                     typer.echo("Edit cancelled")
 
         except ValueError as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
         except typer.Exit:
             raise  # Re-raise without duplicate error message
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
 
     app.command(name="create")(
@@ -477,7 +471,7 @@ def register(app: typer.Typer) -> None:
                 status=status_sh,
             )
             if created is not None:
-                if json_output:
+                if is_json_output(json_output):
                     from dogcat.models import issue_to_dict
 
                     typer.echo(orjson.dumps(issue_to_dict(created)).decode())
@@ -490,12 +484,12 @@ def register(app: typer.Typer) -> None:
                 typer.echo("Create cancelled")
 
         except ValueError as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
         except typer.Exit:
             raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
 
     app.command(name="n", hidden=True)(

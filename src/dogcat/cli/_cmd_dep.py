@@ -7,6 +7,7 @@ import typer
 
 from ._completions import complete_issue_ids
 from ._helpers import get_storage
+from ._json_state import echo_error, is_json_output
 
 
 def register(app: typer.Typer) -> None:
@@ -38,7 +39,7 @@ def register(app: typer.Typer) -> None:
 
             if subcommand == "add":
                 if not depends_on_id:
-                    typer.echo("Error: --depends-on required for add", err=True)
+                    echo_error("--depends-on required for add")
                     raise typer.Exit(1)
 
                 dep = storage.add_dependency(
@@ -54,7 +55,7 @@ def register(app: typer.Typer) -> None:
 
             elif subcommand == "remove":
                 if not depends_on_id:
-                    typer.echo("Error: --depends-on required for remove", err=True)
+                    echo_error("--depends-on required for remove")
                     raise typer.Exit(1)
 
                 storage.remove_dependency(issue_id, depends_on_id)
@@ -63,7 +64,7 @@ def register(app: typer.Typer) -> None:
             elif subcommand == "list":
                 deps = storage.get_dependencies(issue_id)
 
-                if json_output:
+                if is_json_output(json_output):
                     output = [
                         {
                             "issue_id": dep.issue_id,
@@ -82,14 +83,16 @@ def register(app: typer.Typer) -> None:
                     else:
                         typer.echo("No dependencies")
             else:
-                typer.echo(f"Unknown subcommand: {subcommand}", err=True)
+                echo_error(f"Unknown subcommand: {subcommand}")
                 raise typer.Exit(1)
 
         except ValueError as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
+        except typer.Exit:
+            raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
 
     @app.command("link")
@@ -118,7 +121,7 @@ def register(app: typer.Typer) -> None:
 
             if subcommand == "add":
                 if not related_id:
-                    typer.echo("Error: --related required for add", err=True)
+                    echo_error("--related required for add")
                     raise typer.Exit(1)
 
                 link = storage.add_link(
@@ -133,7 +136,7 @@ def register(app: typer.Typer) -> None:
 
             elif subcommand == "remove":
                 if not related_id:
-                    typer.echo("Error: --related required for remove", err=True)
+                    echo_error("--related required for remove")
                     raise typer.Exit(1)
 
                 storage.remove_link(issue_id, related_id)
@@ -143,7 +146,7 @@ def register(app: typer.Typer) -> None:
                 links = storage.get_links(issue_id)
                 incoming = storage.get_incoming_links(issue_id)
 
-                if json_output:
+                if is_json_output(json_output):
                     output = {
                         "outgoing": [
                             {
@@ -176,12 +179,14 @@ def register(app: typer.Typer) -> None:
                     else:
                         typer.echo("No links")
             else:
-                typer.echo(f"Unknown subcommand: {subcommand}", err=True)
+                echo_error(f"Unknown subcommand: {subcommand}")
                 raise typer.Exit(1)
 
         except ValueError as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
+        except typer.Exit:
+            raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)

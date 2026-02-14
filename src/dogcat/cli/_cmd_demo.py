@@ -72,6 +72,8 @@ def register(app: typer.Typer) -> None:
             )
             typer.echo("\nTry: dcat list --table")
 
+        except typer.Exit:
+            raise
         except Exception as e:
             typer.echo(f"Error creating demo issues: {e}", err=True)
             raise typer.Exit(1)

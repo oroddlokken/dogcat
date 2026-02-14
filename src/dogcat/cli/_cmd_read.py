@@ -26,6 +26,7 @@ from ._formatting import (
     get_legend,
 )
 from ._helpers import _make_alias, get_storage
+from ._json_state import echo_error, is_json_output
 
 if TYPE_CHECKING:
     from dogcat.models import Issue
@@ -232,7 +233,7 @@ def register(app: typer.Typer) -> None:
         try:
             # Validate mutually exclusive options early
             if tree and table:
-                typer.echo("Error: --tree and --table are mutually exclusive", err=True)
+                echo_error("--tree and --table are mutually exclusive")
                 raise typer.Exit(1)
 
             storage = get_storage(dogcats_dir)
@@ -322,7 +323,7 @@ def register(app: typer.Typer) -> None:
 
                     issues = filtered_issues
                 except ValueError as e:
-                    typer.echo(f"Error parsing date: {e}", err=True)
+                    echo_error(f"parsing date: {e}")
                     raise typer.Exit(1)
 
             # In tree mode, re-include closed parents of visible children
@@ -350,7 +351,7 @@ def register(app: typer.Typer) -> None:
             # Sort by priority (lower number = higher priority)
             issues = sorted(issues, key=lambda i: (i.priority, i.id))
 
-            if json_output:
+            if is_json_output(json_output):
                 if limit:
                     issues = issues[:limit]
                 from dogcat.models import issue_to_dict
@@ -451,8 +452,10 @@ def register(app: typer.Typer) -> None:
                                 )
                     typer.echo(get_legend(total_hidden, color=legend_color))
 
+        except typer.Exit:
+            raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
 
     @app.command()
@@ -467,14 +470,15 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Show details of a specific issue."""
         try:
+            is_json_output(json_output)  # sync local flag for echo_error
             storage = get_storage(dogcats_dir)
             issue = storage.get(issue_id)
 
             if issue is None:
-                typer.echo(f"Issue {issue_id} not found", err=True)
+                echo_error(f"Issue {issue_id} not found")
                 raise typer.Exit(1)
 
-            if json_output:
+            if is_json_output(json_output):
                 from dogcat.models import issue_to_dict
 
                 typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
@@ -552,8 +556,10 @@ def register(app: typer.Typer) -> None:
 
                 typer.echo("\n".join(output_lines))
 
+        except typer.Exit:
+            raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
 
     @app.command()
@@ -579,7 +585,7 @@ def register(app: typer.Typer) -> None:
 
             issue = storage.get(issue_id)
             if issue is None:
-                typer.echo(f"Error: Issue {issue_id} not found", err=True)
+                echo_error(f"Issue {issue_id} not found")
                 raise typer.Exit(1)
 
             from dogcat.tui.editor import edit_issue
@@ -593,7 +599,7 @@ def register(app: typer.Typer) -> None:
         except typer.Exit:
             raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
 
     @app.command(name="e", hidden=True)

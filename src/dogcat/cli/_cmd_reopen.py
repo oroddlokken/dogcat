@@ -9,6 +9,7 @@ import typer
 
 from ._completions import complete_issue_ids
 from ._helpers import get_default_operator, get_storage
+from ._json_state import echo_error, is_json_output
 
 if TYPE_CHECKING:
     from dogcat.storage import JSONLStorage
@@ -32,14 +33,14 @@ def register(app: typer.Typer) -> None:
                 reopened_by=reopened_by,
             )
 
-            if json_output:
+            if is_json_output(json_output):
                 from dogcat.models import issue_to_dict
 
                 typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
             else:
                 typer.echo(f"✓ Reopened {issue.full_id}: {issue.title}")
         except (ValueError, Exception) as e:
-            typer.echo(f"Error reopening {issue_id}: {e}", err=True)
+            echo_error(f"reopening {issue_id}: {e}")
             return True
         return False
 

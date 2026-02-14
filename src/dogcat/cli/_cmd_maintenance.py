@@ -21,6 +21,7 @@ from dogcat.config import (
 
 from ._formatting import format_issue_brief
 from ._helpers import get_default_operator, get_storage
+from ._json_state import echo_error, is_json_output
 from ._validate import detect_concurrent_edits, validate_jsonl
 
 
@@ -62,8 +63,10 @@ def register(app: typer.Typer) -> None:
                 pruned_ids = storage.prune_tombstones()
                 typer.echo(f"✓ Pruned {len(pruned_ids)} tombstoned issue(s)")
 
+        except typer.Exit:
+            raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
 
     @app.command()
@@ -88,8 +91,10 @@ def register(app: typer.Typer) -> None:
 
         except KeyboardInterrupt:
             typer.echo("", err=True)
+        except typer.Exit:
+            raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
 
     @app.command()
@@ -108,16 +113,17 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Manage issue labels."""
         try:
+            is_json_output(json_output)  # sync local flag for echo_error
             storage = get_storage(dogcats_dir)
 
             if subcommand == "add":
                 if not label_name:
-                    typer.echo("Error: --label required for add", err=True)
+                    echo_error("--label required for add")
                     raise typer.Exit(1)
 
                 issue = storage.get(issue_id)
                 if issue is None:
-                    typer.echo(f"Issue {issue_id} not found", err=True)
+                    echo_error(f"Issue {issue_id} not found")
                     raise typer.Exit(1)
 
                 if label_name not in issue.labels:
@@ -132,12 +138,12 @@ def register(app: typer.Typer) -> None:
 
             elif subcommand == "remove":
                 if not label_name:
-                    typer.echo("Error: --label required for remove", err=True)
+                    echo_error("--label required for remove")
                     raise typer.Exit(1)
 
                 issue = storage.get(issue_id)
                 if issue is None:
-                    typer.echo(f"Issue {issue_id} not found", err=True)
+                    echo_error(f"Issue {issue_id} not found")
                     raise typer.Exit(1)
 
                 if label_name in issue.labels:
@@ -153,10 +159,10 @@ def register(app: typer.Typer) -> None:
             elif subcommand == "list":
                 issue = storage.get(issue_id)
                 if issue is None:
-                    typer.echo(f"Issue {issue_id} not found", err=True)
+                    echo_error(f"Issue {issue_id} not found")
                     raise typer.Exit(1)
 
-                if json_output:
+                if is_json_output(json_output):
                     typer.echo(orjson.dumps(issue.labels).decode())
                 else:
                     if issue.labels:
@@ -165,11 +171,13 @@ def register(app: typer.Typer) -> None:
                     else:
                         typer.echo("No labels")
             else:
-                typer.echo(f"Unknown subcommand: {subcommand}", err=True)
+                echo_error(f"Unknown subcommand: {subcommand}")
                 raise typer.Exit(1)
 
+        except typer.Exit:
+            raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
 
     @app.command("labels")
@@ -189,7 +197,7 @@ def register(app: typer.Typer) -> None:
                 for lbl in issue.labels:
                     label_counts[lbl] = label_counts.get(lbl, 0) + 1
 
-            if json_output:
+            if is_json_output(json_output):
                 result = [
                     {"label": lbl, "count": count}
                     for lbl, count in sorted(label_counts.items())
@@ -202,8 +210,10 @@ def register(app: typer.Typer) -> None:
                 else:
                     typer.echo("No labels found")
 
+        except typer.Exit:
+            raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
 
     @app.command("namespaces")
@@ -238,7 +248,7 @@ def register(app: typer.Typer) -> None:
                     return "hidden" if ns in hidden else "visible"
                 return ""
 
-            if json_output:
+            if is_json_output(json_output):
                 result = [
                     {
                         "namespace": ns,
@@ -257,8 +267,10 @@ def register(app: typer.Typer) -> None:
                 else:
                     typer.echo("No namespaces found")
 
+        except typer.Exit:
+            raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
 
     @app.command()
@@ -485,6 +497,8 @@ def register(app: typer.Typer) -> None:
                     f"Fixed: Removed {len(dangling_deps)} "
                     "dangling dependency reference(s)",
                 )
+            except typer.Exit:
+                raise
             except Exception as e:
                 typer.echo(f"Error fixing dependencies: {e}")
 
@@ -520,7 +534,7 @@ def register(app: typer.Typer) -> None:
                 pass  # Not in a git repo or path not relative
 
         # Output results
-        if json_output:
+        if is_json_output(json_output):
             output_data: dict[str, Any] = {
                 "status": "ok" if all_passed else "issues_found",
                 "checks": {
@@ -654,12 +668,14 @@ def register(app: typer.Typer) -> None:
                 for link in all_links:
                     typer.echo(orjson.dumps(link).decode())
             else:
-                typer.echo(f"Error: Unknown format '{format_type}'", err=True)
+                echo_error(f"Unknown format '{format_type}'")
                 typer.echo("Supported formats: json, jsonl", err=True)
                 raise typer.Exit(1)
 
+        except typer.Exit:
+            raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
 
     @app.command()
@@ -691,12 +707,12 @@ def register(app: typer.Typer) -> None:
             issue = storage.get(issue_id)
 
             if not issue:
-                typer.echo(f"Error: Issue {issue_id} not found", err=True)
+                echo_error(f"Issue {issue_id} not found")
                 raise typer.Exit(1)
 
             if action == "add":
                 if not text:
-                    typer.echo("Error: --text is required for add action", err=True)
+                    echo_error("--text is required for add action")
                     raise typer.Exit(1)
 
                 # Generate comment ID
@@ -713,7 +729,7 @@ def register(app: typer.Typer) -> None:
                 issue.comments.append(new_comment)
                 storage.update(issue_id, {"comments": issue.comments})
 
-                if json_output:
+                if is_json_output(json_output):
                     from dogcat.models import issue_to_dict
 
                     typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
@@ -721,7 +737,7 @@ def register(app: typer.Typer) -> None:
                     typer.echo(f"✓ Added comment {new_comment_id}")
 
             elif action == "list":
-                if json_output:
+                if is_json_output(json_output):
                     output = [
                         {
                             "id": c.id,
@@ -743,10 +759,7 @@ def register(app: typer.Typer) -> None:
 
             elif action == "delete":
                 if not comment_id:
-                    typer.echo(
-                        "Error: --comment-id is required for delete action",
-                        err=True,
-                    )
+                    echo_error("--comment-id is required for delete action")
                     raise typer.Exit(1)
 
                 comment_to_delete = None
@@ -756,7 +769,7 @@ def register(app: typer.Typer) -> None:
                         break
 
                 if not comment_to_delete:
-                    typer.echo(f"Error: Comment {comment_id} not found", err=True)
+                    echo_error(f"Comment {comment_id} not found")
                     raise typer.Exit(1)
 
                 issue.comments.remove(comment_to_delete)
@@ -765,12 +778,14 @@ def register(app: typer.Typer) -> None:
                 typer.echo(f"✓ Deleted comment {comment_id}")
 
             else:
-                typer.echo(f"Error: Unknown action '{action}'", err=True)
+                echo_error(f"Unknown action '{action}'")
                 typer.echo("Valid actions: add, list, delete", err=True)
                 raise typer.Exit(1)
 
+        except typer.Exit:
+            raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
 
     @app.command()
@@ -790,7 +805,7 @@ def register(app: typer.Typer) -> None:
             TYPE_SHORTHANDS,
         )
 
-        if json_output:
+        if is_json_output(json_output):
             output = {
                 "types": [
                     {"label": label, "value": value} for label, value in TYPE_OPTIONS
@@ -871,7 +886,7 @@ def register(app: typer.Typer) -> None:
 
             total = len(all_issues)
 
-            if json_output:
+            if is_json_output(json_output):
                 output = {
                     "prefix": prefix,
                     "total": total,
@@ -892,7 +907,7 @@ def register(app: typer.Typer) -> None:
                         typer.echo(f"  {type_val:<12} {count}")
 
         except ValueError as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1) from None
 
     def _extract_snippet(text: str, pattern: re.Pattern[str], context: int = 40) -> str:
@@ -992,7 +1007,7 @@ def register(app: typer.Typer) -> None:
             # Sort by priority
             matches = sorted(matches, key=lambda m: (m[0].priority, m[0].id))
 
-            if json_output:
+            if is_json_output(json_output):
                 from dogcat.models import issue_to_dict
 
                 output = [issue_to_dict(issue) for issue, _ in matches]
@@ -1013,8 +1028,10 @@ def register(app: typer.Typer) -> None:
                             )
                             typer.echo(f"{styled_field} {snippet}")
 
+        except typer.Exit:
+            raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1)
 
     @app.command(name="backfill-history")
@@ -1161,5 +1178,5 @@ def register(app: typer.Typer) -> None:
         except typer.Exit:
             raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1) from e

@@ -13,6 +13,24 @@ app = typer.Typer(
     cls=SortedGroup,
 )
 
+
+@app.callback(invoke_without_command=True)
+def _global_options(
+    ctx: typer.Context,
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Output as JSON for all commands",
+    ),
+) -> None:
+    from ._json_state import set_json_flag
+
+    set_json_flag(json_output)
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit(0)
+
+
 from . import (  # noqa: E402
     _cmd_archive,
     _cmd_close,

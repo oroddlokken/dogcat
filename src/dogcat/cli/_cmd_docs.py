@@ -17,6 +17,7 @@ from dogcat.constants import (
 )
 
 from ._helpers import SortedGroup, find_dogcats_dir
+from ._json_state import echo_error, is_json_output
 
 # Sub-app for 'dcat git' subcommands
 git_app = typer.Typer(
@@ -240,7 +241,7 @@ def register(app: typer.Typer) -> None:
         dogcats_dir = find_dogcats_dir()
         config = load_config(dogcats_dir)
         if config.get("git_tracking") is False:
-            if json_output:
+            if is_json_output(json_output):
                 typer.echo(
                     orjson.dumps(
                         {"status": "skipped", "reason": "git_tracking is disabled"},
@@ -256,7 +257,7 @@ def register(app: typer.Typer) -> None:
         all_passed, checks = _run_git_checks()
 
         # Output
-        if json_output:
+        if is_json_output(json_output):
             output_data = {
                 "status": "ok" if all_passed else "issues_found",
                 "checks": {
@@ -304,7 +305,7 @@ def register(app: typer.Typer) -> None:
         # Check we're in a git repo and get repo root
         repo_root = _git_repo_root()
         if repo_root is None:
-            typer.echo("Error: Not in a git repository", err=True)
+            echo_error("Not in a git repository")
             raise typer.Exit(1)
 
         # Configure the merge driver
@@ -744,13 +745,13 @@ Labels are freeform tags (e.g. "backend", "ui", "auth") that appear in
                         )
                         typer.echo(f"  ✗ {desc}")
                         typer.echo(
-                            f"    Consider running: {check['fix']}",
+                            f"    Suggestion: {check['fix']}",
                         )
                 typer.echo()
                 if not all_passed:
                     typer.echo(
-                        "You may want to fix the issues above for"
-                        " smoother git integration.\n"
+                        "You should inform the user about the issues"
+                        " above and ask if you should fix them.\n"
                         "To disable git checks: dcat config set"
                         " git_tracking false\n",
                     )

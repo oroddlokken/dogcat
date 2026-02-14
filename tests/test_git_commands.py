@@ -500,7 +500,7 @@ class TestPrimeGitHealth:
         )
         assert result.exit_code == 0
         assert "Git Integration Health" in result.stdout
-        assert "Consider running:" in result.stdout
+        assert "Suggestion:" in result.stdout
         assert "merge driver" in result.stdout.lower()
         assert "dcat config set git_tracking false" in result.stdout
 

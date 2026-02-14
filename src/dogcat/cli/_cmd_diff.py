@@ -13,6 +13,7 @@ from dogcat.constants import TRACKED_FIELDS
 
 from ._formatting import format_event, get_event_legend
 from ._helpers import get_storage
+from ._json_state import echo_error, is_json_output
 
 
 def _get_git_root(cwd: Path | None = None) -> Path | None:
@@ -130,11 +131,9 @@ def register(app: typer.Typer) -> None:
         try:
             from dogcat.event_log import EventRecord, _serialize
 
+            is_json_output(json_output)  # sync local flag for echo_error
             if staged and unstaged:
-                typer.echo(
-                    "Error: --staged and --unstaged are mutually exclusive",
-                    err=True,
-                )
+                echo_error("--staged and --unstaged are mutually exclusive")
                 raise typer.Exit(1)
 
             storage = get_storage(dogcats_dir)
@@ -142,7 +141,7 @@ def register(app: typer.Typer) -> None:
 
             git_root = _get_git_root(cwd=storage.dogcats_dir)
             if git_root is None:
-                typer.echo("Error: Not in a git repository", err=True)
+                echo_error("Not in a git repository")
                 raise typer.Exit(1)
 
             if staged:
@@ -239,7 +238,7 @@ def register(app: typer.Typer) -> None:
             # Sort oldest first (chronological)
             events.sort(key=lambda e: e.timestamp)
 
-            if json_output:
+            if is_json_output(json_output):
                 output = [_serialize(e) for e in events]
                 typer.echo(orjson.dumps(output).decode())
             elif not events:
@@ -252,5 +251,5 @@ def register(app: typer.Typer) -> None:
         except typer.Exit:
             raise
         except Exception as e:
-            typer.echo(f"Error: {e}", err=True)
+            echo_error(str(e))
             raise typer.Exit(1) from e
