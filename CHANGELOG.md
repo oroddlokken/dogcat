@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## [Unreleased]
+
+- **Remove dependencies between issues** — `dcat update` now supports `--remove-depends-on` and `--remove-blocks` to remove dependency relationships.
+
 ## 0.8.3
 
 - **Collapse deferred subtrees in `dcat list`** — children of deferred parents are hidden with a `[N hidden subtasks]` summary; external issues blocked by deferred subtrees are annotated. JSON output is unaffected.

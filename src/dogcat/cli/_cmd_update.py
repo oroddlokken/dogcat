@@ -104,6 +104,18 @@ def register(app: typer.Typer) -> None:
             help="Issue ID this blocks (the other issue is blocked by this one)",
             autocompletion=complete_issue_ids,
         ),
+        remove_depends_on: str | None = typer.Option(
+            None,
+            "--remove-depends-on",
+            help="Remove a dependency this issue has on another",
+            autocompletion=complete_issue_ids,
+        ),
+        remove_blocks: str | None = typer.Option(
+            None,
+            "--remove-blocks",
+            help="Remove a blocks relationship from this issue to another",
+            autocompletion=complete_issue_ids,
+        ),
         manual: bool | None = typer.Option(
             None,
             "--manual/--no-manual",
@@ -184,7 +196,14 @@ def register(app: typer.Typer) -> None:
                     new_metadata.pop("no_agent", None)  # migrate old key
                 updates["metadata"] = new_metadata
 
-            if not updates and not depends_on and not blocks and not editor:
+            if (
+                not updates
+                and not depends_on
+                and not blocks
+                and not remove_depends_on
+                and not remove_blocks
+                and not editor
+            ):
                 typer.echo("No updates provided", err=True)
                 raise typer.Exit(1)
 
@@ -217,6 +236,37 @@ def register(app: typer.Typer) -> None:
                     "blocks",
                     created_by=final_updated_by,
                 )
+
+            # Remove dependencies if specified
+            if remove_depends_on:
+                resolved_target = storage.resolve_id(remove_depends_on)
+                if resolved_target is None:
+                    typer.echo(f"Error: Issue {remove_depends_on} not found", err=True)
+                    raise typer.Exit(1)
+                # Check the dependency exists before removing
+                deps = storage.get_dependencies(issue.full_id)
+                if not any(d.depends_on_id == resolved_target for d in deps):
+                    typer.echo(
+                        f"Error: {issue.full_id} does not depend on {resolved_target}",
+                        err=True,
+                    )
+                    raise typer.Exit(1)
+                storage.remove_dependency(issue.full_id, resolved_target)
+
+            if remove_blocks:
+                resolved_target = storage.resolve_id(remove_blocks)
+                if resolved_target is None:
+                    typer.echo(f"Error: Issue {remove_blocks} not found", err=True)
+                    raise typer.Exit(1)
+                # Check the dependency exists before removing (reversed direction)
+                deps = storage.get_dependencies(resolved_target)
+                if not any(d.depends_on_id == issue.full_id for d in deps):
+                    typer.echo(
+                        f"Error: {issue.full_id} does not block {resolved_target}",
+                        err=True,
+                    )
+                    raise typer.Exit(1)
+                storage.remove_dependency(resolved_target, issue.full_id)
 
             if json_output:
                 from dogcat.models import issue_to_dict

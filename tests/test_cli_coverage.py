@@ -2739,6 +2739,110 @@ class TestUpdateManualOnNonexistent:
         assert result.exit_code == 1
 
 
+class TestUpdateRemoveDependencies:
+    """Test update --remove-depends-on and --remove-blocks."""
+
+    def test_update_remove_depends_on(self, tmp_path: Path) -> None:
+        """Test removing a dependency with --remove-depends-on."""
+        dogcats_dir, ids = _init_and_create(tmp_path, "Alpha", "Bravo")
+        # Add dependency: Alpha depends on Bravo
+        runner.invoke(
+            app,
+            [
+                "update",
+                ids[0],
+                "--depends-on",
+                ids[1],
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        # Remove dependency
+        result = runner.invoke(
+            app,
+            [
+                "update",
+                ids[0],
+                "--remove-depends-on",
+                ids[1],
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Updated" in result.stdout
+
+        # Verify dependency is gone
+        show_result = runner.invoke(
+            app,
+            ["show", ids[0], "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert (
+            ids[1] not in show_result.stdout
+            or "depends on" not in show_result.stdout.lower()
+        )
+
+    def test_update_remove_blocks(self, tmp_path: Path) -> None:
+        """Test removing a blocks relationship with --remove-blocks."""
+        dogcats_dir, ids = _init_and_create(tmp_path, "Alpha", "Bravo")
+        # Add: Alpha blocks Bravo
+        runner.invoke(
+            app,
+            [
+                "update",
+                ids[0],
+                "--blocks",
+                ids[1],
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        # Remove blocks relationship
+        result = runner.invoke(
+            app,
+            [
+                "update",
+                ids[0],
+                "--remove-blocks",
+                ids[1],
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Updated" in result.stdout
+
+        # Verify blocks relationship is gone
+        show_result = runner.invoke(
+            app,
+            ["show", ids[1], "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert (
+            ids[0] not in show_result.stdout
+            or "blocks" not in show_result.stdout.lower()
+        )
+
+    def test_update_remove_depends_on_nonexistent(self, tmp_path: Path) -> None:
+        """Test removing a dependency that doesn't exist gives a clear error."""
+        dogcats_dir, ids = _init_and_create(tmp_path, "Alpha", "Bravo")
+
+        result = runner.invoke(
+            app,
+            [
+                "update",
+                ids[0],
+                "--remove-depends-on",
+                ids[1],
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 1
+        assert "does not depend on" in result.output
+
+
 class TestListJsonOutput:
     """Test list with JSON output."""
 

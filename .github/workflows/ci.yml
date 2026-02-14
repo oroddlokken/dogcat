@@ -27,10 +27,7 @@ jobs:
         run: uv sync --group dev
 
       - name: Lint
-        run: |
-          uv run black --check --diff src tests dcat.py benchmark.py
-          uv run isort --check-only --diff src tests dcat.py benchmark.py
-          uv run ruff check src tests dcat.py benchmark.py
+        run: uvx --from rust-just just lint-all
 
       - name: Test
         run: uv run pytest --timeout 30 -n 8 tests

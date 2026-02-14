@@ -635,6 +635,8 @@ DOGCAT WORKFLOW GUIDE
   dcat create <title> --blocks <id>         - Create issue that blocks another
   dcat update <id> --depends-on <other_id>  - Add dependency to existing issue
   dcat update <id> --blocks <other_id>      - Mark issue as blocking another
+  dcat update <id> --remove-depends-on <id> - Remove a dependency
+  dcat update <id> --remove-blocks <id>     - Remove a blocks relationship
   dcat show <id>                            - View issue details
   dcat search <query>                       - Search issues across all fields
   dcat search <query> --type bug            - Search with type filter
