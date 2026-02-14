@@ -11,19 +11,19 @@ var:
 
 # run formatters
 fmt:
-    isort src tests dcat.py benchmark.py
-    ruff format src tests dcat.py benchmark.py
-    ruff check --fix --unsafe-fixes src tests dcat.py benchmark.py
+    uv run isort src tests dcat.py benchmark.py
+    uv run ruff format src tests dcat.py benchmark.py
+    uv run ruff check --fix --unsafe-fixes src tests dcat.py benchmark.py
 
 # lint the code
 lint:
-    isort --check-only --diff src tests dcat.py benchmark.py
-    ruff format --check --diff src tests dcat.py benchmark.py
-    ruff check src tests dcat.py benchmark.py
+    uv run isort --check-only --diff src tests dcat.py benchmark.py
+    uv run ruff format --check --diff src tests dcat.py benchmark.py
+    uv run ruff check src tests dcat.py benchmark.py
 
 # lint using pyright
 lint-pyright:
-    PYRIGHT_PYTHON_FORCE_VERSION=latest pyright src tests dcat.py benchmark.py
+    PYRIGHT_PYTHON_FORCE_VERSION=latest uv run pyright src tests dcat.py benchmark.py
 
 # run all linters
 lint-all:
@@ -32,19 +32,19 @@ lint-all:
 
 # find dead code with vulture
 vulture:
-    vulture src tests dcat.py benchmark.py vulture_whitelist.py --ignore-decorators "@app.command" --ignore-names "on_modified,on_moved,RELATED,reload"
+    uv run vulture src tests dcat.py benchmark.py vulture_whitelist.py --ignore-decorators "@app.command" --ignore-names "on_modified,on_moved,RELATED,reload"
 
 # run tests (excludes regression tests)
 test:
-    pytest --timeout 30 -n 8 tests --ignore=tests/test_regression.py
+    uv run pytest --timeout 30 -n 8 tests --ignore=tests/test_regression.py
 
 # run regression tests only
 test-regression:
-    pytest --timeout 60 -n 8 tests/test_regression.py
+    uv run pytest --timeout 60 -n 8 tests/test_regression.py
 
 # run all tests (including regression)
 test-all:
-    pytest --timeout 60 -n 8 tests --cov-config=.coveragerc --cov-report=html --cov=src/dogcat
+    uv run pytest --timeout 60 -n 8 tests --cov-config=.coveragerc --cov-report=html --cov=src/dogcat
 
 # run tests across Python 3.10-3.14 (installs missing interpreters automatically)
 test-matrix *args:
