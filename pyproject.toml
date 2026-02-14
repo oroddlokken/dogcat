@@ -33,7 +33,6 @@ packages = ["src/dogcat"]
 
 [dependency-groups]
 dev = [
-    "black>=26.1.0",
     "isort>=7.0.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
@@ -108,6 +107,7 @@ select = [
   "YTT",  # flake8-2020
 ]
 ignore = [
+  "COM812", # Checks for the absence of trailing commas
   "RUF100", # Unused blanket noqa directive
   "EXE001", # Shebang is present but file is not executable
   "D105",   # Missing docstring in magic method

@@ -21,12 +21,12 @@ def test_demo_uses_project_prefix_from_directory() -> None:
         # not the old hardcoded "demo" or the default "dc"
         issues = storage.list()
         for issue in issues:
-            assert (
-                issue.namespace != "demo"
-            ), f"Issue {issue.full_id} still uses hardcoded 'demo' namespace"
-            assert (
-                issue.namespace != "dc"
-            ), f"Issue {issue.full_id} uses default 'dc' namespace"
+            assert issue.namespace != "demo", (
+                f"Issue {issue.full_id} still uses hardcoded 'demo' namespace"
+            )
+            assert issue.namespace != "dc", (
+                f"Issue {issue.full_id} uses default 'dc' namespace"
+            )
 
 
 def test_demo_uses_configured_prefix() -> None:
@@ -75,6 +75,6 @@ def test_demo_has_deferred_epic_with_subtasks() -> None:
         # Check that the deferred epic has children
         deferred_epic = deferred_epics[0]
         children = storage.get_children(deferred_epic.full_id)
-        assert (
-            len(children) > 0
-        ), f"Deferred epic {deferred_epic.full_id} should have children"
+        assert len(children) > 0, (
+            f"Deferred epic {deferred_epic.full_id} should have children"
+        )

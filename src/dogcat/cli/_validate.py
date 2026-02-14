@@ -221,8 +221,7 @@ def validate_references(
                 {
                     "level": "error",
                     "message": (
-                        f"Dependency references"
-                        f" non-existent depends_on '{depends_on}'"
+                        f"Dependency references non-existent depends_on '{depends_on}'"
                     ),
                 },
             )

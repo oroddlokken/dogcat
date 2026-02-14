@@ -41,7 +41,7 @@ Always write tests for new features or when changing functionality.
 
 Use `just test` during development for fast feedback (excludes regression tests). Run `just test-regression` once you're happy with the changes to verify nothing is broken across versions. Use `just test-all` to run everything.
 
-Use `just lint` to check for linting errors. Run `just fmt-all` to automatically fix formatting issues. The CICD pipeline will fail if linting errors are present, so they must be fixed before pushing code.
+Use `just lint` to check for linting errors. Run `just fmt` to automatically fix formatting issues. The CICD pipeline will fail if linting errors are present, so they must be fixed before pushing code.
 
 We are using uv for dependency management. NEVER use pip.
 

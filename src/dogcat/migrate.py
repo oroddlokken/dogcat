@@ -148,7 +148,8 @@ def migrate_issue(beads_issue: dict[str, Any]) -> tuple[Issue, list[Dependency]]
             issue_id=dep_dict.get("issue_id", issue_id),
             depends_on_id=dep_dict.get("depends_on_id", ""),
             dep_type=dep_type,
-            created_at=parse_datetime(dep_created_at_str) or datetime.now(tz=timezone.utc),  # type: ignore  # noqa: E501
+            created_at=parse_datetime(dep_created_at_str)
+            or datetime.now(tz=timezone.utc),  # type: ignore  # noqa: E501
             created_by=dep_dict.get("created_by"),
         )
         dependencies.append(dep)

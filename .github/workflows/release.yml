@@ -1,12 +1,16 @@
-name: Release
+name: Release (RC)
 
 on:
   push:
     tags:
-      - "v*"
+      - "v*-rc.*"
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -29,10 +33,7 @@ jobs:
         run: uv sync --group dev
 
       - name: Lint
-        run: |
-          uv run black --check --diff src tests dcat.py benchmark.py
-          uv run isort --check-only --diff src tests dcat.py benchmark.py
-          uv run ruff check src tests dcat.py benchmark.py
+        run: uvx --from rust-just just lint-all
 
       - name: Test
         run: uv run pytest --timeout 30 -n 8 tests
@@ -55,17 +56,18 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Create GitHub Release
+      - name: Create GitHub Release (prerelease)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: "dogcat ${{ steps.version.outputs.version }}"
+          prerelease: true
           generate_release_notes: true
           files: |
             dist/*.whl
             dist/*.tar.gz
 
-  update-homebrew:
+  update-homebrew-edge:
     needs: build-and-release
     runs-on: ubuntu-latest
     steps:
@@ -95,18 +97,18 @@ jobs:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: homebrew-tap
 
-      - name: Update formula
+      - name: Update edge formula
         run: |
           cd homebrew-tap
-          sed -i 's|url ".*"|url "${{ steps.sha.outputs.url }}"|' Formula/dogcat.rb
-          sed -i 's|sha256 ".*"|sha256 "${{ steps.sha.outputs.sha256 }}"|' Formula/dogcat.rb
+          sed -i 's|url ".*"|url "${{ steps.sha.outputs.url }}"|' Formula/dogcatwindowbed.rb
+          sed -i 's|sha256 ".*"|sha256 "${{ steps.sha.outputs.sha256 }}"|' Formula/dogcatwindowbed.rb
 
       - name: Commit and push
         run: |
           cd homebrew-tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/dogcat.rb
+          git add Formula/dogcatwindowbed.rb
           git diff --cached --quiet && echo "No changes to commit" && exit 0
-          git commit -m "Update dogcat to ${{ steps.meta.outputs.version }}"
+          git commit -m "Update dogcatwindowbed (edge) to ${{ steps.meta.outputs.version }}"
           git push

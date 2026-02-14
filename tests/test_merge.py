@@ -286,9 +286,9 @@ class TestMergeBranches:
 
         # Merge B (compacted) into main -- auto-resolves
         result_b = repo.merge("branch-b")
-        assert (
-            result_b.returncode == 0
-        ), f"Expected auto-resolve but got conflict: {result_b.stdout}"
+        assert result_b.returncode == 0, (
+            f"Expected auto-resolve but got conflict: {result_b.stdout}"
+        )
 
         # Verify integrity after auto-merge
         assert _all_valid_json(repo)

@@ -1,0 +1,137 @@
+name: Publish Release
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    if: github.event.pull_request.merged == true && startsWith(github.head_ref, 'release/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.14
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Lint
+        run: uvx --from rust-just just lint-all
+
+      - name: Test
+        run: uv run pytest --timeout 30 -n 8 tests
+
+      - name: Extract version from branch name
+        id: version
+        run: |
+          BRANCH="${{ github.head_ref }}"
+          VERSION="${BRANCH#release/v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push git tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.version.outputs.tag }}" -m "Release ${{ steps.version.outputs.version }}"
+          git push origin "${{ steps.version.outputs.tag }}"
+
+      - name: Build sdist and wheel
+        run: uv build
+
+      - name: Extract changelog entry
+        id: changelog
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          # Extract the section for this version from CHANGELOG.md
+          BODY=$(awk -v ver="$VERSION" '
+            /^## / {
+              if (found) exit
+              if ($0 ~ ver) found=1; next
+            }
+            found { print }
+          ' CHANGELOG.md)
+          # Use EOF delimiter for multiline output
+          {
+            echo "body<<CHANGELOG_EOF"
+            echo "$BODY"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "dogcat ${{ steps.version.outputs.version }}"
+          body: ${{ steps.changelog.outputs.body }}
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+
+  update-homebrew:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get version
+        id: meta
+        run: |
+          BRANCH="${{ github.head_ref }}"
+          VERSION="${BRANCH#release/v}"
+          TAG="v${VERSION}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Download wheel and compute SHA256
+        id: sha
+        run: |
+          VERSION="${{ steps.meta.outputs.version }}"
+          TAG="${{ steps.meta.outputs.tag }}"
+          WHEEL="dogcat-${VERSION}-py3-none-any.whl"
+          URL="https://github.com/oroddlokken/dogcat/releases/download/${TAG}/${WHEEL}"
+          # Retry a few times since the release asset may take a moment to be available
+          for i in 1 2 3 4 5; do
+            SHA256=$(curl -sL "$URL" | shasum -a 256 | cut -d' ' -f1)
+            if [ -n "$SHA256" ]; then break; fi
+            sleep 10
+          done
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout homebrew-tap
+        uses: actions/checkout@v4
+        with:
+          repository: oroddlokken/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update formula
+        run: |
+          cd homebrew-tap
+          sed -i 's|url ".*"|url "${{ steps.sha.outputs.url }}"|' Formula/dogcat.rb
+          sed -i 's|sha256 ".*"|sha256 "${{ steps.sha.outputs.sha256 }}"|' Formula/dogcat.rb
+
+      - name: Commit and push
+        run: |
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/dogcat.rb
+          git diff --cached --quiet && echo "No changes to commit" && exit 0
+          git commit -m "Update dogcat to ${{ steps.meta.outputs.version }}"
+          git push

@@ -325,8 +325,7 @@ def register(app: typer.Typer) -> None:
             save_config(dogcats_dir, {"namespace": detected_prefix})
             config_exists = True
             typer.echo(
-                f"Fixed: Created {config_path.name}"
-                f" with namespace='{detected_prefix}'",
+                f"Fixed: Created {config_path.name} with namespace='{detected_prefix}'",
             )
 
         checks["config_toml"] = {
@@ -380,8 +379,7 @@ def register(app: typer.Typer) -> None:
             checks["config_deprecated_keys"] = {
                 "description": "No deprecated config keys",
                 "fail_description": (
-                    "Config uses deprecated 'issue_prefix' key"
-                    " (renamed to 'namespace')"
+                    "Config uses deprecated 'issue_prefix' key (renamed to 'namespace')"
                 ),
                 "passed": deprecated_ok,
                 "fix": "Run 'dcat doctor --fix' to migrate",
@@ -570,8 +568,7 @@ def register(app: typer.Typer) -> None:
             # Post-merge concurrent edit warnings
             if merge_warnings:
                 typer.echo(
-                    f"\nConcurrent edits detected"
-                    f" ({len(merge_warnings)} issue(s)):",
+                    f"\nConcurrent edits detected ({len(merge_warnings)} issue(s)):",
                 )
                 for warn in merge_warnings:
                     typer.echo(f"  ⚠ {warn['message']}")

@@ -71,9 +71,9 @@ class TestFixtureRegression:
             IssueType.CHORE,
             IssueType.QUESTION,
         }
-        assert (
-            types_found >= expected_types
-        ), f"Missing types: {expected_types - types_found}"
+        assert types_found >= expected_types, (
+            f"Missing types: {expected_types - types_found}"
+        )
 
     def test_has_all_statuses(self, loaded_storage: JSONLStorage) -> None:
         """Fixture covers all statuses used in practice (including migrated drafts)."""
@@ -88,9 +88,9 @@ class TestFixtureRegression:
             Status.DEFERRED,
             Status.TOMBSTONE,
         }
-        assert (
-            statuses_found >= expected_statuses
-        ), f"Missing statuses: {expected_statuses - statuses_found}"
+        assert statuses_found >= expected_statuses, (
+            f"Missing statuses: {expected_statuses - statuses_found}"
+        )
 
     def test_dependencies_survive(self, loaded_storage: JSONLStorage) -> None:
         """Fixture preserves dependency relationships."""

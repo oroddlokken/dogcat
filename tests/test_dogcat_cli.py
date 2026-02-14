@@ -1736,9 +1736,9 @@ class TestCLIList:
             ["list", "--tree", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
-        assert (
-            "Parent issue" in result.stdout
-        ), "Closed parent should appear in tree when it has visible children"
+        assert "Parent issue" in result.stdout, (
+            "Closed parent should appear in tree when it has visible children"
+        )
         assert "Child issue" in result.stdout
 
         # Child should be indented under the parent
@@ -1895,9 +1895,9 @@ class TestCLIList:
         assert result.exit_code == 0
         lines = result.stdout.split("\n")
         dependent_line = next(line for line in lines if dependent_id in line)
-        assert (
-            "■" in dependent_line
-        ), f"Blocked issue should show ■ symbol in table output, got: {dependent_line}"
+        assert "■" in dependent_line, (
+            f"Blocked issue should show ■ symbol in table output, got: {dependent_line}"
+        )
 
     def test_list_blocked_symbol_clears_when_blocker_closed(
         self,

@@ -2,15 +2,27 @@
 
 ## [Unreleased]
 
-- **Dim closed issues in `dcat show`** — closed children, dependencies, and blocks are now fully dimmed (bright_black) to visually distinguish them from active issues.
-- **Fix `dcat ready` showing children of deferred parents** — `dcat ready` now walks up the parent chain and excludes issues whose parent (or any ancestor) is deferred, matching the behavior of `dcat list`.
+### Added
+
 - **`dcat list --expand`** — show subtasks of deferred parents inline without also revealing closed/deleted issues. The legend now shows how many issues are hidden and hints at `--expand`.
 - **Show blocked issues in `dcat show`** — `dcat show` now displays a "Blocks" section listing issues that depend on the viewed issue, making both directions of a dependency visible.
 - **Remove dependencies between issues** — `dcat update` now supports `--remove-depends-on` and `--remove-blocks` to remove dependency relationships.
-- **Colored legend in `dcat list`** — status symbols and priority levels in the legend now use the same colors as the issue list. All five priority levels are listed individually.
 - **`disable_legend_colors` config option** — `dcat config set disable_legend_colors true` turns off legend colors for users who prefer plain text.
+
+### Changed
+
+- **Dim closed issues in `dcat show`** — closed children, dependencies, and blocks are now fully dimmed (bright_black) to visually distinguish them from active issues.
+- **Colored legend in `dcat list`** — status symbols and priority levels in the legend now use the same colors as the issue list. All five priority levels are listed individually.
 - **Rich dependency display in `dcat show`** — Dependencies and Blocks sections now show full issue details (status, priority, title, type) instead of bare IDs with an ambiguous `(blocks)` label.
+
+### Fixed
+
+- **Fix `dcat ready` showing children of deferred parents** — `dcat ready` now walks up the parent chain and excludes issues whose parent (or any ancestor) is deferred, matching the behavior of `dcat list`.
 - **Fix validator false circular dependency errors** — the JSONL validator now correctly handles dependency removals instead of reporting false cycles from stale edges.
+
+### Development
+
+- **Remove `black` formatter** — replaced `black` with `ruff format` as the sole code formatter. Resolves formatting conflicts between `black` and `ruff format` on assert statements. `isort` is retained for import sorting.
 
 ## 0.8.3
 

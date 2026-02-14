@@ -55,7 +55,9 @@ class IssueEditorScreen(Screen["Issue | None"]):
         Binding("e", "enter_edit", "Edit"),
     ]
 
-    CSS = SHARED_CSS + """
+    CSS = (
+        SHARED_CSS
+        + """
     #editor-form {
         padding: 1 2;
     }
@@ -78,6 +80,7 @@ class IssueEditorScreen(Screen["Issue | None"]):
         margin-bottom: 1;
     }
     """
+    )
 
     def __init__(
         self,

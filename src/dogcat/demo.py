@@ -509,8 +509,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
     _comment(
         epic2_id,
         "diana@example.com",
-        "Design team starting wireframes this week. ETA 2 weeks "
-        "for initial mockups.",
+        "Design team starting wireframes this week. ETA 2 weeks for initial mockups.",
     )
 
     # Feature 2.1: Dashboard redesign
@@ -1194,8 +1193,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
     _comment(
         question1_id,
         "alice@example.com",
-        "Let's do both - REST for public, GraphQL for internal. "
-        "Best of both worlds.",
+        "Let's do both - REST for public, GraphQL for internal. Best of both worlds.",
     )
 
     question2_id = _create(

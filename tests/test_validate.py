@@ -26,7 +26,6 @@ from dogcat.constants import MERGE_DRIVER_CMD
 from dogcat.models import Issue
 
 if TYPE_CHECKING:
-
     from conftest import GitRepo
 
 runner = CliRunner()
