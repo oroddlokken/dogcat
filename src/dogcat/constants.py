@@ -24,6 +24,10 @@ DEFAULT_PRIORITY = 2
 # Maximum number of preview subtasks shown under deferred parents in list view
 MAX_PREVIEW_SUBTASKS = 3
 
+# Split-pane TUI thresholds
+SPLIT_PANE_MIN_COLS = 200
+SPLIT_PANE_MIN_ROWS = 40
+
 # Maximum estimated token count for `dcat prime` output.
 # Measured with a conservative char-based estimator (chars / 4) that over-counts
 # vs real Claude BPE tokenisation, so staying under this limit guarantees the

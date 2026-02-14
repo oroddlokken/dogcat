@@ -32,9 +32,13 @@ lint-all:
 vulture:
     uv run vulture src tests dcat.py benchmark.py vulture_whitelist.py --ignore-decorators "@app.command" --ignore-names "on_modified,on_moved,RELATED,reload"
 
-# run tests (excludes regression tests)
+# run tests (excludes regression and TUI tests)
 test:
-    uv run pytest --timeout 30 -n 8 tests --ignore=tests/test_regression.py
+    uv run pytest --timeout 30 -n 8 tests --ignore=tests/test_regression.py --ignore-glob='tests/test_tui_*.py'
+
+# run TUI tests only
+test-tui:
+    uv run pytest --timeout 30 -n 8 tests -k 'test_tui_'
 
 # run regression tests only
 test-regression:

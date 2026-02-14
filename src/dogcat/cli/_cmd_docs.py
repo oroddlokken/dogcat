@@ -602,6 +602,11 @@ def register(app: typer.Typer) -> None:
         guide = """
 DOGCAT WORKFLOW GUIDE
 
+## Rules
+  Run `dcat prime` after compaction, clear, or new session
+  Do NOT use TodoWrite, TaskCreate, or markdown files for
+  task tracking — use dcat for all issue and task management
+
 ## Quick Start for AI agents
 
 0a. Allowed issue types, priorities, and statuses:

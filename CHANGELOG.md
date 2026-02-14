@@ -4,8 +4,13 @@
 
 ### Added
 
+- **Split-pane TUI layout** — `dcat tui` now shows a master-detail split pane on wide terminals (200+ cols, 40+ rows). Highlighting an issue displays its details on the right; pressing `e` enables inline editing, `Enter` focuses the detail panel, and `Ctrl+S` saves. Narrow terminals retain the existing modal behavior. Escape is blocked during inline editing to prevent data loss.
 - **`--acceptance-criteria` alias** — `dcat create` and `dcat update` now accept `--acceptance-criteria` as an alias for `--acceptance`, matching the underlying model field name.
 - **Preview subtasks under deferred parents in `dcat list`** — deferred parents now show up to 3 highest-priority subtasks indented below them, with a `[...and N more hidden subtasks]` summary when there are more. Applies to brief, tree, and table formats. `--expand` still shows all subtasks.
+
+### Fixed
+
+- **TUI issue labels match CLI format** — the TUI issue list now uses the same `emoji [priority] id: title [type] [labels]` format and colors as `dcat list`, including showing the blocked `■` icon for dependency-blocked issues.
 
 ### Development
 

@@ -64,18 +64,31 @@ SHARED_CSS = """
 """
 
 
-def make_issue_label(issue: Issue) -> Text:
-    """Build a Rich Text label for an issue."""
+def make_issue_label(
+    issue: Issue,
+    blocked_ids: set[str] | None = None,
+) -> Text:
+    """Build a Rich Text label for an issue.
+
+    Matches the CLI ``dcat list`` format:
+    ``emoji [priority] id: title [type] [labels] [manual]``
+    """
     type_color = TYPE_COLORS.get(issue.issue_type.value, "white")
     priority_color = PRIORITY_COLORS.get(issue.priority, "white")
 
+    # Override status icon/color for dependency-blocked issues
+    if blocked_ids and issue.full_id in blocked_ids:
+        status_emoji = "\u25a0"  # ■
+        status_color = STATUS_COLORS.get("blocked", "white")
+    else:
+        status_emoji = issue.get_status_emoji()
+        status_color = STATUS_COLORS.get(issue.status.value, "white")
+
     label = Text()
-    status_color = STATUS_COLORS.get(issue.status.value, "white")
-    label.append(f"{issue.get_status_emoji()} ", style=f"bold {status_color}")
+    label.append(f"{status_emoji} ", style=f"bold {status_color}")
     label.append(f"[{issue.priority}]", style=f"bold {priority_color}")
-    label.append(" ")
-    label.append(f"[{issue.issue_type.value}] ", style=type_color)
-    label.append(f"{issue.full_id} {issue.title}")
+    label.append(f" {issue.full_id}: {issue.title}")
+    label.append(f" [{issue.issue_type.value}]", style=type_color)
     if issue.labels:
         label.append(f" [{', '.join(issue.labels)}]", style="cyan")
     if issue.metadata.get("manual") or issue.metadata.get("no_agent"):
