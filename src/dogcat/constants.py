@@ -24,6 +24,13 @@ DEFAULT_PRIORITY = 2
 # Maximum number of preview subtasks shown under deferred parents in list view
 MAX_PREVIEW_SUBTASKS = 3
 
+# Maximum estimated token count for `dcat prime` output.
+# Measured with a conservative char-based estimator (chars / 4) that over-counts
+# vs real Claude BPE tokenisation, so staying under this limit guarantees the
+# actual token footprint is even smaller.
+MAX_PRIME_TOKENS = 1500
+MAX_PRIME_TOKENS_OPINIONATED = 2000
+
 # Priority shorthand: single digits 0-4
 PRIORITY_SHORTHANDS = frozenset("01234")
 

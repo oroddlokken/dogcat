@@ -11,7 +11,6 @@ var:
 
 # run formatters
 fmt:
-    uv run ruff check --select I --fix src tests dcat.py benchmark.py
     uv run ruff format src tests dcat.py benchmark.py
     uv run ruff check --fix --unsafe-fixes src tests dcat.py benchmark.py
 

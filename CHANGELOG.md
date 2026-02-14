@@ -8,6 +8,7 @@
 
 ### Development
 
+- **Token limit tests for `dcat prime` output** — added `MAX_PRIME_TOKENS` (1500) and `MAX_PRIME_TOKENS_OPINIONATED` (2000) constants with tests that verify output stays within budget using a conservative char-based token estimator (chars / 4).
 - **Replace isort with ruff's built-in import sorting** — removed the `isort` dependency and `[tool.isort]` config in favor of ruff's `I` rules, simplifying the toolchain.
 - **Two-step release workflow** — `just release-prep <version>` creates an RC tag, stamps the changelog, and opens a PR. Merging the PR triggers `publish.yml` which creates the final tag, builds, publishes the GitHub release with changelog body, and updates the Homebrew formula.
 - **CI concurrency groups** — concurrent CI and release workflow runs on the same ref are cancelled automatically.

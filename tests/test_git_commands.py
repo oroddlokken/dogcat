@@ -12,7 +12,11 @@ from typing import TYPE_CHECKING
 from typer.testing import CliRunner
 
 from dogcat.cli import app
-from dogcat.constants import MERGE_DRIVER_CMD
+from dogcat.constants import (
+    MAX_PRIME_TOKENS,
+    MAX_PRIME_TOKENS_OPINIONATED,
+    MERGE_DRIVER_CMD,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -571,3 +575,58 @@ class TestPrimeGitHealth:
         )
         assert result.exit_code == 0
         assert "Git Integration Health" in result.stdout
+
+    def test_prime_token_count_within_limit(
+        self,
+        git_repo: GitRepo,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Dcat prime output stays within the MAX_PRIME_TOKENS budget."""
+        repo = git_repo
+        monkeypatch.chdir(repo.path)
+
+        # Set up a repo where all health checks pass
+        (repo.path / ".gitignore").write_text(".dogcats/.issues.lock\n")
+        repo.git("config", "merge.dcat-jsonl.driver", MERGE_DRIVER_CMD)
+        (repo.path / ".gitattributes").write_text(
+            ".dogcats/*.jsonl merge=dcat-jsonl\n",
+        )
+
+        result = runner.invoke(app, ["prime"], catch_exceptions=False)
+        assert result.exit_code == 0
+
+        estimated_tokens = len(result.stdout) / 4
+        assert estimated_tokens <= MAX_PRIME_TOKENS, (
+            f"dcat prime output is ~{estimated_tokens:.0f} estimated tokens, "
+            f"exceeds limit of {MAX_PRIME_TOKENS}"
+        )
+
+    def test_prime_opinionated_token_count_within_limit(
+        self,
+        git_repo: GitRepo,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Opinionated prime output stays within token budget."""
+        repo = git_repo
+        monkeypatch.chdir(repo.path)
+
+        # Set up a repo where all health checks pass
+        (repo.path / ".gitignore").write_text(".dogcats/.issues.lock\n")
+        repo.git("config", "merge.dcat-jsonl.driver", MERGE_DRIVER_CMD)
+        (repo.path / ".gitattributes").write_text(
+            ".dogcats/*.jsonl merge=dcat-jsonl\n",
+        )
+
+        result = runner.invoke(
+            app,
+            ["prime", "--opinionated"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+
+        estimated_tokens = len(result.stdout) / 4
+        assert estimated_tokens <= MAX_PRIME_TOKENS_OPINIONATED, (
+            f"dcat prime --opinionated output is "
+            f"~{estimated_tokens:.0f} estimated tokens, "
+            f"exceeds limit of {MAX_PRIME_TOKENS_OPINIONATED}"
+        )
