@@ -105,7 +105,7 @@ def register(app: typer.Typer) -> None:
         if json_output:
             typer.echo(orjson.dumps({key: val}).decode())
         elif isinstance(val, list):
-            typer.echo(", ".join(str(i) for i in val))
+            typer.echo(", ".join(str(i) for i in val))  # type: ignore[reportUnknownArgumentType, reportUnknownVariableType]
         else:
             typer.echo(val)
 
@@ -126,7 +126,7 @@ def register(app: typer.Typer) -> None:
             else:
                 for k, v in sorted(config.items()):
                     if isinstance(v, list):
-                        typer.echo(f"{k} = {', '.join(str(i) for i in v)}")
+                        typer.echo(f"{k} = {', '.join(str(i) for i in v)}")  # type: ignore[reportUnknownArgumentType, reportUnknownVariableType]
                     else:
                         typer.echo(f"{k} = {v}")
 

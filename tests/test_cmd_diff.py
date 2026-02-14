@@ -217,7 +217,7 @@ class TestDiff:
         assert result.exit_code == 0
         data = json.loads(result.stdout)
         assert isinstance(data, list)
-        assert len(data) >= 1
+        assert len(data) >= 1  # type: ignore[reportUnknownArgumentType]
         assert data[0]["event_type"] == "created"
 
     def test_diff_no_git_repo(self, tmp_path: Path) -> None:

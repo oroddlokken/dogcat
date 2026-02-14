@@ -23,7 +23,7 @@ class EventRecord:
     by: str | None = None
     title: str | None = None
     changes: dict[str, dict[str, Any]] = field(
-        default_factory=dict,
+        default_factory=dict[str, dict[str, Any]],
     )
 
 

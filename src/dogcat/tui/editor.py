@@ -324,7 +324,7 @@ class IssueEditorScreen(Screen["Issue | None"]):
         # Enable all form fields
         for inp in self.query(Input):
             inp.disabled = False
-        for sel in self.query(Select):
+        for sel in self.query(Select):  # type: ignore[reportUnknownVariableType]
             sel.disabled = False  # type: ignore[reportUnknownMemberType]
         self.query_one("#manual-input", Checkbox).disabled = False
         for ta in self.query(TextArea):

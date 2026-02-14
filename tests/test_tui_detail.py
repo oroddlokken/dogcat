@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -115,15 +115,21 @@ class TestViewModeLayout:
             app.push_screen(screen)
             await pilot.pause()
 
-            type_select = screen.query_one("#type-input", Select)
+            type_select = cast("Select[str]", screen.query_one("#type-input", Select))
             assert type_select.value == "bug"
             assert type_select.disabled is True
 
-            status_select = screen.query_one("#status-input", Select)
+            status_select = cast(
+                "Select[str]",
+                screen.query_one("#status-input", Select),
+            )
             assert status_select.value == "in_progress"
             assert status_select.disabled is True
 
-            priority_select = screen.query_one("#priority-input", Select)
+            priority_select = cast(
+                "Select[int]",
+                screen.query_one("#priority-input", Select),
+            )
             assert priority_select.value == 1
             assert priority_select.disabled is True
 

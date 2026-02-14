@@ -119,7 +119,7 @@ class TestHistory:
         assert result.exit_code == 0
         data = json.loads(result.stdout)
         assert isinstance(data, list)
-        assert len(data) == 1
+        assert len(data) == 1  # type: ignore[reportUnknownArgumentType]
         assert data[0]["event_type"] == "created"
 
     def test_history_close_event(self, tmp_path: Path) -> None:

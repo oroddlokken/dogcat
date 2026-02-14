@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -34,7 +34,7 @@ def _make_issue(
     **kwargs: object,
 ) -> Issue:
     now = datetime.now().astimezone()
-    defaults = {
+    defaults: dict[str, Any] = {
         "id": issue_id,
         "title": title,
         "namespace": "dc",
