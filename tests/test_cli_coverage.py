@@ -2067,6 +2067,31 @@ class TestShowWithDepsAndChildren:
         assert result.exit_code == 0
         assert "Dependencies:" in result.stdout
 
+    def test_show_with_blocks(self, tmp_path: Path) -> None:
+        """Test show displays issues blocked by the viewed issue."""
+        dogcats_dir, ids = _init_and_create(tmp_path, "Alpha", "Bravo")
+        # Bravo depends on Alpha, so Alpha blocks Bravo
+        runner.invoke(
+            app,
+            [
+                "dep",
+                ids[1],
+                "add",
+                "--depends-on",
+                ids[0],
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["show", ids[0], "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Blocks:" in result.stdout
+        assert ids[1] in result.stdout
+
     def test_show_with_children(self, tmp_path: Path) -> None:
         """Test show displays children."""
         dogcats_dir, ids = _init_and_create(tmp_path, "Parent", "Child")

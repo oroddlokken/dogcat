@@ -9,7 +9,7 @@ ALWAYS run `dcat update --status in_progress $issueId` as soon as you pick up an
 
 It is okay to work on multiple issues at the same time - just mark all of them as in_progress, and ask the user which one to prioritize if there is a conflict.
 
-If the user brings up a new bug, feature or anything else that warrants changes to the code, ALWAYS ask if we should create an issue for it before you start working on the code.
+If the user brings up a new bug, feature or anything else that warrants changes to the code, ALWAYS ask if we should create an issue for it before you start working on the code. When creating issues, set appropriate labels using `--labels` based on the issue content (e.g. `cli`, `tui`, `api`, `docs`, `testing`, `refactor`, `ux`, `performance`, etc.).
 
 When research or discussion produces findings relevant to an existing issue, ask these as **separate questions in order**:
 

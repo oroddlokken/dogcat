@@ -442,6 +442,15 @@ def register(app: typer.Typer) -> None:
                             f"  → {dep.depends_on_id} ({dep.dep_type.value})",
                         )
 
+                # Add blocks (issues that depend on this one)
+                dependents = storage.get_dependents(issue_id)
+                if dependents:
+                    output_lines.append("\nBlocks:")
+                    for dep in dependents:
+                        output_lines.append(
+                            f"  ← {dep.issue_id} ({dep.dep_type.value})",
+                        )
+
                 # Add links
                 links = storage.get_links(issue_id)
                 incoming = storage.get_incoming_links(issue_id)
