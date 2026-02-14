@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.8.5 (2026-02-14)
+
 ### Changed
 
 - **`dcat prime --opinionated` now active** — the `--opinionated` flag injects prescriptive rules (e.g. "Do NOT use TodoWrite/TaskCreate") into the Rules section.
