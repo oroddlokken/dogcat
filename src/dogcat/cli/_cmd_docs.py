@@ -587,7 +587,7 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     def prime(
-        opinionated: bool = typer.Option(  # noqa: ARG001
+        opinionated: bool = typer.Option(
             False,
             "--opinionated",
             help="Include stronger, prescriptive recommendations.",
@@ -599,14 +599,19 @@ def register(app: typer.Typer) -> None:
         Git health checks are included automatically when in a git repo.
         Disable with: dcat config set git_tracking false
         """
-        guide = """
+        opinionated_rules = ""
+        if opinionated:
+            opinionated_rules = (
+                "  Do NOT use TodoWrite, TaskCreate, or markdown files for\n"
+                "  task tracking — use dcat for all issue and task management\n"
+            )
+
+        guide = f"""
 DOGCAT WORKFLOW GUIDE
 
 ## Rules
   Run `dcat prime` after compaction, clear, or new session
-  Do NOT use TodoWrite, TaskCreate, or markdown files for
-  task tracking — use dcat for all issue and task management
-
+{opinionated_rules}
 ## Quick Start for AI agents
 
 0a. Allowed issue types, priorities, and statuses:

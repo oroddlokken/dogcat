@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **`dcat prime --opinionated` now active** — the `--opinionated` flag injects prescriptive rules (e.g. "Do NOT use TodoWrite/TaskCreate") into the Rules section.
+
 ### Added
 
 - **Split-pane TUI layout** — `dcat tui` now shows a master-detail split pane on wide terminals (200+ cols, 40+ rows). Highlighting an issue displays its details on the right; pressing `e` enables inline editing, `Enter` focuses the detail panel, and `Ctrl+S` saves. Narrow terminals retain the existing modal behavior. Escape is blocked during inline editing to prevent data loss.

@@ -562,12 +562,12 @@ class TestPrimeGitHealth:
         assert result.exit_code == 0
         assert "Git Integration Health" not in result.stdout
 
-    def test_prime_opinionated_still_works(
+    def test_prime_opinionated_includes_extra_rules(
         self,
         git_repo: GitRepo,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """--opinionated flag still works (git checks run in standard prime)."""
+        """--opinionated flag injects prescriptive rules into Rules section."""
         monkeypatch.chdir(git_repo.path)
         result = runner.invoke(
             app,
@@ -575,7 +575,23 @@ class TestPrimeGitHealth:
             catch_exceptions=False,
         )
         assert result.exit_code == 0
+        assert "Do NOT use TodoWrite" in result.stdout
         assert "Git Integration Health" in result.stdout
+
+    def test_prime_base_excludes_opinionated_rules(
+        self,
+        git_repo: GitRepo,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Base prime does not include opinionated rules."""
+        monkeypatch.chdir(git_repo.path)
+        result = runner.invoke(
+            app,
+            ["prime"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert "TodoWrite" not in result.stdout
 
     def test_prime_token_count_within_limit(
         self,
