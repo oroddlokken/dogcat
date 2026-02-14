@@ -101,6 +101,13 @@ release-prep version:
         git -C "$WORKTREE_DIR" commit -m "Prepare changelog for v${VERSION}"
     fi
 
+    # Skip if HEAD already has an RC tag (nothing changed)
+    EXISTING_TAG=$(git -C "$WORKTREE_DIR" tag --points-at HEAD | grep "^${TAG_PREFIX}\." || true)
+    if [ -n "$EXISTING_TAG" ]; then
+        echo "HEAD already tagged as ${EXISTING_TAG} — nothing changed, skipping."
+        exit 0
+    fi
+
     # Tag and push
     git -C "$WORKTREE_DIR" tag -a "${RC_TAG}" -m "Release candidate ${RC_TAG}"
     git push -u origin "${BRANCH}" --tags

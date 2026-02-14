@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Development
+
+- **Two-step release workflow** — `just release-prep <version>` creates an RC tag, stamps the changelog, and opens a PR. Merging the PR triggers `publish.yml` which creates the final tag, builds, publishes the GitHub release with changelog body, and updates the Homebrew formula.
+- **CI concurrency groups** — concurrent CI and release workflow runs on the same ref are cancelled automatically.
+
 ## 0.8.4 (2026-02-14)
 
 ### Added
