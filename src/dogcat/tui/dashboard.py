@@ -225,6 +225,7 @@ class DogcatTUI(App[None]):
 
     def _load_issues(self) -> None:
         """Load issues as a tree into the option list."""
+        from dogcat.config import get_namespace_filter
         from dogcat.deps import get_blocked_issues
 
         issues: list[Issue] = [
@@ -232,6 +233,10 @@ class DogcatTUI(App[None]):
             for i in self._storage.list()
             if i.status.value not in ("closed", "tombstone")
         ]
+
+        ns_filter = get_namespace_filter(str(self._storage.dogcats_dir))
+        if ns_filter is not None:
+            issues = [i for i in issues if ns_filter(i.namespace)]
 
         blocked = get_blocked_issues(self._storage)
         self._blocked_ids: set[str] = {bi.issue_id for bi in blocked}

@@ -37,7 +37,7 @@ def _make_storage(issues: list[Issue] | None = None) -> MagicMock:
     storage.get_dependencies.return_value = []
     storage.get_issue_ids.return_value = {i.full_id for i in issue_list}
     storage.dogcats_dir = MagicMock()
-    storage.dogcats_dir.__str__ = MagicMock(return_value=".dogcats")
+    storage.dogcats_dir.__str__ = MagicMock(return_value="/tmp/_nonexistent_dogcats")
     return storage
 
 

@@ -86,9 +86,15 @@ def pick_issue(storage: JSONLStorage) -> str | None:
     Returns:
         The selected issue ID, or None if cancelled.
     """
+    from dogcat.config import get_namespace_filter
+
+    ns_filter = get_namespace_filter(str(storage.dogcats_dir))
+
     issues: list[tuple[Text, str]] = []
     for issue in storage.list():
         if issue.is_tombstone() or issue.is_closed():
+            continue
+        if ns_filter is not None and not ns_filter(issue.namespace):
             continue
         label = make_issue_label(issue)
         issues.append((label, issue.full_id))

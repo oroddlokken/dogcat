@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- **TUI now respects `visible_namespaces` / `hidden_namespaces` config** — the TUI dashboard and issue picker were showing issues from all namespaces, ignoring the namespace filtering configured in `config.toml`. Both now use `get_namespace_filter()` to match CLI behavior.
 - **Fix `-l` short flag collision on `ready`** — removed `-l` from `--limit` (collided with `--label` on other commands). Added positional `[LIMIT]` argument and `--limit` option (no short flag) to `ready`, `blocked`, `in-progress`, `in-review`, `deferred`, and `manual`.
 - **Fix `-n` short flag collision on `history`/`recently-*`** — removed `-n` from `--limit` (collided with `--notes` on create/update). Added positional `[LIMIT]` argument and `--limit` option to `history`, `recently-closed`, `recently-added`, and their aliases.
 - **Rename `archive --confirm` to `--yes`/`-y`** — the old `--confirm` name was misleading (it meant "skip confirmation"). Renamed to `--yes`/`-y` to match common CLI conventions.
