@@ -418,6 +418,9 @@ def register(app: typer.Typer) -> None:
 
     dcat init --use-existing-folder /home/me/project/.dogcats
 
+  If you don't want to store issues in git:
+
+    dcat init --no-git
 
   Create your first issue:
 
@@ -449,9 +452,15 @@ def register(app: typer.Typer) -> None:
 
     dcat list
 
-  Show as a formatted table:
+  Show as a tree or formatted table:
 
+    dcat list --tree
     dcat list --table
+
+  List children of a specific parent issue:
+
+    dcat list <parent_id>
+    dcat list --parent <parent_id>        # same, using explicit flag
 
   View a specific issue in detail:
 
@@ -497,12 +506,25 @@ def register(app: typer.Typer) -> None:
 
     dcat close <id> --reason "Fixed in commit abc123"
 
+  Reopen a closed issue:
+
+    dcat reopen <id>
+
+  Delete an issue (soft delete — creates a tombstone):
+
+    dcat delete <id>
+
   To find issues that are ready to work on (no blockers):
 
     dcat ready
 
   Edit an issue with a TUI:
+
     dcat edit <id>
+
+  Launch the full TUI dashboard:
+
+    dcat tui
 
 ── Dependencies & Hierarchy ────────────────────────────────────────────────
 
@@ -515,6 +537,11 @@ def register(app: typer.Typer) -> None:
   add an explicit dependency:
 
     dcat dep <child_id> add --depends-on <parent_id>
+
+  Remove a dependency:
+
+    dcat update <id> --remove-depends-on <other_id>
+    dcat update <id> --remove-blocks <other_id>
 
   View dependencies for an issue:
 
@@ -544,6 +571,25 @@ def register(app: typer.Typer) -> None:
     dcat link <id> list
     dcat link <id> list --json
 
+── Namespaces ──────────────────────────────────────────────────────────────
+
+  Namespaces let multiple projects share a single .dogcats directory.
+  Each project gets its own namespace (auto-detected from directory name
+  during dcat init).
+
+  List all namespaces:
+
+    dcat namespaces
+
+  Filter by namespace:
+
+    dcat list --namespace myproject
+
+  Show issues from all namespaces:
+
+    dcat list --all-namespaces
+    dcat list -A                          # shorthand
+
 ── Filtering & Advanced Usage ──────────────────────────────────────────────
 
   Filter by type, priority, label, or status:
@@ -552,6 +598,14 @@ def register(app: typer.Typer) -> None:
     dcat list --priority 0
     dcat list --label "backend"
     dcat list --status in_review
+
+  Show subtasks of deferred parents (hidden by default):
+
+    dcat list --expand
+
+  List all labels used across issues:
+
+    dcat labels
 
   Add labels to an issue:
 
@@ -565,9 +619,10 @@ def register(app: typer.Typer) -> None:
 
     dcat list --closed --closed-after 2025-01-01
 
-  JSON output for scripting:
+  JSON output for scripting (available on all commands):
 
     dcat list --json
+    dcat --json list              # global flag form
 
 ── Manual Issues ────────────────────────────────────────────────────────────
 
@@ -593,6 +648,32 @@ def register(app: typer.Typer) -> None:
 
     dcat close <id> --reason "Going with Auth0"
 
+── Git Integration ─────────────────────────────────────────────────────────
+
+  Dogcat includes a custom JSONL merge driver that auto-resolves most
+  merge conflicts when multiple branches modify issues.
+
+  Install the merge driver:
+
+    dcat git setup
+
+  Check git configuration:
+
+    dcat git check
+
+  Read the full git integration guide:
+
+    dcat git guide
+
+── Configuration ───────────────────────────────────────────────────────────
+
+  View and manage dogcat settings:
+
+    dcat config list                      # show all settings
+    dcat config get <key>                 # get a specific value
+    dcat config set <key> <value>         # set a value
+    dcat config keys                      # list available keys
+
 ── Useful Commands ─────────────────────────────────────────────────────────
 
   dcat info        Show valid types, statuses, and priorities
@@ -602,13 +683,19 @@ def register(app: typer.Typer) -> None:
   dcat doctor      Run health checks on your issue data
   dcat link        Manage general issue relationships
   dcat export      Export all issues (for backup or migration)
+  dcat archive     Archive closed issues to reduce startup load
   dcat prune       Permanently remove deleted issues
+  dcat stream      Stream issue changes in real-time (JSONL)
+  dcat features    List feature flags and their status
+  dcat version     Show the dogcat version
+  dcat demo        Generate demo issues for testing
 
 ── Getting Help ────────────────────────────────────────────────────────────
 
   dcat --help              List all commands
   dcat <command> --help    Help for a specific command
-  dcat prime               Show the machine-readable workflow guide
+  dcat prime               Show the workflow guide for AI agents
+  dcat prime --opinionated Show a stricter, more prescriptive guide
 """
         typer.echo(guide_text)
 
@@ -618,6 +705,13 @@ def register(app: typer.Typer) -> None:
             False,
             "--opinionated",
             help="Include stronger, prescriptive recommendations.",
+        ),
+        tokens: bool = typer.Option(
+            False,
+            "--tokens",
+            "-t",
+            help="Print estimated token count of the prime output.",
+            hidden=True,
         ),
     ) -> None:
         """Show dogcat workflow guide and best practices for AI agents.
@@ -655,9 +749,14 @@ DOGCAT WORKFLOW GUIDE
    $ dcat create "My first issue" --type bug --priority 1 -d "Description"
 
 2. List issues:
-   $ dcat list              - Show all open issues
-   $ dcat ready             - Show issues ready to work (no blockers)
-   $ dcat blocked           - Show all blocked issues
+   $ dcat list                       - Show all open issues
+   $ dcat list <parent_id>           - Show children of a parent issue
+   $ dcat list --parent <parent_id>  - Same, using explicit flag
+   $ dcat ready                      - Show issues ready to work (no blockers)
+   $ dcat blocked                    - Show all blocked issues
+
+   Use --namespace <ns> to filter by namespace, or --all-namespaces
+   to show issues across all namespaces.
 
 3. Update an issue:
    $ dcat update <issue_id> --status in_progress
@@ -667,22 +766,27 @@ DOGCAT WORKFLOW GUIDE
 
 ## Essential Commands
 
-  dcat create <title>                       - Create a new issue
-  dcat create <title> --depends-on <id>     - Create with dependency
-  dcat create <title> --blocks <id>         - Create issue that blocks another
-  dcat update <id> --depends-on <other_id>  - Add dependency to existing issue
-  dcat update <id> --blocks <other_id>      - Mark issue as blocking another
-  dcat update <id> --remove-depends-on <id> - Remove a dependency
-  dcat update <id> --remove-blocks <id>     - Remove a blocks relationship
-  dcat show <id>                            - View issue details
-  dcat search <query>                       - Search issues across all fields
-  dcat search <query> --type bug            - Search with type filter
-  dcat close <id>                           - Mark issue as closed
-  dcat history                              - Show change history timeline
-  dcat history -i <id>                      - History for a specific issue
-  dcat diff                                 - Show uncommitted issue changes
-  dcat label <id> add -l <label>            - Add a label to an issue
-  dcat label <id> remove -l <label>         - Remove a label
+  dcat create <title>                        - Create a new issue
+  dcat create <title> --depends-on <id>      - Create with dependency
+  dcat create <title> --blocks <id>          - Create issue that blocks another
+  dcat update <id> --depends-on <other_id>   - Add dependency to existing issue
+  dcat update <id> --blocks <other_id>       - Mark issue as blocking another
+  dcat update <id> --remove-depends-on <id>  - Remove a dependency
+  dcat update <id> --remove-blocks <id>      - Remove a blocks relationship
+  dcat show <id>                             - View issue details
+  dcat search <query>                        - Search issues across all fields
+  dcat search <query> --type bug             - Search with type filter
+  dcat close <id>                            - Mark issue as closed
+  dcat reopen <id>                           - Reopen a closed issue
+  dcat delete <id>                           - Delete an issue (tombstone)
+  dcat pr                                    - Show in-progress and in-review issues
+  dcat history                               - Show change history timeline
+  dcat history -i <id>                       - History for a specific issue
+  dcat diff                                  - Show uncommitted issue changes
+  dcat label <id> add -l <label>             - Add a label to an issue
+  dcat label <id> remove -l <label>          - Remove a label
+  dcat link <id> add --related <other_id>    - Link two issues (relates_to)
+  dcat link <id> remove --related <other_id> - Remove a link
 
 ## Parent-Child vs Dependencies
 
@@ -737,7 +841,7 @@ NOT tasks to work on.
 Labels are freeform tags (e.g. "backend", "ui", "auth") that appear in
 `dcat list` and `dcat show`, and can be filtered with `--label`.
 """
-        typer.echo(guide)
+        output_parts: list[str] = [guide]
 
         # Git health checks — always run unless git_tracking is disabled
         dogcats_dir = find_dogcats_dir()
@@ -752,35 +856,43 @@ Labels are freeform tags (e.g. "backend", "ui", "auth") that appear in
             )
             if git_result.returncode == 0:
                 all_passed, checks = _run_git_checks()
-                typer.echo("## Git Integration Health\n")
+                output_parts.append("## Git Integration Health\n")
                 for check in checks.values():
                     is_optional = check.get("optional", False)
                     if check["passed"]:
                         desc = check["description"]
-                        typer.echo(f"  ✓ {desc}")
+                        output_parts.append(f"  ✓ {desc}")
                     elif is_optional:
                         desc = check.get(
                             "fail_description",
                             check["description"],
                         )
-                        typer.echo(f"  ○ {desc}")
+                        output_parts.append(f"  ○ {desc}")
                     else:
                         desc = check.get(
                             "fail_description",
                             check["description"],
                         )
-                        typer.echo(f"  ✗ {desc}")
-                        typer.echo(
+                        output_parts.append(f"  ✗ {desc}")
+                        output_parts.append(
                             f"    Suggestion: {check['fix']}",
                         )
-                typer.echo()
+                output_parts.append("")
                 if not all_passed:
-                    typer.echo(
+                    output_parts.append(
                         "You should inform the user about the issues"
                         " above and ask if you should fix them.\n"
                         "To disable git checks: dcat config set"
                         " git_tracking false\n",
                     )
+
+        full_output = "\n".join(output_parts)
+        typer.echo(full_output)
+
+        if tokens:
+            from dogcat.utils import estimate_tokens
+
+            typer.echo(f"Estimated tokens: {estimate_tokens(full_output)}")
 
     @app.command()
     def version() -> None:

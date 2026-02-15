@@ -49,6 +49,8 @@ For a guide more suited for humans, run `dcat guide`.
 
 Alternatively, you can run `dcat init --use-existing-folder /home/me/project/.dogcats` to use a shared dogcat database.
 
+If you don't want to store issues in git, use `dcat init --no-git`.
+
 ### Telling your agent to use dogcat
 
 In your `AGENTS.md`/`CLAUDE.md` file, add something like the following:
@@ -94,25 +96,48 @@ This is only a starting point - it's up to you to decide how dogcat fits best in
 
 | Command | Action |
 | --- | --- |
+| **Creating** | |
 | `dcat create "My first bug" -t bug -p 0` | Create a bug issue, with priority 0 |
 | `dcat c b 0 "My first bug"` | Same as above, using `dcat c` shorthands for type and priority |
-| `dcat create "Turn off the lights" --manual` | Indicate to the agent that this is a manual issue, and should be done by the user, not the agent |
-| `dcat ready` | List issues that is not blocked by other issues |
-| `dcat close $id` | Close an issue |
-| `dcat close $id -reason "Fixed the bug"` | Close an issue with reason |
+| `dcat create "Turn off the lights" --manual` | Create a manual issue (not for agents) |
+| **Viewing** | |
+| `dcat list` | List all open issues |
+| `dcat list --tree` | List issues as a parent-child tree |
+| `dcat show $id` | Show full details about an issue |
 | `dcat search "login"` | Search issues across all fields |
 | `dcat search "bug" --type bug` | Search with type filter |
-| `dcat show $id` | Show full details about an issue |
-| `dcat new` | Interactive TUI for creating a new issue |
-| `dcat edit [$id]` | Interactive TUI for editing an issue |
+| `dcat labels` | List all labels with counts |
+| **Filtering** | |
+| `dcat ready` | List issues not blocked by other issues |
+| `dcat blocked` | List all blocked issues |
 | `dcat in-progress` | List issues currently in progress |
 | `dcat in-review` | List issues currently in review |
-| `dcat pr` | List issues currently in progress and in progress |
+| `dcat pr` | List issues in progress and in review |
+| `dcat manual` | List issues marked as manual |
 | `dcat recently-added` | List recently added issues |
+| `dcat recently-closed` | List recently closed issues |
+| **Updating** | |
+| `dcat update $id --status in_progress` | Update an issue's status |
+| `dcat close $id --reason "Fixed the bug"` | Close an issue with reason |
+| `dcat reopen $id` | Reopen a closed issue |
+| `dcat delete $id` | Delete an issue (soft delete) |
+| **TUI** | |
+| `dcat tui` | Launch the interactive TUI dashboard |
+| `dcat new` | Interactive TUI for creating a new issue |
+| `dcat edit [$id]` | Interactive TUI for editing an issue |
+| **Git & maintenance** | |
+| `dcat git setup` | Install the JSONL merge driver for git |
+| `dcat history` | Show change history timeline |
+| `dcat diff` | Show uncommitted issue changes |
+| `dcat doctor` | Run health checks on issue data |
+| `dcat archive` | Archive closed issues to reduce startup load |
+| `dcat prune` | Permanently remove deleted issues |
+| `dcat config` | Manage dogcat configuration |
+| `dcat stream` | Stream issue changes in real-time (JSONL) |
 
 ## Screenshots
 
-Compact table view showing tasissuesks with ID, Parent, Type, Priority, and Title columns:  
+Compact table view showing tasks with ID, Parent, Type, Priority, and Title columns:  
 ![Table View](static/dcat-list_table.png)
 
 Hierarchical tree view displaying parent-child issue relationships:  

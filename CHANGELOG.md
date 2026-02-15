@@ -29,6 +29,9 @@
 
 ### Changed
 
+- **Updated `dcat prime` docs** — added `reopen`, `delete`, `pr`, `link` to essential commands; documented `list <parent_id>` positional shorthand, `--namespace`/`--all-namespaces` flags, and `--json` global flag.
+- **Updated `dcat guide` docs** — added sections for namespaces, git integration, and configuration; documented `--no-git`, `--tree`/`--table`, `reopen`, `delete`, `tui`, `--expand`, `labels`, `--remove-depends-on`/`--remove-blocks`, `archive`, `stream`, `features`, `version`, `demo`, and `prime --opinionated`.
+- **Updated README command cheat sheet** — reorganized into categories (creating, viewing, filtering, updating, TUI, git & maintenance) and added 20 missing commands. Fixed typos.
 - **Standardize attribution flags to `--by`** — replaced `--created-by`, `--updated-by`, `--closed-by`, `--deleted-by`, `--reopened-by`, `--author`, and `--operator` with a single `--by` flag across all commands.
 - **Improved git health check messaging** — fix suggestions now use "Suggestion:" instead of the misleading "Consider running:" prefix, and the agent nudge tells the agent to inform the user and ask before fixing issues.
 
