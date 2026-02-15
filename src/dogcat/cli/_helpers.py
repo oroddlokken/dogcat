@@ -251,7 +251,7 @@ def apply_common_filters(
     if priority is not None:
         issues = [i for i in issues if i.priority == priority]
     if label:
-        labels_filter = parse_labels(label)
+        labels_filter = set(parse_labels(label))
         issues = [i for i in issues if labels_filter.issubset(set(i.labels or []))]
     if owner:
         issues = [i for i in issues if i.owner == owner]

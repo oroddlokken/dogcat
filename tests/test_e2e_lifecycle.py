@@ -151,7 +151,7 @@ class TestConcurrentProcessAccess:
         storage_path.touch()
 
         # Spawn two dcat processes in parallel
-        procs = []
+        procs: list[subprocess.Popen[bytes]] = []
         for i in range(2):
             proc = subprocess.Popen(
                 [
@@ -203,7 +203,7 @@ for j in range(5):
         s.create(Issue(id="shared", title="Shared issue"))
 
         # Spawn two processes that update the same issue
-        procs = []
+        procs: list[subprocess.Popen[bytes]] = []
         for i in range(2):
             proc = subprocess.Popen(
                 [

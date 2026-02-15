@@ -11,7 +11,7 @@ The merged result is written to the ours file (%A).
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import orjson
 
@@ -89,7 +89,12 @@ def _event_key(record: dict[str, Any]) -> tuple[str, str, str, str, str]:
     distinct events sharing the same timestamp and type are not collapsed.
     """
     changes = record.get("changes", {})
-    changes_sig = ",".join(sorted(changes.keys())) if isinstance(changes, dict) else ""
+    field_names = (
+        sorted(cast("dict[str, Any]", changes).keys())
+        if isinstance(changes, dict)
+        else []
+    )
+    changes_sig = ",".join(sorted(field_names))
     return (
         record.get("issue_id", ""),
         record.get("timestamp", ""),
