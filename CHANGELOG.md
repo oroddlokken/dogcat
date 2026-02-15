@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.9.0 (2026-02-15)
+
 ### Fixed
 
 - **Show blocker relationships in TUI issue editor** — the dependency fields now display "blocked by: ..." and "blocking: ..." labels and remain read-only in edit mode.
