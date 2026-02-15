@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import orjson
 import typer
 
-from ._completions import complete_issue_ids
+from ._completions import complete_closed_issue_ids
 from ._helpers import get_default_operator, get_storage
 from ._json_state import echo_error, is_json_output
 
@@ -49,7 +49,7 @@ def register(app: typer.Typer) -> None:
         issue_ids: list[str] = typer.Argument(  # noqa: B008
             ...,
             help="Issue ID(s) to reopen",
-            autocompletion=complete_issue_ids,
+            autocompletion=complete_closed_issue_ids,
         ),
         reason: str | None = typer.Option(
             None,

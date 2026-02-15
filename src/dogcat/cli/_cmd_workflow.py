@@ -10,6 +10,8 @@ from dogcat.config import extract_prefix, get_namespace_filter
 from ._completions import (
     complete_issue_ids,
     complete_labels,
+    complete_namespaces,
+    complete_owners,
     complete_priorities,
     complete_types,
 )
@@ -51,7 +53,13 @@ def register(app: typer.Typer) -> None:
             help="Filter by label",
             autocompletion=complete_labels,
         ),
-        owner: str | None = typer.Option(None, "--owner", "-o", help="Filter by owner"),
+        owner: str | None = typer.Option(
+            None,
+            "--owner",
+            "-o",
+            help="Filter by owner",
+            autocompletion=complete_owners,
+        ),
         parent: str | None = typer.Option(
             None,
             "--parent",
@@ -62,6 +70,7 @@ def register(app: typer.Typer) -> None:
             None,
             "--namespace",
             help="Filter by namespace",
+            autocompletion=complete_namespaces,
         ),
         all_namespaces: bool = typer.Option(
             False,
@@ -151,7 +160,13 @@ def register(app: typer.Typer) -> None:
             help="Filter by label",
             autocompletion=complete_labels,
         ),
-        owner: str | None = typer.Option(None, "--owner", "-o", help="Filter by owner"),
+        owner: str | None = typer.Option(
+            None,
+            "--owner",
+            "-o",
+            help="Filter by owner",
+            autocompletion=complete_owners,
+        ),
         parent: str | None = typer.Option(
             None,
             "--parent",
@@ -162,6 +177,7 @@ def register(app: typer.Typer) -> None:
             None,
             "--namespace",
             help="Filter by namespace",
+            autocompletion=complete_namespaces,
         ),
         all_namespaces: bool = typer.Option(
             False,
@@ -276,7 +292,13 @@ def register(app: typer.Typer) -> None:
             help="Filter by label",
             autocompletion=complete_labels,
         ),
-        owner: str | None = typer.Option(None, "--owner", "-o", help="Filter by owner"),
+        owner: str | None = typer.Option(
+            None,
+            "--owner",
+            "-o",
+            help="Filter by owner",
+            autocompletion=complete_owners,
+        ),
         parent: str | None = typer.Option(
             None,
             "--parent",
@@ -287,6 +309,7 @@ def register(app: typer.Typer) -> None:
             None,
             "--namespace",
             help="Filter by namespace",
+            autocompletion=complete_namespaces,
         ),
         all_namespaces: bool = typer.Option(
             False,
@@ -373,7 +396,13 @@ def register(app: typer.Typer) -> None:
             help="Filter by label",
             autocompletion=complete_labels,
         ),
-        owner: str | None = typer.Option(None, "--owner", "-o", help="Filter by owner"),
+        owner: str | None = typer.Option(
+            None,
+            "--owner",
+            "-o",
+            help="Filter by owner",
+            autocompletion=complete_owners,
+        ),
         parent: str | None = typer.Option(
             None,
             "--parent",
@@ -384,6 +413,7 @@ def register(app: typer.Typer) -> None:
             None,
             "--namespace",
             help="Filter by namespace",
+            autocompletion=complete_namespaces,
         ),
         all_namespaces: bool = typer.Option(
             False,
@@ -579,7 +609,13 @@ def register(app: typer.Typer) -> None:
             help="Filter by label",
             autocompletion=complete_labels,
         ),
-        owner: str | None = typer.Option(None, "--owner", "-o", help="Filter by owner"),
+        owner: str | None = typer.Option(
+            None,
+            "--owner",
+            "-o",
+            help="Filter by owner",
+            autocompletion=complete_owners,
+        ),
         parent: str | None = typer.Option(
             None,
             "--parent",
@@ -590,6 +626,7 @@ def register(app: typer.Typer) -> None:
             None,
             "--namespace",
             help="Filter by namespace",
+            autocompletion=complete_namespaces,
         ),
         all_namespaces: bool = typer.Option(
             False,
@@ -713,7 +750,13 @@ def register(app: typer.Typer) -> None:
             help="Filter by label",
             autocompletion=complete_labels,
         ),
-        owner: str | None = typer.Option(None, "--owner", "-o", help="Filter by owner"),
+        owner: str | None = typer.Option(
+            None,
+            "--owner",
+            "-o",
+            help="Filter by owner",
+            autocompletion=complete_owners,
+        ),
         parent: str | None = typer.Option(
             None,
             "--parent",
@@ -724,6 +767,7 @@ def register(app: typer.Typer) -> None:
             None,
             "--namespace",
             help="Filter by namespace",
+            autocompletion=complete_namespaces,
         ),
         all_namespaces: bool = typer.Option(
             False,

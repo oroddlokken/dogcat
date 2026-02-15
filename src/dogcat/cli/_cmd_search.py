@@ -9,6 +9,8 @@ import typer
 
 from ._completions import (
     complete_labels,
+    complete_namespaces,
+    complete_owners,
     complete_priorities,
     complete_statuses,
     complete_types,
@@ -79,11 +81,13 @@ def register(app: typer.Typer) -> None:
             "--owner",
             "-o",
             help="Filter by owner",
+            autocompletion=complete_owners,
         ),
         namespace: str | None = typer.Option(
             None,
             "--namespace",
             help="Filter by namespace",
+            autocompletion=complete_namespaces,
         ),
         all_namespaces: bool = typer.Option(
             False,

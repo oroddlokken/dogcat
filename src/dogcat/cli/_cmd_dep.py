@@ -5,7 +5,12 @@ from __future__ import annotations
 import orjson
 import typer
 
-from ._completions import complete_issue_ids, complete_subcommands
+from ._completions import (
+    complete_dep_types,
+    complete_issue_ids,
+    complete_link_types,
+    complete_subcommands,
+)
 from ._helpers import get_storage
 from ._json_state import echo_error, is_json_output
 
@@ -32,7 +37,13 @@ def register(app: typer.Typer) -> None:
             help="Issue ID it depends on",
             autocompletion=complete_issue_ids,
         ),
-        dep_type: str = typer.Option("blocks", "--type", "-t", help="Dependency type"),
+        dep_type: str = typer.Option(
+            "blocks",
+            "--type",
+            "-t",
+            help="Dependency type",
+            autocompletion=complete_dep_types,
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         by: str = typer.Option(None, "--by", help="Who is making this change"),
         all_namespaces: bool = typer.Option(  # noqa: ARG001
@@ -130,7 +141,13 @@ def register(app: typer.Typer) -> None:
             help="Issue ID to link to",
             autocompletion=complete_issue_ids,
         ),
-        link_type: str = typer.Option("relates_to", "--type", "-t", help="Link type"),
+        link_type: str = typer.Option(
+            "relates_to",
+            "--type",
+            "-t",
+            help="Link type",
+            autocompletion=complete_link_types,
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         by: str = typer.Option(None, "--by", help="Who is making this change"),
         all_namespaces: bool = typer.Option(  # noqa: ARG001

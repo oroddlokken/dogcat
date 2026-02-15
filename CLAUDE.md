@@ -45,6 +45,10 @@ NEVER close issues without explicit user approval. When work is complete:
 
 Import from this module rather than hardcoding values in multiple places.
 
+## Tab Completions
+
+Every CLI option that accepts a constrained set of values (status, type, priority, owner, namespace, labels, config keys, export formats, dep/link types, etc.) MUST have an `autocompletion=` callback registered via Typer. Completers live in `src/dogcat/cli/_completions.py` and return `list[tuple[str, str]]` (value, description) pairs. Use `tabcomp.py` (run via `uv run ./tabcomp.py "dcat <command> --option "`) to verify completions work. If a new option accepts values from a known set, add a completer for it.
+
 ## Development
 
 Always write tests for new features or when changing functionality.

@@ -12,6 +12,8 @@ from dogcat.constants import parse_labels
 from ._completions import (
     complete_issue_ids,
     complete_labels,
+    complete_namespaces,
+    complete_owners,
     complete_priorities,
     complete_statuses,
     complete_types,
@@ -60,7 +62,13 @@ def register(app: typer.Typer) -> None:
             "-d",
             help="New description",
         ),
-        owner: str | None = typer.Option(None, "--owner", "-o", help="New owner"),
+        owner: str | None = typer.Option(
+            None,
+            "--owner",
+            "-o",
+            help="New owner",
+            autocompletion=complete_owners,
+        ),
         acceptance: str | None = typer.Option(
             None,
             "--acceptance",
@@ -122,6 +130,7 @@ def register(app: typer.Typer) -> None:
             None,
             "--namespace",
             help="Move issue to a different namespace (cascades to all references)",
+            autocompletion=complete_namespaces,
         ),
         all_namespaces: bool = typer.Option(  # noqa: ARG001
             False,

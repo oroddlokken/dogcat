@@ -53,7 +53,7 @@ generate-fixture tag="":
     python tests/generate_fixture.py {{tag}}
 
 # prepare a release: create RC tag, push branch, open PR (stays on current branch)
-release-prep version: test-all
+release-prep version: lint-all test-all
     #!/usr/bin/env bash
     set -euo pipefail
     VERSION="{{version}}"

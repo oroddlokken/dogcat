@@ -10,6 +10,7 @@ import typer
 
 from dogcat.models import Issue, Status, classify_record
 
+from ._completions import complete_durations, complete_namespaces
 from ._helpers import get_storage
 from ._json_state import echo_error, is_json_output
 
@@ -28,11 +29,13 @@ def register(app: typer.Typer) -> None:
             None,
             "--older-than",
             help="Only archive issues closed more than N days ago (e.g. 30d)",
+            autocompletion=complete_durations,
         ),
         namespace: str | None = typer.Option(
             None,
             "--namespace",
             help="Only archive issues from this namespace",
+            autocompletion=complete_namespaces,
         ),
         yes: bool = typer.Option(
             False,

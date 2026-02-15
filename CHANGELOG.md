@@ -5,9 +5,11 @@
 ### Added
 
 - **Tab completion for all commands** — added missing autocompletion to `comment`, `label`, `search`, `dep`, and `link` commands. Completions now respect namespace filtering (matching `dcat list` behavior) and support `-A`/`--namespace` flags. Short ID matching lets you type e.g. `dcat show 1g<tab>` without the namespace prefix.
+- **Nice-to-have tab completions** — `--older-than` suggests common durations (7d–90d), `--closed-after`/`--closed-before` suggest recent dates, and `config set VALUE` offers context-dependent suggestions (true/false for bools, namespaces for namespace lists)
 
 ### Fixed
 
+- **Fix tab completion gaps across CLI** — added missing completers for `--namespace`, `--owner`, `--format`, config keys, dep/link types, and export formats. Fixed `reopen` suggesting open issues instead of closed ones. (closes dogcat-56nl)
 - **Add `dcat comment` docs to `dcat prime` and fix `dcat guide`** — added comment commands (add, list, delete) to the Essential Commands section of `dcat prime`, and fixed incorrect syntax in `dcat guide` which showed a positional argument instead of the `add -t` action form
 
 ### Changed
@@ -17,6 +19,7 @@
 
 ### Development
 
+- **Add `tabcomp.py` dev utility** — simulates tab completion for any `dcat` command line, showing what completions would appear. Useful for debugging shell completion issues without a live shell.
 - **Speed up test suite ~22%** — worksteal scheduler, `COVERAGE_CORE=sysmon`, plugin pruning, optimized git fixtures, removed unnecessary `time.sleep()` calls
 - **Add `just test-changed`** — incremental test runs via pytest-testmon, only re-runs tests affected by code changes
 - **Simplify test commands** — merged TUI tests into `just test`, removed tox and `just matrix`/`test-py`

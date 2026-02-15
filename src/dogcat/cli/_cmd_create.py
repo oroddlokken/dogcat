@@ -16,6 +16,7 @@ from dogcat.models import Issue, IssueType, Status
 from ._completions import (
     complete_issue_ids,
     complete_labels,
+    complete_owners,
     complete_priorities,
     complete_statuses,
     complete_types,
@@ -117,7 +118,13 @@ def register(app: typer.Typer) -> None:
             help="Initial status (draft, open, in_progress, blocked, deferred)",
             autocompletion=complete_statuses,
         ),
-        owner: str | None = typer.Option(None, "--owner", "-o", help="Issue owner"),
+        owner: str | None = typer.Option(
+            None,
+            "--owner",
+            "-o",
+            help="Issue owner",
+            autocompletion=complete_owners,
+        ),
         labels: str | None = typer.Option(
             None,
             "--labels",

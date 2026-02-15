@@ -8,6 +8,7 @@ import typer
 
 from dogcat.config import load_config, save_config
 
+from ._completions import complete_config_keys, complete_config_values
 from ._helpers import SortedGroup, find_dogcats_dir
 from ._json_state import echo_error, is_json_output
 
@@ -84,8 +85,16 @@ def register(app: typer.Typer) -> None:
 
     @config_app.command("set")
     def config_set(
-        key: str = typer.Argument(..., help="Configuration key to set"),
-        value: str = typer.Argument(..., help="Value to set"),
+        key: str = typer.Argument(
+            ...,
+            help="Configuration key to set",
+            autocompletion=complete_config_keys,
+        ),
+        value: str = typer.Argument(
+            ...,
+            help="Value to set",
+            autocompletion=complete_config_values,
+        ),
     ) -> None:
         """Set a configuration value."""
         dogcats_dir = find_dogcats_dir()
@@ -97,7 +106,11 @@ def register(app: typer.Typer) -> None:
 
     @config_app.command("get")
     def config_get(
-        key: str = typer.Argument(..., help="Configuration key to read"),
+        key: str = typer.Argument(
+            ...,
+            help="Configuration key to read",
+            autocompletion=complete_config_keys,
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     ) -> None:
         """Get a configuration value."""

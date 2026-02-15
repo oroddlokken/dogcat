@@ -10,8 +10,11 @@ import typer
 from dogcat.config import get_issue_prefix
 
 from ._completions import (
+    complete_export_formats,
     complete_issue_ids,
     complete_labels,
+    complete_namespaces,
+    complete_owners,
     complete_priorities,
     complete_statuses,
     complete_types,
@@ -115,6 +118,7 @@ def register(app: typer.Typer) -> None:
             "--format",
             "-f",
             help="Export format: json or jsonl",
+            autocompletion=complete_export_formats,
         ),
         status: str | None = typer.Option(
             None,
@@ -149,6 +153,7 @@ def register(app: typer.Typer) -> None:
             "--owner",
             "-o",
             help="Filter by owner",
+            autocompletion=complete_owners,
         ),
         parent: str | None = typer.Option(
             None,
@@ -160,6 +165,7 @@ def register(app: typer.Typer) -> None:
             None,
             "--namespace",
             help="Filter by namespace",
+            autocompletion=complete_namespaces,
         ),
         all_namespaces: bool = typer.Option(
             False,
