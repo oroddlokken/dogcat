@@ -163,7 +163,6 @@ def register(app: typer.Typer) -> None:
             help="Who is creating this",
         ),
         design: str | None = typer.Option(None, "--design", help="Design notes"),
-        plan: str | None = typer.Option(None, "--plan", help="Implementation plan"),
         external_ref: str | None = typer.Option(
             None,
             "--external-ref",
@@ -325,7 +324,6 @@ def register(app: typer.Typer) -> None:
                 labels=issue_labels,
                 external_ref=external_ref,
                 design=design,
-                plan=plan,
                 acceptance=acceptance,
                 notes=notes,
                 duplicate_of=duplicate_of,

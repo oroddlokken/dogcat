@@ -458,7 +458,7 @@ def register(app: typer.Typer) -> None:
     dcat show <issue_id>
 
   Search issues by keyword across all fields (title, description,
-  notes, acceptance criteria, design, plan, comments):
+  notes, acceptance criteria, design, comments):
 
     dcat search "login"
     dcat search "API" --type bug          # filter by type
@@ -627,18 +627,10 @@ def register(app: typer.Typer) -> None:
         Disable with: dcat config set git_tracking false
         """
         opinionated_rules = ""
-        opinionated_planning = ""
         if opinionated:
             opinionated_rules = (
                 "  Do NOT use TodoWrite, TaskCreate, or markdown files for\n"
                 "  task tracking — use dcat for all issue and task management\n"
-            )
-            opinionated_planning = (
-                "\n## Planning Before Implementation\n\n"
-                "Before writing code for an issue, record your implementation plan:\n"
-                '  dcat update <id> --plan "1. Step one\\n2. Step two\\n..."\n\n'
-                "This captures your approach for traceability and review.\n"
-                "Update the plan as it evolves during implementation.\n"
             )
 
         guide = f"""
@@ -656,7 +648,7 @@ DOGCAT WORKFLOW GUIDE
 
 0b. `dcat create` and `dcat update` both support --title, --description,
     --priority, --acceptance, --notes, --labels, --parent, --manual,
-    --design, --plan, --external-ref, --depends-on, --blocks, --duplicate-of,
+    --design, --external-ref, --depends-on, --blocks, --duplicate-of,
     --editor
 
 1. Create an issue:
@@ -734,7 +726,7 @@ Do NOT attempt to work on manual issues. Leave them for the user.
 ## Status Workflow
 
   draft -> open -> in_progress -> in_review -> closed
-{opinionated_planning}
+
 ## Questions
 
 Questions (type: question) are used to track questions that need answers,

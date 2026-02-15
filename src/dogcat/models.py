@@ -90,7 +90,6 @@ class Issue:
     labels: list[str] = field(default_factory=list[str])
     external_ref: str | None = None
     design: str | None = None
-    plan: str | None = None
     acceptance: str | None = None
     notes: str | None = None
     close_reason: str | None = None
@@ -196,7 +195,6 @@ def issue_to_dict(issue: Issue) -> dict[str, Any]:
         "labels": issue.labels,
         "external_ref": issue.external_ref,
         "design": issue.design,
-        "plan": issue.plan,
         "acceptance": issue.acceptance,
         "notes": issue.notes,
         "close_reason": issue.close_reason,
@@ -321,7 +319,6 @@ def dict_to_issue(data: dict[str, Any]) -> Issue:
         labels=data.get("labels", []),
         external_ref=data.get("external_ref"),
         design=data.get("design"),
-        plan=data.get("plan"),
         acceptance=data.get("acceptance"),
         notes=_migrate_notes(data.get("notes"), data.get("close_reason")),
         close_reason=_migrate_close_reason(data.get("notes"), data.get("close_reason")),

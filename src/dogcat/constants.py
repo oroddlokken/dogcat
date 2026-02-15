@@ -161,7 +161,6 @@ TRACKED_FIELDS: frozenset[str] = frozenset(
         "acceptance",
         "notes",
         "design",
-        "plan",
         "status",
         "owner",
     },

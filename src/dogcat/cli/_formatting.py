@@ -243,9 +243,6 @@ def format_issue_full(issue: Issue, parent_title: str | None = None) -> str:
     if issue.design:
         lines.append(f"\n{key('Design:')}\n{issue.design}")
 
-    if issue.plan:
-        lines.append(f"\n{key('Plan:')}\n{issue.plan}")
-
     if issue.comments:
         lines.append(f"\n{key('Comments:')}")
         for comment in issue.comments:
@@ -597,7 +594,7 @@ def format_event(event: EventRecord, *, verbose: bool = False) -> str:
     header = f"{styled_symbol} {ts_styled}  {issue_styled}"
 
     # Long-form fields: show "changed" (red) instead of full content unless verbose
-    _long_fields = {"description", "notes", "acceptance", "design", "plan"}
+    _long_fields = {"description", "notes", "acceptance", "design"}
     _changed = typer.style("changed", fg="red")
 
     # Format field changes on the next line

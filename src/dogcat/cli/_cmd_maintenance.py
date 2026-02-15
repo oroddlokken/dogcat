@@ -985,7 +985,6 @@ def register(app: typer.Typer) -> None:
                 ("notes", "Notes"),
                 ("acceptance", "Acceptance"),
                 ("design", "Design"),
-                ("plan", "Plan"),
             ]
 
             matches: list[tuple[Issue, list[tuple[str, str]]]] = []

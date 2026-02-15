@@ -251,13 +251,6 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             "- Order and Inventory have some overlap (reservations)\n"
             "- Notifications can be fully async"
         ),
-        plan=(
-            "1. Map current monolith modules to bounded contexts\n"
-            "2. Extract User Service first (lowest coupling)\n"
-            "3. Set up gRPC contracts between services\n"
-            "4. Migrate Order and Inventory with shared reservation API\n"
-            "5. Extract Notification Service last (fully async)"
-        ),
         priority=1,
         issue_type=IssueType.TASK,
         labels=["backend", "design", "documentation"],
