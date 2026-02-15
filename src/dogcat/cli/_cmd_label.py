@@ -9,6 +9,7 @@ import typer
 
 from dogcat.config import get_issue_prefix, load_config
 
+from ._completions import complete_issue_ids, complete_labels, complete_subcommands
 from ._helpers import get_storage
 from ._json_state import echo_error, is_json_output
 
@@ -18,16 +19,37 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     def label(
-        issue_id: str = typer.Argument(..., help="Issue ID"),
-        subcommand: str = typer.Argument(..., help="add, remove, or list"),
+        issue_id: str = typer.Argument(
+            ...,
+            help="Issue ID",
+            autocompletion=complete_issue_ids,
+        ),
+        subcommand: str = typer.Argument(
+            ...,
+            help="add, remove, or list",
+            autocompletion=complete_subcommands,
+        ),
         label_name: str = typer.Option(
             None,
             "--label",
             "-l",
             help="Label to add/remove",
+            autocompletion=complete_labels,
         ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         by: str = typer.Option(None, "--by", help="Who is managing labels"),
+        all_namespaces: bool = typer.Option(  # noqa: ARG001
+            False,
+            "--all-namespaces",
+            "--all-ns",
+            "-A",
+            hidden=True,
+        ),
+        namespace: str | None = typer.Option(  # noqa: ARG001
+            None,
+            "--namespace",
+            hidden=True,
+        ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Manage issue labels."""

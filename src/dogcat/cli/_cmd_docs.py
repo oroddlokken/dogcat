@@ -611,9 +611,17 @@ def register(app: typer.Typer) -> None:
 
     dcat label <id> add "backend"
 
-  Add a comment:
+  Add a comment to an issue:
 
-    dcat comment <id> "Needs more investigation"
+    dcat comment <id> add -t "Needs more investigation"
+
+  List comments:
+
+    dcat comment <id> list
+
+  Delete a comment:
+
+    dcat comment <id> delete -c <comment_id>
 
   Date-based queries for closed issues:
 
@@ -787,6 +795,9 @@ DOGCAT WORKFLOW GUIDE
   dcat label <id> remove -l <label>          - Remove a label
   dcat link <id> add --related <other_id>    - Link two issues (relates_to)
   dcat link <id> remove --related <other_id> - Remove a link
+  dcat comment <id> add -t "text"            - Add a comment to an issue
+  dcat comment <id> list                     - List comments for an issue
+  dcat comment <id> delete -c <comment_id>   - Delete a comment
 
 ## Parent-Child vs Dependencies
 

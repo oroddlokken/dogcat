@@ -63,6 +63,18 @@ def register(app: typer.Typer) -> None:
             "--by",
             help="Who is reopening this",
         ),
+        all_namespaces: bool = typer.Option(  # noqa: ARG001
+            False,
+            "--all-namespaces",
+            "--all-ns",
+            "-A",
+            hidden=True,
+        ),
+        namespace: str | None = typer.Option(  # noqa: ARG001
+            None,
+            "--namespace",
+            hidden=True,
+        ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Reopen one or more closed issues."""

@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Tab completion for all commands** — added missing autocompletion to `comment`, `label`, `search`, `dep`, and `link` commands. Completions now respect namespace filtering (matching `dcat list` behavior) and support `-A`/`--namespace` flags. Short ID matching lets you type e.g. `dcat show 1g<tab>` without the namespace prefix.
+
+### Fixed
+
+- **Add `dcat comment` docs to `dcat prime` and fix `dcat guide`** — added comment commands (add, list, delete) to the Essential Commands section of `dcat prime`, and fixed incorrect syntax in `dcat guide` which showed a positional argument instead of the `add -t` action form
+
 ### Changed
 
 - **Show comment timestamps in `dcat show` and TUI** — comments now display their creation timestamp alongside the author, with blank-line separation between comments for readability

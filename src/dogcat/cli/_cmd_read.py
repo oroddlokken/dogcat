@@ -497,6 +497,20 @@ def register(app: typer.Typer) -> None:
             help="Issue ID",
             autocompletion=complete_issue_ids,
         ),
+        all_namespaces: bool = typer.Option(  # noqa: ARG001
+            False,
+            "--all-namespaces",
+            "--all-ns",
+            "-A",
+            help="Complete from all namespaces",
+            hidden=True,
+        ),
+        namespace: str | None = typer.Option(  # noqa: ARG001
+            None,
+            "--namespace",
+            help="Complete from namespace",
+            hidden=True,
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
@@ -601,6 +615,20 @@ def register(app: typer.Typer) -> None:
             help="Issue ID (opens picker if omitted)",
             autocompletion=complete_issue_ids,
         ),
+        all_namespaces: bool = typer.Option(  # noqa: ARG001
+            False,
+            "--all-namespaces",
+            "--all-ns",
+            "-A",
+            help="Complete from all namespaces",
+            hidden=True,
+        ),
+        namespace: str | None = typer.Option(  # noqa: ARG001
+            None,
+            "--namespace",
+            help="Complete from namespace",
+            hidden=True,
+        ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Open an issue in the Textual editor for interactive editing."""
@@ -640,6 +668,18 @@ def register(app: typer.Typer) -> None:
             None,
             help="Issue ID (opens picker if omitted)",
             autocompletion=complete_issue_ids,
+        ),
+        all_namespaces: bool = typer.Option(  # noqa: ARG001
+            False,
+            "--all-namespaces",
+            "--all-ns",
+            "-A",
+            hidden=True,
+        ),
+        namespace: str | None = typer.Option(  # noqa: ARG001
+            None,
+            "--namespace",
+            hidden=True,
         ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import orjson
 import typer
 
-from ._completions import complete_issue_ids
+from ._completions import complete_issue_ids, complete_subcommands
 from ._helpers import get_storage
 from ._json_state import echo_error, is_json_output
 
@@ -20,7 +20,11 @@ def register(app: typer.Typer) -> None:
             help="Issue ID",
             autocompletion=complete_issue_ids,
         ),
-        subcommand: str = typer.Argument(..., help="add, remove, or list"),
+        subcommand: str = typer.Argument(
+            ...,
+            help="add, remove, or list",
+            autocompletion=complete_subcommands,
+        ),
         depends_on_id: str = typer.Option(
             None,
             "--depends-on",
@@ -31,6 +35,18 @@ def register(app: typer.Typer) -> None:
         dep_type: str = typer.Option("blocks", "--type", "-t", help="Dependency type"),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         by: str = typer.Option(None, "--by", help="Who is making this change"),
+        all_namespaces: bool = typer.Option(  # noqa: ARG001
+            False,
+            "--all-namespaces",
+            "--all-ns",
+            "-A",
+            hidden=True,
+        ),
+        namespace: str | None = typer.Option(  # noqa: ARG001
+            None,
+            "--namespace",
+            hidden=True,
+        ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Manage issue dependencies."""
@@ -102,7 +118,11 @@ def register(app: typer.Typer) -> None:
             help="Issue ID",
             autocompletion=complete_issue_ids,
         ),
-        subcommand: str = typer.Argument(..., help="add, remove, or list"),
+        subcommand: str = typer.Argument(
+            ...,
+            help="add, remove, or list",
+            autocompletion=complete_subcommands,
+        ),
         related_id: str = typer.Option(
             None,
             "--related",
@@ -113,6 +133,18 @@ def register(app: typer.Typer) -> None:
         link_type: str = typer.Option("relates_to", "--type", "-t", help="Link type"),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         by: str = typer.Option(None, "--by", help="Who is making this change"),
+        all_namespaces: bool = typer.Option(  # noqa: ARG001
+            False,
+            "--all-namespaces",
+            "--all-ns",
+            "-A",
+            hidden=True,
+        ),
+        namespace: str | None = typer.Option(  # noqa: ARG001
+            None,
+            "--namespace",
+            hidden=True,
+        ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Manage issue links (general relationships)."""

@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import pytest
 
 from dogcat.cli._completions import (
+    complete_comment_actions,
     complete_issue_ids,
     complete_labels,
     complete_priorities,
     complete_statuses,
+    complete_subcommands,
     complete_types,
 )
 from dogcat.models import Issue, IssueType, Status
@@ -176,7 +178,7 @@ class TestCompleteIssueIds:
             "dogcat.cli._completions.get_storage",
             lambda: storage_with_issues,
         )
-        result = complete_issue_ids("")
+        result = complete_issue_ids(None, [], "")
         values = _values(result)
         assert "dc-abc1" in values
         assert "dc-abc2" in values
@@ -196,11 +198,28 @@ class TestCompleteIssueIds:
             "dogcat.cli._completions.get_storage",
             lambda: storage_with_issues,
         )
-        result = complete_issue_ids("dc-abc")
+        result = complete_issue_ids(None, [], "dc-abc")
         values = _values(result)
         assert "dc-abc1" in values
         assert "dc-abc2" in values
         assert "dc-xyz1" not in values
+
+    def test_matches_short_id(
+        self,
+        storage_with_issues: JSONLStorage,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Should match by short ID and return short ID as completion value."""
+        monkeypatch.setattr(
+            "dogcat.cli._completions.get_storage",
+            lambda: storage_with_issues,
+        )
+        result = complete_issue_ids(None, [], "abc")
+        values = _values(result)
+        # Returns short IDs (not full IDs) so zsh prefix filtering works
+        assert "abc1" in values
+        assert "abc2" in values
+        assert "xyz1" not in values
 
     def test_returns_empty_on_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Should return empty list when storage is unavailable."""
@@ -210,7 +229,98 @@ class TestCompleteIssueIds:
             raise FileNotFoundError(msg)
 
         monkeypatch.setattr("dogcat.cli._completions.get_storage", raise_error)
-        assert complete_issue_ids("") == []
+        assert complete_issue_ids(None, [], "") == []
+
+    def test_all_namespaces_via_ctx_params(
+        self,
+        temp_dogcats_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Should show all namespaces when ctx.params has all_namespaces=True."""
+        storage = JSONLStorage(str(temp_dogcats_dir / "issues.jsonl"), create_dir=True)
+        now = datetime.now().astimezone()
+        storage.create(
+            Issue(
+                id="aaa1",
+                namespace="dc",
+                title="DC issue",
+                status=Status.OPEN,
+                priority=2,
+                issue_type=IssueType.TASK,
+                created_by="test",
+                created_at=now,
+            ),
+        )
+        storage.create(
+            Issue(
+                id="bbb1",
+                namespace="other",
+                title="Other NS issue",
+                status=Status.OPEN,
+                priority=2,
+                issue_type=IssueType.TASK,
+                created_by="test",
+                created_at=now,
+            ),
+        )
+        monkeypatch.setattr(
+            "dogcat.cli._completions.get_storage",
+            lambda: storage,
+        )
+
+        # Simulate Click context with parsed all_namespaces param
+        class FakeCtx:
+            params: ClassVar[dict[str, Any]] = {"all_namespaces": True}
+
+        result = complete_issue_ids(FakeCtx(), [], "")
+        values = _values(result)
+        assert "dc-aaa1" in values
+        assert "other-bbb1" in values
+
+    def test_explicit_namespace_via_ctx_params(
+        self,
+        temp_dogcats_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Should scope to namespace from ctx.params."""
+        storage = JSONLStorage(str(temp_dogcats_dir / "issues.jsonl"), create_dir=True)
+        now = datetime.now().astimezone()
+        storage.create(
+            Issue(
+                id="aaa1",
+                namespace="dc",
+                title="DC issue",
+                status=Status.OPEN,
+                priority=2,
+                issue_type=IssueType.TASK,
+                created_by="test",
+                created_at=now,
+            ),
+        )
+        storage.create(
+            Issue(
+                id="bbb1",
+                namespace="other",
+                title="Other NS issue",
+                status=Status.OPEN,
+                priority=2,
+                issue_type=IssueType.TASK,
+                created_by="test",
+                created_at=now,
+            ),
+        )
+        monkeypatch.setattr(
+            "dogcat.cli._completions.get_storage",
+            lambda: storage,
+        )
+
+        class FakeCtx:
+            params: ClassVar[dict[str, Any]] = {"namespace": "other"}
+
+        result = complete_issue_ids(FakeCtx(), [], "")
+        values = _values(result)
+        assert "other-bbb1" in values
+        assert "dc-aaa1" not in values
 
 
 class TestCompleteLabels:
@@ -226,7 +336,7 @@ class TestCompleteLabels:
             "dogcat.cli._completions.get_storage",
             lambda: storage_with_issues,
         )
-        result = complete_labels("")
+        result = complete_labels(None, [], "")
         values = _values(result)
         assert "backend" in values
         assert "frontend" in values
@@ -244,7 +354,7 @@ class TestCompleteLabels:
             "dogcat.cli._completions.get_storage",
             lambda: storage_with_issues,
         )
-        assert _values(complete_labels("b")) == ["backend"]
+        assert _values(complete_labels(None, [], "b")) == ["backend"]
 
     def test_returns_empty_on_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Should return empty list when storage is unavailable."""
@@ -254,4 +364,93 @@ class TestCompleteLabels:
             raise FileNotFoundError(msg)
 
         monkeypatch.setattr("dogcat.cli._completions.get_storage", raise_error)
-        assert complete_labels("") == []
+        assert complete_labels(None, [], "") == []
+
+    def test_all_namespaces_via_ctx_params(
+        self,
+        temp_dogcats_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Should include labels from all namespaces when -A is in ctx.params."""
+        storage = JSONLStorage(str(temp_dogcats_dir / "issues.jsonl"), create_dir=True)
+        now = datetime.now().astimezone()
+        storage.create(
+            Issue(
+                id="aaa1",
+                namespace="dc",
+                title="DC issue",
+                status=Status.OPEN,
+                priority=2,
+                issue_type=IssueType.TASK,
+                labels=["local-label"],
+                created_by="test",
+                created_at=now,
+            ),
+        )
+        storage.create(
+            Issue(
+                id="bbb1",
+                namespace="other",
+                title="Other NS issue",
+                status=Status.OPEN,
+                priority=2,
+                issue_type=IssueType.TASK,
+                labels=["remote-label"],
+                created_by="test",
+                created_at=now,
+            ),
+        )
+        monkeypatch.setattr(
+            "dogcat.cli._completions.get_storage",
+            lambda: storage,
+        )
+
+        class FakeCtx:
+            params: ClassVar[dict[str, Any]] = {"all_namespaces": True}
+
+        result = complete_labels(FakeCtx(), [], "")
+        values = _values(result)
+        assert "local-label" in values
+        assert "remote-label" in values
+
+
+class TestCompleteSubcommands:
+    """Test complete_subcommands completion callback."""
+
+    def test_returns_all_subcommands(self) -> None:
+        """Should return add, remove, list with descriptions."""
+        result = complete_subcommands("")
+        values = _values(result)
+        assert values == ["add", "remove", "list"]
+        assert all(isinstance(item, tuple) and len(item) == 2 for item in result)
+
+    def test_filters_by_prefix(self) -> None:
+        """Should filter subcommands by incomplete prefix."""
+        assert _values(complete_subcommands("a")) == ["add"]
+        assert _values(complete_subcommands("r")) == ["remove"]
+        assert _values(complete_subcommands("l")) == ["list"]
+
+    def test_no_match(self) -> None:
+        """Should return empty list when no subcommand matches."""
+        assert complete_subcommands("zzz") == []
+
+
+class TestCompleteCommentActions:
+    """Test complete_comment_actions completion callback."""
+
+    def test_returns_all_actions(self) -> None:
+        """Should return add, list, delete with descriptions."""
+        result = complete_comment_actions("")
+        values = _values(result)
+        assert values == ["add", "list", "delete"]
+        assert all(isinstance(item, tuple) and len(item) == 2 for item in result)
+
+    def test_filters_by_prefix(self) -> None:
+        """Should filter actions by incomplete prefix."""
+        assert _values(complete_comment_actions("a")) == ["add"]
+        assert _values(complete_comment_actions("d")) == ["delete"]
+        assert _values(complete_comment_actions("l")) == ["list"]
+
+    def test_no_match(self) -> None:
+        """Should return empty list when no action matches."""
+        assert complete_comment_actions("zzz") == []

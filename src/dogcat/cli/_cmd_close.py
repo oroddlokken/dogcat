@@ -63,6 +63,18 @@ def register(app: typer.Typer) -> None:
             "--by",
             help="Who is closing this",
         ),
+        all_namespaces: bool = typer.Option(  # noqa: ARG001
+            False,
+            "--all-namespaces",
+            "--all-ns",
+            "-A",
+            hidden=True,
+        ),
+        namespace: str | None = typer.Option(  # noqa: ARG001
+            None,
+            "--namespace",
+            hidden=True,
+        ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Close one or more issues."""
@@ -130,6 +142,18 @@ def register(app: typer.Typer) -> None:
             "--by",
             help="Who is deleting this",
         ),
+        all_namespaces: bool = typer.Option(  # noqa: ARG001
+            False,
+            "--all-namespaces",
+            "--all-ns",
+            "-A",
+            hidden=True,
+        ),
+        namespace: str | None = typer.Option(  # noqa: ARG001
+            None,
+            "--namespace",
+            hidden=True,
+        ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Delete one or more issues (creates tombstone).
@@ -172,6 +196,18 @@ def register(app: typer.Typer) -> None:
             None,
             "--by",
             help="Who is deleting this",
+        ),
+        all_namespaces: bool = typer.Option(  # noqa: ARG001
+            False,
+            "--all-namespaces",
+            "--all-ns",
+            "-A",
+            hidden=True,
+        ),
+        namespace: str | None = typer.Option(  # noqa: ARG001
+            None,
+            "--namespace",
+            hidden=True,
         ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:

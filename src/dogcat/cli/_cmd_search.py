@@ -7,6 +7,12 @@ import re
 import orjson
 import typer
 
+from ._completions import (
+    complete_labels,
+    complete_priorities,
+    complete_statuses,
+    complete_types,
+)
 from ._formatting import format_issue_brief
 from ._helpers import apply_common_filters, get_storage
 from ._json_state import echo_error, is_json_output
@@ -40,19 +46,33 @@ def register(app: typer.Typer) -> None:
             "-c",
             help="Case-sensitive search",
         ),
-        status: str = typer.Option(None, "--status", "-s", help="Filter by status"),
-        issue_type: str = typer.Option(None, "--type", "-t", help="Filter by type"),
+        status: str = typer.Option(
+            None,
+            "--status",
+            "-s",
+            help="Filter by status",
+            autocompletion=complete_statuses,
+        ),
+        issue_type: str = typer.Option(
+            None,
+            "--type",
+            "-t",
+            help="Filter by type",
+            autocompletion=complete_types,
+        ),
         priority: int | None = typer.Option(
             None,
             "--priority",
             "-p",
             help="Filter by priority",
+            autocompletion=complete_priorities,
         ),
         label: str | None = typer.Option(
             None,
             "--label",
             "-l",
             help="Filter by label",
+            autocompletion=complete_labels,
         ),
         owner: str | None = typer.Option(
             None,

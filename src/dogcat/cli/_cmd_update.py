@@ -123,6 +123,13 @@ def register(app: typer.Typer) -> None:
             "--namespace",
             help="Move issue to a different namespace (cascades to all references)",
         ),
+        all_namespaces: bool = typer.Option(  # noqa: ARG001
+            False,
+            "--all-namespaces",
+            "--all-ns",
+            "-A",
+            hidden=True,
+        ),
         manual: bool | None = typer.Option(
             None,
             "--manual/--no-manual",

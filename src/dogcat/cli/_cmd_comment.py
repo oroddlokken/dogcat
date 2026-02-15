@@ -5,6 +5,7 @@ from __future__ import annotations
 import orjson
 import typer
 
+from ._completions import complete_comment_actions, complete_issue_ids
 from ._helpers import get_default_operator, get_storage
 from ._json_state import echo_error, is_json_output
 
@@ -14,8 +15,16 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     def comment(
-        issue_id: str = typer.Argument(..., help="Issue ID"),
-        action: str = typer.Argument(..., help="Action: add, list, or delete"),
+        issue_id: str = typer.Argument(
+            ...,
+            help="Issue ID",
+            autocompletion=complete_issue_ids,
+        ),
+        action: str = typer.Argument(
+            ...,
+            help="Action: add, list, or delete",
+            autocompletion=complete_comment_actions,
+        ),
         text: str = typer.Option(None, "--text", "-t", help="Comment text (for add)"),
         comment_id: str = typer.Option(
             None,
@@ -25,6 +34,18 @@ def register(app: typer.Typer) -> None:
         ),
         author: str = typer.Option(None, "--by", help="Comment author name"),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+        all_namespaces: bool = typer.Option(  # noqa: ARG001
+            False,
+            "--all-namespaces",
+            "--all-ns",
+            "-A",
+            hidden=True,
+        ),
+        namespace: str | None = typer.Option(  # noqa: ARG001
+            None,
+            "--namespace",
+            hidden=True,
+        ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Manage issue comments.
