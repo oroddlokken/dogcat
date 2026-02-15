@@ -26,12 +26,14 @@ def _ns_filter_from_ctx(
     Reads ctx.params for all_namespaces and namespace options.
     Commands must define hidden -A / --namespace options for this to work.
     """
-    params = getattr(ctx, "params", None) or {}
+    params: dict[str, object] = getattr(ctx, "params", None) or {}
 
     if params.get("all_namespaces", False):
         return None
 
-    return get_namespace_filter(dogcats_dir, params.get("namespace"))
+    ns = params.get("namespace")
+    explicit_ns: str | None = str(ns) if isinstance(ns, str) else None
+    return get_namespace_filter(dogcats_dir, explicit_ns)
 
 
 def complete_issue_ids(
