@@ -214,8 +214,14 @@ def register(app: typer.Typer) -> None:
         namespace: str | None = typer.Option(
             None,
             "--namespace",
-            "-ns",
             help="Filter by namespace",
+        ),
+        all_namespaces: bool = typer.Option(
+            False,
+            "--all-namespaces",
+            "--all-ns",
+            "-A",
+            help="Show issues from all namespaces",
         ),
         agent_only: bool = typer.Option(
             False,
@@ -284,11 +290,12 @@ def register(app: typer.Typer) -> None:
                     if i.full_id == resolved_parent or i.full_id in child_ids
                 ]
 
-            # Apply namespace filtering
+            # Apply namespace filtering (skip if --all-namespaces)
             actual_dogcats_dir = str(storage.dogcats_dir)
-            ns_filter = get_namespace_filter(actual_dogcats_dir, namespace)
-            if ns_filter is not None:
-                issues = [i for i in issues if ns_filter(i.namespace)]
+            if not all_namespaces:
+                ns_filter = get_namespace_filter(actual_dogcats_dir, namespace)
+                if ns_filter is not None:
+                    issues = [i for i in issues if ns_filter(i.namespace)]
 
             # Exclude closed/tombstone issues by default (unless explicitly requested)
             # Also include closed issues when date filters are used

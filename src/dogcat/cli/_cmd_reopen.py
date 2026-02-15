@@ -60,7 +60,7 @@ def register(app: typer.Typer) -> None:
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         reopened_by: str | None = typer.Option(
             None,
-            "--reopened-by",
+            "--by",
             help="Who is reopening this",
         ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),

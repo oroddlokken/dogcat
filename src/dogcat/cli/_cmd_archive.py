@@ -34,9 +34,10 @@ def register(app: typer.Typer) -> None:
             "--namespace",
             help="Only archive issues from this namespace",
         ),
-        confirm: bool = typer.Option(
+        yes: bool = typer.Option(
             False,
-            "--confirm",
+            "--yes",
+            "-y",
             help="Skip confirmation prompt",
         ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
@@ -56,7 +57,7 @@ def register(app: typer.Typer) -> None:
             dcat archive --dry-run            # Preview what would be archived
             dcat archive --older-than 30d     # Only archive if closed 30+ days ago
             dcat archive --namespace myproj   # Archive only 'myproj' namespace
-            dcat archive --confirm            # Skip confirmation prompt
+            dcat archive --yes                # Skip confirmation prompt
         """
         import re
         import tempfile
@@ -232,8 +233,8 @@ def register(app: typer.Typer) -> None:
                 typer.echo("\n(dry run - no changes made)")
                 return
 
-            # Confirm unless --confirm flag is passed
-            if not confirm:
+            # Confirm unless --yes flag is passed
+            if not yes:
                 typer.echo("")
                 proceed = typer.confirm(
                     f"Archive {len(archivable)} issue(s)?",

@@ -1213,109 +1213,6 @@ class TestEditAlias:
         )
 
 
-class TestCLICreateEditor:
-    """Test create --editor flag."""
-
-    def test_create_with_editor_flag_opens_editor(self, tmp_path: Path) -> None:
-        """Test that --editor opens the Textual editor after creation."""
-        dogcats_dir = tmp_path / ".dogcats"
-        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
-
-        mock_issue = MagicMock()
-        mock_issue.full_id = "dc-test"
-        mock_issue.title = "Edited title"
-
-        with patch(
-            "dogcat.tui.editor.edit_issue",
-            return_value=mock_issue,
-        ) as mock_edit:
-            result = runner.invoke(
-                app,
-                [
-                    "create",
-                    "Test editor issue",
-                    "--editor",
-                    "--dogcats-dir",
-                    str(dogcats_dir),
-                ],
-            )
-            assert result.exit_code == 0
-            assert "Created" in result.stdout
-            assert "Updated dc-test: Edited title" in result.stdout
-            mock_edit.assert_called_once()
-
-    def test_create_with_e_shorthand_opens_editor(self, tmp_path: Path) -> None:
-        """Test that -e shorthand opens the Textual editor after creation."""
-        dogcats_dir = tmp_path / ".dogcats"
-        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
-
-        mock_issue = MagicMock()
-        mock_issue.full_id = "dc-test"
-        mock_issue.title = "Edited title"
-
-        with patch(
-            "dogcat.tui.editor.edit_issue",
-            return_value=mock_issue,
-        ) as mock_edit:
-            result = runner.invoke(
-                app,
-                [
-                    "create",
-                    "Test editor shorthand",
-                    "-e",
-                    "--dogcats-dir",
-                    str(dogcats_dir),
-                ],
-            )
-            assert result.exit_code == 0
-            assert "Created" in result.stdout
-            assert "Updated dc-test: Edited title" in result.stdout
-            mock_edit.assert_called_once()
-
-    def test_create_with_editor_cancelled(self, tmp_path: Path) -> None:
-        """Test that cancelling the editor shows cancel message."""
-        dogcats_dir = tmp_path / ".dogcats"
-        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
-
-        with patch("dogcat.tui.editor.edit_issue", return_value=None) as mock_edit:
-            result = runner.invoke(
-                app,
-                [
-                    "create",
-                    "Test editor cancel",
-                    "--editor",
-                    "--dogcats-dir",
-                    str(dogcats_dir),
-                ],
-            )
-            assert result.exit_code == 0
-            assert "Created" in result.stdout
-            assert "Edit cancelled" in result.stdout
-            mock_edit.assert_called_once()
-
-    def test_create_without_editor_flag_does_not_open_editor(
-        self,
-        tmp_path: Path,
-    ) -> None:
-        """Test that without --editor, the editor is not opened."""
-        dogcats_dir = tmp_path / ".dogcats"
-        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
-
-        with patch("dogcat.tui.editor.edit_issue") as mock_edit:
-            result = runner.invoke(
-                app,
-                [
-                    "create",
-                    "Test no editor",
-                    "--dogcats-dir",
-                    str(dogcats_dir),
-                ],
-            )
-            assert result.exit_code == 0
-            assert "Created" in result.stdout
-            mock_edit.assert_not_called()
-
-
 class TestCLIList:
     """Test list command."""
 
@@ -3025,42 +2922,6 @@ class TestUpdateAlignedOptions:
         )
         assert result.exit_code == 0
 
-    def test_update_with_editor(self, tmp_path: Path) -> None:
-        """Test that update --editor opens the editor after updating."""
-        dogcats_dir = tmp_path / ".dogcats"
-        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
-
-        create_result = runner.invoke(
-            app,
-            ["create", "Test issue", "--json", "--dogcats-dir", str(dogcats_dir)],
-        )
-        data = json.loads(create_result.stdout)
-        issue_id = f"{data['namespace']}-{data['id']}"
-
-        mock_issue = MagicMock()
-        mock_issue.full_id = issue_id
-        mock_issue.title = "Edited title"
-
-        with patch(
-            "dogcat.tui.editor.edit_issue",
-            return_value=mock_issue,
-        ) as mock_edit:
-            result = runner.invoke(
-                app,
-                [
-                    "update",
-                    issue_id,
-                    "--title",
-                    "New title",
-                    "--editor",
-                    "--dogcats-dir",
-                    str(dogcats_dir),
-                ],
-            )
-            assert result.exit_code == 0
-            mock_edit.assert_called_once()
-            assert "Updated" in result.stdout
-
 
 class TestCLIDependency:
     """Test dependency commands."""
@@ -4438,7 +4299,7 @@ class TestCLIComments:
                 "add",
                 "--text",
                 "Test comment",
-                "--author",
+                "--by",
                 "testuser",
                 "--dogcats-dir",
                 str(dogcats_dir),
@@ -4514,7 +4375,7 @@ class TestCLIComments:
                 "add",
                 "--text",
                 "First comment",
-                "--author",
+                "--by",
                 "user1",
                 "--dogcats-dir",
                 str(dogcats_dir),
@@ -4528,7 +4389,7 @@ class TestCLIComments:
                 "add",
                 "--text",
                 "Second comment",
-                "--author",
+                "--by",
                 "user2",
                 "--dogcats-dir",
                 str(dogcats_dir),
@@ -4566,7 +4427,7 @@ class TestCLIComments:
                 "add",
                 "--text",
                 "Test comment",
-                "--author",
+                "--by",
                 "testuser",
                 "--dogcats-dir",
                 str(dogcats_dir),
@@ -4604,7 +4465,7 @@ class TestCLIComments:
                 "add",
                 "--text",
                 "Comment to delete",
-                "--author",
+                "--by",
                 "testuser",
                 "--dogcats-dir",
                 str(dogcats_dir),
@@ -4646,7 +4507,7 @@ class TestCLIInitPrefix:
             app,
             [
                 "init",
-                "--prefix",
+                "--namespace",
                 "myapp",
                 "--dogcats-dir",
                 str(dogcats_dir),
@@ -4663,7 +4524,7 @@ class TestCLIInitPrefix:
             app,
             [
                 "init",
-                "--prefix",
+                "--namespace",
                 "testprefix",
                 "--dogcats-dir",
                 str(dogcats_dir),
@@ -4696,7 +4557,7 @@ class TestCLIInitPrefix:
             app,
             [
                 "init",
-                "--prefix",
+                "--namespace",
                 "myapp-",
                 "--dogcats-dir",
                 str(dogcats_dir),
@@ -4712,7 +4573,7 @@ class TestCLIInitPrefix:
             app,
             [
                 "init",
-                "--prefix",
+                "--namespace",
                 "custom",
                 "--dogcats-dir",
                 str(dogcats_dir),
@@ -4751,7 +4612,7 @@ class TestCLIInitPrefix:
             app,
             [
                 "init",
-                "--prefix",
+                "--namespace",
                 "proj",
                 "--dogcats-dir",
                 str(dogcats_dir),
@@ -4905,7 +4766,7 @@ class TestCLIImportBeadsPrefix:
             app,
             [
                 "init",
-                "--prefix",
+                "--namespace",
                 "keepme",
                 "--dogcats-dir",
                 str(dogcats_dir),
@@ -4948,7 +4809,7 @@ class TestCLIStatus:
             app,
             [
                 "init",
-                "--prefix",
+                "--namespace",
                 "test",
                 "--dogcats-dir",
                 str(dogcats_dir),
@@ -4989,7 +4850,7 @@ class TestCLIStatus:
             app,
             [
                 "init",
-                "--prefix",
+                "--namespace",
                 "empty",
                 "--dogcats-dir",
                 str(dogcats_dir),
@@ -5011,7 +4872,7 @@ class TestCLIStatus:
             app,
             [
                 "init",
-                "--prefix",
+                "--namespace",
                 "jsontest",
                 "--dogcats-dir",
                 str(dogcats_dir),

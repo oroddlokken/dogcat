@@ -5,6 +5,8 @@ from __future__ import annotations
 import orjson
 import typer
 
+from dogcat.config import extract_prefix, get_namespace_filter
+
 from ._completions import complete_issue_ids
 from ._formatting import format_event, get_event_legend
 from ._helpers import get_storage
@@ -16,6 +18,14 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     def history(
+        limit_arg: int | None = typer.Argument(None, help="Number of events to show"),
+        all_namespaces: bool = typer.Option(
+            False,
+            "--all-namespaces",
+            "--all-ns",
+            "-A",
+            help="Show events from all namespaces",
+        ),
         issue: str | None = typer.Option(
             None,
             "--issue",
@@ -23,10 +33,9 @@ def register(app: typer.Typer) -> None:
             help="Filter events for a specific issue",
             autocompletion=complete_issue_ids,
         ),
-        limit: int = typer.Option(
-            20,
+        limit: int | None = typer.Option(
+            None,
             "--limit",
-            "-n",
             help="Number of events to show",
         ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
@@ -42,6 +51,7 @@ def register(app: typer.Typer) -> None:
         try:
             from dogcat.event_log import EventLog, _serialize
 
+            final_limit = limit_arg or limit or 20
             storage = get_storage(dogcats_dir)
             event_log = EventLog(storage.dogcats_dir)
 
@@ -53,7 +63,17 @@ def register(app: typer.Typer) -> None:
                     echo_error(f"Issue {issue} not found")
                     raise typer.Exit(1)
 
-            events = event_log.read(issue_id=resolved_issue, limit=limit)
+            events = event_log.read(issue_id=resolved_issue, limit=final_limit)
+
+            # Apply namespace filter (skip if --all-namespaces)
+            if not all_namespaces:
+                actual_dogcats_dir = str(storage.dogcats_dir)
+                ns_filter = get_namespace_filter(actual_dogcats_dir)
+                if ns_filter is not None:
+                    events = [
+                        e for e in events if ns_filter(extract_prefix(e.issue_id) or "")
+                    ]
+
             events.reverse()  # Display oldest-first (chronological)
 
             # Fill in missing titles from storage
@@ -81,6 +101,14 @@ def register(app: typer.Typer) -> None:
 
     @app.command(name="h", hidden=True)
     def history_alias(
+        limit_arg: int | None = typer.Argument(None, help="Number of events to show"),
+        all_namespaces: bool = typer.Option(
+            False,
+            "--all-namespaces",
+            "--all-ns",
+            "-A",
+            help="Show events from all namespaces",
+        ),
         issue: str | None = typer.Option(
             None,
             "--issue",
@@ -88,10 +116,9 @@ def register(app: typer.Typer) -> None:
             help="Filter events for a specific issue",
             autocompletion=complete_issue_ids,
         ),
-        limit: int = typer.Option(
-            20,
+        limit: int | None = typer.Option(
+            None,
             "--limit",
-            "-n",
             help="Number of events to show",
         ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
@@ -105,6 +132,8 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Alias for history."""
         history(
+            limit_arg=limit_arg,
+            all_namespaces=all_namespaces,
             issue=issue,
             limit=limit,
             json_output=json_output,

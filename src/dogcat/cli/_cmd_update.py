@@ -121,23 +121,17 @@ def register(app: typer.Typer) -> None:
         namespace: str | None = typer.Option(
             None,
             "--namespace",
-            help="Change issue namespace (cascades to all references)",
+            help="Move issue to a different namespace (cascades to all references)",
         ),
         manual: bool | None = typer.Option(
             None,
             "--manual/--no-manual",
             help="Mark/unmark issue as manual (not for agents)",
         ),
-        editor: bool = typer.Option(
-            False,
-            "--editor",
-            "-e",
-            help="Open the Textual editor after updating the issue",
-        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         updated_by: str | None = typer.Option(
             None,
-            "--updated-by",
+            "--by",
             help="Who is updating this",
         ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
@@ -210,7 +204,6 @@ def register(app: typer.Typer) -> None:
                 and not blocks
                 and not remove_depends_on
                 and not remove_blocks
-                and not editor
             ):
                 echo_error("No updates provided")
                 raise typer.Exit(1)
@@ -285,15 +278,6 @@ def register(app: typer.Typer) -> None:
                 typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
             else:
                 typer.echo(f"✓ Updated {issue.full_id}: {issue.title}")
-
-            if editor:
-                from dogcat.tui.editor import edit_issue
-
-                edited = edit_issue(issue.full_id, storage)
-                if edited is not None:
-                    typer.echo(f"✓ Updated {edited.full_id}: {edited.title}")
-                else:
-                    typer.echo("Edit cancelled")
 
         except ValueError as e:
             echo_error(str(e))

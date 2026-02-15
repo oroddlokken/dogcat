@@ -159,7 +159,7 @@ def register(app: typer.Typer) -> None:
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         created_by: str | None = typer.Option(
             None,
-            "--created-by",
+            "--by",
             help="Who is creating this",
         ),
         design: str | None = typer.Option(None, "--design", help="Design notes"),
@@ -178,12 +178,6 @@ def register(app: typer.Typer) -> None:
             False,
             "--manual",
             help="Mark issue as manual (not for agents)",
-        ),
-        editor: bool = typer.Option(
-            False,
-            "--editor",
-            "-e",
-            help="Open the Textual editor after creating the issue",
         ),
         allow_shorthands: bool = typer.Option(False, hidden=True),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
@@ -359,15 +353,6 @@ def register(app: typer.Typer) -> None:
                     f"[{final_type}, pri {final_priority}]",
                 )
 
-            if editor:
-                from dogcat.tui.editor import edit_issue
-
-                updated = edit_issue(issue.full_id, storage)
-                if updated is not None:
-                    typer.echo(f"✓ Updated {updated.full_id}: {updated.title}")
-                else:
-                    typer.echo("Edit cancelled")
-
         except ValueError as e:
             echo_error(str(e))
             raise typer.Exit(1)
@@ -398,8 +383,8 @@ def register(app: typer.Typer) -> None:
         _make_alias(
             _create_impl,
             doc=_C_DOC,
-            exclude_params=frozenset({"editor", "allow_shorthands"}),
-            param_defaults={"editor": False, "allow_shorthands": True},
+            exclude_params=frozenset({"allow_shorthands"}),
+            param_defaults={"allow_shorthands": True},
         ),
     )
 
@@ -408,13 +393,12 @@ def register(app: typer.Typer) -> None:
             _create_impl,
             doc="Create a new issue (alias for 'create' command).",
             exclude_params=frozenset(
-                {"arg2", "arg3", "arg4", "editor", "allow_shorthands"},
+                {"arg2", "arg3", "arg4", "allow_shorthands"},
             ),
             param_defaults={
                 "arg2": None,
                 "arg3": None,
                 "arg4": None,
-                "editor": False,
                 "allow_shorthands": False,
             },
             param_help={"arg1": _ARG_HELP},

@@ -1086,6 +1086,52 @@ class TestPruneDryRun:
         assert result.exit_code == 0
         assert "No tombstoned issues" in result.stdout
 
+    def test_prune_json_output(self, tmp_path: Path) -> None:
+        """Test prune --json returns structured output."""
+        dogcats_dir, ids = _init_and_create(tmp_path, "To prune")
+        runner.invoke(
+            app,
+            ["delete", ids[0], "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["prune", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["pruned"] == 1
+        assert ids[0] in data["ids"]
+
+    def test_prune_dry_run_json(self, tmp_path: Path) -> None:
+        """Test prune --dry-run --json returns structured output."""
+        dogcats_dir, ids = _init_and_create(tmp_path, "To prune dry")
+        runner.invoke(
+            app,
+            ["delete", ids[0], "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["prune", "--dry-run", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["dry_run"] is True
+        assert data["count"] == 1
+
+    def test_prune_no_tombstones_json(self, tmp_path: Path) -> None:
+        """Test prune --json with no tombstones."""
+        dogcats_dir, _ = _init_and_create(tmp_path, "Alive")
+
+        result = runner.invoke(
+            app,
+            ["prune", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["pruned"] == 0
+
 
 class TestShowDescription:
     """Test show displays description."""
@@ -1375,7 +1421,7 @@ class TestCommentCommand:
                 "add",
                 "--text",
                 "Note",
-                "--author",
+                "--by",
                 "alice",
                 "--dogcats-dir",
                 str(dogcats_dir),
@@ -1979,7 +2025,7 @@ class TestArchiveCommand:
 
         result = runner.invoke(
             app,
-            ["archive", "--confirm", "--dogcats-dir", str(dogcats_dir)],
+            ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
         assert "Archived" in result.stdout
@@ -2107,7 +2153,7 @@ class TestArchiveCommand:
 
         result = runner.invoke(
             app,
-            ["archive", "--confirm", "--dogcats-dir", str(dogcats_dir)],
+            ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
         assert "Archived" in result.stdout
@@ -3403,7 +3449,7 @@ class TestRemoveCommand:
             [
                 "remove",
                 ids[0],
-                "--deleted-by",
+                "--by",
                 "alice",
                 "--dogcats-dir",
                 str(dogcats_dir),

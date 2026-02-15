@@ -84,7 +84,7 @@ class TestArchiveBasic:
 
         result = runner.invoke(
             app,
-            ["archive", "--confirm", "--dogcats-dir", str(dogcats_dir)],
+            ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
         assert "Archived 1 issue(s)" in result.stdout
@@ -108,7 +108,7 @@ class TestArchiveBasic:
 
         runner.invoke(
             app,
-            ["archive", "--confirm", "--dogcats-dir", str(dogcats_dir)],
+            ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Reload and verify issue is gone
@@ -124,7 +124,7 @@ class TestArchiveBasic:
 
         runner.invoke(
             app,
-            ["archive", "--confirm", "--dogcats-dir", str(dogcats_dir)],
+            ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)],
         )
 
         archive_dir = dogcats_dir / "archive"
@@ -178,7 +178,7 @@ class TestArchiveOlderThan:
                 "archive",
                 "--older-than",
                 "30d",
-                "--confirm",
+                "--yes",
                 "--dogcats-dir",
                 str(dogcats_dir),
             ],
@@ -353,7 +353,7 @@ class TestArchiveWithDependencies:
 
         result = runner.invoke(
             app,
-            ["archive", "--confirm", "--dogcats-dir", str(dogcats_dir)],
+            ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
         assert "Archived 2 issue(s)" in result.stdout
@@ -428,7 +428,7 @@ class TestArchiveWithLinks:
 
         result = runner.invoke(
             app,
-            ["archive", "--confirm", "--dogcats-dir", str(dogcats_dir)],
+            ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
         assert "Archived 2 issue(s)" in result.stdout
@@ -450,7 +450,7 @@ class TestArchiveMultiple:
 
         result = runner.invoke(
             app,
-            ["archive", "--confirm", "--dogcats-dir", str(dogcats_dir)],
+            ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
         assert "Archived 5 issue(s)" in result.stdout
@@ -475,7 +475,7 @@ class TestArchiveMultiple:
 
         result = runner.invoke(
             app,
-            ["archive", "--confirm", "--dogcats-dir", str(dogcats_dir)],
+            ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
         assert "Archived 1 issue(s)" in result.stdout
@@ -544,7 +544,7 @@ class TestArchivePreservesHistory:
 
         runner.invoke(
             app,
-            ["archive", "--confirm", "--dogcats-dir", str(dogcats_dir)],
+            ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)],
         )
 
         archive_dir = dogcats_dir / "archive"
@@ -609,7 +609,7 @@ class TestArchivePreservesHistory:
 
         runner.invoke(
             app,
-            ["archive", "--confirm", "--dogcats-dir", str(dogcats_dir)],
+            ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)],
         )
 
         # Verify open issue still has all its history in the main file
@@ -669,7 +669,7 @@ class TestArchiveNamespace:
                 "archive",
                 "--namespace",
                 ns,
-                "--confirm",
+                "--yes",
                 "--dogcats-dir",
                 str(dogcats_dir),
             ],

@@ -60,7 +60,7 @@ def register(app: typer.Typer) -> None:
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         closed_by: str | None = typer.Option(
             None,
-            "--closed-by",
+            "--by",
             help="Who is closing this",
         ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
@@ -127,7 +127,7 @@ def register(app: typer.Typer) -> None:
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         deleted_by: str | None = typer.Option(
             None,
-            "--deleted-by",
+            "--by",
             help="Who is deleting this",
         ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
@@ -170,7 +170,7 @@ def register(app: typer.Typer) -> None:
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         deleted_by: str = typer.Option(
             None,
-            "--deleted-by",
+            "--by",
             help="Who is deleting this",
         ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),

@@ -224,6 +224,62 @@ def get_storage(
     return JSONLStorage(f"{dogcats_dir}/issues.jsonl", create_dir=create_dir)
 
 
+def apply_common_filters(
+    issues: list[Any],
+    *,
+    issue_type: str | None = None,
+    priority: int | None = None,
+    label: str | None = None,
+    owner: str | None = None,
+    parent: str | None = None,
+    namespace: str | None = None,
+    agent_only: bool = False,
+    all_namespaces: bool = False,
+    dogcats_dir: str | None = None,
+    storage: Any = None,
+) -> list[Any]:
+    """Apply common filters to a list of issues.
+
+    This is a shared helper to avoid duplicating filter logic across
+    shortcut commands (ready, blocked, in-progress, etc.), search, and export.
+    """
+    from dogcat.config import get_namespace_filter
+    from dogcat.constants import parse_labels
+
+    if issue_type:
+        issues = [i for i in issues if i.issue_type.value == issue_type]
+    if priority is not None:
+        issues = [i for i in issues if i.priority == priority]
+    if label:
+        labels_filter = parse_labels(label)
+        issues = [i for i in issues if labels_filter.issubset(set(i.labels or []))]
+    if owner:
+        issues = [i for i in issues if i.owner == owner]
+    if parent and storage:
+        resolved_parent = storage.resolve_id(parent)
+        if resolved_parent:
+            child_ids = {c.full_id for c in storage.get_children(resolved_parent)}
+            issues = [
+                i
+                for i in issues
+                if i.full_id == resolved_parent or i.full_id in child_ids
+            ]
+    if agent_only:
+        issues = [
+            i
+            for i in issues
+            if not (i.metadata.get("manual") or i.metadata.get("no_agent"))
+        ]
+
+    # Namespace filtering (skip if --all-namespaces)
+    if not all_namespaces and dogcats_dir:
+        ns_filter = get_namespace_filter(dogcats_dir, namespace)
+        if ns_filter is not None:
+            issues = [i for i in issues if ns_filter(i.namespace)]
+
+    return issues
+
+
 def _parse_priority_value(value: str) -> int:
     """Parse a priority value that can be an int (0-4), pINT (p0-p4), or a name.
 

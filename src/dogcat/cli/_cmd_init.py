@@ -19,11 +19,11 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     def init(
-        prefix: str | None = typer.Option(
+        namespace: str | None = typer.Option(
             None,
-            "--prefix",
-            "-p",
-            help="Issue prefix (default: auto-detect from directory name)",
+            "--namespace",
+            "-n",
+            help="Issue namespace (default: auto-detect from directory name)",
         ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
         external_dir: str | None = typer.Option(
@@ -48,8 +48,8 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Initialize a new Dogcat repository.
 
-        If --prefix is not specified, the prefix is auto-detected from the
-        directory name (e.g., folder 'myproject' -> prefix 'myproject').
+        If --namespace is not specified, the namespace is auto-detected from
+        the directory name (e.g., folder 'myproject' -> namespace 'myproject').
 
         Use --dir to place the .dogcats directory at an external location.
         This creates a .dogcatrc file in the current directory pointing to the
@@ -100,25 +100,25 @@ def register(app: typer.Typer) -> None:
         else:
             typer.echo(f"✓ {issues_file} already exists")
 
-        # Determine and save the issue prefix
-        if prefix is None:
+        # Determine and save the namespace
+        if namespace is None:
             # Auto-detect from directory name
             project_dir = dogcats_path.resolve().parent
-            prefix = project_dir.name
+            namespace = project_dir.name
             # Sanitize: only allow alphanumeric and hyphens
-            prefix = "".join(
-                c if c.isalnum() or c == "-" else "-" for c in prefix.lower()
+            namespace = "".join(
+                c if c.isalnum() or c == "-" else "-" for c in namespace.lower()
             )
-            prefix = prefix.strip("-")
-            if not prefix:
-                prefix = "dc"  # Fallback to default
+            namespace = namespace.strip("-")
+            if not namespace:
+                namespace = "dc"  # Fallback to default
 
         # Strip trailing hyphens (the hyphen is added during ID generation)
-        prefix = prefix.rstrip("-")
+        namespace = namespace.rstrip("-")
 
-        # Save prefix to config
-        set_issue_prefix(dogcats_dir, prefix)
-        typer.echo(f"✓ Set namespace: {prefix}")
+        # Save namespace to config
+        set_issue_prefix(dogcats_dir, namespace)
+        typer.echo(f"✓ Set namespace: {namespace}")
 
         if no_git:
             config = load_config(dogcats_dir)
@@ -146,13 +146,15 @@ def register(app: typer.Typer) -> None:
         if is_json_output(json_output):
             output = {
                 "status": "initialized",
-                "prefix": prefix,
+                "namespace": namespace,
                 "path": str(dogcats_path.resolve()),
             }
             typer.echo(orjson.dumps(output).decode())
         else:
             typer.echo(f"\n✓ Dogcat repository initialized in {dogcats_dir}")
-            typer.echo(f"  Issues will be named: {prefix}-<hash> (e.g., {prefix}-a3f2)")
+            typer.echo(
+                f"  Issues will be named: {namespace}-<hash> (e.g., {namespace}-a3f2)"
+            )
 
     @app.command("import-beads")
     def import_beads(

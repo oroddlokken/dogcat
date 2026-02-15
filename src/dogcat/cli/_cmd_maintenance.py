@@ -13,14 +13,20 @@ import typer
 from dogcat.config import (
     get_config_path,
     get_issue_prefix,
-    get_namespace_filter,
     load_config,
     migrate_config_keys,
     save_config,
 )
 
+from ._completions import (
+    complete_issue_ids,
+    complete_labels,
+    complete_priorities,
+    complete_statuses,
+    complete_types,
+)
 from ._formatting import format_issue_brief
-from ._helpers import get_default_operator, get_storage
+from ._helpers import apply_common_filters, get_default_operator, get_storage
 from ._json_state import echo_error, is_json_output
 from ._validate import detect_concurrent_edits, validate_jsonl
 
@@ -36,6 +42,7 @@ def register(app: typer.Typer) -> None:
             "-n",
             help="Show what would be removed without actually removing",
         ),
+        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Remove tombstoned (deleted) issues from storage permanently.
@@ -51,17 +58,32 @@ def register(app: typer.Typer) -> None:
             tombstones = [i for i in issues if i.status.value == "tombstone"]
 
             if not tombstones:
-                typer.echo("No tombstoned issues to prune")
+                if is_json_output(json_output):
+                    typer.echo(orjson.dumps({"pruned": 0, "ids": []}).decode())
+                else:
+                    typer.echo("No tombstoned issues to prune")
                 return
 
             if dry_run:
-                typer.echo(f"Would remove {len(tombstones)} tombstoned issue(s):")
-                for issue in tombstones:
-                    typer.echo(f"  ☠ {issue.full_id}: {issue.title}")
+                if is_json_output(json_output):
+                    output = {
+                        "dry_run": True,
+                        "count": len(tombstones),
+                        "ids": [i.full_id for i in tombstones],
+                    }
+                    typer.echo(orjson.dumps(output).decode())
+                else:
+                    typer.echo(f"Would remove {len(tombstones)} tombstoned issue(s):")
+                    for issue in tombstones:
+                        typer.echo(f"  ☠ {issue.full_id}: {issue.title}")
             else:
                 # Remove tombstones from storage using public API
                 pruned_ids = storage.prune_tombstones()
-                typer.echo(f"✓ Pruned {len(pruned_ids)} tombstoned issue(s)")
+                if is_json_output(json_output):
+                    output = {"pruned": len(pruned_ids), "ids": list(pruned_ids)}
+                    typer.echo(orjson.dumps(output).decode())
+                else:
+                    typer.echo(f"✓ Pruned {len(pruned_ids)} tombstoned issue(s)")
 
         except typer.Exit:
             raise
@@ -614,9 +636,63 @@ def register(app: typer.Typer) -> None:
             "-f",
             help="Export format: json or jsonl",
         ),
+        status: str | None = typer.Option(
+            None,
+            "--status",
+            "-s",
+            help="Filter by status",
+            autocompletion=complete_statuses,
+        ),
+        issue_type: str | None = typer.Option(
+            None,
+            "--type",
+            "-t",
+            help="Filter by type",
+            autocompletion=complete_types,
+        ),
+        priority: int | None = typer.Option(
+            None,
+            "--priority",
+            "-p",
+            help="Filter by priority",
+            autocompletion=complete_priorities,
+        ),
+        label: str | None = typer.Option(
+            None,
+            "--label",
+            "-l",
+            help="Filter by label",
+            autocompletion=complete_labels,
+        ),
+        owner: str | None = typer.Option(
+            None,
+            "--owner",
+            "-o",
+            help="Filter by owner",
+        ),
+        parent: str | None = typer.Option(
+            None,
+            "--parent",
+            help="Filter by parent issue ID",
+            autocompletion=complete_issue_ids,
+        ),
+        namespace: str | None = typer.Option(
+            None,
+            "--namespace",
+            help="Filter by namespace",
+        ),
+        all_namespaces: bool = typer.Option(
+            False,
+            "--all-namespaces",
+            "--all-ns",
+            "-A",
+            help="Export issues from all namespaces",
+        ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
-        """Export all issues, dependencies, and links to stdout in specified format.
+        """Export issues, dependencies, and links to stdout in specified format.
+
+        By default exports all issues. Use filters to narrow the export.
 
         Supported formats:
         - json: table-printed JSON object with issues, dependencies, and links
@@ -626,9 +702,39 @@ def register(app: typer.Typer) -> None:
             storage = get_storage(dogcats_dir)
             issues = storage.list()
 
+            # Apply status filter
+            if status:
+                issues = [i for i in issues if i.status.value == status]
+
+            # Apply common filters
+            issues = apply_common_filters(
+                issues,
+                issue_type=issue_type,
+                priority=priority,
+                label=label,
+                owner=owner,
+                parent=parent,
+                namespace=namespace,
+                all_namespaces=all_namespaces,
+                dogcats_dir=str(storage.dogcats_dir),
+                storage=storage,
+            )
+
             from dogcat.models import issue_to_dict
 
-            # Get all dependencies and links directly (avoids per-issue iteration dups)
+            # Get all deps and links (avoids per-issue iteration dups).
+            # When filters are active, scope to exported issues.
+            exported_ids = {i.full_id for i in issues}
+            has_filters = bool(
+                status
+                or issue_type
+                or priority is not None
+                or label
+                or owner
+                or parent
+                or namespace
+            )
+
             all_deps: list[dict[str, Any]] = [
                 {
                     "issue_id": dep.issue_id,
@@ -638,6 +744,8 @@ def register(app: typer.Typer) -> None:
                     "created_by": dep.created_by,
                 }
                 for dep in storage.all_dependencies
+                if not has_filters
+                or (dep.issue_id in exported_ids or dep.depends_on_id in exported_ids)
             ]
             all_links: list[dict[str, Any]] = [
                 {
@@ -648,6 +756,8 @@ def register(app: typer.Typer) -> None:
                     "created_by": link.created_by,
                 }
                 for link in storage.all_links
+                if not has_filters
+                or (link.from_id in exported_ids or link.to_id in exported_ids)
             ]
 
             if format_type == "json":
@@ -689,7 +799,7 @@ def register(app: typer.Typer) -> None:
             "-c",
             help="Comment ID (for delete)",
         ),
-        author: str = typer.Option(None, "--author", help="Comment author name"),
+        author: str = typer.Option(None, "--by", help="Comment author name"),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
@@ -936,6 +1046,36 @@ def register(app: typer.Typer) -> None:
         ),
         status: str = typer.Option(None, "--status", "-s", help="Filter by status"),
         issue_type: str = typer.Option(None, "--type", "-t", help="Filter by type"),
+        priority: int | None = typer.Option(
+            None,
+            "--priority",
+            "-p",
+            help="Filter by priority",
+        ),
+        label: str | None = typer.Option(
+            None,
+            "--label",
+            "-l",
+            help="Filter by label",
+        ),
+        owner: str | None = typer.Option(
+            None,
+            "--owner",
+            "-o",
+            help="Filter by owner",
+        ),
+        namespace: str | None = typer.Option(
+            None,
+            "--namespace",
+            help="Filter by namespace",
+        ),
+        all_namespaces: bool = typer.Option(
+            False,
+            "--all-namespaces",
+            "--all-ns",
+            "-A",
+            help="Show issues from all namespaces",
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
@@ -953,14 +1093,10 @@ def register(app: typer.Typer) -> None:
         from dogcat.models import Issue
 
         try:
+            from ._helpers import apply_common_filters
+
             storage = get_storage(dogcats_dir)
             issues = storage.list()
-
-            # Apply namespace filter
-            actual_dogcats_dir = str(storage.dogcats_dir)
-            ns_filter = get_namespace_filter(actual_dogcats_dir)
-            if ns_filter is not None:
-                issues = [i for i in issues if ns_filter(i.namespace)]
 
             # Apply status/type filters first
             if status:
@@ -973,6 +1109,18 @@ def register(app: typer.Typer) -> None:
                 issues = [
                     i for i in issues if i.status.value not in ("closed", "tombstone")
                 ]
+
+            # Apply common filters (namespace, priority, label, owner)
+            issues = apply_common_filters(
+                issues,
+                priority=priority,
+                label=label,
+                owner=owner,
+                namespace=namespace,
+                all_namespaces=all_namespaces,
+                dogcats_dir=str(storage.dogcats_dir),
+                storage=storage,
+            )
 
             # Search across all text fields
             flags = 0 if case_sensitive else re.IGNORECASE
@@ -1041,6 +1189,7 @@ def register(app: typer.Typer) -> None:
             "--dry-run",
             help="Preview without writing events",
         ),
+        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Backfill event history from existing JSONL records.
@@ -1167,7 +1316,13 @@ def register(app: typer.Typer) -> None:
                     events_generated += 1
                     issue_states[full_id] = new_state
 
-            if dry_run:
+            if is_json_output(json_output):
+                output = {
+                    "dry_run": dry_run,
+                    "events_generated": events_generated,
+                }
+                typer.echo(orjson.dumps(output).decode())
+            elif dry_run:
                 typer.echo(
                     f"\nDry run: would generate {events_generated} event(s)",
                     err=True,

@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- **Fix `-l` short flag collision on `ready`** — removed `-l` from `--limit` (collided with `--label` on other commands). Added positional `[LIMIT]` argument and `--limit` option (no short flag) to `ready`, `blocked`, `in-progress`, `in-review`, `deferred`, and `manual`.
+- **Fix `-n` short flag collision on `history`/`recently-*`** — removed `-n` from `--limit` (collided with `--notes` on create/update). Added positional `[LIMIT]` argument and `--limit` option to `history`, `recently-closed`, `recently-added`, and their aliases.
+- **Rename `archive --confirm` to `--yes`/`-y`** — the old `--confirm` name was misleading (it meant "skip confirmation"). Renamed to `--yes`/`-y` to match common CLI conventions.
+- **Remove non-standard `-ns` short flag from `list --namespace`** — two-character short flags violate POSIX convention. Use `--namespace` (long form) instead.
+- **Rename `init --prefix` to `--namespace`** — aligned with the terminology used by every other command. New short flag is `-n`.
+- **`dcat pr` command now visible in CLI help** — removed `hidden=True` so the progress-review command appears in the help output.
 - **Archive no longer archives children whose parent is still open** — a closed child issue is now skipped if its parent is not also being archived, preserving context on epics and parent issues.
 - **Add `os.fsync()` to storage compaction and append** — `_save()` and `_append()` now call `os.fsync()` before completing, preventing data loss on power failure or kernel panic.
 - **Tolerate malformed last line in JSONL storage** — `_load()` now skips a corrupt last line (the most common crash artifact) with a warning instead of making all data inaccessible. The file is automatically compacted on the next write to clean up the garbage.
@@ -16,17 +22,26 @@
 - **Compaction preserves records appended by other processes** — `_save()` now reloads from disk under the file lock before compacting, preventing data loss when another process appended records between load and compaction.
 - **Merge driver: event dedup key too coarse** — event deduplication now includes `by` and changed field names in the key, so distinct events sharing the same timestamp and type are no longer collapsed.
 
+### Removed
+
+- **`--editor`/`-e` flag from `create` and `update`** — three entry points to the Textual editor was unnecessary. Use `dcat edit <id>` instead.
+
 ### Changed
 
+- **Standardize attribution flags to `--by`** — replaced `--created-by`, `--updated-by`, `--closed-by`, `--deleted-by`, `--reopened-by`, `--author`, and `--operator` with a single `--by` flag across all commands.
 - **Improved git health check messaging** — fix suggestions now use "Suggestion:" instead of the misleading "Consider running:" prefix, and the agent nudge tells the agent to inform the user and ask before fixing issues.
 
 ### Added
 
+- **`--json` output on `prune` and `backfill-history`** — both commands now support `--json` for machine-readable output, completing JSON coverage across all data-producing commands.
 - **`--namespace` option on `dcat update`** — change an issue's namespace via `dcat update <id> --namespace <new>`. Cascades the rename to all references: parent fields, duplicate_of, dependencies, and links.
 - **`--namespace` option on `dcat archive`** — filter archived issues by namespace (`dcat archive --namespace <ns>`), useful for shared databases with multiple namespaces.
 - **`--json` output flag on all commands** — global `dcat --json <command>` and per-command `dcat <command> --json` flags output machine-readable JSON. List/search return arrays, show/create/update return objects, and errors return `{"error": "..."}` to stderr with non-zero exit.
 - **`dcat reopen` command** — dedicated command to reopen closed issues (`dcat reopen <id> [--reason]`). Validates the issue is closed, transitions to open, clears closed metadata, and emits a distinct `"reopened"` event in the audit trail.
 - **`--parent` filter and positional argument on `dcat list`** — filter issues by parent via `dcat list --parent <id>` or the shorthand `dcat list <id>`. Shows the parent issue plus its direct children, and combines with all existing filters.
+- **`--all-namespaces`/`-A` flag on all read commands** — bypass namespace visibility filtering on `list`, `search`, `history`, `recently-closed`, `recently-added`, and `export`.
+- **Common filters on shortcut commands and search** — `ready`, `blocked`, `in-progress`, `in-review`, `deferred`, and `manual` now support `--type`, `--priority`, `--label`, `--owner`, `--parent`, `--namespace`, `--all-namespaces`, `--agent-only`, `--tree`, and `--table`. `search` gains `--priority`, `--label`, `--owner`, and `--namespace`.
+- **Filters on `dcat export`** — `export` now supports `--status`, `--type`, `--priority`, `--label`, `--owner`, `--parent`, `--namespace`, and `--all-namespaces`. Dependencies and links are scoped to exported issues when filters are active.
 
 ### Development
 
