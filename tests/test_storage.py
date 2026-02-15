@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+import orjson
 import pytest
 
 from dogcat.models import DependencyType, Issue, IssueType, Status
@@ -1473,3 +1474,25 @@ class TestChangeNamespace:
         deps = storage.get_dependencies("dc-ch1")
         assert len(deps) == 1
         assert deps[0].depends_on_id == "newns-par1"
+
+    def test_namespace_change_updates_event_ids(self, storage: JSONLStorage) -> None:
+        """Test that events have issue_id rewritten after namespace change."""
+        issue = Issue(id="ev1", title="Evented", namespace="dc")
+        storage.create(issue)
+        storage.update("dc-ev1", {"title": "Updated title"})
+
+        storage.change_namespace("dc-ev1", "newns")
+
+        # Read raw JSONL and collect event issue_ids
+        raw_lines = storage.path.read_bytes().splitlines()
+        event_issue_ids: set[str] = set()
+        for line in raw_lines:
+            data = orjson.loads(line)
+            if data.get("record_type") == "event":
+                event_issue_ids.add(data["issue_id"])
+
+        # Old namespace should not appear in any events
+        assert "dc-ev1" not in event_issue_ids
+
+        # Events should reference the new namespace
+        assert "newns-ev1" in event_issue_ids

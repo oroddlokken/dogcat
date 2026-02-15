@@ -232,7 +232,13 @@ class JSONLStorage:
             fcntl.flock(lock_fd, fcntl.LOCK_UN)
             lock_fd.close()
 
-    def _save(self, *, _reload: bool = True) -> None:
+    def _save(
+        self,
+        *,
+        _reload: bool = True,
+        _prune_event_ids: set[str] | None = None,
+        _rename_event_ids: dict[str, str] | None = None,
+    ) -> None:
         """Compact: rewrite the entire file with only current state.
 
         Eliminates superseded issue records, removed dependencies/links,
@@ -245,6 +251,10 @@ class JSONLStorage:
                 when the caller has already modified in-memory state (e.g.
                 removing dependencies) and that modification is the
                 authoritative source of truth.
+            _prune_event_ids: If set, drop event records whose ``issue_id``
+                is in this set (used by ``prune_tombstones``).
+            _rename_event_ids: If set, rewrite ``issue_id`` in event records
+                according to this old→new mapping (used by ``change_namespace``).
         """
         with self._file_lock():
             if _reload and self.path.exists():
@@ -309,6 +319,12 @@ class JSONLStorage:
                                 except (orjson.JSONDecodeError, ValueError):
                                     continue  # Skip malformed lines
                                 if data.get("record_type") == "event":
+                                    eid = data.get("issue_id", "")
+                                    if _prune_event_ids and eid in _prune_event_ids:
+                                        continue
+                                    if _rename_event_ids and eid in _rename_event_ids:
+                                        data["issue_id"] = _rename_event_ids[eid]
+                                        raw_line = orjson.dumps(data)
                                     tmp_file.write(raw_line)
                                     tmp_file.write(b"\n")
                                     line_count += 1
@@ -839,7 +855,7 @@ class JSONLStorage:
 
         # Namespace changes cannot be expressed as simple appends (the old
         # full_id must vanish), so rewrite the entire file from current state.
-        self._save(_reload=False)
+        self._save(_reload=False, _rename_event_ids={old_full_id: new_full_id})
 
         # Emit event
         self._emit_event(
@@ -1415,7 +1431,7 @@ class JSONLStorage:
         self._save(_reload=False)
 
     def prune_tombstones(self) -> list[str]:
-        """Permanently remove tombstoned issues from storage.
+        """Permanently remove tombstoned issues and orphaned events from storage.
 
         Returns:
             List of pruned issue IDs
@@ -1429,7 +1445,23 @@ class JSONLStorage:
         for issue_id in tombstone_ids:
             del self._issues[issue_id]
 
-        if tombstone_ids:
-            self._save(_reload=False)
+        # Collect IDs to prune: tombstones + any orphaned event references
+        prune_ids = set(tombstone_ids)
+        if self.path.exists():
+            for raw_line in self.path.open("rb"):
+                raw_line = raw_line.strip()
+                if not raw_line:
+                    continue
+                try:
+                    data = orjson.loads(raw_line)
+                except (orjson.JSONDecodeError, ValueError):
+                    continue
+                if data.get("record_type") == "event":
+                    eid = data.get("issue_id", "")
+                    if eid and eid not in self._issues:
+                        prune_ids.add(eid)
+
+        if prune_ids:
+            self._save(_reload=False, _prune_event_ids=prune_ids)
 
         return tombstone_ids

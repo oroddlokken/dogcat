@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import orjson
 import pytest
 
 from dogcat.models import Issue, IssueType, Status
@@ -58,6 +59,30 @@ class TestPruneTombstones:
 
         pruned = storage.prune_tombstones()
         assert pruned == []
+
+    def test_prune_removes_orphaned_events(self, storage: JSONLStorage) -> None:
+        """Test that prune removes events for pruned issues from JSONL."""
+        storage.create(Issue(id="keep", title="Keep me"))
+        storage.create(Issue(id="del1", title="Delete me"))
+        storage.update("keep", {"title": "Updated keep"})
+        storage.update("del1", {"title": "Updated del"})
+        storage.delete("del1", reason="gone")
+
+        storage.prune_tombstones()
+
+        # Read raw JSONL and check that no events reference the pruned issue
+        raw_lines = storage.path.read_bytes().splitlines()
+        event_issue_ids: set[str] = set()
+        for line in raw_lines:
+            data = orjson.loads(line)
+            if data.get("record_type") == "event":
+                event_issue_ids.add(data["issue_id"])
+
+        # Events for the pruned issue should be gone
+        assert "dc-del1" not in event_issue_ids
+
+        # Events for the kept issue should still exist
+        assert "dc-keep" in event_issue_ids
 
 
 class TestUpdateIssueTypeConversion:

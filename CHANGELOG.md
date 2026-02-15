@@ -23,6 +23,7 @@
 - **Merge driver: log warnings for malformed and conflict-marked lines** — `_parse_jsonl()` now logs warnings instead of silently dropping malformed JSONL lines and explicitly detects git conflict markers.
 - **Compaction preserves records appended by other processes** — `_save()` now reloads from disk under the file lock before compacting, preventing data loss when another process appended records between load and compaction.
 - **Merge driver: event dedup key too coarse** — event deduplication now includes `by` and changed field names in the key, so distinct events sharing the same timestamp and type are no longer collapsed.
+- **Orphaned events not cleaned up by prune or namespace changes** — `prune_tombstones()` now removes event records for pruned issues (and any pre-existing orphans), and `change_namespace()` rewrites `issue_id` in event records to match the new namespace.
 
 ### Removed
 
