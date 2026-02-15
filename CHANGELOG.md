@@ -28,6 +28,7 @@
 - **`dcat prime --opinionated` includes planning guidance** — the opinionated prime output now instructs agents to record an implementation plan on the issue before writing code.
 - **`--json` output flag on all commands** — global `dcat --json <command>` and per-command `dcat <command> --json` flags output machine-readable JSON. List/search return arrays, show/create/update return objects, and errors return `{"error": "..."}` to stderr with non-zero exit.
 - **`dcat reopen` command** — dedicated command to reopen closed issues (`dcat reopen <id> [--reason]`). Validates the issue is closed, transitions to open, clears closed metadata, and emits a distinct `"reopened"` event in the audit trail.
+- **`--parent` filter and positional argument on `dcat list`** — filter issues by parent via `dcat list --parent <id>` or the shorthand `dcat list <id>`. Shows the parent issue plus its direct children, and combines with all existing filters.
 
 ### Development
 

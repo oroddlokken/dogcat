@@ -149,6 +149,11 @@ def register(app: typer.Typer) -> None:
 
     @app.command("list")
     def list_issues(
+        parent_arg: str | None = typer.Argument(
+            None,
+            help="Parent issue ID (shorthand for --parent)",
+            autocompletion=complete_issue_ids,
+        ),
         status: str | None = typer.Option(
             None,
             "--status",
@@ -178,6 +183,12 @@ def register(app: typer.Typer) -> None:
             autocompletion=complete_labels,
         ),
         owner: str | None = typer.Option(None, "--owner", "-o", help="Filter by owner"),
+        parent: str | None = typer.Option(
+            None,
+            "--parent",
+            help="Filter by parent issue ID",
+            autocompletion=complete_issue_ids,
+        ),
         closed: bool = typer.Option(False, "--closed", help="Show only closed issues"),
         open_issues: bool = typer.Option(
             False,
@@ -258,6 +269,20 @@ def register(app: typer.Typer) -> None:
                 filters["owner"] = owner
 
             issues = storage.list(filters or None)
+
+            # Filter by parent issue (--parent option or positional argument)
+            parent_filter = parent or parent_arg
+            if parent_filter:
+                resolved_parent = storage.resolve_id(parent_filter)
+                if resolved_parent is None:
+                    echo_error(f"Issue {parent_filter} not found")
+                    raise typer.Exit(1)
+                child_ids = {c.full_id for c in storage.get_children(resolved_parent)}
+                issues = [
+                    i
+                    for i in issues
+                    if i.full_id == resolved_parent or i.full_id in child_ids
+                ]
 
             # Apply namespace filtering
             actual_dogcats_dir = str(storage.dogcats_dir)

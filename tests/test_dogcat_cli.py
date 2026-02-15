@@ -7148,3 +7148,228 @@ class TestListCollapseDeferredSubtrees:
         assert child2_full_id in result.stdout
         # No summary line
         assert "more hidden subtasks" not in result.stdout
+
+    def test_list_parent_option(self, tmp_path: Path) -> None:
+        """Test list --parent shows parent and its children only."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # Create parent issue
+        result = runner.invoke(
+            app,
+            ["create", "Parent issue", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        parent_data = json.loads(result.stdout)
+        parent_full_id = f"{parent_data['namespace']}-{parent_data['id']}"
+
+        # Create child under parent
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Child issue",
+                "--parent",
+                parent_full_id,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        # Create unrelated issue
+        runner.invoke(
+            app,
+            ["create", "Unrelated issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["list", "--parent", parent_full_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Parent issue" in result.stdout
+        assert "Child issue" in result.stdout
+        assert "Unrelated issue" not in result.stdout
+
+    def test_list_parent_positional(self, tmp_path: Path) -> None:
+        """Test list with positional argument as shorthand for --parent."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["create", "Parent issue", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        parent_data = json.loads(result.stdout)
+        parent_full_id = f"{parent_data['namespace']}-{parent_data['id']}"
+
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Child issue",
+                "--parent",
+                parent_full_id,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        runner.invoke(
+            app,
+            ["create", "Unrelated issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["list", parent_full_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Parent issue" in result.stdout
+        assert "Child issue" in result.stdout
+        assert "Unrelated issue" not in result.stdout
+
+    def test_list_parent_not_found(self, tmp_path: Path) -> None:
+        """Test list --parent with nonexistent issue ID."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["list", "--parent", "nonexistent-xxxx", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 1
+        assert "not found" in result.output
+
+    def test_list_parent_combined_with_status(self, tmp_path: Path) -> None:
+        """Test list --parent combined with --status filters children."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["create", "Parent issue", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        parent_data = json.loads(result.stdout)
+        parent_full_id = f"{parent_data['namespace']}-{parent_data['id']}"
+
+        # Create child and move it to in_progress
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "Active child",
+                "--parent",
+                parent_full_id,
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        child_data = json.loads(result.stdout)
+        child_full_id = f"{child_data['namespace']}-{child_data['id']}"
+        runner.invoke(
+            app,
+            [
+                "update",
+                child_full_id,
+                "--status",
+                "in_progress",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        # Create another child that stays open
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Open child",
+                "--parent",
+                parent_full_id,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "list",
+                "--parent",
+                parent_full_id,
+                "--status",
+                "in_progress",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Active child" in result.stdout
+        assert "Open child" not in result.stdout
+
+    def test_list_parent_no_children(self, tmp_path: Path) -> None:
+        """Test list --parent with issue that has no children shows just the parent."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["create", "Lone issue", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issue_data = json.loads(result.stdout)
+        issue_full_id = f"{issue_data['namespace']}-{issue_data['id']}"
+
+        result = runner.invoke(
+            app,
+            ["list", "--parent", issue_full_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Lone issue" in result.stdout
+
+    def test_list_parent_json(self, tmp_path: Path) -> None:
+        """Test list --parent with --json output."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["create", "Parent issue", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        parent_data = json.loads(result.stdout)
+        parent_full_id = f"{parent_data['namespace']}-{parent_data['id']}"
+
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Child issue",
+                "--parent",
+                parent_full_id,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        runner.invoke(
+            app,
+            ["create", "Unrelated issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "list",
+                "--parent",
+                parent_full_id,
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        issues = json.loads(result.stdout)
+        titles = [i["title"] for i in issues]
+        assert "Parent issue" in titles
+        assert "Child issue" in titles
+        assert "Unrelated issue" not in titles
