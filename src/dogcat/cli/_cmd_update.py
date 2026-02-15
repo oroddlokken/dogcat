@@ -119,6 +119,11 @@ def register(app: typer.Typer) -> None:
             help="Remove a blocks relationship from this issue to another",
             autocompletion=complete_issue_ids,
         ),
+        namespace: str | None = typer.Option(
+            None,
+            "--namespace",
+            help="Change issue namespace (cascades to all references)",
+        ),
         manual: bool | None = typer.Option(
             None,
             "--manual/--no-manual",
@@ -203,6 +208,7 @@ def register(app: typer.Typer) -> None:
 
             if (
                 not updates
+                and not namespace
                 and not depends_on
                 and not blocks
                 and not remove_depends_on
@@ -225,6 +231,15 @@ def register(app: typer.Typer) -> None:
                 if issue is None:
                     echo_error(f"Issue {issue_id} not found")
                     raise typer.Exit(1)
+
+            # Change namespace if specified (must happen after regular
+            # updates since it re-keys the issue and cascades references)
+            if namespace is not None:
+                issue = storage.change_namespace(
+                    issue.full_id,
+                    namespace,
+                    updated_by=final_updated_by,
+                )
 
             # Add dependencies if specified
             if depends_on:

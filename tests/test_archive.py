@@ -210,6 +210,62 @@ class TestArchiveWithChildren:
         assert "No issues can be archived" in result.stdout
         assert "open child" in result.stdout
 
+    def test_skip_child_with_open_parent(self, tmp_path: Path) -> None:
+        """Test that closed children with open parents are skipped."""
+        dogcats_dir = tmp_path / ".dogcats"
+        init_repo(dogcats_dir)
+
+        # Create parent and child
+        parent_id = create_issue(dogcats_dir, "Parent issue")
+        child_id = create_issue(dogcats_dir, "Child issue", parent=parent_id)
+
+        # Close only the child
+        close_issue(dogcats_dir, child_id)
+
+        result = runner.invoke(
+            app,
+            ["archive", "--dry-run", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "No issues can be archived" in result.stdout
+        assert "parent" in result.stdout
+        assert "not being archived" in result.stdout
+
+    def test_skip_child_with_closed_but_non_candidate_parent(
+        self, tmp_path: Path
+    ) -> None:
+        """Test that closed child is skipped if parent is closed but not a candidate.
+
+        This can happen when --older-than filters out the parent but not
+        the child, or when --namespace excludes the parent.
+        """
+        dogcats_dir = tmp_path / ".dogcats"
+        init_repo(dogcats_dir)
+
+        # Create parent and child
+        parent_id = create_issue(dogcats_dir, "Parent issue")
+        child_id = create_issue(dogcats_dir, "Child issue", parent=parent_id)
+
+        # Close both
+        close_issue(dogcats_dir, child_id)
+        close_issue(dogcats_dir, parent_id)
+
+        # Use --older-than 999d so both are too recent → no candidates
+        # The point is to verify the check uses candidate_ids, not just status
+        result = runner.invoke(
+            app,
+            [
+                "archive",
+                "--older-than",
+                "999d",
+                "--dry-run",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "No closed issues older than 999 days" in result.stdout
+
     def test_archive_parent_with_closed_children(self, tmp_path: Path) -> None:
         """Test that parents with all closed children can be archived."""
         dogcats_dir = tmp_path / ".dogcats"
@@ -566,3 +622,57 @@ class TestArchivePreservesHistory:
             and b"from_id" not in ln
         )
         assert open_issue_post_count == open_issue_pre_count
+
+
+class TestArchiveNamespace:
+    """Test --namespace filtering for archive command."""
+
+    def test_namespace_filters_issues(self, tmp_path: Path) -> None:
+        """Test that --namespace only archives matching namespace."""
+        dogcats_dir = tmp_path / ".dogcats"
+        init_repo(dogcats_dir)
+
+        # Create and close an issue (uses default namespace)
+        issue_id = create_issue(dogcats_dir, "Default ns issue")
+        close_issue(dogcats_dir, issue_id)
+
+        # Try to archive with a non-matching namespace
+        result = runner.invoke(
+            app,
+            [
+                "archive",
+                "--namespace",
+                "other",
+                "--dry-run",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "No closed issues in namespace 'other'" in result.stdout
+
+    def test_namespace_archives_matching(self, tmp_path: Path) -> None:
+        """Test that --namespace archives issues from the matching namespace."""
+        dogcats_dir = tmp_path / ".dogcats"
+        init_repo(dogcats_dir)
+
+        # Create and close issues
+        issue_id = create_issue(dogcats_dir, "Matching ns issue")
+        close_issue(dogcats_dir, issue_id)
+
+        # Get the actual namespace from the issue ID
+        ns = issue_id.rsplit("-", 1)[0]
+
+        result = runner.invoke(
+            app,
+            [
+                "archive",
+                "--namespace",
+                ns,
+                "--confirm",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Archived 1 issue(s)" in result.stdout

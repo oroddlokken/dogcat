@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- **Archive no longer archives children whose parent is still open** — a closed child issue is now skipped if its parent is not also being archived, preserving context on epics and parent issues.
 - **Add `os.fsync()` to storage compaction and append** — `_save()` and `_append()` now call `os.fsync()` before completing, preventing data loss on power failure or kernel panic.
 - **Tolerate malformed last line in JSONL storage** — `_load()` now skips a corrupt last line (the most common crash artifact) with a warning instead of making all data inaccessible. The file is automatically compacted on the next write to clean up the garbage.
 - **Atomic append with single write** — `_append()` pre-serializes the entire payload and writes it in one call, preventing truncated JSON lines on disk-full. Also prepends a newline if the file doesn't end with one (from a prior crash).
@@ -21,6 +22,8 @@
 
 ### Added
 
+- **`--namespace` option on `dcat update`** — change an issue's namespace via `dcat update <id> --namespace <new>`. Cascades the rename to all references: parent fields, duplicate_of, dependencies, and links.
+- **`--namespace` option on `dcat archive`** — filter archived issues by namespace (`dcat archive --namespace <ns>`), useful for shared databases with multiple namespaces.
 - **`--plan` option for create and update** — new `--plan` / implementation plan field on issues, available via `dcat create --plan`, `dcat update --plan`, TUI editing, and full-text search. Tracks step-by-step implementation approach, distinct from `--design` (architecture) and `--acceptance` (verification).
 - **`dcat prime --opinionated` includes planning guidance** — the opinionated prime output now instructs agents to record an implementation plan on the issue before writing code.
 - **`--json` output flag on all commands** — global `dcat --json <command>` and per-command `dcat <command> --json` flags output machine-readable JSON. List/search return arrays, show/create/update return objects, and errors return `{"error": "..."}` to stderr with non-zero exit.

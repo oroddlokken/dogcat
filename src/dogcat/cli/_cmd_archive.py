@@ -29,6 +29,11 @@ def register(app: typer.Typer) -> None:
             "--older-than",
             help="Only archive issues closed more than N days ago (e.g. 30d)",
         ),
+        namespace: str | None = typer.Option(
+            None,
+            "--namespace",
+            help="Only archive issues from this namespace",
+        ),
         confirm: bool = typer.Option(
             False,
             "--confirm",
@@ -50,6 +55,7 @@ def register(app: typer.Typer) -> None:
             dcat archive                      # Archive all closed issues
             dcat archive --dry-run            # Preview what would be archived
             dcat archive --older-than 30d     # Only archive if closed 30+ days ago
+            dcat archive --namespace myproj   # Archive only 'myproj' namespace
             dcat archive --confirm            # Skip confirmation prompt
         """
         import re
@@ -81,6 +87,15 @@ def register(app: typer.Typer) -> None:
                 typer.echo("No closed issues to archive.")
                 return
 
+            # Apply namespace filter if specified
+            if namespace is not None:
+                closed_issues = [i for i in closed_issues if i.namespace == namespace]
+                if not closed_issues:
+                    typer.echo(
+                        f"No closed issues in namespace '{namespace}' to archive."
+                    )
+                    return
+
             # Apply age filter if specified
             if days is not None:
                 cutoff = datetime.now(timezone.utc) - timedelta(days=days)
@@ -111,6 +126,21 @@ def register(app: typer.Typer) -> None:
                             issue,
                             f"has {len(open_children)} open child(ren): "
                             + ", ".join(c.full_id for c in open_children[:3]),
+                        ),
+                    )
+                    continue
+
+                # Check if parent is still open (not being archived)
+                if issue.parent and issue.parent not in candidate_ids:
+                    parent_issue = storage.get(issue.parent)
+                    parent_status = (
+                        parent_issue.status.value if parent_issue else "unknown"
+                    )
+                    skipped.append(
+                        (
+                            issue,
+                            f"parent {issue.parent} is not being archived"
+                            f" (status: {parent_status})",
                         ),
                     )
                     continue

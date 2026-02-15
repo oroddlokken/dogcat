@@ -1698,6 +1698,78 @@ class TestUpdateFieldPaths:
         assert result.exit_code == 0
 
 
+class TestUpdateNamespace:
+    """Test update --namespace option."""
+
+    def test_update_namespace(self, tmp_path: Path) -> None:
+        """Test changing an issue's namespace via CLI."""
+        dogcats_dir, ids = _init_and_create(tmp_path, "Test issue")
+
+        result = runner.invoke(
+            app,
+            [
+                "update",
+                ids[0],
+                "--namespace",
+                "newns",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Updated" in result.stdout
+        assert "newns" in result.stdout
+
+    def test_update_namespace_cascades_parent(self, tmp_path: Path) -> None:
+        """Test that namespace change cascades to child parent references."""
+        dogcats_dir, ids = _init_and_create(tmp_path, "Parent", "Child")
+
+        # Get the hash part of the parent ID (everything after the last hyphen)
+        # IDs are in format <namespace>-<hash>, where namespace may contain hyphens
+        result = runner.invoke(
+            app,
+            ["show", ids[0], "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        parent_data = json.loads(result.stdout)
+        parent_hash = parent_data["id"]
+
+        # Set child's parent
+        runner.invoke(
+            app,
+            [
+                "update",
+                ids[1],
+                "--parent",
+                ids[0],
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        # Change parent namespace
+        result = runner.invoke(
+            app,
+            [
+                "update",
+                ids[0],
+                "--namespace",
+                "newns",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+
+        # Verify child's parent reference was updated
+        result = runner.invoke(
+            app,
+            ["show", ids[1], "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["parent"] == f"newns-{parent_hash}"
+
+
 class TestListTreeAndTable:
     """Test list with --tree and --table options."""
 

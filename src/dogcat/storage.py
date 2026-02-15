@@ -746,6 +746,112 @@ class JSONLStorage:
 
         return issue
 
+    def change_namespace(
+        self,
+        issue_id: str,
+        new_namespace: str,
+        updated_by: str | None = None,
+    ) -> Issue:
+        """Change an issue's namespace, cascading to all references.
+
+        Updates the namespace field and re-keys the issue.  All other
+        issues that reference the old full_id (parent, duplicate_of) are
+        patched, as are dependency and link records.
+
+        Args:
+            issue_id: The ID of the issue to update (supports partial IDs).
+            new_namespace: The new namespace string.
+            updated_by: Who is making the change.
+
+        Returns:
+            The updated issue with new namespace.
+
+        Raises:
+            ValueError: If issue doesn't exist or new ID already taken.
+        """
+        resolved_id = self.resolve_id(issue_id)
+        if resolved_id is None:
+            msg = f"Issue {issue_id} not found"
+            raise ValueError(msg)
+
+        issue = self._issues[resolved_id]
+        old_full_id = issue.full_id
+        new_full_id = f"{new_namespace}-{issue.id}"
+
+        if old_full_id == new_full_id:
+            return issue  # no-op
+
+        if new_full_id in self._issues:
+            msg = f"Issue with ID {new_full_id} already exists"
+            raise ValueError(msg)
+
+        # Update the issue itself
+        issue.namespace = new_namespace
+        issue.updated_at = datetime.now().astimezone()
+        if updated_by:
+            issue.updated_by = updated_by
+
+        # Re-key in _issues dict
+        del self._issues[old_full_id]
+        self._issues[new_full_id] = issue
+
+        # Collect all records to append
+        records: list[dict[str, Any]] = [self._issue_record(issue)]
+
+        # Cascade to other issues referencing the old full_id
+        for other in self._issues.values():
+            changed = False
+            if other.parent == old_full_id:
+                other.parent = new_full_id
+                changed = True
+            if other.duplicate_of == old_full_id:
+                other.duplicate_of = new_full_id
+                changed = True
+            if changed:
+                other.updated_at = datetime.now().astimezone()
+                records.append(self._issue_record(other))
+
+        # Cascade to dependencies
+        for dep in self._dependencies:
+            changed = False
+            if dep.issue_id == old_full_id:
+                dep.issue_id = new_full_id
+                changed = True
+            if dep.depends_on_id == old_full_id:
+                dep.depends_on_id = new_full_id
+                changed = True
+            if changed:
+                records.append(self._dep_record(dep))
+
+        # Cascade to links
+        for link in self._links:
+            changed = False
+            if link.from_id == old_full_id:
+                link.from_id = new_full_id
+                changed = True
+            if link.to_id == old_full_id:
+                link.to_id = new_full_id
+                changed = True
+            if changed:
+                records.append(self._link_record(link))
+
+        # Rebuild indexes since IDs changed
+        self._rebuild_indexes()
+
+        # Namespace changes cannot be expressed as simple appends (the old
+        # full_id must vanish), so rewrite the entire file from current state.
+        self._save(_reload=False)
+
+        # Emit event
+        self._emit_event(
+            "updated",
+            issue,
+            {"namespace": {"old": old_full_id.split("-")[0], "new": new_namespace}},
+            by=updated_by,
+        )
+
+        return issue
+
     def close(
         self,
         issue_id: str,

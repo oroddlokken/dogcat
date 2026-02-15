@@ -1336,3 +1336,140 @@ def _count_lines(path: Path) -> int:
     """Count non-empty lines in a file."""
     with path.open() as f:
         return sum(1 for line in f if line.strip())
+
+
+class TestChangeNamespace:
+    """Test change_namespace() method."""
+
+    def test_basic_namespace_change(self, storage: JSONLStorage) -> None:
+        """Test changing an issue's namespace."""
+        issue = Issue(id="abc1", title="Test", namespace="dc")
+        storage.create(issue)
+
+        updated = storage.change_namespace("dc-abc1", "newns")
+        assert updated.namespace == "newns"
+        assert updated.full_id == "newns-abc1"
+        assert storage.get("newns-abc1") is not None
+        assert storage.get("dc-abc1") is None
+
+    def test_noop_when_same_namespace(self, storage: JSONLStorage) -> None:
+        """Test that no-op when namespace doesn't change."""
+        issue = Issue(id="abc1", title="Test", namespace="dc")
+        storage.create(issue)
+
+        updated = storage.change_namespace("dc-abc1", "dc")
+        assert updated.full_id == "dc-abc1"
+
+    def test_error_on_id_conflict(self, storage: JSONLStorage) -> None:
+        """Test that error is raised if new ID already exists."""
+        issue1 = Issue(id="abc1", title="Issue 1", namespace="dc")
+        issue2 = Issue(id="abc1", title="Issue 2", namespace="other")
+        storage.create(issue1)
+        storage.create(issue2)
+
+        with pytest.raises(ValueError, match="already exists"):
+            storage.change_namespace("dc-abc1", "other")
+
+    def test_error_on_nonexistent_issue(self, storage: JSONLStorage) -> None:
+        """Test that error is raised for nonexistent issue."""
+        with pytest.raises(ValueError, match="not found"):
+            storage.change_namespace("dc-nope", "newns")
+
+    def test_cascades_to_parent_references(self, storage: JSONLStorage) -> None:
+        """Test that parent references in children are updated."""
+        parent = Issue(id="par1", title="Parent", namespace="dc")
+        storage.create(parent)
+        child = Issue(id="ch1", title="Child", namespace="dc", parent="dc-par1")
+        storage.create(child)
+
+        storage.change_namespace("dc-par1", "newns")
+
+        # Child's parent reference should point to new ID
+        updated_child = storage.get("dc-ch1")
+        assert updated_child is not None
+        assert updated_child.parent == "newns-par1"
+
+        # Parent-child index should work
+        children = storage.get_children("newns-par1")
+        assert len(children) == 1
+        assert children[0].full_id == "dc-ch1"
+
+    def test_cascades_to_duplicate_of(self, storage: JSONLStorage) -> None:
+        """Test that duplicate_of references are updated."""
+        original = Issue(id="orig1", title="Original", namespace="dc")
+        storage.create(original)
+        dup = Issue(
+            id="dup1", title="Duplicate", namespace="dc", duplicate_of="dc-orig1"
+        )
+        storage.create(dup)
+
+        storage.change_namespace("dc-orig1", "newns")
+
+        updated_dup = storage.get("dc-dup1")
+        assert updated_dup is not None
+        assert updated_dup.duplicate_of == "newns-orig1"
+
+    def test_cascades_to_dependencies(self, storage: JSONLStorage) -> None:
+        """Test that dependency records are updated."""
+        issue1 = Issue(id="is1", title="Issue 1", namespace="dc")
+        issue2 = Issue(id="is2", title="Issue 2", namespace="dc")
+        storage.create(issue1)
+        storage.create(issue2)
+        storage.add_dependency("dc-is1", "dc-is2", "blocks")
+
+        storage.change_namespace("dc-is2", "newns")
+
+        # Dependency should now reference the new ID
+        deps = storage.get_dependencies("dc-is1")
+        assert len(deps) == 1
+        assert deps[0].depends_on_id == "newns-is2"
+
+        # Reverse lookup should also work
+        dependents = storage.get_dependents("newns-is2")
+        assert len(dependents) == 1
+        assert dependents[0].issue_id == "dc-is1"
+
+    def test_cascades_to_links(self, storage: JSONLStorage) -> None:
+        """Test that link records are updated."""
+        issue1 = Issue(id="is1", title="Issue 1", namespace="dc")
+        issue2 = Issue(id="is2", title="Issue 2", namespace="dc")
+        storage.create(issue1)
+        storage.create(issue2)
+        storage.add_link("dc-is1", "dc-is2", "relates_to")
+
+        storage.change_namespace("dc-is1", "newns")
+
+        # Link should now reference the new ID
+        links = storage.get_links("newns-is1")
+        assert len(links) == 1
+        assert links[0].from_id == "newns-is1"
+        assert links[0].to_id == "dc-is2"
+
+        # Incoming link lookup should work too
+        incoming = storage.get_incoming_links("dc-is2")
+        assert len(incoming) == 1
+        assert incoming[0].from_id == "newns-is1"
+
+    def test_persists_after_reload(self, storage: JSONLStorage) -> None:
+        """Test that namespace change persists after reload."""
+        parent = Issue(id="par1", title="Parent", namespace="dc")
+        storage.create(parent)
+        child = Issue(id="ch1", title="Child", namespace="dc", parent="dc-par1")
+        storage.create(child)
+        storage.add_dependency("dc-ch1", "dc-par1", "blocks")
+
+        storage.change_namespace("dc-par1", "newns")
+
+        # Reload from disk
+        storage.reload()
+
+        assert storage.get("newns-par1") is not None
+        assert storage.get("dc-par1") is None
+
+        updated_child = storage.get("dc-ch1")
+        assert updated_child is not None
+        assert updated_child.parent == "newns-par1"
+
+        deps = storage.get_dependencies("dc-ch1")
+        assert len(deps) == 1
+        assert deps[0].depends_on_id == "newns-par1"
