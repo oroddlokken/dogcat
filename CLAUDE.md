@@ -26,7 +26,6 @@ NEVER close issues without explicit user approval. When work is complete:
 3. Ask if we can close it: "Can I close issue [id] '[title]'?"
 4. Only run `dcat close` after user confirms
 5. Ask: "Should I add this to CHANGELOG.md?" — update if yes
-6. Ask: "Should I commit?" — commit AFTER the issue has been closed and changelog has been updated, never before. Include the issue ID in the commit message (e.g. `(closes dogcat-xxxx)`)
 
 ## Changelog
 

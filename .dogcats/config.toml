@@ -1,3 +1,6 @@
 namespace = "dogcat"
 git_tracking = true
 disable_legend_colors = false
+visible_namespaces = [
+    "dogcat",
+]
