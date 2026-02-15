@@ -32,13 +32,13 @@ lint-all:
 vulture:
     uv run vulture src tests dcat.py benchmark.py vulture_whitelist.py --ignore-decorators "@app.command" --ignore-names "on_modified,on_moved,RELATED,reload"
 
-# run tests (excludes regression and TUI tests)
+# run tests (excludes regression tests)
 test:
-    uv run pytest --timeout 30 -n 8 tests --ignore=tests/test_regression.py --ignore-glob='tests/test_tui_*.py'
+    uv run pytest --timeout 30 -n 8 tests --ignore=tests/test_regression.py
 
-# run TUI tests only
-test-tui:
-    uv run pytest --timeout 30 -n 8 tests -k 'test_tui_'
+# run only tests affected by code changes since last run
+test-changed:
+    uv run pytest --testmon --timeout 60 -n 8 tests
 
 # run regression tests only
 test-regression:
@@ -46,22 +46,14 @@ test-regression:
 
 # run all tests (including regression)
 test-all:
-    uv run pytest --timeout 60 -n 8 tests --cov-config=.coveragerc --cov-report=html --cov=src/dogcat
-
-# run lints + tests across Python 3.10-3.14 (installs missing interpreters automatically)
-matrix *args:
-    tox {{args}}
-
-# run tests on a single Python version (e.g. just test-py 3.12)
-test-py version *args:
-    tox -e py{{replace(version, ".", "")}} {{args}}
+    COVERAGE_CORE=sysmon uv run pytest --timeout 60 -n 8 tests --cov-report=html --cov=src/dogcat
 
 # generate JSONL fixture for a specific tag (or all tags)
 generate-fixture tag="":
     python tests/generate_fixture.py {{tag}}
 
 # prepare a release: create RC tag, push branch, open PR (stays on current branch)
-release-prep version:
+release-prep version: test-all
     #!/usr/bin/env bash
     set -euo pipefail
     VERSION="{{version}}"

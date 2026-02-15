@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import json
 import subprocess
-import time
 from typing import TYPE_CHECKING
 
+from conftest import _GIT_TEST_ENV
 from typer.testing import CliRunner
 
 from dogcat.cli import app
@@ -49,16 +49,7 @@ def _init_git_workspace(tmp_path: Path) -> Path:
         ["git", "init", str(tmp_path)],
         check=True,
         capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "config", "user.email", "test@test.com"],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "config", "user.name", "Test"],
-        check=True,
-        capture_output=True,
+        env=_GIT_TEST_ENV,
     )
 
     dogcats_dir = tmp_path / ".dogcats"
@@ -69,11 +60,13 @@ def _init_git_workspace(tmp_path: Path) -> Path:
         ["git", "-C", str(tmp_path), "add", ".dogcats/"],
         check=True,
         capture_output=True,
+        env=_GIT_TEST_ENV,
     )
     subprocess.run(
         ["git", "-C", str(tmp_path), "commit", "-m", "init"],
         check=True,
         capture_output=True,
+        env=_GIT_TEST_ENV,
     )
 
     return tmp_path
@@ -86,9 +79,9 @@ class TestHistoryOrder:
         """Events appear in chronological order (oldest at top)."""
         dogcats_dir = _init_repo(tmp_path)
         _create_issue(dogcats_dir, "First issue")
-        time.sleep(0.05)
+
         _create_issue(dogcats_dir, "Second issue")
-        time.sleep(0.05)
+
         _create_issue(dogcats_dir, "Third issue")
 
         result = runner.invoke(app, ["history", "--dogcats-dir", str(dogcats_dir)])
@@ -103,7 +96,7 @@ class TestHistoryOrder:
         """JSON output is also oldest-first."""
         dogcats_dir = _init_repo(tmp_path)
         _create_issue(dogcats_dir, "First issue")
-        time.sleep(0.05)
+
         _create_issue(dogcats_dir, "Second issue")
 
         result = runner.invoke(
@@ -124,10 +117,10 @@ class TestRecentlyClosedOrder:
         dogcats_dir = _init_repo(tmp_path)
         id1 = _create_issue(dogcats_dir, "Closed first")
         runner.invoke(app, ["close", id1, "--dogcats-dir", str(dogcats_dir)])
-        time.sleep(0.05)
+
         id2 = _create_issue(dogcats_dir, "Closed second")
         runner.invoke(app, ["close", id2, "--dogcats-dir", str(dogcats_dir)])
-        time.sleep(0.05)
+
         id3 = _create_issue(dogcats_dir, "Closed third")
         runner.invoke(app, ["close", id3, "--dogcats-dir", str(dogcats_dir)])
 
@@ -150,9 +143,9 @@ class TestRecentlyAddedOrder:
         """Issues appear in chronological order (oldest at top)."""
         dogcats_dir = _init_repo(tmp_path)
         _create_issue(dogcats_dir, "Added first")
-        time.sleep(0.05)
+
         _create_issue(dogcats_dir, "Added second")
-        time.sleep(0.05)
+
         _create_issue(dogcats_dir, "Added third")
 
         result = runner.invoke(
@@ -176,9 +169,9 @@ class TestDiffOrder:
         dogcats_dir = git_workspace / ".dogcats"
 
         _create_issue(dogcats_dir, "Diff first")
-        time.sleep(0.05)
+
         _create_issue(dogcats_dir, "Diff second")
-        time.sleep(0.05)
+
         _create_issue(dogcats_dir, "Diff third")
 
         result = runner.invoke(
@@ -198,7 +191,7 @@ class TestDiffOrder:
         dogcats_dir = git_workspace / ".dogcats"
 
         _create_issue(dogcats_dir, "JSON diff first")
-        time.sleep(0.05)
+
         _create_issue(dogcats_dir, "JSON diff second")
 
         result = runner.invoke(

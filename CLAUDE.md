@@ -49,7 +49,7 @@ Import from this module rather than hardcoding values in multiple places.
 
 Always write tests for new features or when changing functionality.
 
-Use `just test` during development for fast feedback (excludes regression and TUI tests). Run `just test-tui` for TUI-specific tests. Run `just test-regression` once you're happy with the changes to verify nothing is broken across versions. Use `just test-all` to run everything.
+Use `just test-changed` during development for fast feedback — it only runs tests affected by code changes since the last run. Use `just test-all` to confirm all tests are passing before committing or pushing.
 
 Use `just lint` to check for linting errors. Run `just fmt` to automatically fix formatting issues. The CICD pipeline will fail if linting errors are present, so they must be fixed before pushing code.
 

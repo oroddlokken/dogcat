@@ -7,6 +7,7 @@ import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
+from conftest import _GIT_TEST_ENV
 from typer.testing import CliRunner
 
 from dogcat.cli import app
@@ -24,16 +25,7 @@ def git_workspace(tmp_path: Path) -> Path:
         ["git", "init", str(tmp_path)],
         check=True,
         capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "config", "user.email", "test@test.com"],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "config", "user.name", "Test"],
-        check=True,
-        capture_output=True,
+        env=_GIT_TEST_ENV,
     )
 
     dogcats_dir = tmp_path / ".dogcats"
@@ -45,11 +37,13 @@ def git_workspace(tmp_path: Path) -> Path:
         ["git", "-C", str(tmp_path), "add", ".dogcats/"],
         check=True,
         capture_output=True,
+        env=_GIT_TEST_ENV,
     )
     subprocess.run(
         ["git", "-C", str(tmp_path), "commit", "-m", "init"],
         check=True,
         capture_output=True,
+        env=_GIT_TEST_ENV,
     )
 
     return tmp_path

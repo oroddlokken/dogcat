@@ -1,8 +1,7 @@
 """Pytest configuration and shared fixtures."""
 
+import os
 import subprocess
-import tempfile
-from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -10,21 +9,33 @@ import pytest
 
 from dogcat.storage import JSONLStorage
 
+# Environment variables that eliminate per-repo git config calls and skip
+# system/global config lookups, saving 2 subprocess calls per git_repo fixture
+# and speeding up every subsequent git operation.
+_GIT_TEST_ENV = {
+    **os.environ,
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "HOME": "/dev/null",
+    "GIT_AUTHOR_NAME": "Test",
+    "GIT_AUTHOR_EMAIL": "test@test.com",
+    "GIT_COMMITTER_NAME": "Test",
+    "GIT_COMMITTER_EMAIL": "test@test.com",
+    "GIT_TERMINAL_PROMPT": "0",
+}
+
 
 @pytest.fixture
-def temp_dogcats_dir() -> Generator[Path]:
+def temp_dogcats_dir(tmp_path: Path) -> Path:
     """Create a temporary .dogcats directory for testing."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        dogcats_path = Path(tmpdir) / ".dogcats"
-        dogcats_path.mkdir()
-        yield dogcats_path
+    dogcats_path = tmp_path / ".dogcats"
+    dogcats_path.mkdir()
+    return dogcats_path
 
 
 @pytest.fixture
-def temp_workspace() -> Generator[Path]:
+def temp_workspace(tmp_path: Path) -> Path:
     """Create a temporary workspace directory for testing."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        yield Path(tmpdir)
+    return tmp_path
 
 
 @dataclass
@@ -43,6 +54,7 @@ class GitRepo:
             capture_output=True,
             text=True,
             check=check,
+            env=_GIT_TEST_ENV,
         )
 
     def storage(self) -> JSONLStorage:
@@ -73,53 +85,48 @@ class GitRepo:
         ]
 
 
+@pytest.fixture(scope="session")
+def _git_template_dir(tmp_path_factory: pytest.TempPathFactory) -> str:
+    """Empty template dir to skip copying sample hooks during git init."""
+    return str(tmp_path_factory.mktemp("git-tpl"))
+
+
 @pytest.fixture
-def git_repo() -> Generator[GitRepo]:
+def git_repo(tmp_path: Path, _git_template_dir: str) -> GitRepo:
     """Create a temporary git repository with dogcats initialized."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        repo_path = Path(tmpdir)
-        dogcats_dir = repo_path / ".dogcats"
-        storage_path = dogcats_dir / "issues.jsonl"
+    repo_path = tmp_path
+    dogcats_dir = repo_path / ".dogcats"
+    storage_path = dogcats_dir / "issues.jsonl"
 
-        # Initialize git repo with per-repo config
-        subprocess.run(
-            ["git", "init", "-b", "main", str(repo_path)],
-            check=True,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "config", "user.email", "test@test.com"],
-            cwd=repo_path,
-            check=True,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "config", "user.name", "Test"],
-            cwd=repo_path,
-            check=True,
-            capture_output=True,
-        )
+    # Initialize dogcats directory with empty JSONL
+    dogcats_dir.mkdir()
+    storage_path.touch()
 
-        # Initialize dogcats directory with empty JSONL
-        dogcats_dir.mkdir()
-        storage_path.touch()
+    # Initialize git repo (3 subprocess calls instead of 5:
+    # no git config needed thanks to _GIT_TEST_ENV, faster init via --template)
+    subprocess.run(
+        ["git", "init", "-b", "main", "--template", _git_template_dir, str(repo_path)],
+        check=True,
+        capture_output=True,
+        env=_GIT_TEST_ENV,
+    )
+    subprocess.run(
+        ["git", "add", "-A"],
+        cwd=repo_path,
+        check=True,
+        capture_output=True,
+        env=_GIT_TEST_ENV,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "Initial commit with empty .dogcats"],
+        cwd=repo_path,
+        check=True,
+        capture_output=True,
+        env=_GIT_TEST_ENV,
+    )
 
-        # Initial commit so branches can diverge
-        subprocess.run(
-            ["git", "add", "-A"],
-            cwd=repo_path,
-            check=True,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "commit", "-m", "Initial commit with empty .dogcats"],
-            cwd=repo_path,
-            check=True,
-            capture_output=True,
-        )
-
-        yield GitRepo(
-            path=repo_path,
-            dogcats_dir=dogcats_dir,
-            storage_path=storage_path,
-        )
+    return GitRepo(
+        path=repo_path,
+        dogcats_dir=dogcats_dir,
+        storage_path=storage_path,
+    )

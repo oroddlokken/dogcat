@@ -191,10 +191,6 @@ class TestCRUDOperations:
         assert original_issue is not None
         original_time = original_issue.updated_at
 
-        # Wait a moment and update
-        import time
-
-        time.sleep(0.01)
         storage.update("issue-1", {"title": "Updated"})
 
         updated_issue = storage.get("issue-1")
@@ -689,13 +685,10 @@ class TestCloseDeleteUpdatedAt:
 
     def test_close_sets_updated_at(self, storage: JSONLStorage) -> None:
         """Test that close() updates the updated_at timestamp."""
-        import time
-
         issue = Issue(id="issue-1", title="Test")
         storage.create(issue)
         original_time = issue.updated_at
 
-        time.sleep(0.01)
         closed = storage.close("issue-1", reason="Done")
         assert closed.updated_at > original_time
         assert closed.closed_at is not None
@@ -703,13 +696,10 @@ class TestCloseDeleteUpdatedAt:
 
     def test_delete_sets_updated_at(self, storage: JSONLStorage) -> None:
         """Test that delete() updates the updated_at timestamp."""
-        import time
-
         issue = Issue(id="issue-1", title="Test")
         storage.create(issue)
         original_time = issue.updated_at
 
-        time.sleep(0.01)
         deleted = storage.delete("issue-1", reason="Dup")
         assert deleted.updated_at > original_time
         assert deleted.deleted_at is not None

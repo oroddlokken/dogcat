@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Development
+
+- **Speed up test suite ~22%** — worksteal scheduler, `COVERAGE_CORE=sysmon`, plugin pruning, optimized git fixtures, removed unnecessary `time.sleep()` calls
+- **Add `just test-changed`** — incremental test runs via pytest-testmon, only re-runs tests affected by code changes
+- **Simplify test commands** — merged TUI tests into `just test`, removed tox and `just matrix`/`test-py`
+- **`just release-prep` now runs `test-all`** as a prerequisite
+
 ## 0.9.0 (2026-02-15)
 
 ### Fixed
