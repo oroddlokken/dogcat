@@ -49,6 +49,8 @@
 
 ### Development
 
+- **Split `_cmd_maintenance.py` into focused modules** — replaced the 1337-line grab-bag with `_cmd_doctor.py`, `_cmd_search.py`, `_cmd_comment.py`, `_cmd_label.py`, and `_cmd_admin.py`.
+- **Split `test_dogcat_cli.py` into 13 command-aligned test modules** — replaced the 7236-line monolithic test file with focused modules matching the CLI command structure.
 - **Rename `just test-matrix` to `just matrix`** — the matrix command now also runs ruff linting in each Python version environment via tox.
 
 ## 0.8.5 (2026-02-14)

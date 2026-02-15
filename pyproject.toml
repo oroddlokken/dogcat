@@ -138,6 +138,7 @@ reportUnreachable = true
 # reportInvalidAbstractMethod = true
 
 [tool.pytest.ini_options]
+pythonpath = ["tests"]
 asyncio_mode = "strict"
 filterwarnings = [
     "ignore:unclosed database:ResourceWarning",
