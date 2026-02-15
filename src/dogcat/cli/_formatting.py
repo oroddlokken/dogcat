@@ -245,8 +245,11 @@ def format_issue_full(issue: Issue, parent_title: str | None = None) -> str:
 
     if issue.comments:
         lines.append(f"\n{key('Comments:')}")
-        for comment in issue.comments:
-            lines.append(f"  [{comment.id}] {comment.author}")
+        for i, comment in enumerate(issue.comments):
+            if i > 0:
+                lines.append("")
+            ts = comment.created_at.strftime(dt_fmt)
+            lines.append(f"  [{comment.id}] {comment.author} ({ts})")
             lines.append(f"  {comment.text}")
 
     return "\n".join(lines)

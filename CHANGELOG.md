@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Show comment timestamps in `dcat show` and TUI** — comments now display their creation timestamp alongside the author, with blank-line separation between comments for readability
+- **Show comments in TUI edit mode** — comments are now visible (read-only) when editing an issue, not just in view mode
+
 ### Development
 
 - **Speed up test suite ~22%** — worksteal scheduler, `COVERAGE_CORE=sysmon`, plugin pruning, optimized git fixtures, removed unnecessary `time.sleep()` calls

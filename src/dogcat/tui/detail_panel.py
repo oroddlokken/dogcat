@@ -305,6 +305,8 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
 
             if ro:
                 yield from self._compose_view_sections()
+            elif self._issue.comments:
+                yield from self._compose_comments_section()
 
     def _compose_view_sections(self) -> ComposeResult:
         """Yield read-only dependency/children/comment sections."""
@@ -333,12 +335,16 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
                     )
 
         if self._issue.comments:
-            with Collapsible(title="Comments", collapsed=False, id="comments-section"):
-                for comment in self._issue.comments:
-                    yield Static(
-                        f"  [{comment.id}] {comment.author}\n    {comment.text}",
-                        classes="detail-section-body",
-                    )
+            yield from self._compose_comments_section()
+
+    def _compose_comments_section(self) -> ComposeResult:
+        """Yield read-only comments section."""
+        with Collapsible(title="Comments", collapsed=False, id="comments-section"):
+            for comment in self._issue.comments:
+                ts = comment.created_at.strftime("%Y-%m-%d %H:%M:%S")
+                body = f"  [{comment.id}] {comment.author} ({ts})"
+                body += f"\n    {comment.text}\n"
+                yield Static(body, classes="detail-section-body")
 
     def on_mount(self) -> None:
         """Hide buttons in view mode; focus title for edit/create."""
@@ -394,7 +400,7 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
         self.query_one("#cancel-btn", Button).display = True
         self.query_one("#save-btn", Button).display = True
 
-        for section_id in ("deps-section", "children-section", "comments-section"):
+        for section_id in ("deps-section", "children-section"):
             with contextlib.suppress(Exception):
                 self.query_one(f"#{section_id}").remove()
 
