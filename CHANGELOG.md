@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Add `os.fsync()` to storage compaction and append** — `_save()` and `_append()` now call `os.fsync()` before completing, preventing data loss on power failure or kernel panic.
+- **Tolerate malformed last line in JSONL storage** — `_load()` now skips a corrupt last line (the most common crash artifact) with a warning instead of making all data inaccessible. The file is automatically compacted on the next write to clean up the garbage.
+- **Atomic append with single write** — `_append()` pre-serializes the entire payload and writes it in one call, preventing truncated JSON lines on disk-full. Also prepends a newline if the file doesn't end with one (from a prior crash).
+- **Compaction tolerates corrupt lines when preserving events** — `_save()` no longer crashes when scanning for event records in a file that contains malformed lines.
+- **Remove stale `manual` from `UPDATABLE_FIELDS`** — the `manual` flag lives in `metadata`, not as a top-level Issue field. The stale entry allowed `setattr()` to silently succeed but the value was lost on serialization.
+- **Merge driver: proper three-way merge for deps and links** — the JSONL merge driver now uses base records to implement true three-way merge semantics. Deletions by either side are correctly honored instead of being silently resurrected by the naive union.
+- **Merge driver: error handling in CLI entry point** — `dcat git merge-driver` now catches exceptions and exits non-zero so git falls back to its default merge. Uses atomic write (temp file + rename) to prevent partial output on crash.
+- **Merge driver: log warnings for malformed and conflict-marked lines** — `_parse_jsonl()` now logs warnings instead of silently dropping malformed JSONL lines and explicitly detects git conflict markers.
+- **Compaction preserves records appended by other processes** — `_save()` now reloads from disk under the file lock before compacting, preventing data loss when another process appended records between load and compaction.
+- **Merge driver: event dedup key too coarse** — event deduplication now includes `by` and changed field names in the key, so distinct events sharing the same timestamp and type are no longer collapsed.
+
 ### Changed
 
 - **Improved git health check messaging** — fix suggestions now use "Suggestion:" instead of the misleading "Consider running:" prefix, and the agent nudge tells the agent to inform the user and ask before fixing issues.

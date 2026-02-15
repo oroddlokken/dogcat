@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fcntl
+import os
 import subprocess
 import tempfile
 from contextlib import contextmanager
@@ -80,6 +81,7 @@ class JSONLStorage:
             )
 
         self._lock_path = self.dogcats_dir / ".issues.lock"
+        self._needs_compaction = False  # Set when corrupt last line is skipped
 
         # Initialize event log for change tracking
         from dogcat.event_log import EventLog
@@ -97,6 +99,10 @@ class JSONLStorage:
         (last-write-wins by ID).  Dependency and link records may carry an
         ``"op"`` field (``"add"`` or ``"remove"``); the default is ``"add"``
         for backwards compatibility with files written before append-only mode.
+
+        A malformed **last** line is tolerated (logged and skipped) because it
+        is the most common result of a crash or disk-full during ``_append()``.
+        Any other malformed line still raises ``ValueError``.
         """
         self._issues.clear()
         self._dependencies.clear()
@@ -109,68 +115,84 @@ class JSONLStorage:
 
         try:
             with self.path.open("rb") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-
-                    line_count += 1
-
-                    try:
-                        data = orjson.loads(line)
-                        rtype = classify_record(data)
-                        if rtype == "link":
-                            op = data.get("op", "add")
-                            key = (
-                                data["from_id"],
-                                data["to_id"],
-                                data.get("link_type", "relates_to"),
-                            )
-                            if op == "remove":
-                                link_map.pop(key, None)
-                            else:
-                                link = Link(
-                                    from_id=data["from_id"],
-                                    to_id=data["to_id"],
-                                    link_type=data.get("link_type", "relates_to"),
-                                    created_at=datetime.fromisoformat(
-                                        data["created_at"],
-                                    ),
-                                    created_by=data.get("created_by"),
-                                )
-                                link_map[key] = link
-                        elif rtype == "dependency":
-                            op = data.get("op", "add")
-                            key = (
-                                data["issue_id"],
-                                data["depends_on_id"],
-                                data["type"],
-                            )
-                            if op == "remove":
-                                dep_map.pop(key, None)
-                            else:
-                                dep = Dependency(
-                                    issue_id=data["issue_id"],
-                                    depends_on_id=data["depends_on_id"],
-                                    dep_type=DependencyType(data["type"]),
-                                    created_at=datetime.fromisoformat(
-                                        data["created_at"],
-                                    ),
-                                    created_by=data.get("created_by"),
-                                )
-                                dep_map[key] = dep
-                        elif rtype == "event":
-                            continue
-                        else:
-                            # Issue record — last-write-wins
-                            issue = dict_to_issue(data)
-                            self._issues[issue.full_id] = issue
-                    except (orjson.JSONDecodeError, ValueError, KeyError) as e:
-                        msg = f"Invalid JSONL record: {e}"
-                        raise ValueError(msg) from e
+                lines = f.readlines()
         except OSError as e:
             msg = f"Failed to read storage file: {e}"
             raise RuntimeError(msg) from e
+
+        # Strip trailing empty lines so we can identify the true last line
+        while lines and not lines[-1].strip():
+            lines.pop()
+
+        for line_idx, raw_line in enumerate(lines):
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            line_count += 1
+            is_last_line = line_idx == len(lines) - 1
+
+            try:
+                data = orjson.loads(line)
+                rtype = classify_record(data)
+                if rtype == "link":
+                    op = data.get("op", "add")
+                    key = (
+                        data["from_id"],
+                        data["to_id"],
+                        data.get("link_type", "relates_to"),
+                    )
+                    if op == "remove":
+                        link_map.pop(key, None)
+                    else:
+                        link = Link(
+                            from_id=data["from_id"],
+                            to_id=data["to_id"],
+                            link_type=data.get("link_type", "relates_to"),
+                            created_at=datetime.fromisoformat(
+                                data["created_at"],
+                            ),
+                            created_by=data.get("created_by"),
+                        )
+                        link_map[key] = link
+                elif rtype == "dependency":
+                    op = data.get("op", "add")
+                    key = (
+                        data["issue_id"],
+                        data["depends_on_id"],
+                        data["type"],
+                    )
+                    if op == "remove":
+                        dep_map.pop(key, None)
+                    else:
+                        dep = Dependency(
+                            issue_id=data["issue_id"],
+                            depends_on_id=data["depends_on_id"],
+                            dep_type=DependencyType(data["type"]),
+                            created_at=datetime.fromisoformat(
+                                data["created_at"],
+                            ),
+                            created_by=data.get("created_by"),
+                        )
+                        dep_map[key] = dep
+                elif rtype == "event":
+                    continue
+                else:
+                    # Issue record — last-write-wins
+                    issue = dict_to_issue(data)
+                    self._issues[issue.full_id] = issue
+            except (orjson.JSONDecodeError, ValueError, KeyError) as e:
+                if is_last_line:
+                    # Tolerate a corrupt last line (crash/disk-full artifact)
+                    logging.getLogger(__name__).warning(
+                        "Skipping malformed last line in %s: %s",
+                        self.path,
+                        e,
+                    )
+                    self._needs_compaction = True
+                else:
+                    msg = f"Invalid JSONL record at line {line_idx + 1}: {e}"
+                    raise ValueError(msg) from e
 
         self._dependencies = list(dep_map.values())
         self._links = list(link_map.values())
@@ -210,13 +232,23 @@ class JSONLStorage:
             fcntl.flock(lock_fd, fcntl.LOCK_UN)
             lock_fd.close()
 
-    def _save(self) -> None:
+    def _save(self, *, _reload: bool = True) -> None:
         """Compact: rewrite the entire file with only current state.
 
         Eliminates superseded issue records, removed dependencies/links,
         and resets the append counter.
+
+        Args:
+            _reload: If True (default), reload from disk under the lock
+                before writing so that records appended by other processes
+                since our last ``_load()`` are not discarded.  Pass False
+                when the caller has already modified in-memory state (e.g.
+                removing dependencies) and that modification is the
+                authoritative source of truth.
         """
         with self._file_lock():
+            if _reload and self.path.exists():
+                self._load()
             # Write to temporary file first
             with tempfile.NamedTemporaryFile(
                 mode="wb",
@@ -272,13 +304,17 @@ class JSONLStorage:
                                 raw_line = raw_line.strip()
                                 if not raw_line:
                                     continue
-                                data = orjson.loads(raw_line)
+                                try:
+                                    data = orjson.loads(raw_line)
+                                except (orjson.JSONDecodeError, ValueError):
+                                    continue  # Skip malformed lines
                                 if data.get("record_type") == "event":
                                     tmp_file.write(raw_line)
                                     tmp_file.write(b"\n")
                                     line_count += 1
 
                     tmp_file.flush()
+                    os.fsync(tmp_file.fileno())
                 except Exception as e:
                     tmp_path.unlink(missing_ok=True)
                     msg = f"Failed to write to temporary file: {e}"
@@ -298,16 +334,41 @@ class JSONLStorage:
     def _append(self, records: list[dict[str, Any]]) -> None:
         """Append records to the JSONL file without rewriting it.
 
+        Builds the payload in memory first and writes it in a single call
+        so that a partial write (e.g. disk full) never leaves a truncated
+        JSON line in the file.  If the file doesn't end with a newline
+        (e.g. from a prior truncated write), a newline is prepended to
+        avoid concatenating with the corrupt trailing content.
+
         Args:
             records: List of dicts to serialize and append as JSONL lines.
         """
+        # If the file had a corrupt last line, rewrite it cleanly first
+        # so the garbage doesn't persist between valid records.
+        # Use _reload=False because callers (e.g. create()) may have already
+        # added new records to in-memory state that aren't on disk yet.
+        if self._needs_compaction:
+            self._save(_reload=False)
+            self._needs_compaction = False
+
+        # Pre-serialize so the file write is a single operation
+        payload = b"".join(orjson.dumps(r) + b"\n" for r in records)
+
         with self._file_lock():
             try:
+                # If the file exists and doesn't end with a newline (e.g.
+                # from a prior truncated write), prepend one to avoid
+                # concatenating with the corrupt trailing content.
+                if self.path.exists() and self.path.stat().st_size > 0:
+                    with self.path.open("rb") as check:
+                        check.seek(-1, 2)
+                        if check.read(1) != b"\n":
+                            payload = b"\n" + payload
+
                 with self.path.open("ab") as f:
-                    for record in records:
-                        f.write(orjson.dumps(record))
-                        f.write(b"\n")
+                    f.write(payload)
                     f.flush()
+                    os.fsync(f.fileno())
             except OSError as e:
                 msg = f"Failed to append to storage file: {e}"
                 raise RuntimeError(msg) from e
@@ -608,7 +669,6 @@ class JSONLStorage:
             "original_type",
             "duplicate_of",
             "metadata",
-            "manual",
             "comments",
         },
     )
@@ -1247,7 +1307,7 @@ class JSONLStorage:
             if (d.issue_id, d.depends_on_id, d.dep_type) not in remove_set
         ]
         self._rebuild_indexes()
-        self._save()
+        self._save(_reload=False)
 
     def prune_tombstones(self) -> list[str]:
         """Permanently remove tombstoned issues from storage.
@@ -1265,6 +1325,6 @@ class JSONLStorage:
             del self._issues[issue_id]
 
         if tombstone_ids:
-            self._save()
+            self._save(_reload=False)
 
         return tombstone_ids

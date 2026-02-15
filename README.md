@@ -83,8 +83,12 @@ NEVER close issues without explicit user approval. When work is complete:
 4. Only run `dcat close` after user confirms
 ``````
 
-This is only a starting point and how I use it, it's up to you to decide how dogcat fits best in your workflow!  
-There is also a `--no-agent` option that can be passed to `dcat list` that will make your agent skip issues marked as requiring manual intervention.
+This is only a starting point - it's up to you to decide how dogcat fits best in your workflow!  
+
+`dcat prime` mainly concerns itself on how to use the dcat CLI, not how your workflow should be.  
+`dcat prime --opinionated` is a more opinionated version of the guide for agents, with stricter guidelines.  
+
+ You can run `diff <(dcat prime) <(dcat prime --opinionated)` to see the differences.
 
 ### Command cheat sheet
 

@@ -342,25 +342,51 @@ def register(app: typer.Typer) -> None:
         ours: str = typer.Argument(..., help="Ours version file path (%A)"),
         theirs: str = typer.Argument(..., help="Theirs version file path (%B)"),
     ) -> None:
-        """JSONL merge driver invoked by git during merge conflicts."""
+        """JSONL merge driver invoked by git during merge conflicts.
+
+        Exit 0 on success (merged result written to ours file).
+        Exit 1 on failure so git falls back to its default merge strategy.
+        """
+        import logging
+
         import orjson
 
         from dogcat.merge_driver import _parse_jsonl, merge_jsonl
 
-        base_path = Path(base)
-        ours_path = Path(ours)
-        theirs_path = Path(theirs)
+        tmp_path: Path | None = None
+        try:
+            base_path = Path(base)
+            ours_path = Path(ours)
+            theirs_path = Path(theirs)
 
-        base_records = _parse_jsonl(base_path)
-        ours_records = _parse_jsonl(ours_path)
-        theirs_records = _parse_jsonl(theirs_path)
+            base_records = _parse_jsonl(base_path)
+            ours_records = _parse_jsonl(ours_path)
+            theirs_records = _parse_jsonl(theirs_path)
 
-        merged = merge_jsonl(base_records, ours_records, theirs_records)
+            merged = merge_jsonl(base_records, ours_records, theirs_records)
 
-        with ours_path.open("wb") as f:
-            for record in merged:
-                f.write(orjson.dumps(record))
-                f.write(b"\n")
+            # Write to temp file + rename so a crash never leaves a partial ours file.
+            import tempfile
+
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                dir=ours_path.parent,
+                delete=False,
+                suffix=".jsonl",
+            ) as tmp:
+                for record in merged:
+                    tmp.write(orjson.dumps(record))
+                    tmp.write(b"\n")
+                tmp_path = Path(tmp.name)
+
+            tmp_path.replace(ours_path)
+        except Exception:
+            logging.getLogger("dogcat.merge_driver").exception(
+                "Merge driver failed, falling back to git's default merge",
+            )
+            if tmp_path is not None:
+                tmp_path.unlink(missing_ok=True)
+            raise typer.Exit(1)
 
         raise typer.Exit(0)
 

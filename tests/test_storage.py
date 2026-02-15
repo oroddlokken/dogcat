@@ -353,16 +353,50 @@ class TestAtomicWrites:
 class TestErrorHandling:
     """Test error handling."""
 
-    def test_corrupted_jsonl_file_raises(self, temp_workspace: Path) -> None:
-        """Test that corrupted JSONL raises error."""
+    def test_corrupted_jsonl_middle_line_raises(self, temp_workspace: Path) -> None:
+        """Test that a corrupted non-last line raises error."""
         storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
         storage_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Write invalid JSON
+        # Valid first line, corrupt second, valid third
+        import orjson
+
+        from dogcat.models import issue_to_dict
+
+        valid = orjson.dumps(issue_to_dict(Issue(id="ok", title="OK"))).decode()
+        storage_path.write_text(f"{valid}\ninvalid json line\n{valid}\n")
+
+        with pytest.raises(ValueError, match="Invalid JSONL record at line 2"):
+            JSONLStorage(str(storage_path))
+
+    def test_corrupted_last_line_tolerated(self, temp_workspace: Path) -> None:
+        """Test that a corrupted last line is tolerated (crash recovery)."""
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage_path.parent.mkdir(parents=True, exist_ok=True)
+
+        import orjson
+
+        from dogcat.models import issue_to_dict
+
+        valid = orjson.dumps(issue_to_dict(Issue(id="ok", title="OK"))).decode()
+        storage_path.write_text(f"{valid}\ntruncated garbage")
+
+        # Should NOT raise — malformed last line is skipped
+        s = JSONLStorage(str(storage_path))
+        issues = s.list()
+        assert len(issues) == 1
+        assert issues[0].title == "OK"
+
+    def test_corrupted_only_line_tolerated(self, temp_workspace: Path) -> None:
+        """Test that a single corrupt line (only line) is tolerated."""
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage_path.parent.mkdir(parents=True, exist_ok=True)
+
         storage_path.write_text("invalid json line\n")
 
-        with pytest.raises(ValueError, match="Invalid JSONL"):
-            JSONLStorage(str(storage_path))
+        # Single corrupt line is the last line — tolerated
+        s = JSONLStorage(str(storage_path))
+        assert len(s.list()) == 0
 
     def test_empty_jsonl_file_ok(self, temp_workspace: Path) -> None:
         """Test that empty JSONL file is handled gracefully."""

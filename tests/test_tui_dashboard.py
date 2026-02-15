@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -10,6 +10,9 @@ from textual.widgets import Button, OptionList
 
 from dogcat.models import Issue
 from dogcat.tui.dashboard import ConfirmDeleteScreen, DogcatTUI
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _make_issue(**kwargs: object) -> Issue:
@@ -431,3 +434,81 @@ class TestDashboardForceDeleteAction:
 
             # list() should be called again for refresh
             assert storage.list.call_count > initial_list_calls
+
+
+# ---------------------------------------------------------------------------
+# E2E test: TUI with real storage backend
+# ---------------------------------------------------------------------------
+
+
+class TestTUIWithRealStorage:
+    """E2E: TUI operations with real JSONLStorage instead of mocks."""
+
+    @pytest.mark.asyncio
+    async def test_dashboard_loads_real_issues(self, tmp_path: Path) -> None:
+        """Dashboard displays issues from real JSONLStorage."""
+        from dogcat.storage import JSONLStorage
+
+        storage_path = tmp_path / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+        storage.create(Issue(id="real1", title="Real issue one"))
+        storage.create(Issue(id="real2", title="Real issue two"))
+
+        app = DogcatTUI(storage)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            option_list = app.query_one("#issue-list", OptionList)
+            assert option_list.option_count == 2
+
+    @pytest.mark.asyncio
+    async def test_force_delete_persists_to_disk(self, tmp_path: Path) -> None:
+        """Force-deleting an issue via TUI persists the tombstone to disk."""
+        from dogcat.storage import JSONLStorage
+
+        storage_path = tmp_path / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+        storage.create(Issue(id="del1", title="Delete me"))
+
+        app = DogcatTUI(storage)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            # Select the issue and force-delete
+            app.action_force_delete_issue()
+            await pilot.pause()
+
+        # Verify the tombstone persists when reloading from disk
+        fresh = JSONLStorage(str(storage_path))
+        issue = fresh.get("del1")
+        assert issue is not None
+        assert issue.status.value == "tombstone"
+
+    @pytest.mark.asyncio
+    async def test_refresh_reloads_from_disk(self, tmp_path: Path) -> None:
+        """Pressing refresh reloads issues from the real JSONL file."""
+        from dogcat.storage import JSONLStorage
+
+        storage_path = tmp_path / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+        storage.create(Issue(id="r1", title="First"))
+
+        app = DogcatTUI(storage)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            option_list = app.query_one("#issue-list", OptionList)
+            assert option_list.option_count == 1
+
+            # Simulate external process adding an issue directly to the file
+            import orjson
+
+            from dogcat.models import issue_to_dict
+
+            external = issue_to_dict(Issue(id="r2", title="External"))
+            with storage_path.open("ab") as f:
+                f.write(orjson.dumps(external) + b"\n")
+
+            # Refresh should pick up the new issue
+            await app.action_refresh()
+            await pilot.pause()
+            assert option_list.option_count == 2

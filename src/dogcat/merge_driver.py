@@ -10,6 +10,7 @@ The merged result is written to the ours file (%A).
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 import orjson
@@ -19,19 +20,39 @@ if TYPE_CHECKING:
 
 from dogcat.models import classify_record
 
+logger = logging.getLogger(__name__)
+
+_CONFLICT_MARKERS = (b"<<<<<<<", b"=======", b">>>>>>>")
+
 
 def _parse_jsonl(path: Path) -> list[dict[str, Any]]:
-    """Parse a JSONL file into a list of dicts, skipping invalid lines."""
+    """Parse a JSONL file into a list of dicts, skipping invalid lines.
+
+    Logs warnings for malformed lines and git conflict markers so that
+    silent data loss during merges is visible in ``git merge`` output.
+    """
     records: list[dict[str, Any]] = []
     if not path.exists():
         return records
-    for line in path.read_bytes().splitlines():
-        line = line.strip()
-        if not line:
+    for line_num, raw in enumerate(path.read_bytes().splitlines(), 1):
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        if stripped.startswith(_CONFLICT_MARKERS):
+            logger.warning(
+                "Git conflict marker at line %d in %s — file has unresolved conflicts",
+                line_num,
+                path,
+            )
             continue
         try:
-            records.append(orjson.loads(line))
+            records.append(orjson.loads(stripped))
         except orjson.JSONDecodeError:
+            logger.warning(
+                "Skipping malformed JSONL at line %d in %s",
+                line_num,
+                path,
+            )
             continue
     return records
 
@@ -61,17 +82,57 @@ def _link_key(record: dict[str, Any]) -> tuple[str, str, str]:
     )
 
 
-def _event_key(record: dict[str, Any]) -> tuple[str, str, str]:
-    """Return unique identity tuple for an event record."""
+def _event_key(record: dict[str, Any]) -> tuple[str, str, str, str, str]:
+    """Return unique identity tuple for an event record.
+
+    Includes ``by`` and the sorted set of changed field names so that
+    distinct events sharing the same timestamp and type are not collapsed.
+    """
+    changes = record.get("changes", {})
+    changes_sig = ",".join(sorted(changes.keys())) if isinstance(changes, dict) else ""
     return (
         record.get("issue_id", ""),
         record.get("timestamp", ""),
         record.get("event_type", ""),
+        record.get("by", "") or "",
+        changes_sig,
     )
 
 
+def _replay_deps(
+    records: list[dict[str, Any]],
+) -> dict[tuple[str, str, str], dict[str, Any]]:
+    """Replay dependency add/remove records to get effective state."""
+    state: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for record in records:
+        if classify_record(record) != "dependency":
+            continue
+        key = _dep_key(record)
+        if record.get("op", "add") == "remove":
+            state.pop(key, None)
+        else:
+            state[key] = record
+    return state
+
+
+def _replay_links(
+    records: list[dict[str, Any]],
+) -> dict[tuple[str, str, str], dict[str, Any]]:
+    """Replay link add/remove records to get effective state."""
+    state: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for record in records:
+        if classify_record(record) != "link":
+            continue
+        key = _link_key(record)
+        if record.get("op", "add") == "remove":
+            state.pop(key, None)
+        else:
+            state[key] = record
+    return state
+
+
 def merge_jsonl(
-    _base_records: list[dict[str, Any]],
+    base_records: list[dict[str, Any]],
     ours_records: list[dict[str, Any]],
     theirs_records: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -79,12 +140,9 @@ def merge_jsonl(
 
     - Issues: union by full_id, latest ``updated_at`` wins for conflicts.
     - Events: union (deduplicated by issue_id + timestamp + event_type).
-    - Dependencies: union of add/remove operations (deduplicated by key).
-    - Links: union of add/remove operations (deduplicated by key).
-
-    The base records are accepted for interface compatibility with
-    git's three-way merge but not used — the union of ours + theirs
-    with last-write-wins is sufficient for JSONL append-only semantics.
+    - Dependencies & Links: proper three-way merge using base records.
+      A deletion by either side (present in base, absent from that side)
+      is honored unless the other side also re-added it.
 
     Returns the merged list of records.
     """
@@ -105,7 +163,7 @@ def merge_jsonl(
                 issues[fid] = record
 
     # --- Events: keep all, deduplicate ---
-    events: dict[tuple[str, str, str], dict[str, Any]] = {}
+    events: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
     for record in [*ours_records, *theirs_records]:
         if classify_record(record) != "event":
             continue
@@ -113,31 +171,50 @@ def merge_jsonl(
         if key not in events:
             events[key] = record
 
-    # --- Dependencies: keep all operations, deduplicate ---
-    deps: dict[tuple[str, str, str, str], dict[str, Any]] = {}
-    for record in [*ours_records, *theirs_records]:
-        if classify_record(record) != "dependency":
-            continue
-        op = record.get("op", "add")
-        key = (*_dep_key(record), op)
-        if key not in deps:
-            deps[key] = record
+    # --- Dependencies: three-way merge ---
+    base_deps = _replay_deps(base_records)
+    ours_deps = _replay_deps(ours_records)
+    theirs_deps = _replay_deps(theirs_records)
 
-    # --- Links: keep all operations, deduplicate ---
-    links: dict[tuple[str, str, str, str], dict[str, Any]] = {}
-    for record in [*ours_records, *theirs_records]:
-        if classify_record(record) != "link":
-            continue
-        op = record.get("op", "add")
-        key = (*_link_key(record), op)
-        if key not in links:
-            links[key] = record
+    merged_deps: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for key in set(base_deps) | set(ours_deps) | set(theirs_deps):
+        in_base = key in base_deps
+        in_ours = key in ours_deps
+        in_theirs = key in theirs_deps
+
+        if in_ours and in_theirs:
+            merged_deps[key] = theirs_deps[key]
+        elif in_ours and not in_theirs:
+            if not in_base:
+                # New in ours — keep it
+                merged_deps[key] = ours_deps[key]
+        elif in_theirs and not in_ours and not in_base:
+            merged_deps[key] = theirs_deps[key]
+
+    # --- Links: three-way merge ---
+    base_links = _replay_links(base_records)
+    ours_links = _replay_links(ours_records)
+    theirs_links = _replay_links(theirs_records)
+
+    merged_links: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for key in set(base_links) | set(ours_links) | set(theirs_links):
+        in_base = key in base_links
+        in_ours = key in ours_links
+        in_theirs = key in theirs_links
+
+        if in_ours and in_theirs:
+            merged_links[key] = theirs_links[key]
+        elif in_ours and not in_theirs:
+            if not in_base:
+                merged_links[key] = ours_links[key]
+        elif in_theirs and not in_ours and not in_base:
+            merged_links[key] = theirs_links[key]
 
     # Assemble: issues first, then deps, links, events (matches compaction order)
     result: list[dict[str, Any]] = []
     result.extend(issues.values())
-    result.extend(deps.values())
-    result.extend(links.values())
+    result.extend(merged_deps.values())
+    result.extend(merged_links.values())
     # Sort events by timestamp for consistent ordering
     sorted_events = sorted(events.values(), key=lambda e: e.get("timestamp", ""))
     result.extend(sorted_events)

@@ -337,7 +337,7 @@ class TestStreamEmitterIncrementalParsing:
         }
         storage._dependencies = []
         storage._links = []
-        storage._save()
+        storage._save(_reload=False)
 
         # Now file is smaller than file_position — should trigger full reload
         emitter._handle_file_change()  # noqa: SLF001
