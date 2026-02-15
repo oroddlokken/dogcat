@@ -38,6 +38,7 @@ def _make_storage() -> MagicMock:
     storage.get.return_value = None
     storage.list.return_value = []
     storage.get_dependencies.return_value = []
+    storage.get_dependents.return_value = []
     storage.get_links.return_value = []
     storage.get_incoming_links.return_value = []
     storage.get_children.return_value = []
@@ -438,3 +439,141 @@ class TestViewToEditTransition:
             await pilot.pause()
 
             assert screen not in app.screen_stack
+
+
+class TestDependencyInputs:
+    """Test dependency input fields in the editor."""
+
+    @pytest.mark.asyncio
+    async def test_deps_inputs_disabled_in_view_mode(self) -> None:
+        """Depends-on and blocks inputs are rendered and disabled in view mode."""
+        issue = _make_issue()
+        app, screen, _ = await _push_view(issue)
+
+        async with app.run_test() as pilot:
+            app.push_screen(screen)
+            await pilot.pause()
+
+            depends_on = screen.query_one("#depends-on-input", Input)
+            assert depends_on.disabled is True
+
+            blocks = screen.query_one("#blocks-input", Input)
+            assert blocks.disabled is True
+
+    @pytest.mark.asyncio
+    async def test_deps_inputs_prepopulated(self) -> None:
+        """Depends-on and blocks inputs are pre-populated from storage."""
+        from dogcat.models import Dependency, DependencyType
+
+        issue = _make_issue()
+        storage = _make_storage()
+        storage.get_dependencies.return_value = [
+            Dependency(
+                issue_id="dc-test",
+                depends_on_id="dc-blocker",
+                dep_type=DependencyType.BLOCKS,
+            ),
+        ]
+        storage.get_dependents.return_value = [
+            Dependency(
+                issue_id="dc-blocked",
+                depends_on_id="dc-test",
+                dep_type=DependencyType.BLOCKS,
+            ),
+        ]
+        app, screen, _ = await _push_view(issue, storage)
+
+        async with app.run_test() as pilot:
+            app.push_screen(screen)
+            await pilot.pause()
+
+            depends_on = screen.query_one("#depends-on-input", Input)
+            assert depends_on.value == "blocked by: dc-blocker"
+
+            blocks = screen.query_one("#blocks-input", Input)
+            assert blocks.value == "blocking: dc-blocked"
+
+    @pytest.mark.asyncio
+    async def test_deps_inputs_stay_disabled_after_edit(self) -> None:
+        """Depends-on and blocks inputs stay disabled after switching to edit mode."""
+        issue = _make_issue()
+        app, screen, _ = await _push_view(issue)
+
+        async with app.run_test() as pilot:
+            app.push_screen(screen)
+            await pilot.pause()
+
+            assert screen.query_one("#depends-on-input", Input).disabled is True
+            assert screen.query_one("#blocks-input", Input).disabled is True
+
+            screen.action_enter_edit()
+            await pilot.pause()
+
+            assert screen.query_one("#depends-on-input", Input).disabled is True
+            assert screen.query_one("#blocks-input", Input).disabled is True
+
+
+class TestDependencyViewSections:
+    """Test enhanced dependency display in view mode."""
+
+    @pytest.mark.asyncio
+    async def test_view_shows_depends_on_and_blocks(self) -> None:
+        """View mode shows both depends-on and blocks in the Dependencies section."""
+        from dogcat.models import Dependency, DependencyType
+
+        issue = _make_issue()
+        storage = _make_storage()
+        storage.get_dependencies.return_value = [
+            Dependency(
+                issue_id="dc-test",
+                depends_on_id="dc-dep1",
+                dep_type=DependencyType.BLOCKS,
+            ),
+        ]
+        storage.get_dependents.return_value = [
+            Dependency(
+                issue_id="dc-blocked1",
+                depends_on_id="dc-test",
+                dep_type=DependencyType.BLOCKS,
+            ),
+        ]
+        app, screen, _ = await _push_view(issue, storage)
+
+        async with app.run_test() as pilot:
+            app.push_screen(screen)
+            await pilot.pause()
+
+            collapsibles = screen.query(Collapsible)
+            titles = [c.title for c in collapsibles]
+            assert "Dependencies" in titles
+
+            # Check the static text content inside the deps section
+            deps_section = screen.query_one("#deps-section", Collapsible)
+            statics = deps_section.query(Static)
+            texts = [str(s.render()) for s in statics]
+            assert any("blocked by:" in t and "dc-dep1" in t for t in texts)
+            assert any("blocks:" in t and "dc-blocked1" in t for t in texts)
+
+    @pytest.mark.asyncio
+    async def test_view_shows_deps_for_dependents_only(self) -> None:
+        """Dependencies section shows even when only dependents (blocks) exist."""
+        from dogcat.models import Dependency, DependencyType
+
+        issue = _make_issue()
+        storage = _make_storage()
+        storage.get_dependents.return_value = [
+            Dependency(
+                issue_id="dc-other",
+                depends_on_id="dc-test",
+                dep_type=DependencyType.BLOCKS,
+            ),
+        ]
+        app, screen, _ = await _push_view(issue, storage)
+
+        async with app.run_test() as pilot:
+            app.push_screen(screen)
+            await pilot.pause()
+
+            collapsibles = screen.query(Collapsible)
+            titles = [c.title for c in collapsibles]
+            assert "Dependencies" in titles

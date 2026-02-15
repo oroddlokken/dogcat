@@ -56,6 +56,20 @@ SHARED_CSS = """
     width: 1fr;
 }
 
+.deps-row {
+    height: auto;
+    max-height: 5;
+    margin-top: 1;
+}
+
+.deps-row > Input {
+    width: 1fr;
+}
+
+.deps-row > Select {
+    width: 1fr;
+}
+
 .collapsible-textarea {
     height: auto;
     min-height: 5;

@@ -27,6 +27,7 @@ from dogcat.constants import (
     TYPE_OPTIONS,
     parse_labels,
 )
+from dogcat.models import DependencyType
 from dogcat.tui.shared import SHARED_CSS, make_issue_label
 
 if TYPE_CHECKING:
@@ -138,6 +139,20 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
                     stack.append(child.full_id)
         return descendants
 
+    def _get_depends_on_ids(self) -> list[str]:
+        """Get the IDs this issue currently depends on (blocks type)."""
+        if self._create_mode or not self._issue.id:
+            return []
+        deps = self._storage.get_dependencies(self._issue.full_id)
+        return [d.depends_on_id for d in deps if d.dep_type == DependencyType.BLOCKS]
+
+    def _get_blocks_ids(self) -> list[str]:
+        """Get the IDs this issue currently blocks."""
+        if self._create_mode or not self._issue.id:
+            return []
+        dependents = self._storage.get_dependents(self._issue.full_id)
+        return [d.issue_id for d in dependents if d.dep_type == DependencyType.BLOCKS]
+
     def _get_parent_options(self) -> list[tuple[Any, str]]:
         """Build the list of valid parent options, excluding self and descendants."""
         excluded = {self._issue.full_id}
@@ -207,14 +222,6 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
                     id="owner-input",
                     disabled=ro,
                 )
-                yield Select(
-                    options=self._get_parent_options(),
-                    value=(self._issue.parent or Select.BLANK),
-                    prompt="Parent",
-                    allow_blank=True,
-                    id="parent-input",
-                    disabled=ro,
-                )
                 yield Input(
                     value=self._issue.external_ref or "",
                     placeholder="External ref",
@@ -226,6 +233,34 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
                     placeholder="Labels (comma or space separated)",
                     id="labels-input",
                     disabled=ro,
+                )
+
+            with Horizontal(classes="deps-row"):
+                yield Select(
+                    options=self._get_parent_options(),
+                    value=(self._issue.parent or Select.BLANK),
+                    prompt="Parent",
+                    allow_blank=True,
+                    id="parent-input",
+                    disabled=ro,
+                )
+                depends_on_ids = self._get_depends_on_ids()
+                yield Input(
+                    value=(
+                        "blocked by: " + ", ".join(depends_on_ids)
+                        if depends_on_ids
+                        else ""
+                    ),
+                    placeholder="no blockers",
+                    id="depends-on-input",
+                    disabled=True,
+                )
+                blocks_ids = self._get_blocks_ids()
+                yield Input(
+                    value=("blocking: " + ", ".join(blocks_ids) if blocks_ids else ""),
+                    placeholder="not blocking",
+                    id="blocks-input",
+                    disabled=True,
                 )
 
             yield Label("Description", classes="field-label")
@@ -274,11 +309,17 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
     def _compose_view_sections(self) -> ComposeResult:
         """Yield read-only dependency/children/comment sections."""
         deps = self._storage.get_dependencies(self._issue.full_id)
-        if deps:
+        dependents = self._storage.get_dependents(self._issue.full_id)
+        if deps or dependents:
             with Collapsible(title="Dependencies", collapsed=False, id="deps-section"):
                 for dep in deps:
                     yield Static(
-                        f"  \u2192 {dep.depends_on_id} ({dep.dep_type.value})",
+                        f"  blocked by: {dep.depends_on_id}",
+                        classes="detail-section-body",
+                    )
+                for dep in dependents:
+                    yield Static(
+                        f"  blocks: {dep.issue_id}",
                         classes="detail-section-body",
                     )
 
@@ -340,8 +381,10 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
         """Enable editing on all form fields."""
         self._view_mode = False
 
+        _readonly_inputs = {"depends-on-input", "blocks-input"}
         for inp in self.query(Input):
-            inp.disabled = False
+            if inp.id not in _readonly_inputs:
+                inp.disabled = False
         for sel in self.query(Select):  # type: ignore[reportUnknownVariableType]
             sel.disabled = False  # type: ignore[reportUnknownMemberType]
         self.query_one("#manual-input", Checkbox).disabled = False
@@ -370,6 +413,64 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
         self._view_mode = True
         self._create_mode = False
         await self.recompose()
+
+    @staticmethod
+    def _parse_dep_ids(value: str) -> list[str]:
+        """Parse comma/space separated issue IDs from an input value."""
+        raw = value.replace(",", " ").split()
+        return [v.strip() for v in raw if v.strip()]
+
+    def _save_dependencies(self, issue_id: str) -> None:
+        """Reconcile dependency inputs with storage."""
+        new_depends_on = self._parse_dep_ids(
+            self.query_one("#depends-on-input", Input).value,
+        )
+        new_blocks = self._parse_dep_ids(
+            self.query_one("#blocks-input", Input).value,
+        )
+
+        old_depends_on = set(self._get_depends_on_ids())
+        old_blocks = set(self._get_blocks_ids())
+
+        # Add new "depends on" relationships
+        for dep_id in new_depends_on:
+            if dep_id not in old_depends_on:
+                try:
+                    self._storage.add_dependency(
+                        issue_id,
+                        dep_id,
+                        DependencyType.BLOCKS.value,
+                    )
+                except ValueError as e:
+                    self.notify(f"Dependency error: {e}", severity="error")
+
+        # Remove old "depends on" relationships
+        for dep_id in old_depends_on:
+            if dep_id not in new_depends_on:
+                try:
+                    self._storage.remove_dependency(issue_id, dep_id)
+                except ValueError as e:
+                    self.notify(f"Dependency error: {e}", severity="error")
+
+        # Add new "blocks" relationships (reverse: blocked issue depends on this)
+        for dep_id in new_blocks:
+            if dep_id not in old_blocks:
+                try:
+                    self._storage.add_dependency(
+                        dep_id,
+                        issue_id,
+                        DependencyType.BLOCKS.value,
+                    )
+                except ValueError as e:
+                    self.notify(f"Dependency error: {e}", severity="error")
+
+        # Remove old "blocks" relationships
+        for dep_id in old_blocks:
+            if dep_id not in new_blocks:
+                try:
+                    self._storage.remove_dependency(dep_id, issue_id)
+                except ValueError as e:
+                    self.notify(f"Dependency error: {e}", severity="error")
 
     def do_save(self) -> None:
         """Execute the save."""
