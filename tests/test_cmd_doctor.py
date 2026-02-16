@@ -161,6 +161,30 @@ class TestCLIDoctor:
         for line in config_lines:
             assert "✗" not in line
 
+    def test_doctor_finds_dogcats_from_subdirectory(self, tmp_path: Path) -> None:
+        """Test doctor resolves .dogcats when run from a subdirectory."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        # Create a nested subdirectory and run doctor from there
+        subdir = tmp_path / "a" / "b" / "c"
+        subdir.mkdir(parents=True)
+
+        import os
+
+        old_cwd = Path.cwd()
+        try:
+            os.chdir(subdir)
+            # Run without --dogcats-dir so it must walk up to find it
+            result = runner.invoke(app, ["doctor"])
+            assert "✓" in result.stdout
+            assert ".dogcats/ directory exists" in result.stdout
+        finally:
+            os.chdir(old_cwd)
+
 
 class TestDoctorNamespaceConfig:
     """Test doctor checks for namespace config mutual exclusivity."""

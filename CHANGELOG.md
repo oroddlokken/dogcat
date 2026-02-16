@@ -9,6 +9,7 @@
 
 ### Fixed
 
+- **Fix `dcat doctor` failing when run from a subdirectory** — doctor now uses `find_dogcats_dir()` to walk up the directory tree, matching the behavior of all other commands (closes dogcat-5v86)
 - **Fix tab completion gaps across CLI** — added missing completers for `--namespace`, `--owner`, `--format`, config keys, dep/link types, and export formats. Fixed `reopen` suggesting open issues instead of closed ones. (closes dogcat-56nl)
 - **Add `dcat comment` docs to `dcat prime` and fix `dcat guide`** — added comment commands (add, list, delete) to the Essential Commands section of `dcat prime`, and fixed incorrect syntax in `dcat guide` which showed a positional argument instead of the `add -t` action form
 

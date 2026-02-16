@@ -17,7 +17,7 @@ from dogcat.config import (
     save_config,
 )
 
-from ._helpers import get_storage
+from ._helpers import find_dogcats_dir, get_storage
 from ._json_state import is_json_output
 from ._validate import detect_concurrent_edits, validate_jsonl
 
@@ -48,6 +48,10 @@ def register(app: typer.Typer) -> None:
         checks: dict[str, dict[str, Any]] = {}
         all_passed = True
         validation_details: list[dict[str, str]] = []
+
+        # Resolve dogcats_dir via directory walk when using the default
+        if dogcats_dir == ".dogcats" and not Path(dogcats_dir).exists():
+            dogcats_dir = find_dogcats_dir()
 
         # Check 1: .dogcats directory exists
         dogcats_path = Path(dogcats_dir)
