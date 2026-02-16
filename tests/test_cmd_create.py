@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
 from dogcat.cli import app
@@ -331,53 +332,63 @@ class TestCLICreate:
         )
         assert result.exit_code != 0
 
-    def test_create_priority_string_name(self, tmp_path: Path) -> None:
-        """Test creating an issue with -p critical/high/medium/low/minimal."""
-        dogcats_dir = tmp_path / ".dogcats"
-        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
-
-        for name, expected in [
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
             ("critical", 0),
             ("high", 1),
             ("medium", 2),
             ("low", 3),
             ("minimal", 4),
-        ]:
-            result = runner.invoke(
-                app,
-                [
-                    "create",
-                    f"{name} priority issue",
-                    "-p",
-                    name,
-                    "--json",
-                    "--dogcats-dir",
-                    str(dogcats_dir),
-                ],
-            )
-            assert result.exit_code == 0, f"Failed for {name}: {result.output}"
-            data = json.loads(result.stdout)
-            assert data["priority"] == expected, f"Expected {expected} for {name}"
+        ],
+    )
+    def test_create_priority_string_name(
+        self, tmp_path: Path, name: str, expected: int
+    ) -> None:
+        """Test creating an issue with -p critical/high/medium/low/minimal."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
 
-    def test_create_priority_string_case_insensitive(self, tmp_path: Path) -> None:
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                f"{name} priority issue",
+                "-p",
+                name,
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0, f"Failed for {name}: {result.output}"
+        data = json.loads(result.stdout)
+        assert data["priority"] == expected
+
+    @pytest.mark.parametrize(
+        "name",
+        ["Critical", "HIGH", "Medium", "LOW", "MINIMAL"],
+    )
+    def test_create_priority_string_case_insensitive(
+        self, tmp_path: Path, name: str
+    ) -> None:
         """Test that priority string names are case-insensitive."""
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
 
-        for name in ["Critical", "HIGH", "Medium", "LOW", "MINIMAL"]:
-            result = runner.invoke(
-                app,
-                [
-                    "create",
-                    f"{name} case test",
-                    "-p",
-                    name,
-                    "--json",
-                    "--dogcats-dir",
-                    str(dogcats_dir),
-                ],
-            )
-            assert result.exit_code == 0, f"Failed for {name}: {result.output}"
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                f"{name} case test",
+                "-p",
+                name,
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0, f"Failed for {name}: {result.output}"
 
     def test_create_priority_invalid_string(self, tmp_path: Path) -> None:
         """Test that invalid priority string names fail."""

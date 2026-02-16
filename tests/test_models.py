@@ -232,31 +232,26 @@ class TestIssueModel:
 class TestValidation:
     """Test validation functions."""
 
-    def test_validate_priority_valid(self) -> None:
+    @pytest.mark.parametrize("priority", [0, 1, 2, 3, 4])
+    def test_validate_priority_valid(self, priority: int) -> None:
         """Test that valid priorities don't raise."""
-        for priority in range(5):
-            validate_priority(priority)  # Should not raise
+        validate_priority(priority)  # Should not raise
 
-    def test_validate_priority_invalid(self) -> None:
+    @pytest.mark.parametrize("priority", [-1, 5, "high"])
+    def test_validate_priority_invalid(self, priority: int) -> None:
         """Test that invalid priorities raise ValueError."""
         with pytest.raises(ValueError, match="Priority must be"):
-            validate_priority(-1)
+            validate_priority(priority)  # type: ignore[arg-type]
 
-        with pytest.raises(ValueError, match="Priority must be"):
-            validate_priority(5)
-
-        with pytest.raises(ValueError, match="Priority must be"):
-            validate_priority("high")  # type: ignore
-
-    def test_validate_status_valid(self) -> None:
+    @pytest.mark.parametrize("status", list(Status))
+    def test_validate_status_valid(self, status: Status) -> None:
         """Test that valid status doesn't raise."""
-        for status in Status:
-            validate_status(status)  # Should not raise
+        validate_status(status)  # Should not raise
 
     def test_validate_status_invalid(self) -> None:
         """Test that invalid status raises TypeError."""
         with pytest.raises(TypeError, match="Status must be"):
-            validate_status("invalid")  # type: ignore
+            validate_status("invalid")  # type: ignore[arg-type]
 
     def test_validate_issue_type_valid(self) -> None:
         """Test that valid issue type doesn't raise."""

@@ -1,6 +1,5 @@
 """Tests for migration from beads to dogcat."""
 
-from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -23,13 +22,22 @@ class TestParseDatetime:
         dt_str = "2026-02-03T13:21:21.529677+01:00"
         result = parse_datetime(dt_str)
         assert result is not None
-        assert isinstance(result, datetime)
+        assert result.year == 2026
+        assert result.month == 2
+        assert result.day == 3
+        assert result.hour == 13
+        assert result.minute == 21
+        assert result.second == 21
+        assert result.tzinfo is not None
 
     def test_parse_iso8601_utc_z(self) -> None:
         """Test parsing ISO8601 datetime with Z suffix."""
         dt_str = "2026-02-03T12:00:00Z"
         result = parse_datetime(dt_str)
         assert result is not None
+        assert result.year == 2026
+        assert result.hour == 12
+        assert result.tzinfo is not None
 
     def test_parse_none(self) -> None:
         """Test parsing None."""

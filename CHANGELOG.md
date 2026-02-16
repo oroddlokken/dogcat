@@ -19,6 +19,8 @@
 
 ### Development
 
+- **Convert loop-based tests to `@pytest.mark.parametrize`** — replaced manual `for` loops in `test_cmd_create`, `test_idgen`, and `test_models` with parametrized tests so each case appears individually in test reports
+- **Strengthen tests with trivial assertions** — added meaningful assertions to 6 tests that previously had no assertions or only checked truthiness (in `test_storage`, `test_migrate`, `test_stream`, `test_config`)
 - **Add `tabcomp.py` dev utility** — simulates tab completion for any `dcat` command line, showing what completions would appear. Useful for debugging shell completion issues without a live shell.
 - **Speed up test suite ~22%** — worksteal scheduler, `COVERAGE_CORE=sysmon`, plugin pruning, optimized git fixtures, removed unnecessary `time.sleep()` calls
 - **Add `just test-changed`** — incremental test runs via pytest-testmon, only re-runs tests affected by code changes

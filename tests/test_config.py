@@ -230,9 +230,10 @@ class TestSetGetIssuePrefix:
 
         # Should detect from parent directory name
         prefix = get_issue_prefix(str(dogcats_dir))
-        # The prefix should be the tmp directory name (sanitized)
+        # The prefix should be a non-empty lowercase string derived from parent dir
         assert prefix is not None
         assert len(prefix) > 0
+        assert prefix == prefix.lower()
 
     def test_get_prefix_returns_default_for_root(self, tmp_path: Path) -> None:
         """Get prefix returns default if directory name detection fails."""

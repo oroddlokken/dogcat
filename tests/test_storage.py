@@ -324,12 +324,17 @@ class TestAtomicWrites:
         issue = Issue(id="issue-1", title="Test")
         storage.create(issue)
 
-        # Read the file and verify each line is valid JSON
+        # Read the file and verify each line is valid JSON with expected structure
+        records: list[dict[str, object]] = []
         with storage_path.open() as f:
             for line in f:
                 line = line.strip()
                 if line:
-                    json.loads(line)  # Should not raise
+                    records.append(json.loads(line))
+
+        assert len(records) >= 1
+        assert any(r.get("id") == "issue-1" for r in records)
+        assert any(r.get("title") == "Test" for r in records)
 
     def test_persistence_across_instances(self, temp_workspace: Path) -> None:
         """Test that data persists across storage instances."""
@@ -1279,9 +1284,16 @@ class TestFileLock:
 
         # Acquire and release lock twice in sequence
         with storage._file_lock():
-            pass
+            acquired_first = True
         with storage._file_lock():
-            pass
+            acquired_second = True
+
+        assert acquired_first
+        assert acquired_second
+
+        # Verify storage still works after sequential lock cycles
+        storage.create(Issue(id="lock-1", title="After locks"))
+        assert storage.get("lock-1") is not None
 
     def test_concurrent_writes_dont_corrupt(self, temp_workspace: Path) -> None:
         """Test that concurrent writes under lock don't corrupt data."""

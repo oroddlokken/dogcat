@@ -252,10 +252,9 @@ class TestStreamIntegration:
 
         assert len(events) > 0
         for event in events:
-            # Should be serializable as JSON
+            # Should round-trip through JSON serialization
             json_str = json.dumps(event.to_dict())
-            assert json_str is not None
-            # Should be deserializable
+            assert len(json_str) > 2  # More than just "{}"
             data = json.loads(json_str)
             assert data["event_type"] in ["created", "updated", "closed", "deleted"]
 

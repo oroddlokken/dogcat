@@ -2,6 +2,8 @@
 
 from datetime import datetime, timezone
 
+import pytest
+
 from dogcat.idgen import (
     IDGenerator,
     _base36_encode,
@@ -78,11 +80,11 @@ class TestGenerateHashId:
         hash_value = generate_hash_id("test", length=4)
         assert len(hash_value) == 4
 
-    def test_custom_length(self) -> None:
+    @pytest.mark.parametrize("length", [2, 4, 6, 8])
+    def test_custom_length(self, length: int) -> None:
         """Test custom hash length."""
-        for length in [2, 4, 6, 8]:
-            hash_value = generate_hash_id("test", length=length)
-            assert len(hash_value) == length
+        hash_value = generate_hash_id("test", length=length)
+        assert len(hash_value) == length
 
     def test_deterministic(self) -> None:
         """Test that same input produces same hash."""
