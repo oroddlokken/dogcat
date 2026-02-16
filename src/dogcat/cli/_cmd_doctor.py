@@ -206,13 +206,24 @@ def register(app: typer.Typer) -> None:
 
         # Check 4: dcat in PATH
         dogcat_in_path = bool(shutil.which("dcat"))
-        checks["dogcat_in_path"] = {
-            "description": "dcat command is available in PATH",
-            "passed": dogcat_in_path,
-            "fix": "Ensure dogcat is installed and dcat is in PATH",
-        }
-        if not checks["dogcat_in_path"]["passed"]:
-            all_passed = False
+        if dogcat_in_path:
+            checks["dogcat_in_path"] = {
+                "description": "dcat command is available in PATH",
+                "passed": True,
+            }
+        else:
+            # dcat doctor is running, so dcat works — just not as a PATH binary.
+            # It's likely a shell function or alias.
+            checks["dogcat_in_path"] = {
+                "description": "dcat command is available in PATH",
+                "fail_description": (
+                    "dcat is available as a shell function/alias,"
+                    " not as a binary in PATH"
+                ),
+                "passed": False,
+                "optional": True,
+                "note": "Tab completions may not work",
+            }
 
         # Check 6: Issue ID uniqueness
         issue_ids_unique = True
@@ -297,7 +308,9 @@ def register(app: typer.Typer) -> None:
                     name: {
                         "passed": check["passed"],
                         "description": check["description"],
-                        "fix": (check["fix"] if not check["passed"] else None),
+                        **({"optional": True} if check.get("optional") else {}),
+                        "fix": (check.get("fix") if not check["passed"] else None),
+                        **({"note": check["note"]} if "note" in check else {}),
                     }
                     for name, check in checks.items()
                 },
@@ -333,6 +346,8 @@ def register(app: typer.Typer) -> None:
                 typer.echo(line)
                 if not check["passed"] and not is_optional:
                     typer.echo(typer.style(f"  Fix: {check['fix']}", fg="yellow"))
+                if not check["passed"] and is_optional and "note" in check:
+                    typer.echo(typer.style(f"  Note: {check['note']}", fg="yellow"))
                 typer.echo()
 
             # Post-merge concurrent edit warnings

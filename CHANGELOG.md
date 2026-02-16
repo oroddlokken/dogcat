@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Fix misleading `dcat doctor` PATH check message** — when dcat is available as a shell function/alias but not as a binary in PATH, the check now shows an informational note (○) instead of a confusing failure (✗) that read "dcat command is available in PATH" (closes dogcat-2fsd)
+
 ## 0.9.1 (2026-02-16)
 
 ### Added
