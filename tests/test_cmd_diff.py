@@ -96,11 +96,13 @@ class TestDiff:
             ["git", "-C", str(git_workspace), "add", ".dogcats/"],
             check=True,
             capture_output=True,
+            env=_GIT_TEST_ENV,
         )
         subprocess.run(
             ["git", "-C", str(git_workspace), "commit", "-m", "add issue"],
             check=True,
             capture_output=True,
+            env=_GIT_TEST_ENV,
         )
 
         # Now update the issue
@@ -134,11 +136,13 @@ class TestDiff:
             ["git", "-C", str(git_workspace), "add", ".dogcats/"],
             check=True,
             capture_output=True,
+            env=_GIT_TEST_ENV,
         )
         subprocess.run(
             ["git", "-C", str(git_workspace), "commit", "-m", "add issue"],
             check=True,
             capture_output=True,
+            env=_GIT_TEST_ENV,
         )
 
         # Close the issue
@@ -261,11 +265,13 @@ class TestDiff:
             ["git", "-C", str(git_workspace), "add", ".dogcats/"],
             check=True,
             capture_output=True,
+            env=_GIT_TEST_ENV,
         )
         subprocess.run(
             ["git", "-C", str(git_workspace), "commit", "-m", "add issue"],
             check=True,
             capture_output=True,
+            env=_GIT_TEST_ENV,
         )
 
         # Now modify the issue (working tree changes, index stays at commit)
