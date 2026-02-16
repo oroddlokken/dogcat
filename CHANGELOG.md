@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.9.1 (2026-02-16)
+
 ### Added
 
 - **Tab completion for all commands** — added missing autocompletion to `comment`, `label`, `search`, `dep`, and `link` commands. Completions now respect namespace filtering (matching `dcat list` behavior) and support `-A`/`--namespace` flags. Short ID matching lets you type e.g. `dcat show 1g<tab>` without the namespace prefix.
