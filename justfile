@@ -11,17 +11,17 @@ var:
 
 # run formatters
 fmt:
-    uv run ruff format src tests dcat.py benchmark.py
-    uv run ruff check --fix --unsafe-fixes src tests dcat.py benchmark.py
+    uv run ruff format src tests dcat.py benchmark.py tabcomp.py
+    uv run ruff check --fix --unsafe-fixes src tests dcat.py benchmark.py tabcomp.py
 
 # lint the code
 lint:
-    uv run ruff format --check --diff src tests dcat.py benchmark.py
-    uv run ruff check src tests dcat.py benchmark.py
+    uv run ruff format --check --diff src tests dcat.py benchmark.py tabcomp.py
+    uv run ruff check src tests dcat.py benchmark.py tabcomp.py
 
 # lint using pyright
 lint-pyright:
-    PYRIGHT_PYTHON_FORCE_VERSION=latest uv run pyright src tests dcat.py benchmark.py
+    PYRIGHT_PYTHON_FORCE_VERSION=latest uv run pyright src tests dcat.py benchmark.py tabcomp.py
 
 # run all linters
 lint-all:
@@ -30,7 +30,7 @@ lint-all:
 
 # find dead code with vulture
 vulture:
-    uv run vulture src tests dcat.py benchmark.py vulture_whitelist.py --ignore-decorators "@app.command" --ignore-names "on_modified,on_moved,RELATED,reload"
+    uv run vulture src tests dcat.py benchmark.py tabcomp.py vulture_whitelist.py --ignore-decorators "@app.command" --ignore-names "on_modified,on_moved,RELATED,reload"
 
 # run tests (excludes regression tests)
 test:

@@ -55,7 +55,7 @@ Always write tests for new features or when changing functionality.
 
 Use `just test-changed` during development for fast feedback — it only runs tests affected by code changes since the last run. Use `just test-all` to confirm all tests are passing before committing or pushing.
 
-Use `just lint` to check for linting errors. Run `just fmt` to automatically fix formatting issues. The CICD pipeline will fail if linting errors are present, so they must be fixed before pushing code.
+Use `just lint` to check for linting errors. Run `just fmt` to automatically fix formatting issues. Run `just lint-all` (includes pyright) before committing or pushing — the CI pipeline will fail if linting errors are present, so they must be caught locally first.
 
 We are using uv for dependency management. NEVER use pip.
 

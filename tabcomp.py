@@ -40,13 +40,13 @@ def _parse_zsh_completions(raw: str) -> list[tuple[str, str]]:
 
     Zsh format: _arguments '*: :(("val":"desc" "val2":"desc2" ...))'
     """
-    pairs: list[tuple[str, str]] = []
-    for match in re.finditer(r'"([^"]*?)":"([^"]*?)"', raw):
-        pairs.append((match.group(1), match.group(2)))
-    return pairs
+    return [
+        (match.group(1), match.group(2))
+        for match in re.finditer(r'"([^"]*?)":"([^"]*?)"', raw)
+    ]
 
 
-def main() -> None:
+def main() -> None:  # noqa: D103
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
         print(__doc__)
         raise SystemExit(0)
