@@ -52,11 +52,30 @@ test-all:
 generate-fixture tag="":
     python tests/generate_fixture.py {{tag}}
 
+# show next possible versions (patch or minor bump)
+next:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    LATEST=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sed 's/^v//; s/-rc\..*//' | sort -t. -k1,1n -k2,2n -k3,3n -u | tail -1)
+    IFS='.' read -r MAJOR MINOR PATCH <<< "$LATEST"
+    RC=$(git tag -l "v${LATEST}-rc.*" | sort -V | tail -1 | sed -n 's/.*-rc\.//p')
+    RELEASED=$(git tag -l "v${LATEST}" | head -1)
+    if [ -n "$RC" ] && [ -z "$RELEASED" ]; then
+        echo "Current: ${MAJOR}.${MINOR}.${PATCH} (rc.${RC}, unreleased)"
+    elif [ -n "$RC" ]; then
+        echo "Current: ${MAJOR}.${MINOR}.${PATCH}"
+    else
+        echo "Current: ${MAJOR}.${MINOR}.${PATCH}"
+    fi
+    echo "  patch: ${MAJOR}.${MINOR}.$((PATCH + 1))"
+    echo "  minor: ${MAJOR}.$((MINOR + 1)).0"
+
 # prepare a release: create RC tag, push branch, open PR (stays on current branch)
 release-prep version: lint-all test-all
     #!/usr/bin/env bash
     set -euo pipefail
     VERSION="{{version}}"
+    VERSION="${VERSION#v}"
     BRANCH="release/v${VERSION}"
     TAG_PREFIX="v${VERSION}-rc"
     WORKTREE_DIR=".release-worktree"
