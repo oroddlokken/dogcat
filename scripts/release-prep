@@ -1,0 +1,202 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ── Colors ────────────────────────────────────────────────────────────
+if [[ -t 1 ]]; then
+    GREEN='\033[0;32m' RED='\033[0;31m' YELLOW='\033[0;33m'
+    BOLD='\033[1m' DIM='\033[2m' RESET='\033[0m'
+else
+    GREEN='' RED='' YELLOW='' BOLD='' DIM='' RESET=''
+fi
+
+info()  { printf "${BOLD}▸${RESET} %s\n" "$*"; }
+ok()    { printf "${GREEN}✓${RESET} %s\n" "$*"; }
+warn()  { printf "${YELLOW}!${RESET} %s\n" "$*"; }
+die()   { printf "${RED}✗${RESET} %s\n" "$*" >&2; exit 1; }
+
+# ── Usage ─────────────────────────────────────────────────────────────
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [-w] [--skip-checks] <version>
+
+Prepare a release: run checks, create RC tag, push branch, open PR.
+
+Arguments:
+  <version>       Version to release (e.g. 0.9.3 or v0.9.3)
+
+Options:
+  -w, --watch         After prep, watch CI/release actions, wait for merge,
+                      then follow the publish workflow
+  --skip-checks       Skip local lint-all and test-all
+  -h, --help          Show this help
+EOF
+}
+
+# ── Parse args ────────────────────────────────────────────────────────
+WATCH=false
+SKIP_CHECKS=false
+VERSION=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -w|--watch)      WATCH=true; shift ;;
+        --skip-checks)   SKIP_CHECKS=true; shift ;;
+        -h|--help)       usage; exit 0 ;;
+        -*)              die "Unknown option: $1" ;;
+        *)
+            [[ -n "$VERSION" ]] && die "Unexpected argument: $1"
+            VERSION="$1"; shift
+            ;;
+    esac
+done
+
+[[ -z "$VERSION" ]] && { usage; exit 1; }
+
+VERSION="${VERSION#v}"
+BRANCH="release/v${VERSION}"
+TAG_PREFIX="v${VERSION}-rc"
+WORKTREE_DIR=".release-worktree"
+
+# ── Phase 1: Local checks ────────────────────────────────────────────
+if [[ "$SKIP_CHECKS" == false ]]; then
+    info "Running lint-all…"
+    just lint-all
+    ok "Linting passed"
+
+    info "Running test-all…"
+    just test-all
+    ok "Tests passed"
+else
+    warn "Skipping local checks (--skip-checks)"
+fi
+
+# ── Phase 1: Release prep ────────────────────────────────────────────
+
+# Determine next RC number
+LAST_RC=$(git tag -l "${TAG_PREFIX}.*" | sed "s/${TAG_PREFIX}\.//" | sort -n | tail -1)
+if [[ -z "$LAST_RC" ]]; then
+    RC=1
+else
+    RC=$((LAST_RC + 1))
+fi
+RC_TAG="${TAG_PREFIX}.${RC}"
+
+info "Preparing ${RC_TAG} on branch ${BRANCH}"
+
+# Clean up any stale worktree
+if [[ -d "$WORKTREE_DIR" ]]; then
+    git worktree remove --force "$WORKTREE_DIR" 2>/dev/null || true
+fi
+
+# Create or reuse release branch in a temporary worktree
+if git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
+    git worktree add "$WORKTREE_DIR" "${BRANCH}"
+else
+    git worktree add -b "${BRANCH}" "$WORKTREE_DIR"
+fi
+
+cleanup() { git worktree remove --force "$WORKTREE_DIR" 2>/dev/null || true; }
+trap cleanup EXIT
+
+# Stamp CHANGELOG: insert version header after [Unreleased]
+DATE=$(date +%Y-%m-%d)
+if ! grep -q "^## ${VERSION}" "${WORKTREE_DIR}/CHANGELOG.md"; then
+    sed -i.bak "s/^## \[Unreleased\]/## [Unreleased]\n\n## ${VERSION} (${DATE})/" "${WORKTREE_DIR}/CHANGELOG.md"
+    rm -f "${WORKTREE_DIR}/CHANGELOG.md.bak"
+    git -C "$WORKTREE_DIR" add CHANGELOG.md
+    git -C "$WORKTREE_DIR" commit -m "Prepare changelog for v${VERSION}"
+fi
+
+# Skip tagging if HEAD already has an RC tag (nothing changed)
+EXISTING_TAG=$(git -C "$WORKTREE_DIR" tag --points-at HEAD | grep "^${TAG_PREFIX}\." || true)
+if [[ -n "$EXISTING_TAG" ]]; then
+    warn "HEAD already tagged as ${EXISTING_TAG} — nothing changed, skipping tag."
+    RC_TAG="$EXISTING_TAG"
+else
+    # Tag and push
+    git -C "$WORKTREE_DIR" tag -a "${RC_TAG}" -m "Release candidate ${RC_TAG}"
+    git push -u origin "${BRANCH}" --tags
+    ok "RC tag ${RC_TAG} pushed"
+fi
+
+# Open PR if one doesn't exist yet
+PR_URL=""
+if ! gh pr view "${BRANCH}" > /dev/null 2>&1; then
+    PR_URL=$(gh pr create \
+        --head "${BRANCH}" \
+        --title "Release v${VERSION}" \
+        --body "$(cat <<EOF
+## Release v${VERSION}
+
+Release candidate: \`${RC_TAG}\`
+
+Merging this PR will:
+1. Create the final \`v${VERSION}\` tag
+2. Build and publish the release
+3. Update the Homebrew formula
+EOF
+)" \
+        --base main)
+    ok "PR created: ${PR_URL}"
+else
+    PR_URL=$(gh pr view "${BRANCH}" --json url -q .url)
+    ok "PR: ${PR_URL}"
+fi
+
+# ── Phase 2: Watch ────────────────────────────────────────────────────
+[[ "$WATCH" == false ]] && exit 0
+
+echo ""
+info "Watch mode — monitoring CI and release actions…"
+
+# Watch all PR checks (CI + RC release — both show up as commit checks)
+info "Waiting for PR checks…"
+if ! gh pr checks "${BRANCH}" --watch --fail-fast; then
+    die "PR checks failed"
+fi
+
+echo ""
+ok "All checks passed!"
+printf "  ${BOLD}PR:${RESET} %s\n" "$PR_URL"
+echo ""
+info "Waiting for PR to be merged…"
+
+while true; do
+    STATE=$(gh pr view "${BRANCH}" --json state -q .state)
+    case "$STATE" in
+        MERGED)
+            ok "PR merged!"
+            break
+            ;;
+        CLOSED)
+            die "PR was closed without merging"
+            ;;
+        *)
+            printf "${DIM}.${RESET}"
+            sleep 30
+            ;;
+    esac
+done
+
+# Watch publish workflow (triggered by the merge)
+echo ""
+info "Waiting for publish workflow…"
+PUBLISH_RUN_ID=""
+for _ in $(seq 1 60); do
+    PUBLISH_RUN_ID=$(gh run list -w publish.yml -b "${BRANCH}" --json databaseId,createdAt \
+        -q ".[0].databaseId // empty" 2>/dev/null || true)
+    [[ -n "$PUBLISH_RUN_ID" ]] && break
+    sleep 5
+done
+
+if [[ -z "$PUBLISH_RUN_ID" ]]; then
+    die "Could not find publish workflow run"
+fi
+
+if ! gh run watch "$PUBLISH_RUN_ID" --exit-status; then
+    die "Publish workflow failed"
+fi
+
+echo ""
+ok "Release v${VERSION} published!"
+printf "  ${BOLD}Release:${RESET} https://github.com/oroddlokken/dogcat/releases/tag/v%s\n" "$VERSION"

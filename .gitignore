@@ -10,3 +10,4 @@ htmlcov
 scratch
 src/dogcat/_version.py
 .dogcats/.issues.lock
+.release-worktree/
