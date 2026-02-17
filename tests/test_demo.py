@@ -3,8 +3,9 @@
 import tempfile
 from pathlib import Path
 
-from dogcat.demo import generate_demo_issues
-from dogcat.models import IssueType, Status
+from dogcat.demo import generate_demo_inbox, generate_demo_issues
+from dogcat.inbox import InboxStorage
+from dogcat.models import IssueType, ProposalStatus, Status
 from dogcat.storage import JSONLStorage
 
 
@@ -78,3 +79,38 @@ def test_demo_has_deferred_epic_with_subtasks() -> None:
         assert len(children) > 0, (
             f"Deferred epic {deferred_epic.full_id} should have children"
         )
+
+
+def test_demo_inbox_creates_proposals() -> None:
+    """Demo inbox creates proposals in all three statuses."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        dogcats_dir = str(Path(tmpdir) / ".dogcats")
+        # Need to init storage first so directory exists
+        JSONLStorage(f"{dogcats_dir}/issues.jsonl", create_dir=True)
+
+        count = generate_demo_inbox(dogcats_dir)
+        assert count == 6
+
+        inbox = InboxStorage(dogcats_dir=dogcats_dir)
+        proposals = inbox.list(include_tombstones=True)
+        assert len(proposals) == 6
+
+        statuses = {p.status for p in proposals}
+        assert ProposalStatus.OPEN in statuses
+        assert ProposalStatus.CLOSED in statuses
+        assert ProposalStatus.TOMBSTONE in statuses
+
+
+def test_demo_inbox_has_source_repos() -> None:
+    """Demo inbox proposals have realistic source_repo values."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        dogcats_dir = str(Path(tmpdir) / ".dogcats")
+        JSONLStorage(f"{dogcats_dir}/issues.jsonl", create_dir=True)
+
+        generate_demo_inbox(dogcats_dir)
+
+        inbox = InboxStorage(dogcats_dir=dogcats_dir)
+        proposals = inbox.list(include_tombstones=True)
+
+        with_source = [p for p in proposals if p.source_repo]
+        assert len(with_source) >= 4

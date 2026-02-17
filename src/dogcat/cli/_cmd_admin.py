@@ -372,13 +372,30 @@ def register(app: typer.Typer) -> None:
 
             total = len(all_issues)
 
+            # Count inbox proposals
+            from dogcat.inbox import InboxStorage
+
+            inbox_counts: dict[str, int] = {}
+            inbox_total = 0
+            try:
+                inbox = InboxStorage(dogcats_dir=actual_dogcats_dir)
+                for proposal in inbox.list(include_tombstones=True):
+                    sv = proposal.status.value
+                    inbox_counts[sv] = inbox_counts.get(sv, 0) + 1
+                    inbox_total += 1
+            except (ValueError, RuntimeError):
+                pass  # No inbox file or invalid — just skip
+
             if is_json_output(json_output):
-                output = {
+                output: dict[str, object] = {
                     "prefix": prefix,
                     "total": total,
                     "by_status": status_counts,
                     "by_type": type_counts,
                 }
+                if inbox_total:
+                    output["inbox_total"] = inbox_total
+                    output["inbox_by_status"] = inbox_counts
                 typer.echo(orjson.dumps(output, option=orjson.OPT_INDENT_2).decode())
             else:
                 typer.echo(f"Prefix: {prefix}")
@@ -391,6 +408,10 @@ def register(app: typer.Typer) -> None:
                     typer.echo("\nBy type:")
                     for type_val, count in sorted(type_counts.items()):
                         typer.echo(f"  {type_val:<12} {count}")
+                if inbox_total:
+                    typer.echo(f"\nInbox: {inbox_total} proposal(s)")
+                    for sv, count in sorted(inbox_counts.items()):
+                        typer.echo(f"  {sv:<12} {count}")
 
         except ValueError as e:
             echo_error(str(e))

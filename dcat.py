@@ -11,6 +11,10 @@
 #   "watchdog",
 #   "tomli",
 #   "tomli_w",
+#   "fastapi>=0.115.0",
+#   "uvicorn[standard]>=0.30.0",
+#   "jinja2>=3.1.0",
+#   "python-multipart>=0.0.9",
 # ]
 # ///
 

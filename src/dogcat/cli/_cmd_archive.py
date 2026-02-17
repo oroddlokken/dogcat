@@ -15,6 +15,127 @@ from ._helpers import get_storage
 from ._json_state import echo_error, is_json_output
 
 
+def _archive_inbox(
+    dogcats_dir: str,
+    archive_dir: Path,
+    timestamp: str,
+    namespace: str | None,
+    days: int | None,
+) -> int:
+    """Archive closed inbox proposals to archive/inbox-closed-<ts>.jsonl.
+
+    Returns the number of proposals archived.
+    """
+    import tempfile
+    from datetime import timedelta
+
+    from dogcat.inbox import InboxStorage
+    from dogcat.models import ProposalStatus
+
+    try:
+        inbox = InboxStorage(dogcats_dir=dogcats_dir)
+    except (ValueError, RuntimeError):
+        return 0
+
+    proposals = inbox.list(include_tombstones=False)
+    closed = [p for p in proposals if p.status == ProposalStatus.CLOSED]
+
+    if namespace is not None:
+        closed = [p for p in closed if p.namespace == namespace]
+
+    if days is not None:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        closed = [
+            p
+            for p in closed
+            if p.closed_at and p.closed_at.astimezone(timezone.utc) <= cutoff
+        ]
+
+    if not closed:
+        return 0
+
+    closed_ids = {p.full_id for p in closed}
+
+    # Split inbox.jsonl lines into archived vs remaining
+    inbox_path = inbox.get_file_path()
+    if not inbox_path.exists():
+        return 0
+
+    archived_lines: list[bytes] = []
+    remaining_lines: list[bytes] = []
+
+    for raw_line in inbox_path.read_bytes().splitlines(keepends=True):
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        try:
+            data = orjson.loads(stripped)
+        except orjson.JSONDecodeError:
+            remaining_lines.append(raw_line)
+            continue
+
+        ns = data.get("namespace", "dc")
+        pid = data.get("id", "")
+        full_id = f"{ns}-inbox-{pid}"
+
+        if full_id in closed_ids:
+            archived_lines.append(raw_line)
+        else:
+            remaining_lines.append(raw_line)
+
+    if not archived_lines:
+        return 0
+
+    archive_filename = f"inbox-closed-{timestamp}.jsonl"
+    archive_path = archive_dir / archive_filename
+
+    # Write archived lines atomically
+    with tempfile.NamedTemporaryFile(
+        mode="wb",
+        dir=archive_dir,
+        delete=False,
+        suffix=".jsonl",
+    ) as tmp_file:
+        tmp_path = Path(tmp_file.name)
+        try:
+            for line in archived_lines:
+                tmp_file.write(line if line.endswith(b"\n") else line + b"\n")
+            tmp_file.flush()
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            return 0
+
+    try:
+        tmp_path.replace(archive_path)
+    except OSError:
+        tmp_path.unlink(missing_ok=True)
+        return 0
+
+    # Rewrite inbox.jsonl with remaining lines
+    with tempfile.NamedTemporaryFile(
+        mode="wb",
+        dir=str(inbox_path.parent),
+        delete=False,
+        suffix=".jsonl",
+    ) as tmp_file:
+        tmp_main = Path(tmp_file.name)
+        try:
+            for line in remaining_lines:
+                tmp_file.write(line if line.endswith(b"\n") else line + b"\n")
+            tmp_file.flush()
+        except Exception:
+            tmp_main.unlink(missing_ok=True)
+            return 0
+
+    try:
+        tmp_main.replace(inbox_path)
+    except OSError:
+        tmp_main.unlink(missing_ok=True)
+        return 0
+
+    return len(closed)
+
+
 def register(app: typer.Typer) -> None:
     """Register archive command."""
 
@@ -372,12 +493,23 @@ def register(app: typer.Typer) -> None:
             # Update in-memory state
             storage.remove_archived(archivable_ids, len(remaining_lines))
 
+            # Archive closed inbox proposals alongside issues
+            inbox_archived = _archive_inbox(
+                actual_dogcats_dir,
+                archive_dir,
+                timestamp,
+                namespace,
+                days,
+            )
+
             if is_json_output(json_output):
-                output = {
+                output: dict[str, object] = {
                     "archived": len(archivable),
                     "skipped": len(skipped),
                     "archive_path": str(archive_path),
                 }
+                if inbox_archived:
+                    output["inbox_archived"] = inbox_archived
                 typer.echo(orjson.dumps(output).decode())
             else:
                 typer.echo(f"\n✓ Archived {len(archivable)} issue(s) to {archive_path}")
@@ -385,6 +517,8 @@ def register(app: typer.Typer) -> None:
                     typer.echo(f"  Including {archived_dep_count} dependency record(s)")
                 if archived_link_count:
                     typer.echo(f"  Including {archived_link_count} link record(s)")
+                if inbox_archived:
+                    typer.echo(f"  Archived {inbox_archived} inbox proposal(s)")
 
         except typer.Exit:
             raise

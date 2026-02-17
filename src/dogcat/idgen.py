@@ -174,25 +174,25 @@ class IDGenerator:
                 self.existing_ids.add(candidate_id)
                 return candidate_id
 
-    def generate_issue_id(
+    def generate_id(
         self,
         title: str,
         timestamp: datetime | None = None,
         namespace: str | None = None,
     ) -> str:
-        """Generate a unique issue ID hash, handling collisions.
+        """Generate a unique ID hash, handling collisions.
 
-        Uses progressive ID length scaling based on current issue count
+        Uses progressive ID length scaling based on current item count
         to proactively prevent collisions as the database grows.
 
         Args:
-            title: Issue title
-            timestamp: Timestamp for issue creation
+            title: Item title (issue or proposal)
+            timestamp: Timestamp for creation
             namespace: Namespace/prefix for collision checking
                 (defaults to instance prefix)
 
         Returns:
-            Unique issue ID hash (without namespace prefix)
+            Unique ID hash (without namespace prefix)
         """
         if namespace is None:
             namespace = self.prefix
@@ -238,6 +238,10 @@ class IDGenerator:
         full_id = f"{namespace}-{candidate_hash}"
         self.existing_ids.add(full_id)
         return candidate_hash
+
+    # Aliases for domain-specific clarity
+    generate_issue_id = generate_id
+    generate_proposal_id = generate_id
 
     def generate_dependency_id(
         self,

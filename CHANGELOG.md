@@ -2,6 +2,42 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Inbox system** — cross-repo lightweight proposals via `dcat propose` and `dcat inbox` commands. Send proposals to other repos (`dcat propose "Title" -d "Details" --to ~/other-repo`), manage incoming proposals with `dcat inbox list/show/close/delete`. Includes archive support for closed proposals, merge driver support for `inbox.jsonl`, tab completions, demo data, and inbox counts in `dcat status`
+- **Web proposal form** — `dcat web propose` launches a FastAPI server with an HTML form for submitting proposals via browser. Includes CSRF protection, input validation, security headers, namespace selection, and input size limits
+- **FastAPI, uvicorn, jinja2 as optional `[web]` dependencies** — install with `pip install dogcat[web]`
+
+### Fixed
+
+- **Fix blocked status overriding advanced statuses in display** — issues with status `in_review`, `deferred`, or `closed` now display their own status symbol instead of being unconditionally shown as blocked when they have open dependencies (closes dogcat-5wd2)
+- **Fix `dcat stream` not showing events for inbox proposals** — stream now includes proposal events alongside issue events with standardized event naming (closes dogcat-5ond)
+- **Fix inbox list tombstone filtering** — deleted proposals no longer appear in `dcat inbox list` (closes dogcat-66pi)
+- **Fix silent namespace filtering failures in inbox CLI** — namespace filter errors are now surfaced instead of silently returning empty results (closes dogcat-19bk)
+- **Fix inconsistent malformed line handling in InboxStorage** — malformed JSONL lines are now handled consistently with the issue storage (closes dogcat-3952)
+
+### Changed
+
+- **Add `updated_at` field to Proposal model** — proposals now track their last modification time (closes dogcat-3wy6)
+- **Include proposal namespaces in namespace completer** — tab completion for `--namespace` now includes namespaces from inbox proposals (closes dogcat-4rmr)
+- **Include closed proposals in tab completions** — proposal ID completers now suggest closed proposals where appropriate (closes dogcat-4w8x)
+- **Add `validate_proposal()` function** — proposals are validated on creation and update, matching issue validation behavior (closes dogcat-1iku)
+- **Add `generate_proposal_id()` to ID generation** — proposal IDs use their own generator instead of reusing the issue ID function (closes dogcat-ehl7)
+- **Replace type assertions with proper validation in CLI** — inbox CLI commands now use explicit validation instead of assert statements (closes dogcat-5jhs)
+- **Reduce coupling of archive to InboxStorage.path** — archive module uses a cleaner interface for inbox storage access (closes dogcat-ue1e)
+
+### Security
+
+- **CSRF protection on web proposal form** — form submissions are protected against cross-site request forgery (closes dogcat-3ku2)
+- **Security headers on web server** — responses include standard security headers (X-Content-Type-Options, X-Frame-Options, etc.) (closes dogcat-3xls)
+- **Namespace validation on web proposal submission** — the web endpoint validates namespace values before creating proposals (closes dogcat-496q)
+- **Replace broad `except Exception` in web routes** — web error handling now catches specific exceptions instead of blanket catches (closes dogcat-5qrr)
+
+### Development
+
+- **Document proposal merge conflict resolution rules** — README documents how inbox.jsonl conflicts are resolved by the merge driver (closes dogcat-2ah1)
+- **Tests for inbox system, CLI commands, web server, and proposal integration** — comprehensive test coverage across `test_inbox.py`, `test_cmd_inbox.py`, `test_cmd_propose.py`, `test_web_propose.py`, and additions to `test_archive.py`, `test_stream.py`, `test_merge_driver.py`, `test_formatting.py`, and `test_demo.py`
+
 ## 0.9.3 (2026-02-17)
 
 ### Added

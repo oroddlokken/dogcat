@@ -5,9 +5,15 @@ from datetime import timezone
 from pathlib import Path
 from typing import Any
 
-from dogcat.models import Issue, Status, issue_to_dict
+from dogcat.inbox import InboxStorage
+from dogcat.models import Issue, Proposal, Status, issue_to_dict
 from dogcat.storage import JSONLStorage
-from dogcat.stream import StreamEmitter, StreamEvent, StreamWatcher
+from dogcat.stream import (
+    InboxStreamEmitter,
+    StreamEmitter,
+    StreamEvent,
+    StreamWatcher,
+)
 
 
 class TestStreamEvent:
@@ -426,3 +432,119 @@ class TestStreamEmitterIncrementalParsing:
         assert len(captured_events) == 2
         event_types = {e.event_type for e in captured_events}
         assert event_types == {"created"}
+
+
+class TestInboxStreamEmitter:
+    """Test InboxStreamEmitter change detection for proposals."""
+
+    def test_emitter_initialization(self, temp_dogcats_dir: Path) -> None:
+        """Test initializing inbox emitter."""
+        inbox_path = temp_dogcats_dir / "inbox.jsonl"
+        emitter = InboxStreamEmitter(str(inbox_path))
+        assert emitter.inbox_path == inbox_path
+
+    def test_detect_proposal_create(self, temp_dogcats_dir: Path) -> None:
+        """Test detecting proposal creation."""
+        inbox = InboxStorage(dogcats_dir=str(temp_dogcats_dir))
+
+        inbox_path = temp_dogcats_dir / "inbox.jsonl"
+        captured: list[StreamEvent] = []
+        emitter = InboxStreamEmitter(
+            str(inbox_path),
+            on_event=lambda e: captured.append(e),
+        )
+
+        # Create a proposal
+        proposal = Proposal(id="test1", title="Test proposal")
+        inbox.create(proposal)
+
+        emitter._handle_file_change()  # noqa: SLF001
+
+        assert len(captured) == 1
+        assert captured[0].event_type == "proposal_created"
+        assert "dc-inbox-test1" in captured[0].issue_id
+
+    def test_detect_proposal_close(self, temp_dogcats_dir: Path) -> None:
+        """Test detecting proposal close."""
+        inbox = InboxStorage(dogcats_dir=str(temp_dogcats_dir))
+
+        proposal = Proposal(id="test1", title="Close me")
+        inbox.create(proposal)
+
+        inbox_path = temp_dogcats_dir / "inbox.jsonl"
+        captured: list[StreamEvent] = []
+        emitter = InboxStreamEmitter(
+            str(inbox_path),
+            on_event=lambda e: captured.append(e),
+        )
+
+        # Close the proposal
+        inbox.close("dc-inbox-test1", reason="Done")
+
+        emitter._handle_file_change()  # noqa: SLF001
+
+        assert len(captured) == 1
+        assert captured[0].event_type == "proposal_closed"
+        assert "status" in captured[0].changes
+
+    def test_detect_proposal_delete(self, temp_dogcats_dir: Path) -> None:
+        """Test detecting proposal deletion (tombstone)."""
+        inbox = InboxStorage(dogcats_dir=str(temp_dogcats_dir))
+
+        proposal = Proposal(id="test1", title="Delete me")
+        inbox.create(proposal)
+
+        inbox_path = temp_dogcats_dir / "inbox.jsonl"
+        captured: list[StreamEvent] = []
+        emitter = InboxStreamEmitter(
+            str(inbox_path),
+            on_event=lambda e: captured.append(e),
+        )
+
+        inbox.delete("dc-inbox-test1")
+
+        emitter._handle_file_change()  # noqa: SLF001
+
+        assert len(captured) == 1
+        assert captured[0].event_type == "proposal_deleted"
+
+    def test_no_events_when_unchanged(self, temp_dogcats_dir: Path) -> None:
+        """Test no events emitted when inbox hasn't changed."""
+        inbox = InboxStorage(dogcats_dir=str(temp_dogcats_dir))
+        proposal = Proposal(id="test1", title="Static")
+        inbox.create(proposal)
+
+        inbox_path = temp_dogcats_dir / "inbox.jsonl"
+        captured: list[StreamEvent] = []
+        emitter = InboxStreamEmitter(
+            str(inbox_path),
+            on_event=lambda e: captured.append(e),
+        )
+
+        emitter._handle_file_change()  # noqa: SLF001
+
+        assert len(captured) == 0
+
+    def test_incremental_parse_on_append(self, temp_dogcats_dir: Path) -> None:
+        """Test that appending to inbox triggers incremental parse."""
+        inbox = InboxStorage(dogcats_dir=str(temp_dogcats_dir))
+        proposal = Proposal(id="test1", title="First")
+        inbox.create(proposal)
+
+        inbox_path = temp_dogcats_dir / "inbox.jsonl"
+        captured: list[StreamEvent] = []
+        emitter = InboxStreamEmitter(
+            str(inbox_path),
+            on_event=lambda e: captured.append(e),
+        )
+        initial_pos = emitter._file_position
+
+        # Add second proposal
+        proposal2 = Proposal(id="test2", title="Second")
+        inbox.create(proposal2)
+
+        emitter._handle_file_change()  # noqa: SLF001
+
+        assert emitter._file_position > initial_pos
+        assert len(captured) == 1
+        assert captured[0].event_type == "proposal_created"

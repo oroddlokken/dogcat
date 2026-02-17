@@ -88,6 +88,35 @@ def complete_closed_issue_ids(
         return []
 
 
+def complete_proposal_ids(
+    ctx: Any,
+    args: list[str],  # noqa: ARG001 (always [] from Typer, kept for signature compat)
+    incomplete: str,
+) -> list[tuple[str, str]]:
+    """Complete proposal IDs from inbox, including closed proposals."""
+    try:
+        from dogcat.inbox import InboxStorage
+
+        from ._helpers import find_dogcats_dir
+
+        dogcats_dir = find_dogcats_dir()
+        inbox = InboxStorage(dogcats_dir=dogcats_dir)
+        ns_filter = _ns_filter_from_ctx(ctx, dogcats_dir)
+        results: list[tuple[str, str]] = []
+        for p in inbox.list(include_tombstones=False):
+            if ns_filter is not None and not ns_filter(p.namespace):
+                continue
+            desc = f"{p.title} [{p.status.value}]" if p.is_closed() else p.title
+            fid = p.full_id
+            if fid.startswith(incomplete):
+                results.append((fid, desc))
+            elif p.id.startswith(incomplete):
+                results.append((p.id, desc))
+        return sorted(results)
+    except Exception:
+        return []
+
+
 def complete_statuses(incomplete: str) -> list[tuple[str, str]]:
     """Complete status values."""
     return [
@@ -162,14 +191,27 @@ def complete_namespaces(
     args: list[str],  # noqa: ARG001
     incomplete: str,
 ) -> list[tuple[str, str]]:
-    """Complete namespace values from existing issues."""
+    """Complete namespace values from existing issues and proposals."""
     try:
         storage = get_storage()
         ns_counts: dict[str, int] = {}
         for issue in storage.list():
             ns_counts[issue.namespace] = ns_counts.get(issue.namespace, 0) + 1
+
+        try:
+            from dogcat.inbox import InboxStorage
+
+            from ._helpers import find_dogcats_dir
+
+            dogcats_dir = find_dogcats_dir()
+            inbox = InboxStorage(dogcats_dir=dogcats_dir)
+            for p in inbox.list(include_tombstones=False):
+                ns_counts[p.namespace] = ns_counts.get(p.namespace, 0) + 1
+        except Exception:
+            pass
+
         return [
-            (ns, f"{count} issue(s)")
+            (ns, f"{count} item(s)")
             for ns, count in sorted(ns_counts.items())
             if ns.startswith(incomplete)
         ]

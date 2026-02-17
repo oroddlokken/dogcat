@@ -139,6 +139,55 @@ class Issue:
         return status_emojis.get(self.status, "?")
 
 
+class ProposalStatus(str, Enum):
+    """Proposal status enumeration."""
+
+    OPEN = "open"
+    CLOSED = "closed"
+    TOMBSTONE = "tombstone"
+
+
+@dataclass
+class Proposal:
+    """A cross-repo proposal stored in inbox.jsonl."""
+
+    id: str  # The hash part only (e.g., "4kzj")
+    title: str
+    namespace: str = "dc"  # The namespace/prefix (e.g., "dogcat")
+    description: str | None = None
+    proposed_by: str | None = None
+    source_repo: str | None = None
+    status: ProposalStatus = ProposalStatus.OPEN
+    created_at: datetime = field(default_factory=lambda: datetime.now().astimezone())
+    updated_at: datetime = field(default_factory=lambda: datetime.now().astimezone())
+    closed_at: datetime | None = None
+    closed_by: str | None = None
+    close_reason: str | None = None
+    resolved_issue: str | None = None  # ID of issue created from this proposal
+
+    def is_closed(self) -> bool:
+        """Check if the proposal is closed."""
+        return self.status == ProposalStatus.CLOSED
+
+    def is_tombstone(self) -> bool:
+        """Check if the proposal is a tombstone (soft deleted)."""
+        return self.status == ProposalStatus.TOMBSTONE
+
+    @property
+    def full_id(self) -> str:
+        """Get the full ID including namespace (e.g., 'dogcat-inbox-4kzj')."""
+        return f"{self.namespace}-inbox-{self.id}"
+
+    def get_status_emoji(self) -> str:
+        """Get an emoji representation of the status."""
+        status_emojis = {
+            ProposalStatus.OPEN: "●",
+            ProposalStatus.CLOSED: "✓",
+            ProposalStatus.TOMBSTONE: "☠",
+        }
+        return status_emojis.get(self.status, "?")
+
+
 def validate_priority(priority: Any) -> None:
     """Validate that priority is in valid range (0-4)."""
     if not isinstance(priority, int) or priority < 0 or priority > 4:
@@ -172,6 +221,23 @@ def validate_issue(issue: Issue) -> None:
     validate_priority(issue.priority)
     validate_status(issue.status)
     validate_issue_type(issue.issue_type)
+
+
+def validate_proposal(proposal: Proposal) -> None:
+    """Validate that a proposal has all required fields and valid data."""
+    if not proposal.title or not isinstance(
+        proposal.title,
+        str,
+    ):  # pyright: ignore[reportUnnecessaryIsInstance]
+        msg = "Proposal must have a non-empty title string"
+        raise ValueError(msg)
+
+    if not isinstance(proposal.status, ProposalStatus):  # pyright: ignore[reportUnnecessaryIsInstance]
+        msg = (
+            f"Proposal status must be a ProposalStatus enum value, "
+            f"got {proposal.status}"
+        )
+        raise TypeError(msg)
 
 
 def issue_to_dict(issue: Issue) -> dict[str, Any]:
@@ -338,14 +404,66 @@ def dict_to_issue(data: dict[str, Any]) -> Issue:
     )
 
 
+def proposal_to_dict(proposal: Proposal) -> dict[str, Any]:
+    """Convert a Proposal to a dictionary, serializing datetimes."""
+    return {
+        "record_type": "proposal",
+        "dcat_version": _dcat_version,
+        "namespace": proposal.namespace,
+        "id": proposal.id,
+        "title": proposal.title,
+        "description": proposal.description,
+        "proposed_by": proposal.proposed_by,
+        "source_repo": proposal.source_repo,
+        "status": proposal.status.value,
+        "created_at": proposal.created_at.isoformat(),
+        "updated_at": proposal.updated_at.isoformat(),
+        "closed_at": proposal.closed_at.isoformat() if proposal.closed_at else None,
+        "closed_by": proposal.closed_by,
+        "close_reason": proposal.close_reason,
+        "resolved_issue": proposal.resolved_issue,
+    }
+
+
+def dict_to_proposal(data: dict[str, Any]) -> Proposal:
+    """Convert a dictionary to a Proposal, deserializing datetimes."""
+    created_at = datetime.fromisoformat(data["created_at"])
+    updated_at = (
+        datetime.fromisoformat(data["updated_at"])
+        if data.get("updated_at")
+        else created_at
+    )
+    closed_at = (
+        datetime.fromisoformat(data["closed_at"]) if data.get("closed_at") else None
+    )
+
+    proposal = Proposal(
+        id=data["id"],
+        title=data["title"],
+        namespace=data.get("namespace", "dc"),
+        description=data.get("description"),
+        proposed_by=data.get("proposed_by"),
+        source_repo=data.get("source_repo"),
+        status=ProposalStatus(data.get("status", "open")),
+        created_at=created_at,
+        updated_at=updated_at,
+        closed_at=closed_at,
+        closed_by=data.get("closed_by"),
+        close_reason=data.get("close_reason"),
+        resolved_issue=data.get("resolved_issue"),
+    )
+    validate_proposal(proposal)
+    return proposal
+
+
 def classify_record(data: dict[str, Any]) -> str:
-    """Classify a JSONL record as 'issue', 'dependency', 'link', or 'event'.
+    """Classify a JSONL record as 'issue', 'dependency', 'link', 'event', or 'proposal'.
 
     Checks for an explicit ``record_type`` field first, then falls back to
     field-sniffing for backward compatibility with older records.
     """
     explicit = data.get("record_type")
-    if explicit in ("issue", "dependency", "link", "event"):
+    if explicit in ("issue", "dependency", "link", "event", "proposal"):
         return explicit  # type: ignore[return-value]
 
     if "from_id" in data and "to_id" in data:

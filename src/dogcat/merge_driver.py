@@ -64,6 +64,21 @@ def _issue_full_id(record: dict[str, Any]) -> str:
     return f"{ns}-{hash_id}"
 
 
+def _proposal_full_id(record: dict[str, Any]) -> str:
+    """Extract the full proposal ID from a proposal record."""
+    ns = record.get("namespace", "dc")
+    hash_id = record.get("id", "")
+    return f"{ns}-inbox-{hash_id}"
+
+
+# Proposal statuses ordered by finality (higher = more final).
+_PROPOSAL_STATUS_RANK: dict[str, int] = {
+    "open": 0,
+    "closed": 1,
+    "tombstone": 2,
+}
+
+
 def _dep_key(record: dict[str, Any]) -> tuple[str, str, str]:
     """Return unique identity tuple for a dependency record."""
     return (
@@ -167,6 +182,36 @@ def merge_jsonl(
             if new_ts >= old_ts:
                 issues[fid] = record
 
+    # --- Proposals: last-write-wins by status finality, then updated_at ---
+    # Merge strategy: higher status finality always wins (TOMBSTONE > CLOSED > OPEN).
+    # When both sides have the same status, the record with the latest updated_at
+    # (falling back to created_at for older records) wins. This ensures that
+    # deletions and closures are never reverted by concurrent edits.
+    proposals: dict[str, dict[str, Any]] = {}
+    for record in [*ours_records, *theirs_records]:
+        if classify_record(record) != "proposal":
+            continue
+        fid = _proposal_full_id(record)
+        existing = proposals.get(fid)
+        if existing is None:
+            proposals[fid] = record
+        else:
+            new_rank = _PROPOSAL_STATUS_RANK.get(
+                record.get("status", "open"),
+                0,
+            )
+            old_rank = _PROPOSAL_STATUS_RANK.get(
+                existing.get("status", "open"),
+                0,
+            )
+            if new_rank > old_rank:
+                proposals[fid] = record
+            elif new_rank == old_rank:
+                new_ts = record.get("updated_at", record.get("created_at", ""))
+                old_ts = existing.get("updated_at", existing.get("created_at", ""))
+                if new_ts >= old_ts:
+                    proposals[fid] = record
+
     # --- Events: keep all, deduplicate ---
     events: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
     for record in [*ours_records, *theirs_records]:
@@ -215,9 +260,10 @@ def merge_jsonl(
         elif in_theirs and not in_ours and not in_base:
             merged_links[key] = theirs_links[key]
 
-    # Assemble: issues first, then deps, links, events (matches compaction order)
+    # Assemble: issues, proposals, deps, links, events (matches compaction order)
     result: list[dict[str, Any]] = []
     result.extend(issues.values())
+    result.extend(proposals.values())
     result.extend(merged_deps.values())
     result.extend(merged_links.values())
     # Sort events by timestamp for consistent ordering

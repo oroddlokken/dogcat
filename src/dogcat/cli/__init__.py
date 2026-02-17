@@ -46,13 +46,16 @@ from . import (  # noqa: E402
     _cmd_example_md,
     _cmd_features,
     _cmd_history,
+    _cmd_inbox,
     _cmd_init,
     _cmd_label,
+    _cmd_propose,
     _cmd_read,
     _cmd_reopen,
     _cmd_search,
     _cmd_tui,
     _cmd_update,
+    _cmd_web,
     _cmd_workflow,
 )
 
@@ -71,13 +74,16 @@ for _mod in (
     _cmd_example_md,
     _cmd_features,
     _cmd_history,
+    _cmd_inbox,
     _cmd_init,
     _cmd_label,
+    _cmd_propose,
     _cmd_read,
     _cmd_reopen,
     _cmd_search,
     _cmd_tui,
     _cmd_update,
+    _cmd_web,
     _cmd_workflow,
 ):
     _mod.register(app)

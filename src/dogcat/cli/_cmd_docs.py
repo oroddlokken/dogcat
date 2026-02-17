@@ -851,6 +851,16 @@ NOT tasks to work on.
 
 Labels are freeform tags (e.g. "backend", "ui", "auth") that appear in
 `dcat list` and `dcat show`, and can be filtered with `--label`.
+
+## Inbox
+
+Proposals are lightweight (cross-repo) requests (accept, reject, or ignore).
+
+  dcat propose "Title" -d <details>                        - Send a proposal
+  dcat propose "Title" -d "Details" --to ~/git/other-repo  - Send to specific repo
+  dcat inbox list                                          - List open proposals
+  dcat inbox show <id>                                     - View proposal details
+  dcat inbox close <id> --reason "Done" --issue <issue_id> - Close a proposal
 """
         output_parts: list[str] = [guide]
 
@@ -867,7 +877,7 @@ Labels are freeform tags (e.g. "backend", "ui", "auth") that appear in
             )
             if git_result.returncode == 0:
                 all_passed, checks = _run_git_checks()
-                output_parts.append("## Git Integration Health\n")
+                output_parts.append("## dogcat health check\n")
                 for check in checks.values():
                     is_optional = check.get("optional", False)
                     if check["passed"]:
@@ -903,7 +913,7 @@ Labels are freeform tags (e.g. "backend", "ui", "auth") that appear in
         if tokens:
             from dogcat.utils import estimate_tokens
 
-            typer.echo(f"Estimated tokens: {estimate_tokens(full_output)}")
+            typer.echo(f"Estimated tokens: {estimate_tokens(guide)}")
 
     @app.command()
     def version() -> None:

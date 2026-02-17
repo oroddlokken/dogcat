@@ -542,3 +542,72 @@ class TestLegendHiddenCount:
         """Legend has no hidden line when count is explicitly zero."""
         output = get_legend(hidden_count=0)
         assert "hidden under deferred" not in output
+
+
+class TestBlockedStatusPrecedence:
+    """Test that advanced statuses take precedence over blocked display symbol."""
+
+    def test_in_review_not_overridden_by_blocked_brief(self) -> None:
+        """In-review issues keep their own symbol even with open dependencies."""
+        issue = Issue(
+            id="rev1",
+            namespace="dc",
+            title="Review issue",
+            status=Status.IN_REVIEW,
+        )
+        blocked_ids = {"dc-rev1"}
+        output = format_issue_brief(issue, blocked_ids=blocked_ids)
+        # Should show in_review symbol (?), not blocked symbol (■)
+        assert "?" in output
+        assert "■" not in output
+
+    def test_in_review_not_overridden_by_blocked_table(self) -> None:
+        """In-review issues keep their own symbol in table format."""
+        issue = Issue(
+            id="rev2",
+            namespace="dc",
+            title="Review issue table",
+            status=Status.IN_REVIEW,
+        )
+        blocked_ids = {"dc-rev2"}
+        output = format_issue_table([issue], blocked_ids=blocked_ids)
+        assert "?" in output
+        assert "■" not in output
+
+    def test_deferred_not_overridden_by_blocked_brief(self) -> None:
+        """Deferred issues keep their own symbol even with open dependencies."""
+        issue = Issue(
+            id="def1",
+            namespace="dc",
+            title="Deferred issue",
+            status=Status.DEFERRED,
+        )
+        blocked_ids = {"dc-def1"}
+        output = format_issue_brief(issue, blocked_ids=blocked_ids)
+        # Should show deferred symbol (◇), not blocked symbol (■)
+        assert "◇" in output
+        assert "■" not in output
+
+    def test_open_still_overridden_by_blocked_brief(self) -> None:
+        """Open issues with dependencies should still show as blocked."""
+        issue = Issue(
+            id="open1",
+            namespace="dc",
+            title="Open blocked issue",
+            status=Status.OPEN,
+        )
+        blocked_ids = {"dc-open1"}
+        output = format_issue_brief(issue, blocked_ids=blocked_ids)
+        assert "■" in output
+
+    def test_in_progress_still_overridden_by_blocked_brief(self) -> None:
+        """In-progress issues with dependencies should still show as blocked."""
+        issue = Issue(
+            id="ip1",
+            namespace="dc",
+            title="In-progress blocked issue",
+            status=Status.IN_PROGRESS,
+        )
+        blocked_ids = {"dc-ip1"}
+        output = format_issue_brief(issue, blocked_ids=blocked_ids)
+        assert "■" in output

@@ -543,7 +543,7 @@ class TestCompleteNamespaces:
         assert "dc" in values
         # Verify help text shows issue counts
         helps = dict(result)
-        assert "issue(s)" in helps["dc"]
+        assert "item(s)" in helps["dc"]
 
     def test_filters_by_prefix(
         self,

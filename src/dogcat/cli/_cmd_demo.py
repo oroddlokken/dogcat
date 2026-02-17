@@ -70,7 +70,15 @@ def register(app: typer.Typer) -> None:
             typer.echo(
                 "  - Full metadata: created_by, updated_by, closed_by, deleted_by",
             )
+
+            from dogcat.demo import generate_demo_inbox
+
+            inbox_count = generate_demo_inbox(dogcats_dir)
+            typer.echo(f"\n✓ Created {inbox_count} demo inbox proposals")
+            typer.echo("  - 3 open, 2 closed (accepted + rejected), 1 tombstoned")
+
             typer.echo("\nTry: dcat list --table")
+            typer.echo("     dcat inbox list")
 
         except typer.Exit:
             raise

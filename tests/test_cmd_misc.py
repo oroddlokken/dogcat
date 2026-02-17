@@ -106,6 +106,66 @@ class TestCLIStatus:
         assert "by_status" in data
         assert data["by_status"]["open"] == 1
 
+    def test_status_shows_inbox_counts(self, tmp_path: Path) -> None:
+        """Test that status includes inbox proposal counts."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--namespace", "test", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        # Create a proposal in the inbox
+        runner.invoke(
+            app,
+            ["propose", "Test proposal", "--to", str(tmp_path)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["status", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Inbox: 1 proposal(s)" in result.stdout
+        assert "open" in result.stdout
+
+    def test_status_json_includes_inbox(self, tmp_path: Path) -> None:
+        """Test that status JSON includes inbox counts when proposals exist."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--namespace", "test", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        runner.invoke(
+            app,
+            ["propose", "Test proposal", "--to", str(tmp_path)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["status", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["inbox_total"] == 1
+        assert data["inbox_by_status"]["open"] == 1
+
+    def test_status_no_inbox_when_empty(self, tmp_path: Path) -> None:
+        """Test that status JSON omits inbox fields when no proposals exist."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--namespace", "test", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["status", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert "inbox_total" not in data
+
 
 class TestCLIGit:
     """Test git integration guide command."""

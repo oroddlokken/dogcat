@@ -131,6 +131,13 @@ You can always run `dcat example-md` to get an example of what to put in your AG
 | `dcat tui` | Launch the interactive TUI dashboard |
 | `dcat new` | Interactive TUI for creating a new issue |
 | `dcat edit [$id]` | Interactive TUI for editing an issue |
+| **Inbox** | |
+| `dcat propose "Title"` | Submit a proposal |
+| `dcat propose "Title" --to ../other-repo` | Submit a proposal to another repo |
+| `dcat inbox list` | List incoming proposals |
+| `dcat inbox show $id` | View proposal details |
+| `dcat inbox close $id --reason "Done"` | Close a proposal |
+| `dcat inbox delete $id` | Tombstone a spam/invalid proposal |
 | **Git & maintenance** | |
 | `dcat git setup` | Install the JSONL merge driver for git |
 | `dcat history` | Show change history timeline |

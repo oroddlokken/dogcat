@@ -52,6 +52,20 @@ def _event_record(**kwargs: Any) -> dict[str, Any]:
     return defaults
 
 
+def _proposal_record(**kwargs: Any) -> dict[str, Any]:
+    """Build a minimal proposal record dict."""
+    defaults: dict[str, Any] = {
+        "record_type": "proposal",
+        "namespace": "test",
+        "id": "p1",
+        "title": "Proposal",
+        "status": "open",
+        "created_at": "2026-01-01T00:00:00+00:00",
+    }
+    defaults.update(kwargs)
+    return defaults
+
+
 def _dep_record(**kwargs: Any) -> dict[str, Any]:
     """Build a minimal dependency record dict."""
     defaults: dict[str, Any] = {
@@ -178,6 +192,82 @@ class TestMergeJSONL:
         """All empty inputs produce empty output."""
         result = merge_jsonl([], [], [])
         assert result == []
+
+    def test_non_overlapping_proposals(self) -> None:
+        """Different proposals from each side are both kept."""
+        base: list[dict[str, Any]] = []
+        ours = [_proposal_record(id="p1", title="Proposal A")]
+        theirs = [_proposal_record(id="p2", title="Proposal B")]
+
+        result = merge_jsonl(base, ours, theirs)
+        proposals = [r for r in result if r.get("record_type") == "proposal"]
+        assert len(proposals) == 2
+
+    def test_same_proposal_more_final_status_wins(self) -> None:
+        """Same proposal: closed wins over open."""
+        base: list[dict[str, Any]] = []
+        ours = [_proposal_record(id="p1", status="open")]
+        theirs = [
+            _proposal_record(
+                id="p1",
+                status="closed",
+                closed_at="2026-01-02T00:00:00+00:00",
+            ),
+        ]
+
+        result = merge_jsonl(base, ours, theirs)
+        proposals = [r for r in result if r.get("record_type") == "proposal"]
+        assert len(proposals) == 1
+        assert proposals[0]["status"] == "closed"
+
+    def test_same_proposal_tombstone_wins_over_closed(self) -> None:
+        """Same proposal: tombstone wins over closed."""
+        base: list[dict[str, Any]] = []
+        ours = [_proposal_record(id="p1", status="closed")]
+        theirs = [_proposal_record(id="p1", status="tombstone")]
+
+        result = merge_jsonl(base, ours, theirs)
+        proposals = [r for r in result if r.get("record_type") == "proposal"]
+        assert len(proposals) == 1
+        assert proposals[0]["status"] == "tombstone"
+
+    def test_same_proposal_same_status_later_created_at_wins(self) -> None:
+        """Same proposal, same status: later created_at wins."""
+        base: list[dict[str, Any]] = []
+        ours = [
+            _proposal_record(
+                id="p1",
+                title="Earlier",
+                created_at="2026-01-01T00:00:00+00:00",
+            ),
+        ]
+        theirs = [
+            _proposal_record(
+                id="p1",
+                title="Later",
+                created_at="2026-01-02T00:00:00+00:00",
+            ),
+        ]
+
+        result = merge_jsonl(base, ours, theirs)
+        proposals = [r for r in result if r.get("record_type") == "proposal"]
+        assert len(proposals) == 1
+        assert proposals[0]["title"] == "Later"
+
+    def test_proposals_not_dropped_during_merge(self) -> None:
+        """Proposals are preserved through merge (not silently dropped)."""
+        base: list[dict[str, Any]] = []
+        ours = [
+            _issue_record(id="i1", title="Issue"),
+            _proposal_record(id="p1", title="Proposal"),
+        ]
+        theirs: list[dict[str, Any]] = []
+
+        result = merge_jsonl(base, ours, theirs)
+        proposals = [r for r in result if r.get("record_type") == "proposal"]
+        issues = [r for r in result if r.get("record_type") == "issue"]
+        assert len(proposals) == 1
+        assert len(issues) == 1
 
     def test_dep_deleted_by_theirs_stays_deleted(self) -> None:
         """Dep in base and ours but removed by theirs stays deleted."""

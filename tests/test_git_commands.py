@@ -483,7 +483,7 @@ class TestPrimeGitHealth:
         result = runner.invoke(app, ["prime"], catch_exceptions=False)
         assert result.exit_code == 0
         assert "DOGCAT WORKFLOW GUIDE" in result.stdout
-        assert "Git Integration Health" in result.stdout
+        assert "dogcat health check" in result.stdout
 
     def test_prime_shows_failing_checks_with_gentle_nudge(
         self,
@@ -499,7 +499,7 @@ class TestPrimeGitHealth:
             catch_exceptions=False,
         )
         assert result.exit_code == 0
-        assert "Git Integration Health" in result.stdout
+        assert "dogcat health check" in result.stdout
         assert "Suggestion:" in result.stdout
         assert "merge driver" in result.stdout.lower()
         assert "dcat config set git_tracking false" in result.stdout
@@ -541,7 +541,7 @@ class TestPrimeGitHealth:
             catch_exceptions=False,
         )
         assert result.exit_code == 0
-        assert "Git Integration Health" not in result.stdout
+        assert "dogcat health check" not in result.stdout
 
     def test_prime_skips_git_checks_when_tracking_disabled(
         self,
@@ -560,7 +560,7 @@ class TestPrimeGitHealth:
             catch_exceptions=False,
         )
         assert result.exit_code == 0
-        assert "Git Integration Health" not in result.stdout
+        assert "dogcat health check" not in result.stdout
 
     def test_prime_opinionated_includes_extra_rules(
         self,
@@ -576,7 +576,7 @@ class TestPrimeGitHealth:
         )
         assert result.exit_code == 0
         assert "Do NOT use TodoWrite" in result.stdout
-        assert "Git Integration Health" in result.stdout
+        assert "dogcat health check" in result.stdout
 
     def test_prime_base_excludes_opinionated_rules(
         self,

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import typer
 
 from dogcat.constants import EVENT_SYMBOLS, PRIORITY_COLORS, STATUS_COLORS, TYPE_COLORS
+from dogcat.models import Status
 
 if TYPE_CHECKING:
     from dogcat.event_log import EventRecord
@@ -102,8 +103,14 @@ def format_issue_brief(
     # Dim entire line for closed issues
     is_closed = issue.closed_at is not None
 
-    # Use blocked symbol if issue has open dependencies
-    if blocked_ids and issue.full_id in blocked_ids:
+    # Use blocked symbol if issue has open dependencies, but let advanced
+    # statuses (in_review, deferred, closed) take precedence over blocked display
+    _blocked_override_exempt = {Status.IN_REVIEW, Status.DEFERRED, Status.CLOSED}
+    if (
+        blocked_ids
+        and issue.full_id in blocked_ids
+        and issue.status not in _blocked_override_exempt
+    ):
         status_emoji = "■"
         status_color = (
             "bright_black" if is_closed else STATUS_COLORS.get("blocked", "white")
@@ -441,8 +448,10 @@ def format_issue_table(
 
     def _add_issue_row(issue: Issue, *, dimmed: bool = False) -> None:
         """Add a single issue as a row to the table."""
-        # Use blocked symbol if issue has open dependencies
-        if blocked_ids and issue.full_id in blocked_ids:
+        # Use blocked symbol if issue has open dependencies, but let advanced
+        # statuses (in_review, deferred, closed) take precedence
+        _exempt = {Status.IN_REVIEW, Status.DEFERRED, Status.CLOSED}
+        if blocked_ids and issue.full_id in blocked_ids and issue.status not in _exempt:
             emoji = "■"
             status_color = STATUS_COLORS.get("blocked", "white")
         else:

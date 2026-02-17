@@ -1302,3 +1302,105 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
     )
 
     return created_ids
+
+
+def generate_demo_inbox(dogcats_dir: str) -> int:
+    """Generate sample inbox proposals for testing and exploration.
+
+    Creates a handful of proposals in varying statuses (open, closed,
+    tombstone) with realistic cross-repo ``source_repo`` values.
+
+    Args:
+        dogcats_dir: Path to .dogcats directory.
+
+    Returns:
+        Number of proposals created.
+    """
+    from dogcat.inbox import InboxStorage
+    from dogcat.models import Proposal
+
+    inbox = InboxStorage(dogcats_dir=dogcats_dir)
+    namespace = get_issue_prefix(dogcats_dir)
+    idgen = IDGenerator(
+        existing_ids=inbox.get_proposal_ids(),
+        prefix=f"{namespace}-inbox",
+    )
+
+    def _propose(title: str, **kwargs: Any) -> Proposal:
+        pid = idgen.generate_proposal_id(title, namespace=f"{namespace}-inbox")
+        proposal = Proposal(
+            id=pid,
+            title=title,
+            namespace=namespace,
+            **kwargs,
+        )
+        inbox.create(proposal)
+        return proposal
+
+    # Open proposals
+    _propose(
+        "Add webhook support for issue events",
+        description=(
+            "We'd like to receive webhooks when issues are created or "
+            "closed in your tracker. This would let us keep our dashboard "
+            "in sync without polling."
+        ),
+        proposed_by="eve@partner-corp.com",
+        source_repo="/home/eve/repos/partner-dashboard",
+    )
+
+    _propose(
+        "Support for custom fields on issues",
+        description="Would be useful to attach arbitrary key-value metadata.",
+        proposed_by="frank@example.com",
+        source_repo="/home/frank/repos/mobile-app",
+    )
+
+    _propose(
+        "Export issues to CSV format",
+        proposed_by="grace@example.com",
+        source_repo="/home/grace/repos/analytics",
+    )
+
+    # Closed proposal (accepted, linked to an issue)
+    p = _propose(
+        "Add priority filtering to list command",
+        description=(
+            "The list command should support --priority to filter by "
+            "priority level. This would make triage much faster."
+        ),
+        proposed_by="charlie@example.com",
+        source_repo="/home/charlie/repos/dogcat-contrib",
+    )
+    inbox.close(
+        p.full_id,
+        reason="Implemented in v0.9.2",
+        closed_by="alice@example.com",
+        resolved_issue=f"{namespace}-abcd",
+    )
+
+    # Closed proposal (rejected)
+    p = _propose(
+        "Switch storage format to SQLite",
+        description=(
+            "JSONL is hard to query. SQLite would be much faster for "
+            "large repositories with thousands of issues."
+        ),
+        proposed_by="henry@example.com",
+        source_repo="/home/henry/repos/enterprise-fork",
+    )
+    inbox.close(
+        p.full_id,
+        reason="By design — JSONL is git-friendly and append-only",
+        closed_by="bob@example.com",
+    )
+
+    # Tombstoned proposal (spam / duplicate)
+    p = _propose(
+        "asdf test proposal please ignore",
+        proposed_by="unknown",
+        source_repo="/tmp/test-repo",
+    )
+    inbox.delete(p.full_id)
+
+    return 6

@@ -18,7 +18,7 @@ from watchdog.events import (
 )
 from watchdog.observers import Observer
 
-from dogcat.models import issue_to_dict
+from dogcat.models import issue_to_dict, proposal_to_dict
 from dogcat.storage import JSONLStorage
 
 if TYPE_CHECKING:
@@ -33,7 +33,10 @@ _RETRY_DELAY_MS = 50  # milliseconds between retries
 class StreamEvent:
     """An event representing a change to an issue."""
 
-    event_type: str  # "created", "updated", "closed"
+    # Issue events use bare names: "created", "updated", "closed", "deleted",
+    # "reopened". Proposal events use "proposal_" prefix: "proposal_created",
+    # "proposal_updated", "proposal_closed", "proposal_deleted".
+    event_type: str
     issue_id: str
     timestamp: datetime
     by: str | None = None
@@ -292,6 +295,216 @@ class StreamEmitter(FileSystemEventHandler):
                 self.on_event(event_obj)
 
 
+class InboxStreamEmitter(FileSystemEventHandler):
+    """Watches for changes to inbox.jsonl and emits proposal events."""
+
+    def __init__(
+        self,
+        inbox_path: str,
+        by: str | None = None,
+        on_event: Callable[[StreamEvent], None] | None = None,
+    ) -> None:
+        """Initialize the inbox stream emitter.
+
+        Args:
+            inbox_path: Path to the .dogcats/inbox.jsonl file
+            by: Optional attribution name for events
+            on_event: Optional callback for each event
+        """
+        super().__init__()
+        self.inbox_path = Path(inbox_path)
+        self.by = by
+        self.on_event = on_event
+        self.current_state: dict[str, Any] = {}
+        self._file_position: int = 0
+        self._load_current_state()
+
+    def _load_current_state(self) -> None:
+        """Load the current state from the inbox JSONL file."""
+        self.current_state = {}
+        if self.inbox_path.exists():
+            try:
+                from dogcat.inbox import InboxStorage
+
+                inbox = InboxStorage(
+                    dogcats_dir=str(self.inbox_path.parent),
+                )
+                for proposal in inbox.list(include_tombstones=True):
+                    self.current_state[proposal.full_id] = proposal_to_dict(
+                        proposal,
+                    )
+                self._file_position = self.inbox_path.stat().st_size
+            except (ValueError, RuntimeError, OSError):
+                self._file_position = 0
+
+    def _compute_diff(
+        self,
+        old_state: dict[str, Any],
+        new_state: dict[str, Any],
+    ) -> list[StreamEvent]:
+        """Compute the difference between two proposal states."""
+        events: list[StreamEvent] = []
+        now = datetime.now().astimezone()
+
+        for prop_id, new_prop in new_state.items():
+            if prop_id not in old_state:
+                changes: dict[str, dict[str, Any]] = {
+                    f: {"old": None, "new": v}
+                    for f, v in new_prop.items()
+                    if v is not None
+                }
+                events.append(
+                    StreamEvent(
+                        event_type="proposal_created",
+                        issue_id=prop_id,
+                        timestamp=now,
+                        by=self.by,
+                        changes=changes,
+                    ),
+                )
+            else:
+                old_prop = old_state[prop_id]
+                changes = {}
+                for f, new_v in new_prop.items():
+                    old_v = old_prop.get(f)
+                    if old_v != new_v:
+                        changes[f] = {"old": old_v, "new": new_v}
+
+                if changes:
+                    if "status" in changes and changes["status"]["new"] == "closed":
+                        event_type = "proposal_closed"
+                    elif (
+                        "status" in changes and changes["status"]["new"] == "tombstone"
+                    ):
+                        event_type = "proposal_deleted"
+                    else:
+                        event_type = "proposal_updated"
+
+                    events.append(
+                        StreamEvent(
+                            event_type=event_type,
+                            issue_id=prop_id,
+                            timestamp=now,
+                            by=self.by,
+                            changes=changes,
+                        ),
+                    )
+
+        return events
+
+    def on_modified(self, event: DirModifiedEvent | FileModifiedEvent) -> None:
+        """Handle file modification events."""
+        if str(event.src_path).endswith("inbox.jsonl"):
+            self._handle_file_change()
+
+    def on_moved(self, event: DirMovedEvent | FileMovedEvent) -> None:
+        """Handle file move/rename events (for atomic writes)."""
+        if str(event.dest_path).endswith("inbox.jsonl"):
+            self._handle_file_change()
+
+    def _handle_file_change(self) -> None:
+        """Load new state and emit events for any changes."""
+        last_error: Exception | None = None
+
+        for attempt in range(_RETRY_ATTEMPTS):
+            try:
+                current_size = self.inbox_path.stat().st_size
+                break
+            except OSError as e:
+                last_error = e
+                if attempt < _RETRY_ATTEMPTS - 1:
+                    time.sleep(_RETRY_DELAY_MS / 1000)
+        else:
+            return
+
+        if current_size < self._file_position:
+            self._full_reload()
+            return
+
+        if current_size == self._file_position:
+            return
+
+        # Try incremental parse
+        new_state = dict(self.current_state)
+        last_error = None
+
+        for attempt in range(_RETRY_ATTEMPTS):
+            try:
+                with self.inbox_path.open("rb") as f:
+                    f.seek(self._file_position)
+                    new_bytes = f.read()
+
+                for line in new_bytes.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    data = orjson.loads(line)
+                    from dogcat.models import classify_record, dict_to_proposal
+
+                    rtype = classify_record(data)
+                    if rtype == "proposal":
+                        proposal = dict_to_proposal(data)
+                        new_state[proposal.full_id] = proposal_to_dict(
+                            proposal,
+                        )
+
+                self._file_position = current_size
+                last_error = None
+                break
+            except (
+                orjson.JSONDecodeError,
+                ValueError,
+                RuntimeError,
+                OSError,
+            ) as e:
+                last_error = e
+                if attempt < _RETRY_ATTEMPTS - 1:
+                    time.sleep(_RETRY_DELAY_MS / 1000)
+
+        if last_error is not None:
+            self._full_reload()
+            return
+
+        events = self._compute_diff(self.current_state, new_state)
+        self.current_state = new_state
+
+        for event_obj in events:
+            if self.on_event:
+                self.on_event(event_obj)
+
+    def _full_reload(self) -> None:
+        """Full reload: re-parse the entire inbox file and emit events."""
+        new_state: dict[str, Any] = {}
+        last_error: Exception | None = None
+
+        for attempt in range(_RETRY_ATTEMPTS):
+            try:
+                from dogcat.inbox import InboxStorage
+
+                inbox = InboxStorage(
+                    dogcats_dir=str(self.inbox_path.parent),
+                )
+                for proposal in inbox.list(include_tombstones=True):
+                    new_state[proposal.full_id] = proposal_to_dict(proposal)
+                self._file_position = self.inbox_path.stat().st_size
+                last_error = None
+                break
+            except (ValueError, RuntimeError, OSError) as e:
+                last_error = e
+                if attempt < _RETRY_ATTEMPTS - 1:
+                    time.sleep(_RETRY_DELAY_MS / 1000)
+
+        if last_error is not None:
+            return
+
+        events = self._compute_diff(self.current_state, new_state)
+        self.current_state = new_state
+
+        for event_obj in events:
+            if self.on_event:
+                self.on_event(event_obj)
+
+
 class StreamWatcher:
     """Watches the storage file and streams events."""
 
@@ -320,6 +533,20 @@ class StreamWatcher:
             on_event=self._handle_event,
         )
         self.observer.schedule(emitter, str(self.dogcats_dir), recursive=False)
+
+        # Also watch inbox.jsonl for proposal events
+        inbox_path = self.dogcats_dir / "inbox.jsonl"
+        inbox_emitter = InboxStreamEmitter(
+            str(inbox_path),
+            by=self.by,
+            on_event=self._handle_event,
+        )
+        self.observer.schedule(
+            inbox_emitter,
+            str(self.dogcats_dir),
+            recursive=False,
+        )
+
         self.observer.start()
 
     def stop(self) -> None:

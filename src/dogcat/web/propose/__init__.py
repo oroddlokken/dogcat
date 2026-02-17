@@ -1,0 +1,85 @@
+"""Dogcat web server for inbox proposals."""
+
+from __future__ import annotations
+
+import secrets
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from fastapi import FastAPI
+from fastapi.templating import Jinja2Templates
+
+if TYPE_CHECKING:
+    from starlette.requests import Request
+    from starlette.responses import Response
+
+TEMPLATES_DIR = Path(__file__).parent / "templates"
+
+
+def create_app(
+    dogcats_dir: str = ".dogcats",
+    namespace: str | None = None,
+) -> FastAPI:
+    """Create a FastAPI app for submitting inbox proposals.
+
+    Args:
+        dogcats_dir: Path to the .dogcats directory.
+        namespace: Override namespace (auto-detected if None).
+
+    Returns:
+        Configured FastAPI application.
+    """
+    from dogcat.config import get_issue_prefix
+    from dogcat.storage import JSONLStorage
+
+    resolved_namespace = namespace or get_issue_prefix(dogcats_dir)
+
+    # Collect all namespaces from existing issues, primary first
+    try:
+        issues_path = str(Path(dogcats_dir) / "issues.jsonl")
+        storage = JSONLStorage(issues_path)
+        ns_set = {i.namespace for i in storage.list() if not i.is_tombstone()}
+        ns_set.add(resolved_namespace)
+        namespaces = sorted(ns_set)
+        # Move primary to front
+        namespaces.remove(resolved_namespace)
+        namespaces.insert(0, resolved_namespace)
+    except Exception:
+        namespaces = [resolved_namespace]
+
+    app = FastAPI(
+        title="dogcat propose",
+        docs_url=None,
+        redoc_url=None,
+    )
+
+    app.state.dogcats_dir = dogcats_dir
+    app.state.namespace = resolved_namespace
+    app.state.namespaces = namespaces
+    app.state.csrf_token = secrets.token_urlsafe(32)
+    app.state.templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+    from starlette.middleware.base import BaseHTTPMiddleware
+
+    class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request: Request, call_next: Any) -> Response:
+            response = await call_next(request)
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            response.headers["X-Frame-Options"] = "DENY"
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'none'; "
+                "style-src 'unsafe-inline'; "
+                "script-src 'unsafe-inline'"
+            )
+            return response
+
+    app.add_middleware(SecurityHeadersMiddleware)
+
+    from dogcat.web.propose.routes import router
+
+    app.include_router(router)
+
+    return app
+
+
+__all__ = ["create_app"]

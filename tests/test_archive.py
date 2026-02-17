@@ -1,5 +1,6 @@
 """Tests for the archive command."""
 
+import json
 from pathlib import Path
 
 import orjson
@@ -676,3 +677,122 @@ class TestArchiveNamespace:
         )
         assert result.exit_code == 0
         assert "Archived 1 issue(s)" in result.stdout
+
+
+def _create_proposal(tmp_path: Path, title: str = "Test proposal") -> str:
+    """Create a proposal and return its full ID."""
+    result = runner.invoke(
+        app,
+        ["propose", title, "--to", str(tmp_path), "--json"],
+    )
+    data = json.loads(result.stdout)
+    return f"{data['namespace']}-inbox-{data['id']}"
+
+
+class TestArchiveInbox:
+    """Test archiving closed inbox proposals alongside issues."""
+
+    def test_archive_includes_closed_proposals(self, tmp_path: Path) -> None:
+        """Test that archive also archives closed inbox proposals."""
+        dogcats_dir = tmp_path / ".dogcats"
+        init_repo(dogcats_dir)
+
+        # Create and close an issue (needed to trigger archive)
+        issue_id = create_issue(dogcats_dir, "Test issue")
+        close_issue(dogcats_dir, issue_id)
+
+        # Create and close a proposal
+        prop_id = _create_proposal(tmp_path, "Proposal to archive")
+        runner.invoke(
+            app,
+            ["inbox", "close", prop_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Archived 1 inbox proposal(s)" in result.stdout
+
+        # Verify archive file was created
+        archive_dir = dogcats_dir / "archive"
+        inbox_archives = list(archive_dir.glob("inbox-closed-*.jsonl"))
+        assert len(inbox_archives) == 1
+
+    def test_archive_skips_open_proposals(self, tmp_path: Path) -> None:
+        """Test that open proposals are not archived."""
+        dogcats_dir = tmp_path / ".dogcats"
+        init_repo(dogcats_dir)
+
+        # Create and close an issue
+        issue_id = create_issue(dogcats_dir, "Test issue")
+        close_issue(dogcats_dir, issue_id)
+
+        # Create an open proposal (not closed)
+        _create_proposal(tmp_path, "Open proposal")
+
+        result = runner.invoke(
+            app,
+            ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        # Should not mention inbox archiving
+        assert "inbox proposal(s)" not in result.stdout
+
+    def test_archive_json_includes_inbox_count(self, tmp_path: Path) -> None:
+        """Test that JSON output includes inbox_archived when proposals archived."""
+        dogcats_dir = tmp_path / ".dogcats"
+        init_repo(dogcats_dir)
+
+        # Create and close an issue + proposal
+        issue_id = create_issue(dogcats_dir, "Test issue")
+        close_issue(dogcats_dir, issue_id)
+
+        prop_id = _create_proposal(tmp_path, "JSON archive test")
+        runner.invoke(
+            app,
+            ["inbox", "close", prop_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["archive", "--yes", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        # JSON output is the last line; preceding lines are the summary
+        json_line = [
+            ln for ln in result.stdout.strip().splitlines() if ln.startswith("{")
+        ][-1]
+        data = json.loads(json_line)
+        assert data["inbox_archived"] == 1
+
+    def test_archive_removes_proposals_from_inbox(self, tmp_path: Path) -> None:
+        """Test that archived proposals are removed from inbox.jsonl."""
+        dogcats_dir = tmp_path / ".dogcats"
+        init_repo(dogcats_dir)
+
+        # Create and close an issue
+        issue_id = create_issue(dogcats_dir, "Test issue")
+        close_issue(dogcats_dir, issue_id)
+
+        # Create two proposals, close one
+        _create_proposal(tmp_path, "Open proposal")
+        prop_id = _create_proposal(tmp_path, "Closed proposal")
+        runner.invoke(
+            app,
+            ["inbox", "close", prop_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        runner.invoke(
+            app,
+            ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        # Inbox list should only show the open proposal
+        result = runner.invoke(
+            app,
+            ["inbox", "list", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert "Open proposal" in result.stdout
+        assert "Closed proposal" not in result.stdout
