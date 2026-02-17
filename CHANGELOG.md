@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.9.3 (2026-02-17)
+
 ### Added
 
 - **PyPI publishing** — dogcat is now published to PyPI on each release via trusted OIDC publishing. Users can install with `pipx install dogcat`, `uv tool install dogcat`, or `pip install dogcat` (closes dogcat-d0m9)
