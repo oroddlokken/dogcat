@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- **PyPI publishing** — dogcat is now published to PyPI on each release via trusted OIDC publishing. Users can install with `pipx install dogcat`, `uv tool install dogcat`, or `pip install dogcat` (closes dogcat-d0m9)
+- **`dogcat` CLI alias** — the package now registers both `dcat` and `dogcat` as entry points, so `uvx dogcat` works out of the box
+
 ## 0.9.2 (2026-02-17)
 
 ### Added

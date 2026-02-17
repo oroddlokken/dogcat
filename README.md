@@ -33,11 +33,11 @@ This installs `dcat`/`dogcat` and handles Python and dependencies automatically 
 ### pip / pipx / uv (all platforms)
 
 ```bash
-# With pipx (recommended for CLI tools)
-pipx install dogcat
-
-# With uv
+# With uv (recommended for CLI tools)
 uv tool install dogcat
+
+# With pipx
+pipx install dogcat
 
 # With pip
 pip install dogcat
@@ -46,10 +46,6 @@ pip install dogcat
 ### From source
 
 Install `uv`, then run `./dcat.py`.
-
-### Using uvx
-
-By installing [uv](https://docs.astral.sh/uv/) and adding `alias dcat="uvx -p 3.13 --from git+https://github.com/oroddlokken/dogcat dcat"` to your `~/.zshrc` or `~/.bashrc` you can run it without installing it.
 
 ## Usage
 

@@ -16,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 dcat = "dogcat.app:main"
+dogcat = "dogcat.app:main"
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
