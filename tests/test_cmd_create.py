@@ -65,6 +65,31 @@ class TestCLICreate:
         )
         assert result.exit_code == 0
 
+    def test_create_with_namespace(self, tmp_path: Path) -> None:
+        """Test creating an issue with explicit --namespace."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "Namespaced issue",
+                "--namespace",
+                "myproj",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["title"] == "Namespaced issue"
+        assert data["namespace"] == "myproj"
+
     def test_create_json_output(self, tmp_path: Path) -> None:
         """Test create with JSON output."""
         dogcats_dir = tmp_path / ".dogcats"

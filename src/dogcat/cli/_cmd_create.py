@@ -16,6 +16,7 @@ from dogcat.models import Issue, IssueType, Status
 from ._completions import (
     complete_issue_ids,
     complete_labels,
+    complete_namespaces,
     complete_owners,
     complete_priorities,
     complete_statuses,
@@ -181,6 +182,12 @@ def register(app: typer.Typer) -> None:
             help="Original issue ID if duplicate",
             autocompletion=complete_issue_ids,
         ),
+        namespace_opt: str | None = typer.Option(
+            None,
+            "--namespace",
+            help="Create issue in a specific namespace (overrides config default)",
+            autocompletion=complete_namespaces,
+        ),
         manual: bool = typer.Option(
             False,
             "--manual",
@@ -231,8 +238,12 @@ def register(app: typer.Typer) -> None:
 
             storage = get_storage(dogcats_dir)
 
-            # Get namespace from config
-            namespace = get_issue_prefix(dogcats_dir)
+            # Use explicit --namespace if provided, otherwise fall back to config
+            namespace = (
+                namespace_opt
+                if namespace_opt is not None
+                else get_issue_prefix(dogcats_dir)
+            )
             idgen = IDGenerator(existing_ids=storage.get_issue_ids(), prefix=namespace)
 
             # Generate ID hash

@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- **Fix missing `--namespace` option on `dcat create`** — `dcat create` now supports `--namespace` to create issues in a specific namespace, matching the existing `dcat update --namespace` behavior (closes dogcat-1b55)
 - **Fix misleading `dcat doctor` PATH check message** — when dcat is available as a shell function/alias but not as a binary in PATH, the check now shows an informational note (○) instead of a confusing failure (✗) that read "dcat command is available in PATH" (closes dogcat-2fsd)
 
 ## 0.9.1 (2026-02-16)
