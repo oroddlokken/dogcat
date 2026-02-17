@@ -86,6 +86,7 @@ NEVER close issues without explicit user approval. When work is complete:
 ``````
 
 This is only a starting point - it's up to you to decide how dogcat fits best in your workflow!  
+You can always run `dcat example-md` to get an example of what to put in your AGENTS.md/CLAUDE.md file.
 
 `dcat prime` mainly concerns itself on how to use the dcat CLI, not how your workflow should be.  
 `dcat prime --opinionated` is a more opinionated version of the guide for agents, with stricter guidelines.  
