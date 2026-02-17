@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.9.2 (2026-02-17)
+
 ### Added
 
 - **`dcat example-md` command** — outputs a ready-to-use CLAUDE.md template with recommended dcat workflow instructions for AI agents (closes dogcat-45nl)
