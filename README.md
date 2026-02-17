@@ -30,6 +30,19 @@ brew install oroddlokken/tap/dogcat
 
 This installs `dcat`/`dogcat` and handles Python and dependencies automatically via `uv`.
 
+### pip / pipx / uv (all platforms)
+
+```bash
+# With pipx (recommended for CLI tools)
+pipx install dogcat
+
+# With uv
+uv tool install dogcat
+
+# With pip
+pip install dogcat
+```
+
 ### From source
 
 Install `uv`, then run `./dcat.py`.
@@ -37,10 +50,6 @@ Install `uv`, then run `./dcat.py`.
 ### Using uvx
 
 By installing [uv](https://docs.astral.sh/uv/) and adding `alias dcat="uvx -p 3.13 --from git+https://github.com/oroddlokken/dogcat dcat"` to your `~/.zshrc` or `~/.bashrc` you can run it without installing it.
-
-### Other platforms
-
-I hope to have something better in place soon that doesnt require on uv!
 
 ## Usage
 
