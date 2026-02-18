@@ -173,3 +173,15 @@ EVENT_SYMBOLS: dict[str, str] = {
     "updated": "~",
     "deleted": "\u2717",
 }
+
+# Status symbols for at-a-glance display
+STATUS_SYMBOLS: dict[str, str] = {
+    "draft": "\u270e",  # ✎
+    "open": "\u25cf",  # ●
+    "in_progress": "\u25d0",  # ◐
+    "in_review": "?",
+    "blocked": "\u25a0",  # ■
+    "deferred": "\u25c7",  # ◇
+    "closed": "\u2713",  # ✓
+    "tombstone": "\u2620",  # ☠
+}

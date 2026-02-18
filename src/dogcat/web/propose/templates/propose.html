@@ -154,7 +154,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
   <div class="msg msg--err">{{ error }}</div>
   {% endif %}
 
-  <form method="post" action="/propose" id="propose-form">
+  <form method="post" action="/" id="propose-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" id="namespace" name="namespace" value="{{ namespace }}">
     <div class="row field">

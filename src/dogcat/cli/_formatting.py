@@ -6,7 +6,13 @@ from typing import TYPE_CHECKING
 
 import typer
 
-from dogcat.constants import EVENT_SYMBOLS, PRIORITY_COLORS, STATUS_COLORS, TYPE_COLORS
+from dogcat.constants import (
+    EVENT_SYMBOLS,
+    PRIORITY_COLORS,
+    STATUS_COLORS,
+    STATUS_SYMBOLS,
+    TYPE_COLORS,
+)
 from dogcat.models import Status
 
 if TYPE_CHECKING:
@@ -584,6 +590,19 @@ def format_event(event: EventRecord, *, verbose: bool = False) -> str:
     color = symbol_colors.get(event.event_type, "white")
     styled_symbol = typer.style(symbol, fg=color, bold=True)
 
+    # Derive current status and show its symbol (skip when redundant with event symbol)
+    current_status: str | None = None
+    if "status" in event.changes:
+        current_status = event.changes["status"].get("new")
+    elif event.event_type == "created":
+        current_status = "open"
+
+    if current_status and STATUS_SYMBOLS.get(current_status, "") != symbol:
+        status_sym = STATUS_SYMBOLS.get(current_status, "")
+        status_color = STATUS_COLORS.get(current_status, "white")
+        styled_status = typer.style(status_sym, fg=status_color, bold=True)
+        styled_symbol = f"{styled_symbol} {styled_status}"
+
     # Parse and format the timestamp
     from datetime import datetime
 
@@ -641,4 +660,10 @@ def get_event_legend() -> str:
     Returns:
         Legend string
     """
-    return "\nLegend: + Created  ~ Updated  ✓ Closed  ✗ Deleted"
+    event_items = "+ Created  ~ Updated  \u2713 Closed  \u2717 Deleted"
+    status_items = "  ".join(
+        f"{sym} {name.replace('_', ' ').title()}"
+        for name, sym in STATUS_SYMBOLS.items()
+        if name != "tombstone"
+    )
+    return f"\nEvent: {event_items}\nStatus: {status_items}"

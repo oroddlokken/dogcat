@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 logger = logging.getLogger(__name__)
 
@@ -43,19 +44,28 @@ async def propose_form(request: Request) -> HTMLResponse:
     """Render the proposal submission form."""
     templates = request.app.state.templates
     namespace = request.app.state.namespace
+    submitted = request.query_params.get("submitted") == "true"
+    proposal_title = request.query_params.get("title")
     return templates.TemplateResponse(
-        request, "propose.html", _form_context(request, namespace)
+        request,
+        "propose.html",
+        _form_context(
+            request,
+            namespace,
+            submitted=submitted,
+            proposal_title=proposal_title,
+        ),
     )
 
 
-@router.post("/propose", response_class=HTMLResponse)
+@router.post("/", response_model=None)
 async def submit_proposal(
     request: Request,
     namespace: str = Form(...),
     title: str = Form(...),
     description: str = Form(""),
     csrf_token: str = Form(""),
-) -> HTMLResponse:
+) -> HTMLResponse | RedirectResponse:
     """Handle proposal form submission via InboxStorage."""
     import hmac
 
@@ -145,13 +155,5 @@ async def submit_proposal(
             _form_context(request, namespace, error="Failed to submit proposal."),
         )
 
-    return templates.TemplateResponse(
-        request,
-        "propose.html",
-        _form_context(
-            request,
-            namespace,
-            submitted=True,
-            proposal_title=title,
-        ),
-    )
+    query = urlencode({"submitted": "true", "title": title})
+    return RedirectResponse(url=f"/?{query}", status_code=303)

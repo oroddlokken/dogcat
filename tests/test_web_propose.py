@@ -120,14 +120,14 @@ class TestNamespacePopulation:
 
 
 class TestSubmitProposal:
-    """Tests for POST /propose."""
+    """Tests for POST / (proposal submission)."""
 
     def test_submit_creates_proposal(
         self, client: TestClient, web_dogcats: Path
     ) -> None:
         """Submitting creates a proposal in the inbox."""
         resp = client.post(
-            "/propose",
+            "/",
             data={
                 "csrf_token": _csrf(client),
                 "namespace": "testns",
@@ -151,7 +151,7 @@ class TestSubmitProposal:
     def test_submit_empty_title_shows_error(self, client: TestClient) -> None:
         """Submitting with an empty title shows an error."""
         resp = client.post(
-            "/propose",
+            "/",
             data={
                 "csrf_token": _csrf(client),
                 "namespace": "testns",
@@ -165,7 +165,7 @@ class TestSubmitProposal:
     def test_submit_no_description(self, client: TestClient, web_dogcats: Path) -> None:
         """Submitting without a description sets it to None."""
         client.post(
-            "/propose",
+            "/",
             data={
                 "csrf_token": _csrf(client),
                 "namespace": "testns",
@@ -181,7 +181,7 @@ class TestSubmitProposal:
     def test_submit_strips_title(self, client: TestClient, web_dogcats: Path) -> None:
         """Title whitespace is stripped."""
         client.post(
-            "/propose",
+            "/",
             data={
                 "csrf_token": _csrf(client),
                 "namespace": "testns",
@@ -199,7 +199,7 @@ class TestSubmitProposal:
         """Multiple proposals can be submitted."""
         token = _csrf(client)
         client.post(
-            "/propose",
+            "/",
             data={
                 "csrf_token": token,
                 "namespace": "testns",
@@ -208,7 +208,7 @@ class TestSubmitProposal:
             },
         )
         client.post(
-            "/propose",
+            "/",
             data={
                 "csrf_token": token,
                 "namespace": "testns",
@@ -228,7 +228,7 @@ class TestSubmitProposal:
         multi_client = TestClient(app)
         token: str = app.state.csrf_token
         multi_client.post(
-            "/propose",
+            "/",
             data={
                 "csrf_token": token,
                 "namespace": "beta",
@@ -243,7 +243,7 @@ class TestSubmitProposal:
     def test_submit_invalid_namespace(self, client: TestClient) -> None:
         """Submitting to an invalid namespace returns an error."""
         resp = client.post(
-            "/propose",
+            "/",
             data={
                 "csrf_token": _csrf(client),
                 "namespace": "bogus",
@@ -253,6 +253,29 @@ class TestSubmitProposal:
         )
         assert resp.status_code == 200
         assert "Invalid namespace" in resp.text
+
+    def test_submit_redirects_with_303(self, client: TestClient) -> None:
+        """Successful POST returns a 303 redirect (Post/Redirect/Get)."""
+        resp = client.post(
+            "/",
+            data={
+                "csrf_token": _csrf(client),
+                "namespace": "testns",
+                "title": "PRG test",
+                "description": "",
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert "submitted=true" in resp.headers["location"]
+        assert "title=PRG+test" in resp.headers["location"]
+
+    def test_get_with_submitted_shows_success(self, client: TestClient) -> None:
+        """GET /?submitted=true&title=X shows the success message."""
+        resp = client.get("/?submitted=true&title=My+proposal")
+        assert resp.status_code == 200
+        assert "Proposal submitted" in resp.text
+        assert "My proposal" in resp.text
 
 
 class TestAppFactory:

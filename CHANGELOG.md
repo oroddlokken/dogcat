@@ -9,9 +9,11 @@
 - **Inbox system** — cross-repo lightweight proposals via `dcat propose` and `dcat inbox` commands. Send proposals to other repos (`dcat propose "Title" -d "Details" --to ~/other-repo`), manage incoming proposals with `dcat inbox list/show/close/delete`. Includes archive support for closed proposals, merge driver support for `inbox.jsonl`, tab completions, demo data, and inbox counts in `dcat status`
 - **Web proposal form** — `dcat web propose` launches a FastAPI server with an HTML form for submitting proposals via browser. Includes CSRF protection, input validation, security headers, namespace selection, and input size limits
 - **FastAPI, uvicorn, jinja2 as optional `[web]` dependencies** — install with `pip install dogcat[web]`
+- **Status symbols in `dcat diff` output** — diff now shows the current status symbol (●, ◐, ?, etc.) alongside the event type symbol, giving at-a-glance status context when reviewing changes (closes dogcat-5rdf)
 
 ### Fixed
 
+- **Fix web propose refresh showing POST-only error** — moved POST endpoint to `/` and applied Post/Redirect/Get pattern so refreshing after submission no longer fails (closes dogcat-4gb7)
 - **Fix blocked status overriding advanced statuses in display** — issues with status `in_review`, `deferred`, or `closed` now display their own status symbol instead of being unconditionally shown as blocked when they have open dependencies (closes dogcat-5wd2)
 - **Fix `dcat stream` not showing events for inbox proposals** — stream now includes proposal events alongside issue events with standardized event naming (closes dogcat-5ond)
 - **Fix inbox list tombstone filtering** — deleted proposals no longer appear in `dcat inbox list` (closes dogcat-66pi)

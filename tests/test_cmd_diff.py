@@ -177,10 +177,11 @@ class TestDiff:
         assert "Closed" in result.stdout
         assert "Created then closed" in result.stdout
         # First line should be the closed symbol, not created
+        legend_prefixes = ("Legend", "Event:", "Status:")
         lines = [
             line
             for line in result.stdout.splitlines()
-            if line.strip() and "Legend" not in line
+            if line.strip() and not line.strip().startswith(legend_prefixes)
         ]
         assert lines[0].startswith("\u2713")
 
@@ -316,3 +317,78 @@ class TestDiff:
             ["diff", "--staged", "--unstaged", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 1
+
+    def test_diff_shows_status_symbol_for_new_issue(
+        self,
+        git_workspace: Path,
+    ) -> None:
+        """New issue should show open status symbol ● alongside event symbol."""
+        dogcats_dir = git_workspace / ".dogcats"
+        _create_issue(dogcats_dir, "Status symbol test")
+
+        result = runner.invoke(
+            app,
+            ["diff", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        # The open status symbol ● should appear in the output
+        assert "\u25cf" in result.stdout
+
+    def test_diff_shows_status_symbol_for_in_progress(
+        self,
+        git_workspace: Path,
+    ) -> None:
+        """Updated-to-in_progress issue should show ◐ status symbol."""
+        dogcats_dir = git_workspace / ".dogcats"
+        issue_id = _create_issue(dogcats_dir, "Progress test")
+
+        # Commit the creation
+        subprocess.run(
+            ["git", "-C", str(git_workspace), "add", ".dogcats/"],
+            check=True,
+            capture_output=True,
+            env=_GIT_TEST_ENV,
+        )
+        subprocess.run(
+            ["git", "-C", str(git_workspace), "commit", "-m", "add issue"],
+            check=True,
+            capture_output=True,
+            env=_GIT_TEST_ENV,
+        )
+
+        # Update to in_progress
+        runner.invoke(
+            app,
+            [
+                "update",
+                issue_id,
+                "--status",
+                "in_progress",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["diff", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        # The in_progress status symbol ◐ should appear in the output
+        assert "\u25d0" in result.stdout
+
+    def test_diff_legend_shows_event_and_status(
+        self,
+        git_workspace: Path,
+    ) -> None:
+        """Legend should include both event and status symbols."""
+        dogcats_dir = git_workspace / ".dogcats"
+        _create_issue(dogcats_dir, "Legend test")
+
+        result = runner.invoke(
+            app,
+            ["diff", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Event:" in result.stdout
+        assert "Status:" in result.stdout
