@@ -164,15 +164,11 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """List all namespaces used across issues with counts."""
         try:
+            from dogcat.storage import get_namespaces
+
             storage = get_storage(dogcats_dir)
             actual_dogcats_dir = str(storage.dogcats_dir)
-            issues = storage.list()
-
-            ns_counts: dict[str, int] = {}
-            for issue in issues:
-                if issue.is_tombstone():
-                    continue
-                ns_counts[issue.namespace] = ns_counts.get(issue.namespace, 0) + 1
+            ns_counts = get_namespaces(storage, dogcats_dir=actual_dogcats_dir)
 
             # Determine annotations
             primary = get_issue_prefix(actual_dogcats_dir)
@@ -193,18 +189,26 @@ def register(app: typer.Typer) -> None:
                 result = [
                     {
                         "namespace": ns,
-                        "count": count,
+                        "issues": counts.issues,
+                        "inbox": counts.inbox,
+                        "count": counts.total,
                         "visibility": _annotation(ns) or "visible",
                     }
-                    for ns, count in sorted(ns_counts.items())
+                    for ns, counts in sorted(ns_counts.items())
                 ]
                 typer.echo(orjson.dumps(result).decode())
             else:
                 if ns_counts:
-                    for ns, count in sorted(ns_counts.items()):
+                    for ns, counts in sorted(ns_counts.items()):
                         ann = _annotation(ns)
                         suffix = f" ({ann})" if ann else ""
-                        typer.echo(f"  {ns} ({count}){suffix}")
+                        parts: list[str] = []
+                        if counts.issues:
+                            parts.append(f"{counts.issues} issues")
+                        if counts.inbox:
+                            parts.append(f"{counts.inbox} inbox")
+                        detail = ", ".join(parts) if parts else "0 issues"
+                        typer.echo(f"  {ns} ({detail}){suffix}")
                 else:
                     typer.echo("No namespaces found")
 

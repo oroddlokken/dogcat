@@ -27,7 +27,7 @@ class TestNamespacesCommand:
 
         result = runner.invoke(app, ["namespaces", "--dogcats-dir", str(dogcats_dir)])
         assert result.exit_code == 0
-        assert "proj-a (1) (primary)" in result.stdout
+        assert "proj-a (1 issues) (primary)" in result.stdout
 
     def test_multiple_namespaces(self, tmp_path: Path) -> None:
         """Multiple namespaces → lists all with counts."""
@@ -36,8 +36,8 @@ class TestNamespacesCommand:
 
         result = runner.invoke(app, ["namespaces", "--dogcats-dir", str(dogcats_dir)])
         assert result.exit_code == 0
-        assert "proj-a (2) (primary)" in result.stdout
-        assert "proj-b (1)" in result.stdout
+        assert "proj-a (2 issues) (primary)" in result.stdout
+        assert "proj-b (1 issues)" in result.stdout
 
     def test_empty_issues(self, tmp_path: Path) -> None:
         """Empty issues → "No namespaces found"."""
@@ -89,7 +89,7 @@ class TestNamespacesCommand:
         )
 
         result = runner.invoke(app, ["namespaces", "--dogcats-dir", str(dogcats_dir)])
-        assert "proj-a (1)" in result.stdout
+        assert "proj-a (1 issues)" in result.stdout
 
     def test_with_visible_namespaces_annotation(self, tmp_path: Path) -> None:
         """With visible_namespaces config → annotations correct."""
@@ -98,8 +98,8 @@ class TestNamespacesCommand:
         _set_ns_config(dogcats_dir, "visible_namespaces", ["proj-a"])
 
         result = runner.invoke(app, ["namespaces", "--dogcats-dir", str(dogcats_dir)])
-        assert "proj-a (2) (primary)" in result.stdout
-        assert "proj-b (1) (hidden)" in result.stdout
+        assert "proj-a (2 issues) (primary)" in result.stdout
+        assert "proj-b (1 issues) (hidden)" in result.stdout
 
     def test_with_hidden_namespaces_annotation(self, tmp_path: Path) -> None:
         """With hidden_namespaces config → annotations correct."""
@@ -108,8 +108,66 @@ class TestNamespacesCommand:
         _set_ns_config(dogcats_dir, "hidden_namespaces", ["proj-b"])
 
         result = runner.invoke(app, ["namespaces", "--dogcats-dir", str(dogcats_dir)])
-        assert "proj-a (2) (primary)" in result.stdout
-        assert "proj-b (1) (hidden)" in result.stdout
+        assert "proj-a (2 issues) (primary)" in result.stdout
+        assert "proj-b (1 issues) (hidden)" in result.stdout
+
+    def test_includes_inbox_proposals(self, tmp_path: Path) -> None:
+        """Inbox proposals contribute to namespace counts."""
+        from dogcat.inbox import InboxStorage
+        from dogcat.models import Proposal
+
+        dogcats_dir = tmp_path / ".dogcats"
+        _init_with_namespace(dogcats_dir, "proj-a")
+        _create_issue(dogcats_dir, "Issue A1")
+
+        # Add an inbox proposal in a new namespace
+        inbox = InboxStorage(dogcats_dir=str(dogcats_dir))
+        inbox.create(Proposal(id="p1", title="Inbox P1", namespace="proj-new"))
+
+        result = runner.invoke(app, ["namespaces", "--dogcats-dir", str(dogcats_dir)])
+        assert result.exit_code == 0
+        assert "proj-a (1 issues) (primary)" in result.stdout
+        assert "proj-new (1 inbox)" in result.stdout
+
+    def test_inbox_json_includes_proposals(self, tmp_path: Path) -> None:
+        """--json output includes inbox proposal namespaces."""
+        from dogcat.inbox import InboxStorage
+        from dogcat.models import Proposal
+
+        dogcats_dir = tmp_path / ".dogcats"
+        _init_with_namespace(dogcats_dir, "proj-a")
+        _create_issue(dogcats_dir, "Issue A1")
+
+        inbox = InboxStorage(dogcats_dir=str(dogcats_dir))
+        inbox.create(Proposal(id="p1", title="Inbox P1", namespace="proj-new"))
+
+        result = runner.invoke(
+            app,
+            ["namespaces", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        ns_map = {item["namespace"]: item for item in data}
+        assert "proj-new" in ns_map
+        assert ns_map["proj-new"]["count"] == 1
+        assert ns_map["proj-new"]["inbox"] == 1
+        assert ns_map["proj-new"]["issues"] == 0
+
+    def test_inbox_same_namespace_adds_to_count(self, tmp_path: Path) -> None:
+        """Inbox proposals in an existing namespace add to the count."""
+        from dogcat.inbox import InboxStorage
+        from dogcat.models import Proposal
+
+        dogcats_dir = tmp_path / ".dogcats"
+        _init_with_namespace(dogcats_dir, "proj-a")
+        _create_issue(dogcats_dir, "Issue A1")
+
+        inbox = InboxStorage(dogcats_dir=str(dogcats_dir))
+        inbox.create(Proposal(id="p1", title="Inbox P1", namespace="proj-a"))
+
+        result = runner.invoke(app, ["namespaces", "--dogcats-dir", str(dogcats_dir)])
+        assert result.exit_code == 0
+        assert "proj-a (1 issues, 1 inbox) (primary)" in result.stdout
 
 
 class TestSearchNamespaceFilter:

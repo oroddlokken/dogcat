@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import fcntl
 import os
 import subprocess
@@ -1465,3 +1466,55 @@ class JSONLStorage:
             self._save(_reload=False, _prune_event_ids=prune_ids)
 
         return tombstone_ids
+
+
+@dataclasses.dataclass
+class NamespaceCounts:
+    """Counts for a single namespace."""
+
+    issues: int = 0
+    inbox: int = 0
+
+    @property
+    def total(self) -> int:
+        """Total items across issues and inbox."""
+        return self.issues + self.inbox
+
+
+def get_namespaces(
+    storage: JSONLStorage,
+    *,
+    dogcats_dir: str | Path | None = None,
+    include_inbox: bool = True,
+) -> dict[str, NamespaceCounts]:
+    """Get namespace counts from issues and optionally inbox proposals.
+
+    Args:
+        storage: Issue storage instance.
+        dogcats_dir: Path to .dogcats directory (needed for inbox).
+                     Defaults to storage.dogcats_dir.
+        include_inbox: Whether to include inbox proposals in counts.
+
+    Returns:
+        Dictionary mapping namespace names to counts.
+    """
+    ns_counts: dict[str, NamespaceCounts] = {}
+    for issue in storage.list():
+        if issue.is_tombstone():
+            continue
+        counts = ns_counts.setdefault(issue.namespace, NamespaceCounts())
+        counts.issues += 1
+
+    if include_inbox:
+        try:
+            from dogcat.inbox import InboxStorage
+
+            resolved_dir = str(dogcats_dir) if dogcats_dir else str(storage.dogcats_dir)
+            inbox = InboxStorage(dogcats_dir=resolved_dir)
+            for p in inbox.list(include_tombstones=False):
+                counts = ns_counts.setdefault(p.namespace, NamespaceCounts())
+                counts.inbox += 1
+        except Exception:
+            pass
+
+    return ns_counts

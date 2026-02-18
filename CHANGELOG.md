@@ -17,6 +17,7 @@
 
 ### Fixed
 
+- **`dcat namespaces` now includes inbox proposals** — namespaces from inbox proposals are visible immediately, with separate issue/inbox counts shown (e.g. `proj (3 issues, 1 inbox)`) (closes dogcat-51p3)
 - **`dcat info` now shows inbox statuses** — the info command displays available inbox statuses in both text and JSON output (closes dogcat-57w5)
 - **Add `--by` flag to `dcat inbox delete`** — all inbox mutation commands now support `--by` for attribution, matching `inbox close` behavior. Also adds `deleted_at`/`deleted_by` fields to the Proposal model (closes dogcat-4xjq)
 - **`dcat prune` now handles inbox tombstones** — prune removes tombstoned proposals from `inbox.jsonl` in addition to tombstoned issues from `issues.jsonl` (closes dogcat-5n8k)
@@ -39,6 +40,7 @@
 - **Add `generate_proposal_id()` to ID generation** — proposal IDs use their own generator instead of reusing the issue ID function (closes dogcat-ehl7)
 - **Replace type assertions with proper validation in CLI** — inbox CLI commands now use explicit validation instead of assert statements (closes dogcat-5jhs)
 - **Reduce coupling of archive to InboxStorage.path** — archive module uses a cleaner interface for inbox storage access (closes dogcat-ue1e)
+- **Extract shared `get_namespaces()` utility** — namespace collection logic consolidated into `storage.get_namespaces()`, used by CLI, web propose, and tab completions (closes dogcat-21lr)
 
 ### Security
 

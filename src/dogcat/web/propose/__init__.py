@@ -34,17 +34,19 @@ def create_app(
         Configured FastAPI application.
     """
     from dogcat.config import get_issue_prefix
-    from dogcat.storage import JSONLStorage
+    from dogcat.storage import JSONLStorage, get_namespaces
 
     resolved_namespace = namespace or get_issue_prefix(dogcats_dir)
 
-    # Collect all namespaces from existing issues, primary first
+    # Collect all namespaces from existing issues and inbox, primary first
     try:
         issues_path = str(Path(dogcats_dir) / "issues.jsonl")
         storage = JSONLStorage(issues_path)
-        ns_set = {i.namespace for i in storage.list() if not i.is_tombstone()}
-        ns_set.add(resolved_namespace)
-        namespaces = sorted(ns_set)
+        from dogcat.storage import NamespaceCounts
+
+        ns_counts = get_namespaces(storage, dogcats_dir=dogcats_dir)
+        ns_counts.setdefault(resolved_namespace, NamespaceCounts())
+        namespaces = sorted(ns_counts)
         # Move primary to front
         namespaces.remove(resolved_namespace)
         namespaces.insert(0, resolved_namespace)

@@ -1498,3 +1498,91 @@ class TestChangeNamespace:
 
         # Events should reference the new namespace
         assert "newns-ev1" in event_issue_ids
+
+
+class TestGetNamespaces:
+    """Test the get_namespaces() utility function."""
+
+    def test_counts_issues_by_namespace(self, temp_dogcats_dir: Path) -> None:
+        """Counts issues grouped by namespace."""
+        from dogcat.storage import NamespaceCounts, get_namespaces
+
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+        storage.create(Issue(id="a1", title="A1", namespace="ns-a"))
+        storage.create(Issue(id="a2", title="A2", namespace="ns-a"))
+        storage.create(Issue(id="b1", title="B1", namespace="ns-b"))
+
+        result = get_namespaces(storage, include_inbox=False)
+        assert result == {
+            "ns-a": NamespaceCounts(issues=2),
+            "ns-b": NamespaceCounts(issues=1),
+        }
+
+    def test_excludes_tombstones(self, temp_dogcats_dir: Path) -> None:
+        """Tombstoned issues are excluded from counts."""
+        from dogcat.storage import NamespaceCounts, get_namespaces
+
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+        storage.create(Issue(id="a1", title="A1", namespace="ns-a"))
+        storage.create(Issue(id="a2", title="A2", namespace="ns-a"))
+        storage.delete("ns-a-a1")
+
+        result = get_namespaces(storage, include_inbox=False)
+        assert result == {"ns-a": NamespaceCounts(issues=1)}
+
+    def test_includes_inbox_proposals(self, temp_dogcats_dir: Path) -> None:
+        """Inbox proposals are included when include_inbox=True."""
+        from dogcat.inbox import InboxStorage
+        from dogcat.models import Proposal
+        from dogcat.storage import NamespaceCounts, get_namespaces
+
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+        storage.create(Issue(id="a1", title="A1", namespace="ns-a"))
+
+        inbox = InboxStorage(dogcats_dir=str(temp_dogcats_dir))
+        inbox.create(Proposal(id="p1", title="P1", namespace="ns-new"))
+
+        result = get_namespaces(storage, dogcats_dir=str(temp_dogcats_dir))
+        assert result["ns-a"] == NamespaceCounts(issues=1)
+        assert result["ns-new"] == NamespaceCounts(inbox=1)
+
+    def test_inbox_counts_separate_from_issues(self, temp_dogcats_dir: Path) -> None:
+        """Inbox proposals in same namespace tracked separately."""
+        from dogcat.inbox import InboxStorage
+        from dogcat.models import Proposal
+        from dogcat.storage import NamespaceCounts, get_namespaces
+
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+        storage.create(Issue(id="a1", title="A1", namespace="ns-a"))
+
+        inbox = InboxStorage(dogcats_dir=str(temp_dogcats_dir))
+        inbox.create(Proposal(id="p1", title="P1", namespace="ns-a"))
+
+        result = get_namespaces(storage, dogcats_dir=str(temp_dogcats_dir))
+        assert result == {"ns-a": NamespaceCounts(issues=1, inbox=1)}
+        assert result["ns-a"].total == 2
+
+    def test_no_inbox_file_is_safe(self, temp_dogcats_dir: Path) -> None:
+        """Missing inbox.jsonl does not cause errors."""
+        from dogcat.storage import NamespaceCounts, get_namespaces
+
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+        storage.create(Issue(id="a1", title="A1", namespace="ns-a"))
+
+        result = get_namespaces(storage)
+        assert result == {"ns-a": NamespaceCounts(issues=1)}
+
+    def test_empty_storage(self, temp_dogcats_dir: Path) -> None:
+        """Empty storage returns empty dict."""
+        from dogcat.storage import get_namespaces
+
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+
+        result = get_namespaces(storage, include_inbox=False)
+        assert result == {}

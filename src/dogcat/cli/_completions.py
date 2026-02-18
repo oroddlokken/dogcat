@@ -193,26 +193,14 @@ def complete_namespaces(
 ) -> list[tuple[str, str]]:
     """Complete namespace values from existing issues and proposals."""
     try:
+        from dogcat.storage import get_namespaces
+
         storage = get_storage()
-        ns_counts: dict[str, int] = {}
-        for issue in storage.list():
-            ns_counts[issue.namespace] = ns_counts.get(issue.namespace, 0) + 1
-
-        try:
-            from dogcat.inbox import InboxStorage
-
-            from ._helpers import find_dogcats_dir
-
-            dogcats_dir = find_dogcats_dir()
-            inbox = InboxStorage(dogcats_dir=dogcats_dir)
-            for p in inbox.list(include_tombstones=False):
-                ns_counts[p.namespace] = ns_counts.get(p.namespace, 0) + 1
-        except Exception:
-            pass
+        ns_counts = get_namespaces(storage)
 
         return [
-            (ns, f"{count} item(s)")
-            for ns, count in sorted(ns_counts.items())
+            (ns, f"{counts.total} item(s)")
+            for ns, counts in sorted(ns_counts.items())
             if ns.startswith(incomplete)
         ]
     except Exception:
