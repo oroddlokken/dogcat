@@ -321,6 +321,30 @@ class TestInboxDelete:
         )
         assert result.exit_code == 1
 
+    def test_delete_with_by(self, tmp_path: Path) -> None:
+        """Test deleting with --by attribution."""
+        dogcats_dir = _init(tmp_path)
+        full_id = _create_proposal(tmp_path, "Delete with by")
+
+        result = runner.invoke(
+            app,
+            [
+                "inbox",
+                "delete",
+                full_id,
+                "--by",
+                "admin@example.com",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["status"] == "tombstone"
+        assert data["deleted_by"] == "admin@example.com"
+        assert data["deleted_at"] is not None
+
     def test_deleted_proposal_hidden_from_list(self, tmp_path: Path) -> None:
         """Test that deleted proposals are hidden from default list."""
         dogcats_dir = _init(tmp_path)

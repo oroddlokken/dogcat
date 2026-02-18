@@ -164,6 +164,8 @@ class Proposal:
     closed_by: str | None = None
     close_reason: str | None = None
     resolved_issue: str | None = None  # ID of issue created from this proposal
+    deleted_at: datetime | None = None
+    deleted_by: str | None = None
 
     def is_closed(self) -> bool:
         """Check if the proposal is closed."""
@@ -422,6 +424,8 @@ def proposal_to_dict(proposal: Proposal) -> dict[str, Any]:
         "closed_by": proposal.closed_by,
         "close_reason": proposal.close_reason,
         "resolved_issue": proposal.resolved_issue,
+        "deleted_at": proposal.deleted_at.isoformat() if proposal.deleted_at else None,
+        "deleted_by": proposal.deleted_by,
     }
 
 
@@ -435,6 +439,9 @@ def dict_to_proposal(data: dict[str, Any]) -> Proposal:
     )
     closed_at = (
         datetime.fromisoformat(data["closed_at"]) if data.get("closed_at") else None
+    )
+    deleted_at = (
+        datetime.fromisoformat(data["deleted_at"]) if data.get("deleted_at") else None
     )
 
     proposal = Proposal(
@@ -451,6 +458,8 @@ def dict_to_proposal(data: dict[str, Any]) -> Proposal:
         closed_by=data.get("closed_by"),
         close_reason=data.get("close_reason"),
         resolved_issue=data.get("resolved_issue"),
+        deleted_at=deleted_at,
+        deleted_by=data.get("deleted_by"),
     )
     validate_proposal(proposal)
     return proposal

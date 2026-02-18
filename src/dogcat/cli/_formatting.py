@@ -624,9 +624,8 @@ def format_event(event: EventRecord, *, verbose: bool = False) -> str:
 
     header = f"{styled_symbol} {ts_styled}  {issue_styled}"
 
-    # Long-form fields: show "changed" (red) instead of full content unless verbose
+    # Long-form fields: show summary instead of full content unless verbose
     _long_fields = {"description", "notes", "acceptance", "design"}
-    _changed = typer.style("changed", fg="red")
 
     # Format field changes on the next line
     change_parts: list[str] = []
@@ -638,11 +637,19 @@ def format_event(event: EventRecord, *, verbose: bool = False) -> str:
             continue  # Already shown in header
         old = change.get("old")
         new = change.get("new")
-        if not verbose and field_name in _long_fields:
-            old = _changed if old is not None else None
-            new = _changed if new is not None else None
         field_styled = typer.style(field_name, fg="cyan")
-        if old is None:
+        if not verbose and field_name in _long_fields:
+            if old is not None and new is not None:
+                # Both exist: show "(edited)" instead of "changed -> changed"
+                edited = typer.style("(edited)", fg="yellow")
+                change_parts.append(f"{field_styled}: {edited}")
+            elif new is not None:
+                added = typer.style("(added)", fg="green")
+                change_parts.append(f"{field_styled}: {added}")
+            else:
+                removed = typer.style("(removed)", fg="red")
+                change_parts.append(f"{field_styled}: {removed}")
+        elif old is None:
             change_parts.append(f"{field_styled}: {new}")
         else:
             change_parts.append(f"{field_styled}: {old} -> {new}")

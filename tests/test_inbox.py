@@ -438,6 +438,19 @@ class TestInboxStorage:
         result = s.delete("test-inbox-4kzj")
         assert result.status == ProposalStatus.TOMBSTONE
 
+    def test_delete_with_attribution(self, storage: object) -> None:
+        """Test soft-deleting a proposal tracks deleted_by."""
+        from dogcat.inbox import InboxStorage
+
+        s = storage
+        assert isinstance(s, InboxStorage)
+        s.create(Proposal(id="4kzj", title="Test", namespace="test"))
+
+        result = s.delete("test-inbox-4kzj", deleted_by="admin@example.com")
+        assert result.status == ProposalStatus.TOMBSTONE
+        assert result.deleted_by == "admin@example.com"
+        assert result.deleted_at is not None
+
     def test_delete_nonexistent_raises(self, storage: object) -> None:
         """Test that deleting a nonexistent proposal raises ValueError."""
         from dogcat.inbox import InboxStorage
@@ -446,6 +459,50 @@ class TestInboxStorage:
         assert isinstance(s, InboxStorage)
         with pytest.raises(ValueError, match="not found"):
             s.delete("nonexistent")
+
+    def test_prune_tombstones(self, storage: object) -> None:
+        """Test that prune_tombstones removes tombstoned proposals."""
+        from dogcat.inbox import InboxStorage
+
+        s = storage
+        assert isinstance(s, InboxStorage)
+        s.create(Proposal(id="aaa1", title="Active", namespace="test"))
+        s.create(Proposal(id="bbb2", title="To delete", namespace="test"))
+        s.delete("test-inbox-bbb2")
+
+        pruned = s.prune_tombstones()
+        assert len(pruned) == 1
+        assert "test-inbox-bbb2" in pruned
+
+        # Verify the proposal is gone
+        assert s.get("test-inbox-bbb2") is None
+        assert s.get("test-inbox-aaa1") is not None
+
+    def test_prune_tombstones_persists(self, inbox_dir: str) -> None:
+        """Test that prune_tombstones changes persist across reloads."""
+        from dogcat.inbox import InboxStorage
+
+        s = InboxStorage(dogcats_dir=inbox_dir)
+        s.create(Proposal(id="aaa1", title="Active", namespace="test"))
+        s.create(Proposal(id="bbb2", title="To delete", namespace="test"))
+        s.delete("test-inbox-bbb2")
+        s.prune_tombstones()
+
+        # Reload from disk
+        s2 = InboxStorage(dogcats_dir=inbox_dir)
+        assert s2.get("test-inbox-bbb2") is None
+        assert s2.get("test-inbox-aaa1") is not None
+
+    def test_prune_no_tombstones(self, storage: object) -> None:
+        """Test that prune_tombstones with no tombstones is a no-op."""
+        from dogcat.inbox import InboxStorage
+
+        s = storage
+        assert isinstance(s, InboxStorage)
+        s.create(Proposal(id="aaa1", title="Active", namespace="test"))
+
+        pruned = s.prune_tombstones()
+        assert pruned == []
 
     def test_count(self, storage: object) -> None:
         """Test counting proposals with optional status filter."""

@@ -37,45 +37,96 @@ def register(app: typer.Typer) -> None:
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
-        """Remove tombstoned (deleted) issues from storage permanently.
+        """Remove tombstoned (deleted) issues and proposals from storage permanently.
 
-        This command permanently removes issues with tombstone status from the
-        storage file. Use --dry-run to preview what would be removed.
+        This command permanently removes issues and inbox proposals with
+        tombstone status from their storage files. Use --dry-run to preview
+        what would be removed.
         """
         try:
+            from dogcat.inbox import InboxStorage
+
             storage = get_storage(dogcats_dir)
             issues = storage.list()
 
             # Find tombstoned issues
             tombstones = [i for i in issues if i.status.value == "tombstone"]
 
-            if not tombstones:
+            # Find tombstoned inbox proposals
+            inbox_tombstones = []
+            try:
+                inbox = InboxStorage(dogcats_dir=str(storage.dogcats_dir))
+                inbox_tombstones = [
+                    p for p in inbox.list(include_tombstones=True) if p.is_tombstone()
+                ]
+            except (ValueError, RuntimeError):
+                inbox = None
+
+            if not tombstones and not inbox_tombstones:
                 if is_json_output(json_output):
-                    typer.echo(orjson.dumps({"pruned": 0, "ids": []}).decode())
+                    typer.echo(
+                        orjson.dumps(
+                            {
+                                "pruned": 0,
+                                "ids": [],
+                                "inbox_pruned": 0,
+                                "inbox_ids": [],
+                            },
+                        ).decode(),
+                    )
                 else:
-                    typer.echo("No tombstoned issues to prune")
+                    typer.echo("No tombstoned issues or proposals to prune")
                 return
 
             if dry_run:
                 if is_json_output(json_output):
-                    output = {
+                    output: dict[str, Any] = {
                         "dry_run": True,
                         "count": len(tombstones),
                         "ids": [i.full_id for i in tombstones],
+                        "inbox_count": len(inbox_tombstones),
+                        "inbox_ids": [p.full_id for p in inbox_tombstones],
                     }
                     typer.echo(orjson.dumps(output).decode())
                 else:
-                    typer.echo(f"Would remove {len(tombstones)} tombstoned issue(s):")
-                    for issue in tombstones:
-                        typer.echo(f"  ☠ {issue.full_id}: {issue.title}")
+                    if tombstones:
+                        typer.echo(
+                            f"Would remove {len(tombstones)} tombstoned issue(s):"
+                        )
+                        for issue in tombstones:
+                            typer.echo(f"  ☠ {issue.full_id}: {issue.title}")
+                    if inbox_tombstones:
+                        n = len(inbox_tombstones)
+                        typer.echo(
+                            f"Would remove {n} tombstoned proposal(s):",
+                        )
+                        for proposal in inbox_tombstones:
+                            typer.echo(f"  ☠ {proposal.full_id}: {proposal.title}")
+                    if not tombstones and not inbox_tombstones:
+                        typer.echo("Nothing to prune")
             else:
                 # Remove tombstones from storage using public API
-                pruned_ids = storage.prune_tombstones()
+                pruned_ids = storage.prune_tombstones() if tombstones else []
+                inbox_pruned_ids = (
+                    inbox.prune_tombstones()
+                    if inbox is not None and inbox_tombstones
+                    else []
+                )
                 if is_json_output(json_output):
-                    output = {"pruned": len(pruned_ids), "ids": list(pruned_ids)}
+                    output = {
+                        "pruned": len(pruned_ids),
+                        "ids": list(pruned_ids),
+                        "inbox_pruned": len(inbox_pruned_ids),
+                        "inbox_ids": list(inbox_pruned_ids),
+                    }
                     typer.echo(orjson.dumps(output).decode())
                 else:
-                    typer.echo(f"✓ Pruned {len(pruned_ids)} tombstoned issue(s)")
+                    if pruned_ids:
+                        typer.echo(f"✓ Pruned {len(pruned_ids)} tombstoned issue(s)")
+                    if inbox_pruned_ids:
+                        typer.echo(
+                            f"✓ Pruned {len(inbox_pruned_ids)} tombstoned proposal(s)",
+                        )
 
         except typer.Exit:
             raise

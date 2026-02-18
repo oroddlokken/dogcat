@@ -13,6 +13,9 @@
 
 ### Fixed
 
+- **Add `--by` flag to `dcat inbox delete`** — all inbox mutation commands now support `--by` for attribution, matching `inbox close` behavior. Also adds `deleted_at`/`deleted_by` fields to the Proposal model (closes dogcat-4xjq)
+- **`dcat prune` now handles inbox tombstones** — prune removes tombstoned proposals from `inbox.jsonl` in addition to tombstoned issues from `issues.jsonl` (closes dogcat-5n8k)
+- **Fix redundant 'changed -> changed' in diff output for long-form fields** — when description, notes, acceptance, or design fields are edited, diff now shows `(edited)`, `(added)`, or `(removed)` instead of the confusing `changed -> changed` (closes dogcat-2595)
 - **`dcat diff` now shows inbox.jsonl changes** — proposals (new, updated, closed, deleted) are included alongside issue changes in diff output, including `--staged`, `--unstaged`, and `--json` modes (closes dogcat-15zr)
 - **`dcat doctor` now validates inbox.jsonl** — when inbox.jsonl exists, doctor checks JSON validity and validates proposal records for required fields, valid statuses, and well-formed timestamps (closes dogcat-1fek)
 - **Fix web propose refresh showing POST-only error** — moved POST endpoint to `/` and applied Post/Redirect/Get pattern so refreshing after submission no longer fails (closes dogcat-4gb7)

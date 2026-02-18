@@ -1,12 +1,14 @@
 """Tests for display and formatting functions."""
 
 from dogcat.cli._formatting import (
+    format_event,
     format_issue_brief,
     format_issue_full,
     format_issue_table,
     format_issue_tree,
     get_legend,
 )
+from dogcat.event_log import EventRecord
 from dogcat.models import Issue, Status
 
 
@@ -611,3 +613,53 @@ class TestBlockedStatusPrecedence:
         blocked_ids = {"dc-ip1"}
         output = format_issue_brief(issue, blocked_ids=blocked_ids)
         assert "■" in output
+
+
+class TestFormatEventLongFormFields:
+    """Test that format_event shows sensible labels for long-form field changes."""
+
+    def _make_event(self, changes: dict[str, dict[str, str | None]]) -> EventRecord:
+        return EventRecord(
+            event_type="updated",
+            issue_id="dc-abc1",
+            timestamp="2026-02-18T12:00:00",
+            title="Test issue",
+            changes=changes,
+        )
+
+    def test_edited_when_both_old_and_new(self) -> None:
+        """Shows '(edited)' when a long-form field has both old and new values."""
+        for field in ("description", "notes", "acceptance", "design"):
+            event = self._make_event({field: {"old": "old text", "new": "new text"}})
+            output = format_event(event)
+            assert "(edited)" in output
+            assert "changed" not in output
+
+    def test_added_when_only_new(self) -> None:
+        """Shows '(added)' when a long-form field is newly set."""
+        event = self._make_event({"description": {"old": None, "new": "new text"}})
+        output = format_event(event)
+        assert "(added)" in output
+
+    def test_removed_when_only_old(self) -> None:
+        """Shows '(removed)' when a long-form field is cleared."""
+        event = self._make_event({"description": {"old": "old text", "new": None}})
+        output = format_event(event)
+        assert "(removed)" in output
+
+    def test_verbose_shows_full_content(self) -> None:
+        """Verbose mode shows the actual field content, not labels."""
+        event = self._make_event(
+            {"description": {"old": "old text", "new": "new text"}}
+        )
+        output = format_event(event, verbose=True)
+        assert "old text" in output
+        assert "new text" in output
+        assert "(edited)" not in output
+
+    def test_non_long_field_unchanged(self) -> None:
+        """Non-long-form fields still show old -> new normally."""
+        event = self._make_event({"status": {"old": "open", "new": "in_progress"}})
+        output = format_event(event)
+        assert "open" in output
+        assert "in_progress" in output

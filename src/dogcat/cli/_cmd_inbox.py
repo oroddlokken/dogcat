@@ -294,6 +294,11 @@ def register(app: typer.Typer) -> None:
             help="Proposal ID to delete",
             autocompletion=complete_proposal_ids,
         ),
+        by: str | None = typer.Option(
+            None,
+            "--by",
+            help="Who is deleting this",
+        ),
         json_output: bool = typer.Option(
             False,
             "--json",
@@ -308,6 +313,7 @@ def register(app: typer.Typer) -> None:
         from dogcat.models import proposal_to_dict
 
         is_json_output(json_output)
+        deleted_by = by if by is not None else get_default_operator()
 
         try:
             inbox = _get_inbox(dogcats_dir)
@@ -317,7 +323,7 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(1) from None
 
         try:
-            proposal = inbox.delete(proposal_id)
+            proposal = inbox.delete(proposal_id, deleted_by=deleted_by)
         except ValueError as e:
             echo_error(str(e))
             raise typer.Exit(1) from None

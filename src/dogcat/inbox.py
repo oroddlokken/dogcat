@@ -310,11 +310,14 @@ class InboxStorage:
     def delete(
         self,
         proposal_id: str,
+        *,
+        deleted_by: str | None = None,
     ) -> Proposal:
         """Soft delete a proposal (create tombstone).
 
         Args:
             proposal_id: The ID of the proposal to delete.
+            deleted_by: Optional operator who deleted the proposal.
 
         Returns:
             The tombstoned proposal.
@@ -329,9 +332,33 @@ class InboxStorage:
 
         proposal = self._proposals[resolved_id]
         proposal.status = ProposalStatus.TOMBSTONE
-        proposal.updated_at = datetime.now().astimezone()
+        now = datetime.now().astimezone()
+        proposal.deleted_at = now
+        proposal.updated_at = now
+        if deleted_by:
+            proposal.deleted_by = deleted_by
         self._append([self._proposal_record(proposal)])
         return proposal
+
+    def prune_tombstones(self) -> list[str]:
+        """Permanently remove tombstoned proposals from storage.
+
+        Returns:
+            List of pruned proposal IDs.
+        """
+        tombstone_ids = [
+            pid
+            for pid, proposal in self._proposals.items()
+            if proposal.status == ProposalStatus.TOMBSTONE
+        ]
+
+        for pid in tombstone_ids:
+            del self._proposals[pid]
+
+        if tombstone_ids:
+            self._save()
+
+        return tombstone_ids
 
     def count(self, *, status: ProposalStatus | None = None) -> int:
         """Count proposals, optionally filtered by status.

@@ -1132,6 +1132,65 @@ class TestPruneDryRun:
         data = json.loads(result.stdout)
         assert data["pruned"] == 0
 
+    def test_prune_inbox_tombstones(self, tmp_path: Path) -> None:
+        """Test prune removes tombstoned inbox proposals."""
+        dogcats_dir, _ = _init_and_create(tmp_path, "Keep me")
+
+        # Create and delete a proposal
+        propose_result = runner.invoke(
+            app,
+            ["propose", "Prune me", "--to", str(tmp_path), "--json"],
+        )
+        proposal_data = json.loads(propose_result.stdout)
+        proposal_id = f"{proposal_data['namespace']}-inbox-{proposal_data['id']}"
+        runner.invoke(
+            app,
+            ["inbox", "delete", proposal_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["prune", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["inbox_pruned"] == 1
+        assert proposal_id in data["inbox_ids"]
+
+    def test_prune_inbox_tombstones_dry_run(self, tmp_path: Path) -> None:
+        """Test prune --dry-run shows tombstoned proposals."""
+        dogcats_dir, _ = _init_and_create(tmp_path, "Keep me")
+
+        propose_result = runner.invoke(
+            app,
+            ["propose", "Dry run prune", "--to", str(tmp_path), "--json"],
+        )
+        proposal_data = json.loads(propose_result.stdout)
+        proposal_id = f"{proposal_data['namespace']}-inbox-{proposal_data['id']}"
+        runner.invoke(
+            app,
+            ["inbox", "delete", proposal_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["prune", "--dry-run", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Would remove 1 tombstoned proposal(s)" in result.stdout
+        assert "Dry run prune" in result.stdout
+
+    def test_prune_no_tombstones_message(self, tmp_path: Path) -> None:
+        """Test prune with no tombstones at all shows combined message."""
+        dogcats_dir, _ = _init_and_create(tmp_path, "Alive")
+
+        result = runner.invoke(
+            app,
+            ["prune", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "No tombstoned issues or proposals to prune" in result.stdout
+
 
 class TestShowDescription:
     """Test show displays description."""
