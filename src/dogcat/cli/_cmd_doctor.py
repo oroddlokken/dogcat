@@ -19,7 +19,7 @@ from dogcat.config import (
 
 from ._helpers import find_dogcats_dir, get_storage
 from ._json_state import is_json_output
-from ._validate import detect_concurrent_edits, validate_jsonl
+from ._validate import detect_concurrent_edits, validate_inbox_jsonl, validate_jsonl
 
 
 def register(app: typer.Typer) -> None:
@@ -83,6 +83,29 @@ def register(app: typer.Typer) -> None:
         }
         if not checks["issues_jsonl"]["passed"]:
             all_passed = False
+
+        # Check 2-inbox: inbox.jsonl is valid JSON (if it exists)
+        inbox_file = dogcats_path / "inbox.jsonl"
+        inbox_valid = False
+        inbox_exists = inbox_file.exists()
+        if inbox_exists:
+            try:
+                with inbox_file.open() as f:
+                    for line in f:
+                        if line.strip():
+                            orjson.loads(line)
+                inbox_valid = True
+            except (OSError, orjson.JSONDecodeError):
+                pass
+
+        if inbox_exists:
+            checks["inbox_jsonl"] = {
+                "description": f"{dogcats_dir}/inbox.jsonl is valid JSON",
+                "passed": inbox_valid,
+                "fix": "Review and fix malformed lines in inbox.jsonl",
+            }
+            if not inbox_valid:
+                all_passed = False
 
         # Check 2a: config.toml exists
         config_path = get_config_path(dogcats_dir)
@@ -204,6 +227,30 @@ def register(app: typer.Typer) -> None:
         if not data_valid:
             all_passed = False
 
+        # Check 3b: Inbox data integrity
+        inbox_data_valid = True
+        inbox_error_count = 0
+        inbox_validation_details: list[dict[str, str]] = []
+        if inbox_exists and inbox_valid:
+            inbox_validation_details = validate_inbox_jsonl(inbox_file)
+            inbox_error_count = sum(
+                1 for e in inbox_validation_details if e["level"] == "error"
+            )
+            if inbox_error_count > 0:
+                inbox_data_valid = False
+
+        if inbox_exists:
+            checks["inbox_data_integrity"] = {
+                "description": "Inbox data integrity (proposal fields)",
+                "fail_description": (
+                    f"Inbox data integrity: {inbox_error_count} error(s) found"
+                ),
+                "passed": inbox_data_valid,
+                "fix": "Review errors above and fix inbox.jsonl",
+            }
+            if not inbox_data_valid:
+                all_passed = False
+
         # Check 4: dcat in PATH
         dogcat_in_path = bool(shutil.which("dcat"))
         if dogcat_in_path:
@@ -315,8 +362,9 @@ def register(app: typer.Typer) -> None:
                     for name, check in checks.items()
                 },
             }
-            if validation_details:
-                output_data["validation_details"] = validation_details
+            all_validation = validation_details + inbox_validation_details
+            if all_validation:
+                output_data["validation_details"] = all_validation
             if merge_warnings:
                 output_data["concurrent_edits"] = merge_warnings
             typer.echo(
@@ -324,8 +372,9 @@ def register(app: typer.Typer) -> None:
             )
         else:
             # Print validation detail errors first
-            if validation_details:
-                for entry in validation_details:
+            all_validation = validation_details + inbox_validation_details
+            if all_validation:
+                for entry in all_validation:
                     lvl = entry["level"].upper()
                     typer.echo(f"  [{lvl}] {entry['message']}")
                 typer.echo()

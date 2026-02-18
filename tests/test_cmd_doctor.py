@@ -232,3 +232,159 @@ class TestDoctorNamespaceConfig:
         )
         data = json.loads(result.stdout)
         assert data["checks"]["namespace_config_mutual"]["passed"] is True
+
+
+class TestDoctorInbox:
+    """Test doctor inbox.jsonl validation."""
+
+    def test_doctor_no_inbox_no_check(self, tmp_path: Path) -> None:
+        """Doctor skips inbox checks when inbox.jsonl doesn't exist."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["doctor", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert "inbox_jsonl" not in data["checks"]
+        assert "inbox_data_integrity" not in data["checks"]
+
+    def test_doctor_valid_inbox(self, tmp_path: Path) -> None:
+        """Doctor passes when inbox.jsonl is valid."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # Create a valid proposal
+        runner.invoke(
+            app,
+            ["propose", "Test proposal", "--to", str(tmp_path), "--json"],
+        )
+
+        result = runner.invoke(
+            app,
+            ["doctor", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert "inbox.jsonl is valid JSON" in result.stdout
+        assert "Inbox data integrity" in result.stdout
+
+    def test_doctor_valid_inbox_json(self, tmp_path: Path) -> None:
+        """Doctor JSON output includes inbox checks when inbox exists."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        runner.invoke(
+            app,
+            ["propose", "Test proposal", "--to", str(tmp_path), "--json"],
+        )
+
+        result = runner.invoke(
+            app,
+            ["doctor", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["checks"]["inbox_jsonl"]["passed"] is True
+        assert data["checks"]["inbox_data_integrity"]["passed"] is True
+
+    def test_doctor_invalid_inbox_json(self, tmp_path: Path) -> None:
+        """Doctor detects invalid JSON in inbox.jsonl."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # Write invalid JSON to inbox.jsonl
+        inbox_file = dogcats_dir / "inbox.jsonl"
+        inbox_file.write_text("not valid json\n")
+
+        result = runner.invoke(
+            app,
+            ["doctor", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code != 0
+        assert "inbox.jsonl is valid JSON" in result.stdout
+        assert "✗" in result.stdout
+
+    def test_doctor_inbox_invalid_status(self, tmp_path: Path) -> None:
+        """Doctor detects invalid proposal status."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        import orjson
+
+        inbox_file = dogcats_dir / "inbox.jsonl"
+        record = {
+            "record_type": "proposal",
+            "id": "test",
+            "namespace": "dc",
+            "title": "Bad status",
+            "status": "invalid_status",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+        }
+        inbox_file.write_bytes(orjson.dumps(record) + b"\n")
+
+        result = runner.invoke(
+            app,
+            ["doctor", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data = json.loads(result.stdout)
+        assert data["checks"]["inbox_data_integrity"]["passed"] is False
+        assert any("invalid status" in d["message"] for d in data["validation_details"])
+
+    def test_doctor_inbox_missing_required_fields(self, tmp_path: Path) -> None:
+        """Doctor detects missing required fields in proposals."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        import orjson
+
+        inbox_file = dogcats_dir / "inbox.jsonl"
+        # Missing title and status
+        record = {
+            "record_type": "proposal",
+            "id": "test",
+            "namespace": "dc",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+        }
+        inbox_file.write_bytes(orjson.dumps(record) + b"\n")
+
+        result = runner.invoke(
+            app,
+            ["doctor", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data = json.loads(result.stdout)
+        assert data["checks"]["inbox_data_integrity"]["passed"] is False
+        assert any(
+            "missing required field" in d["message"] for d in data["validation_details"]
+        )
+
+    def test_doctor_inbox_invalid_timestamp(self, tmp_path: Path) -> None:
+        """Doctor detects invalid timestamps in proposals."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        import orjson
+
+        inbox_file = dogcats_dir / "inbox.jsonl"
+        record = {
+            "record_type": "proposal",
+            "id": "test",
+            "namespace": "dc",
+            "title": "Bad timestamp",
+            "status": "open",
+            "created_at": "not-a-date",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+        }
+        inbox_file.write_bytes(orjson.dumps(record) + b"\n")
+
+        result = runner.invoke(
+            app,
+            ["doctor", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data = json.loads(result.stdout)
+        assert data["checks"]["inbox_data_integrity"]["passed"] is False
+        assert any(
+            "invalid timestamp" in d["message"] for d in data["validation_details"]
+        )

@@ -9,7 +9,7 @@ from typing import Any
 import orjson
 import typer
 
-from dogcat.constants import TRACKED_FIELDS
+from dogcat.constants import TRACKED_FIELDS, TRACKED_PROPOSAL_FIELDS
 
 from ._formatting import format_event, get_event_legend
 from ._helpers import get_storage
@@ -30,25 +30,16 @@ def _get_git_root(cwd: Path | None = None) -> Path | None:
     return Path(result.stdout.strip())
 
 
-def _get_git_issues(
-    storage_path: Path,
+def _get_git_file(
+    file_path: Path,
     git_root: Path,
     ref: str = "HEAD",
-) -> dict[str, dict[str, Any]]:
-    """Get issue states from a git ref.
-
-    Args:
-        storage_path: Path to the issues.jsonl file.
-        git_root: Root directory of the git repository.
-        ref: Git ref to read from. "HEAD" for last commit, "" for index.
-    """
-    from dogcat.models import classify_record, dict_to_issue, issue_to_dict
-
-    # Compute relative path from git root
+) -> bytes | None:
+    """Read a file from a git ref, returning raw bytes or None."""
     try:
-        rel_path = storage_path.resolve().relative_to(git_root.resolve())
+        rel_path = file_path.resolve().relative_to(git_root.resolve())
     except ValueError:
-        return {}
+        return None
 
     git_ref = f"{ref}:{rel_path}" if ref else f":{rel_path}"
     result = subprocess.run(
@@ -59,10 +50,16 @@ def _get_git_issues(
     )
 
     if result.returncode != 0:
-        return {}  # No committed version (new file or new repo)
+        return None
+    return result.stdout
+
+
+def _parse_issues_from_bytes(raw: bytes) -> dict[str, dict[str, Any]]:
+    """Parse issue records from raw JSONL bytes."""
+    from dogcat.models import classify_record, dict_to_issue, issue_to_dict
 
     states: dict[str, dict[str, Any]] = {}
-    for line in result.stdout.splitlines():
+    for line in raw.splitlines():
         line = line.strip()
         if not line:
             continue
@@ -74,8 +71,51 @@ def _get_git_issues(
                 states[issue.full_id] = issue_to_dict(issue)
         except (orjson.JSONDecodeError, ValueError, KeyError):
             continue
-
     return states
+
+
+def _parse_proposals_from_bytes(raw: bytes) -> dict[str, dict[str, Any]]:
+    """Parse proposal records from raw JSONL bytes."""
+    from dogcat.models import classify_record, dict_to_proposal, proposal_to_dict
+
+    states: dict[str, dict[str, Any]] = {}
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            data = orjson.loads(line)
+            rtype = classify_record(data)
+            if rtype == "proposal":
+                proposal = dict_to_proposal(data)
+                states[proposal.full_id] = proposal_to_dict(proposal)
+        except (orjson.JSONDecodeError, ValueError, KeyError):
+            continue
+    return states
+
+
+def _get_git_issues(
+    storage_path: Path,
+    git_root: Path,
+    ref: str = "HEAD",
+) -> dict[str, dict[str, Any]]:
+    """Get issue states from a git ref."""
+    raw = _get_git_file(storage_path, git_root, ref)
+    if raw is None:
+        return {}
+    return _parse_issues_from_bytes(raw)
+
+
+def _get_git_proposals(
+    inbox_path: Path,
+    git_root: Path,
+    ref: str = "HEAD",
+) -> dict[str, dict[str, Any]]:
+    """Get proposal states from a git ref."""
+    raw = _get_git_file(inbox_path, git_root, ref)
+    if raw is None:
+        return {}
+    return _parse_proposals_from_bytes(raw)
 
 
 def _get_current_issues(
@@ -86,6 +126,20 @@ def _get_current_issues(
 
     storage = get_storage(dogcats_dir)
     return {issue.full_id: issue_to_dict(issue) for issue in storage.list()}
+
+
+def _get_current_proposals(
+    dogcats_dir: str,
+) -> dict[str, dict[str, Any]]:
+    """Get current proposal states from inbox storage."""
+    from dogcat.inbox import InboxStorage
+    from dogcat.models import proposal_to_dict
+
+    inbox_path = Path(dogcats_dir) / "inbox.jsonl"
+    if not inbox_path.exists():
+        return {}
+    inbox = InboxStorage(dogcats_dir)
+    return {p.full_id: proposal_to_dict(p) for p in inbox.list(include_tombstones=True)}
 
 
 def _field_value(value: Any) -> Any:
@@ -119,11 +173,11 @@ def register(app: typer.Typer) -> None:
         ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
-        """Show issue changes in the git working tree.
+        """Show issue and proposal changes in the git working tree.
 
-        Compares the current .dogcats/issues.jsonl against the last
-        committed version (HEAD), showing created, updated, and closed
-        issues with field-level changes.
+        Compares the current .dogcats/issues.jsonl and .dogcats/inbox.jsonl
+        against the last committed version (HEAD), showing created, updated,
+        and closed issues/proposals with field-level changes.
 
         Use --staged to compare the index (staged) against HEAD.
         Use --unstaged to compare the working tree against the index.
@@ -138,6 +192,7 @@ def register(app: typer.Typer) -> None:
 
             storage = get_storage(dogcats_dir)
             storage_path = storage.path
+            inbox_path = Path(dogcats_dir) / "inbox.jsonl"
 
             git_root = _get_git_root(cwd=storage.dogcats_dir)
             if git_root is None:
@@ -147,12 +202,18 @@ def register(app: typer.Typer) -> None:
             if staged:
                 old = _get_git_issues(storage_path, git_root, ref="HEAD")
                 new = _get_git_issues(storage_path, git_root, ref="")
+                old_proposals = _get_git_proposals(inbox_path, git_root, ref="HEAD")
+                new_proposals = _get_git_proposals(inbox_path, git_root, ref="")
             elif unstaged:
                 old = _get_git_issues(storage_path, git_root, ref="")
                 new = _get_current_issues(dogcats_dir)
+                old_proposals = _get_git_proposals(inbox_path, git_root, ref="")
+                new_proposals = _get_current_proposals(dogcats_dir)
             else:
                 old = _get_git_issues(storage_path, git_root, ref="HEAD")
                 new = _get_current_issues(dogcats_dir)
+                old_proposals = _get_git_proposals(inbox_path, git_root, ref="HEAD")
+                new_proposals = _get_current_proposals(dogcats_dir)
 
             events: list[EventRecord] = []
 
@@ -233,6 +294,83 @@ def register(app: typer.Typer) -> None:
                 )
                 for issue_id in old
                 if issue_id not in new
+            )
+
+            # Check for new and updated proposals
+            for prop_id, new_state in new_proposals.items():
+                if prop_id not in old_proposals:
+                    changes = {}
+                    for field_name in TRACKED_PROPOSAL_FIELDS:
+                        value = new_state.get(field_name)
+                        if value is not None and value != "":
+                            changes[field_name] = {
+                                "old": None,
+                                "new": _field_value(value),
+                            }
+                    status = _field_value(new_state.get("status"))
+                    if status == "closed":
+                        event_type = "closed"
+                    elif status == "tombstone":
+                        event_type = "deleted"
+                    else:
+                        event_type = "created"
+                    events.append(
+                        EventRecord(
+                            event_type=event_type,
+                            issue_id=prop_id,
+                            timestamp=new_state.get("created_at", ""),
+                            by=new_state.get("proposed_by"),
+                            title=new_state.get("title"),
+                            changes=changes,
+                        ),
+                    )
+                else:
+                    old_state = old_proposals[prop_id]
+                    changes = {}
+                    for field_name in TRACKED_PROPOSAL_FIELDS:
+                        old_val = _field_value(old_state.get(field_name))
+                        new_val = _field_value(new_state.get(field_name))
+                        if old_val != new_val:
+                            changes[field_name] = {
+                                "old": old_val,
+                                "new": new_val,
+                            }
+                    if changes:
+                        event_type = "updated"
+                        if "status" in changes and changes["status"]["new"] == "closed":
+                            event_type = "closed"
+                        elif (
+                            "status" in changes
+                            and changes["status"]["new"] == "tombstone"
+                        ):
+                            event_type = "deleted"
+                        events.append(
+                            EventRecord(
+                                event_type=event_type,
+                                issue_id=prop_id,
+                                timestamp=new_state.get("updated_at", ""),
+                                by=new_state.get("closed_by"),
+                                title=new_state.get("title"),
+                                changes=changes,
+                            ),
+                        )
+
+            # Check for deleted proposals (in old but not in new)
+            events.extend(
+                EventRecord(
+                    event_type="deleted",
+                    issue_id=prop_id,
+                    timestamp="",
+                    title=old_proposals[prop_id].get("title"),
+                    changes={
+                        "status": {
+                            "old": old_proposals[prop_id].get("status"),
+                            "new": "removed",
+                        },
+                    },
+                )
+                for prop_id in old_proposals
+                if prop_id not in new_proposals
             )
 
             # Sort oldest first (chronological)

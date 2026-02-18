@@ -13,6 +13,8 @@
 
 ### Fixed
 
+- **`dcat diff` now shows inbox.jsonl changes** — proposals (new, updated, closed, deleted) are included alongside issue changes in diff output, including `--staged`, `--unstaged`, and `--json` modes (closes dogcat-15zr)
+- **`dcat doctor` now validates inbox.jsonl** — when inbox.jsonl exists, doctor checks JSON validity and validates proposal records for required fields, valid statuses, and well-formed timestamps (closes dogcat-1fek)
 - **Fix web propose refresh showing POST-only error** — moved POST endpoint to `/` and applied Post/Redirect/Get pattern so refreshing after submission no longer fails (closes dogcat-4gb7)
 - **Fix blocked status overriding advanced statuses in display** — issues with status `in_review`, `deferred`, or `closed` now display their own status symbol instead of being unconditionally shown as blocked when they have open dependencies (closes dogcat-5wd2)
 - **Fix `dcat stream` not showing events for inbox proposals** — stream now includes proposal events alongside issue events with standardized event naming (closes dogcat-5ond)

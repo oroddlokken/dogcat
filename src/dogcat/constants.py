@@ -166,6 +166,19 @@ TRACKED_FIELDS: frozenset[str] = frozenset(
     },
 )
 
+# Fields tracked for proposal diffs
+TRACKED_PROPOSAL_FIELDS: frozenset[str] = frozenset(
+    {
+        "title",
+        "description",
+        "status",
+        "proposed_by",
+        "source_repo",
+        "close_reason",
+        "resolved_issue",
+    },
+)
+
 # Symbols for history/diff output
 EVENT_SYMBOLS: dict[str, str] = {
     "created": "+",

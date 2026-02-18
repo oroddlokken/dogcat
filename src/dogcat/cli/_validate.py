@@ -1,7 +1,7 @@
 """JSONL data validation functions.
 
 Pure validation logic with no CLI dependencies. Used by ``dcat doctor``
-to perform deep data integrity checks on issues.jsonl.
+to perform deep data integrity checks on issues.jsonl and inbox.jsonl.
 """
 
 from __future__ import annotations
@@ -14,14 +14,20 @@ from typing import Any, cast
 import orjson
 
 from dogcat.constants import TRACKED_FIELDS
-from dogcat.models import IssueType, Status, classify_record
+from dogcat.models import IssueType, ProposalStatus, Status, classify_record
 
 # Fields required on every issue record
 _REQUIRED_ISSUE_FIELDS = frozenset(
     {"id", "namespace", "title", "status", "priority", "issue_type"},
 )
 
+# Fields required on every proposal record
+_REQUIRED_PROPOSAL_FIELDS = frozenset(
+    {"id", "namespace", "title", "status"},
+)
+
 _VALID_STATUSES = frozenset(s.value for s in Status)
+_VALID_PROPOSAL_STATUSES = frozenset(s.value for s in ProposalStatus)
 # Includes legacy values migrated on load (see models.dict_to_issue)
 _VALID_TYPES = frozenset(t.value for t in IssueType) | {"draft", "subtask"}
 _MIN_PRIORITY = 0
@@ -261,6 +267,72 @@ def validate_jsonl(path: Path) -> list[dict[str, str]]:
             errors.extend(validate_issue(record, lineno))
 
     errors.extend(validate_references(records))
+    return errors
+
+
+def validate_proposal_record(
+    record: dict[str, Any],
+    lineno: int,
+) -> list[dict[str, str]]:
+    """Validate a single proposal record."""
+    errors: list[dict[str, str]] = []
+    full_id = f"{record.get('namespace', '?')}-inbox-{record.get('id', '?')}"
+
+    # Required fields
+    errors.extend(
+        {
+            "level": "error",
+            "message": (
+                f"Line {lineno}: proposal {full_id} missing required field '{field}'"
+            ),
+        }
+        for field in _REQUIRED_PROPOSAL_FIELDS
+        if field not in record
+    )
+
+    # Status validation
+    status = record.get("status")
+    if status is not None and status not in _VALID_PROPOSAL_STATUSES:
+        errors.append(
+            {
+                "level": "error",
+                "message": (
+                    f"Line {lineno}: proposal {full_id} has invalid status '{status}'"
+                ),
+            },
+        )
+
+    # Timestamp validation
+    for ts_field in ("created_at", "updated_at", "closed_at"):
+        ts = record.get(ts_field)
+        if ts is not None:
+            try:
+                datetime.fromisoformat(ts)
+            except (ValueError, TypeError):
+                errors.append(
+                    {
+                        "level": "error",
+                        "message": (
+                            f"Line {lineno}: proposal {full_id} has invalid"
+                            f" timestamp in '{ts_field}': {ts}"
+                        ),
+                    },
+                )
+
+    return errors
+
+
+def validate_inbox_jsonl(path: Path) -> list[dict[str, str]]:
+    """Run validation checks on an inbox.jsonl file.
+
+    Returns a list of error/warning dicts with 'level' and 'message' keys.
+    """
+    records, errors = parse_raw_records(path)
+
+    for lineno, record in enumerate(records, start=1):
+        if classify_record(record) == "proposal":
+            errors.extend(validate_proposal_record(record, lineno))
+
     return errors
 
 

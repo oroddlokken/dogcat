@@ -60,6 +60,25 @@ def _create_issue(dogcats_dir: Path, title: str) -> str:
     raise ValueError(msg)
 
 
+def _create_proposal(workspace: Path, _dogcats_dir: Path, title: str) -> str:
+    """Create a proposal via CLI and return its full ID."""
+    result = runner.invoke(
+        app,
+        [
+            "propose",
+            title,
+            "--to",
+            str(workspace),
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0
+    import json as _json
+
+    data = _json.loads(result.stdout)
+    return f"{data['namespace']}-inbox-{data['id']}"
+
+
 class TestDiff:
     """Tests for diff."""
 
@@ -392,3 +411,149 @@ class TestDiff:
         assert result.exit_code == 0
         assert "Event:" in result.stdout
         assert "Status:" in result.stdout
+
+
+class TestDiffInbox:
+    """Tests for diff with inbox.jsonl proposals."""
+
+    def test_diff_shows_new_proposal(self, git_workspace: Path) -> None:
+        """Test diff shows a newly created proposal."""
+        dogcats_dir = git_workspace / ".dogcats"
+        _create_proposal(git_workspace, dogcats_dir, "New proposal")
+
+        result = runner.invoke(
+            app,
+            ["diff", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Created" in result.stdout
+        assert "New proposal" in result.stdout
+
+    def test_diff_shows_closed_proposal(self, git_workspace: Path) -> None:
+        """Test diff shows a closed proposal."""
+        dogcats_dir = git_workspace / ".dogcats"
+        prop_id = _create_proposal(git_workspace, dogcats_dir, "To close")
+
+        # Commit the proposal
+        subprocess.run(
+            ["git", "-C", str(git_workspace), "add", ".dogcats/"],
+            check=True,
+            capture_output=True,
+            env=_GIT_TEST_ENV,
+        )
+        subprocess.run(
+            ["git", "-C", str(git_workspace), "commit", "-m", "add proposal"],
+            check=True,
+            capture_output=True,
+            env=_GIT_TEST_ENV,
+        )
+
+        # Close the proposal
+        runner.invoke(
+            app,
+            [
+                "inbox",
+                "close",
+                prop_id,
+                "--reason",
+                "accepted",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["diff", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Closed" in result.stdout
+        assert "To close" in result.stdout
+
+    def test_diff_shows_deleted_proposal(self, git_workspace: Path) -> None:
+        """Test diff shows a deleted (tombstoned) proposal."""
+        dogcats_dir = git_workspace / ".dogcats"
+        prop_id = _create_proposal(git_workspace, dogcats_dir, "To delete")
+
+        # Commit the proposal
+        subprocess.run(
+            ["git", "-C", str(git_workspace), "add", ".dogcats/"],
+            check=True,
+            capture_output=True,
+            env=_GIT_TEST_ENV,
+        )
+        subprocess.run(
+            ["git", "-C", str(git_workspace), "commit", "-m", "add proposal"],
+            check=True,
+            capture_output=True,
+            env=_GIT_TEST_ENV,
+        )
+
+        # Delete the proposal
+        runner.invoke(
+            app,
+            [
+                "inbox",
+                "delete",
+                prop_id,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["diff", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Deleted" in result.stdout
+
+    def test_diff_json_shows_proposal(self, git_workspace: Path) -> None:
+        """Test diff JSON output includes proposal events."""
+        dogcats_dir = git_workspace / ".dogcats"
+        _create_proposal(git_workspace, dogcats_dir, "JSON proposal")
+
+        result = runner.invoke(
+            app,
+            ["diff", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert isinstance(data, list)
+        # Find the proposal event
+        proposal_events: list[dict[str, str]] = [
+            e
+            for e in data  # pyright: ignore[reportUnknownVariableType]
+            if "inbox" in e["issue_id"]
+        ]
+        assert len(proposal_events) == 1
+        assert proposal_events[0]["event_type"] == "created"
+        assert proposal_events[0]["title"] == "JSON proposal"
+
+    def test_diff_no_inbox_no_error(self, git_workspace: Path) -> None:
+        """Test diff works fine when inbox.jsonl doesn't exist."""
+        dogcats_dir = git_workspace / ".dogcats"
+        # No proposals created, inbox.jsonl doesn't exist
+        result = runner.invoke(
+            app,
+            ["diff", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "No changes" in result.stdout
+
+    def test_diff_mixed_issues_and_proposals(self, git_workspace: Path) -> None:
+        """Test diff shows both issue and proposal changes together."""
+        dogcats_dir = git_workspace / ".dogcats"
+        _create_issue(dogcats_dir, "Issue change")
+        _create_proposal(git_workspace, dogcats_dir, "Proposal change")
+
+        result = runner.invoke(
+            app,
+            ["diff", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        issue_events = [e for e in data if "inbox" not in e["issue_id"]]
+        proposal_events = [e for e in data if "inbox" in e["issue_id"]]
+        assert len(issue_events) >= 1
+        assert len(proposal_events) >= 1
