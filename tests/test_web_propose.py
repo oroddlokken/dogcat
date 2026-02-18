@@ -241,12 +241,14 @@ class TestSubmitProposal:
         proposals = inbox.list()
         assert proposals[0].namespace == "beta"
 
-    def test_submit_invalid_namespace(self, client: TestClient) -> None:
-        """Submitting to an invalid namespace returns an error."""
-        resp = client.post(
+    def test_submit_invalid_namespace_when_disallowed(self, web_dogcats: Path) -> None:
+        """Submitting to an invalid namespace errors when disabled."""
+        app = create_app(dogcats_dir=str(web_dogcats), allow_creating_namespaces=False)
+        restricted_client = TestClient(app)
+        resp = restricted_client.post(
             "/",
             data={
-                "csrf_token": _csrf(client),
+                "csrf_token": app.state.csrf_token,
                 "namespace": "bogus",
                 "title": "Bad ns",
                 "description": "",
@@ -254,6 +256,26 @@ class TestSubmitProposal:
         )
         assert resp.status_code == 200
         assert "Invalid namespace" in resp.text
+
+    def test_submit_new_namespace_when_allowed(
+        self, client: TestClient, web_dogcats: Path
+    ) -> None:
+        """Submitting to a new namespace succeeds when creation is allowed (default)."""
+        resp = client.post(
+            "/",
+            data={
+                "csrf_token": _csrf(client),
+                "namespace": "newproject",
+                "title": "New ns proposal",
+                "description": "",
+            },
+        )
+        assert resp.status_code == 200
+        assert "Proposal submitted" in resp.text
+
+        inbox = InboxStorage(dogcats_dir=str(web_dogcats))
+        proposals = inbox.list()
+        assert any(p.namespace == "newproject" for p in proposals)
 
     def test_submit_redirects_with_303(self, client: TestClient) -> None:
         """Successful POST returns a 303 redirect (Post/Redirect/Get)."""
@@ -304,3 +326,27 @@ class TestAppFactory:
         from dogcat.cli._cmd_web import DEFAULT_PORT
 
         assert DEFAULT_PORT == 48042
+
+    def test_allow_creating_namespaces_default(self, web_dogcats: Path) -> None:
+        """By default allow_creating_namespaces is True."""
+        app = create_app(dogcats_dir=str(web_dogcats))
+        assert app.state.allow_creating_namespaces is True
+
+    def test_allow_creating_namespaces_false(self, web_dogcats: Path) -> None:
+        """Explicit False is stored in app state."""
+        app = create_app(dogcats_dir=str(web_dogcats), allow_creating_namespaces=False)
+        assert app.state.allow_creating_namespaces is False
+
+    def test_form_shows_new_option_when_allowed(self, web_dogcats: Path) -> None:
+        """Form includes 'New...' dropdown item when namespace creation is allowed."""
+        app = create_app(dogcats_dir=str(web_dogcats))
+        client = TestClient(app)
+        resp = client.get("/")
+        assert "New&hellip;" in resp.text
+
+    def test_form_hides_new_option_when_disallowed(self, web_dogcats: Path) -> None:
+        """Form omits 'New...' dropdown item when namespace creation is disabled."""
+        app = create_app(dogcats_dir=str(web_dogcats), allow_creating_namespaces=False)
+        client = TestClient(app)
+        resp = client.get("/")
+        assert "New&hellip;" not in resp.text

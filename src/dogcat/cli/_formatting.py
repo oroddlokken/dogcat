@@ -17,7 +17,7 @@ from dogcat.models import Status
 
 if TYPE_CHECKING:
     from dogcat.event_log import EventRecord
-    from dogcat.models import Issue
+    from dogcat.models import Issue, Proposal
 
 
 def get_legend(hidden_count: int = 0, *, color: bool = True) -> str:
@@ -85,6 +85,18 @@ def get_legend(hidden_count: int = 0, *, color: bool = True) -> str:
             " — use --expand to show",
         )
     return "\n".join(legend_lines)
+
+
+def format_proposal_brief(proposal: Proposal) -> str:
+    """Format a proposal for brief display.
+
+    Returns:
+        Formatted string like: ● dc-inbox-4kzj: My proposal [inbox]
+    """
+    symbol = typer.style("●", fg="bright_cyan")
+    full_id = typer.style(proposal.full_id, fg="bright_cyan")
+    label = typer.style("[inbox]", fg="bright_black")
+    return f"{symbol} {full_id}: {proposal.title} {label}"
 
 
 def format_issue_brief(

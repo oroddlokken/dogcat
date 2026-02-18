@@ -128,6 +128,13 @@ STATUS_OPTIONS = [
     ("Closed", "closed"),
 ]
 
+# Inbox proposal statuses (display_label, value)
+INBOX_STATUS_OPTIONS = [
+    ("Open", "open"),
+    ("Closed", "closed"),
+    ("Tombstone", "tombstone"),
+]
+
 # Progressive ID length scaling thresholds
 # Tuple of (max_issue_count, id_length)
 # IDs scale: 4 chars for 0-500 issues, 5 chars for 501-1500, 6+ beyond

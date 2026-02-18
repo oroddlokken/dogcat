@@ -831,3 +831,212 @@ class TestCLIMarkManualShortcut:
         )
         assert result.exit_code == 1
         assert "Error" in result.stdout or "Error" in result.stderr
+
+
+class TestStatusHeaderCounts:
+    """Test item counts in status listing headers."""
+
+    def test_pr_shows_counts_in_headers(self, tmp_path: Path) -> None:
+        """Test that pr shows counts in section headers."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        runner.invoke(
+            app,
+            [
+                "create",
+                "WIP issue",
+                "--status",
+                "in_progress",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["pr", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "In Progress (1):" in result.stdout
+        assert "In Review (0):" in result.stdout
+
+    def test_pr_shows_zero_counts(self, tmp_path: Path) -> None:
+        """Test that pr shows (0) counts when no issues."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["pr", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "In Progress (0):" in result.stdout
+        assert "In Review (0):" in result.stdout
+
+    def test_in_progress_shows_count_header(self, tmp_path: Path) -> None:
+        """Test that in-progress shows count header when issues exist."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        runner.invoke(
+            app,
+            [
+                "create",
+                "WIP 1",
+                "--status",
+                "in_progress",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        runner.invoke(
+            app,
+            [
+                "create",
+                "WIP 2",
+                "--status",
+                "in_progress",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["in-progress", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "In Progress (2):" in result.stdout
+
+    def test_in_review_shows_count_header(self, tmp_path: Path) -> None:
+        """Test that in-review shows count header when issues exist."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Review issue",
+                "--status",
+                "in_review",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["in-review", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "In Review (1):" in result.stdout
+
+    def test_ready_shows_count_header(self, tmp_path: Path) -> None:
+        """Test that ready shows count header when issues exist."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        runner.invoke(
+            app,
+            ["create", "Ready 1", "--dogcats-dir", str(dogcats_dir)],
+        )
+        runner.invoke(
+            app,
+            ["create", "Ready 2", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["ready", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Ready (2):" in result.stdout
+
+
+class TestIncludeInbox:
+    """Test --include-inbox flag on ready and list commands."""
+
+    def test_ready_include_inbox_shows_proposals(self, tmp_path: Path) -> None:
+        """Test that ready --include-inbox shows inbox proposals."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--namespace", "test", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        runner.invoke(
+            app,
+            ["propose", "Inbox proposal", "--to", str(tmp_path)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["ready", "--include-inbox", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Inbox (1):" in result.stdout
+        assert "Inbox proposal" in result.stdout
+
+    def test_ready_without_include_inbox_hides_proposals(self, tmp_path: Path) -> None:
+        """Test that ready without --include-inbox doesn't show proposals."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--namespace", "test", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        runner.invoke(
+            app,
+            ["propose", "Hidden proposal", "--to", str(tmp_path)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["ready", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Inbox" not in result.stdout
+        assert "Hidden proposal" not in result.stdout
+
+    def test_list_include_inbox_shows_proposals(self, tmp_path: Path) -> None:
+        """Test that list --include-inbox shows inbox proposals."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--namespace", "test", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        runner.invoke(
+            app,
+            ["propose", "Listed proposal", "--to", str(tmp_path)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["list", "--include-inbox", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Inbox (1):" in result.stdout
+        assert "Listed proposal" in result.stdout
+
+    def test_list_without_include_inbox_hides_proposals(self, tmp_path: Path) -> None:
+        """Test that list without --include-inbox doesn't show proposals."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--namespace", "test", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        runner.invoke(
+            app,
+            ["propose", "Hidden proposal", "--to", str(tmp_path)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["list", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Inbox" not in result.stdout

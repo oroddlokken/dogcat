@@ -20,12 +20,15 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 def create_app(
     dogcats_dir: str = ".dogcats",
     namespace: str | None = None,
+    *,
+    allow_creating_namespaces: bool = True,
 ) -> FastAPI:
     """Create a FastAPI app for submitting inbox proposals.
 
     Args:
         dogcats_dir: Path to the .dogcats directory.
         namespace: Override namespace (auto-detected if None).
+        allow_creating_namespaces: Whether to allow creating new namespaces.
 
     Returns:
         Configured FastAPI application.
@@ -57,6 +60,7 @@ def create_app(
     app.state.dogcats_dir = dogcats_dir
     app.state.namespace = resolved_namespace
     app.state.namespaces = namespaces
+    app.state.allow_creating_namespaces = allow_creating_namespaces
     app.state.csrf_token = secrets.token_urlsafe(32)
     app.state.templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 

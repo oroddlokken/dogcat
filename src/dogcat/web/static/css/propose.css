@@ -163,6 +163,20 @@ textarea:focus {
   color: var(--accent);
 }
 
+.dropdown-item--new {
+  color: var(--muted);
+  font-style: italic;
+  border-top: 1px solid var(--border);
+}
+
+.ns-custom {
+  max-width: 10rem;
+}
+
+.hidden {
+  display: none !important;
+}
+
 textarea {
   resize: vertical;
   min-height: 7rem;

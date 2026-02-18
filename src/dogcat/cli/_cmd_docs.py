@@ -714,6 +714,11 @@ def register(app: typer.Typer) -> None:
             "--opinionated",
             help="Include stronger, prescriptive recommendations.",
         ),
+        inbox: bool = typer.Option(
+            False,
+            "--inbox",
+            help="Include inbox/proposal commands in the output.",
+        ),
         tokens: bool = typer.Option(
             False,
             "--tokens",
@@ -852,6 +857,9 @@ NOT tasks to work on.
 Labels are freeform tags (e.g. "backend", "ui", "auth") that appear in
 `dcat list` and `dcat show`, and can be filtered with `--label`.
 
+"""
+
+        inbox_section = """\
 ## Inbox
 
 Proposals are lightweight (cross-repo) requests (accept, reject, or ignore).
@@ -862,6 +870,8 @@ Proposals are lightweight (cross-repo) requests (accept, reject, or ignore).
   dcat inbox show <id>                                     - View proposal details
   dcat inbox close <id> --reason "Done" --issue <issue_id> - Close a proposal
 """
+        if inbox:
+            guide += inbox_section
         output_parts: list[str] = [guide]
 
         # Git health checks — always run unless git_tracking is disabled

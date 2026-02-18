@@ -4,6 +4,10 @@
 
 ### Added
 
+- **`--include-inbox` flag on `dcat list` and `dcat ready`** — show pending inbox proposals alongside issues (closes dogcat-3y3d)
+- **`--inbox` flag on `dcat prime`** — inbox section is now hidden by default unless `--inbox` is passed (closes dogcat-4iog)
+- **`--allow-creating-namespaces` / `--disable-creating-namespaces` on `dcat web propose`** — control whether the web form allows creating new namespaces, with CLI flag > config > default (True) precedence. Adds `allow_creating_namespaces` config key and "New..." option in the namespace dropdown (closes dogcat-23z4)
+- **Item counts in status listing headers** — all listing commands (`dcat list`, `dcat ready`, `dcat blocked`, `dcat deferred`, `dcat in-progress`, `dcat in-review`, `dcat manual`, `dcat recently-added`, `dcat recently-closed`, `dcat pr`) now show item counts in their headers, e.g. "Ready (3):" (closes dogcat-63au)
 - **`--body` alias for `--description`** — `dcat create` and `dcat update` now accept `--body` as a hidden alias for `--description`/`-d` (closes dogcat-4jpv)
 - **Hidden `--full` flag on `dcat show`** — preparatory no-op hook for future functionality (closes dogcat-ns83)
 - **Inbox system** — cross-repo lightweight proposals via `dcat propose` and `dcat inbox` commands. Send proposals to other repos (`dcat propose "Title" -d "Details" --to ~/other-repo`), manage incoming proposals with `dcat inbox list/show/close/delete`. Includes archive support for closed proposals, merge driver support for `inbox.jsonl`, tab completions, demo data, and inbox counts in `dcat status`
@@ -13,6 +17,7 @@
 
 ### Fixed
 
+- **`dcat info` now shows inbox statuses** — the info command displays available inbox statuses in both text and JSON output (closes dogcat-57w5)
 - **Add `--by` flag to `dcat inbox delete`** — all inbox mutation commands now support `--by` for attribution, matching `inbox close` behavior. Also adds `deleted_at`/`deleted_by` fields to the Proposal model (closes dogcat-4xjq)
 - **`dcat prune` now handles inbox tombstones** — prune removes tombstoned proposals from `inbox.jsonl` in addition to tombstoned issues from `issues.jsonl` (closes dogcat-5n8k)
 - **Fix redundant 'changed -> changed' in diff output for long-form fields** — when description, notes, acceptance, or design fields are edited, diff now shows `(edited)`, `(added)`, or `(removed)` instead of the confusing `changed -> changed` (closes dogcat-2595)

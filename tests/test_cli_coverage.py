@@ -3318,9 +3318,10 @@ class TestRecentlyAdded:
             ],
         )
         assert result.exit_code == 0
-        # Should show only 1 of the 3 issues
+        # Should show header + 1 issue
+        assert "Recently Added (1):" in result.stdout
         lines = [line for line in result.stdout.strip().split("\n") if line.strip()]
-        assert len(lines) == 1
+        assert len(lines) == 2
 
     def test_ra_alias(self, tmp_path: Path) -> None:
         """Test that 'ra' alias works for recently-added."""
@@ -3399,8 +3400,8 @@ class TestProgressReview:
             ["pr", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
-        assert "In Progress:" in result.stdout
-        assert "In Review:" in result.stdout
+        assert "In Progress (1):" in result.stdout
+        assert "In Review (1):" in result.stdout
         assert "Task A" in result.stdout
         assert "Task B" in result.stdout
 
@@ -3820,7 +3821,7 @@ class TestWorkflowTreeView:
             ["pr", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
-        assert "In Progress:" in result.stdout
+        assert "In Progress (2):" in result.stdout
         assert "PR Epic" in result.stdout
         assert "PR Subtask" in result.stdout
 

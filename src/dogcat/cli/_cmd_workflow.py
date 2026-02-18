@@ -15,7 +15,12 @@ from ._completions import (
     complete_priorities,
     complete_types,
 )
-from ._formatting import format_issue_brief, format_issue_table, format_issue_tree
+from ._formatting import (
+    format_issue_brief,
+    format_issue_table,
+    format_issue_tree,
+    format_proposal_brief,
+)
 from ._helpers import (
     _make_alias,
     apply_common_filters,
@@ -86,6 +91,11 @@ def register(app: typer.Typer) -> None:
         ),
         tree: bool = typer.Option(False, "--tree", help="Display as tree"),
         table: bool = typer.Option(False, "--table", help="Display in columns"),
+        include_inbox: bool = typer.Option(
+            False,
+            "--include-inbox",
+            help="Show pending inbox proposals alongside ready issues",
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
@@ -121,19 +131,51 @@ def register(app: typer.Typer) -> None:
                 typer.echo(orjson.dumps(output).decode())
             elif not ready_issues:
                 typer.echo("No ready work")
-            elif tree:
-                typer.echo(format_issue_tree(ready_issues))
-            elif table:
-                typer.echo(format_issue_table(ready_issues))
             else:
-                for issue in ready_issues:
-                    typer.echo(format_issue_brief(issue))
+                typer.echo(f"Ready ({len(ready_issues)}):")
+                if tree:
+                    typer.echo(format_issue_tree(ready_issues))
+                elif table:
+                    typer.echo(format_issue_table(ready_issues))
+                else:
+                    for issue in ready_issues:
+                        typer.echo(format_issue_brief(issue))
+
+            # Append inbox proposals if requested
+            if include_inbox and not is_json_output(json_output):
+                _show_inbox_in_ready(
+                    str(storage.dogcats_dir), namespace, all_namespaces
+                )
 
         except typer.Exit:
             raise
         except Exception as e:
             echo_error(str(e))
             raise typer.Exit(1)
+
+    def _show_inbox_in_ready(
+        dogcats_dir: str,
+        namespace: str | None,
+        all_namespaces: bool,
+    ) -> None:
+        """Show open inbox proposals in ready output."""
+        try:
+            from dogcat.inbox import InboxStorage
+
+            inbox = InboxStorage(dogcats_dir=dogcats_dir)
+            proposals = [p for p in inbox.list() if not p.is_closed()]
+
+            if not all_namespaces:
+                ns_filter = get_namespace_filter(dogcats_dir, namespace)
+                if ns_filter is not None:
+                    proposals = [p for p in proposals if ns_filter(p.namespace)]
+
+            if proposals:
+                typer.echo(f"\nInbox ({len(proposals)}):")
+                for proposal in proposals:
+                    typer.echo(format_proposal_brief(proposal))
+        except (ValueError, RuntimeError):
+            pass  # No inbox file — silently skip
 
     @app.command()
     def blocked(
@@ -240,6 +282,7 @@ def register(app: typer.Typer) -> None:
             elif not blocked_issues:
                 typer.echo("No blocked issues")
             else:
+                typer.echo(f"Blocked ({len(blocked_issues)}):")
                 for bi in blocked_issues:
                     issue = storage.get(bi.issue_id)
                     if issue:
@@ -357,13 +400,15 @@ def register(app: typer.Typer) -> None:
                 typer.echo(orjson.dumps(output).decode())
             elif not issues:
                 typer.echo("No in-progress issues")
-            elif tree or any(i.parent for i in issues):
-                typer.echo(format_issue_tree(issues))
-            elif table:
-                typer.echo(format_issue_table(issues))
             else:
-                for issue in issues:
-                    typer.echo(format_issue_brief(issue))
+                typer.echo(f"In Progress ({len(issues)}):")
+                if tree or any(i.parent for i in issues):
+                    typer.echo(format_issue_tree(issues))
+                elif table:
+                    typer.echo(format_issue_table(issues))
+                else:
+                    for issue in issues:
+                        typer.echo(format_issue_brief(issue))
 
         except typer.Exit:
             raise
@@ -461,13 +506,15 @@ def register(app: typer.Typer) -> None:
                 typer.echo(orjson.dumps(output).decode())
             elif not issues:
                 typer.echo("No in-review issues")
-            elif tree or any(i.parent for i in issues):
-                typer.echo(format_issue_tree(issues))
-            elif table:
-                typer.echo(format_issue_table(issues))
             else:
-                for issue in issues:
-                    typer.echo(format_issue_brief(issue))
+                typer.echo(f"In Review ({len(issues)}):")
+                if tree or any(i.parent for i in issues):
+                    typer.echo(format_issue_tree(issues))
+                elif table:
+                    typer.echo(format_issue_table(issues))
+                else:
+                    for issue in issues:
+                        typer.echo(format_issue_brief(issue))
 
         except typer.Exit:
             raise
@@ -674,13 +721,15 @@ def register(app: typer.Typer) -> None:
                 typer.echo(orjson.dumps(output).decode())
             elif not issues:
                 typer.echo("No deferred issues")
-            elif tree:
-                typer.echo(format_issue_tree(issues))
-            elif table:
-                typer.echo(format_issue_table(issues))
             else:
-                for issue in issues:
-                    typer.echo(format_issue_brief(issue))
+                typer.echo(f"Deferred ({len(issues)}):")
+                if tree:
+                    typer.echo(format_issue_tree(issues))
+                elif table:
+                    typer.echo(format_issue_table(issues))
+                else:
+                    for issue in issues:
+                        typer.echo(format_issue_brief(issue))
 
         except typer.Exit:
             raise
@@ -815,13 +864,15 @@ def register(app: typer.Typer) -> None:
                 typer.echo(orjson.dumps(output).decode())
             elif not issues:
                 typer.echo("No manual issues")
-            elif tree:
-                typer.echo(format_issue_tree(issues))
-            elif table:
-                typer.echo(format_issue_table(issues))
             else:
-                for issue in issues:
-                    typer.echo(format_issue_brief(issue))
+                typer.echo(f"Manual ({len(issues)}):")
+                if tree:
+                    typer.echo(format_issue_tree(issues))
+                elif table:
+                    typer.echo(format_issue_table(issues))
+                else:
+                    for issue in issues:
+                        typer.echo(format_issue_brief(issue))
 
         except typer.Exit:
             raise
@@ -946,6 +997,7 @@ def register(app: typer.Typer) -> None:
             elif not events:
                 typer.echo("No recently closed issues")
             else:
+                typer.echo(f"Recently Closed ({len(events)}):")
                 for event in events:
                     typer.echo(format_event(event))
                 typer.echo(get_event_legend())
@@ -1009,6 +1061,7 @@ def register(app: typer.Typer) -> None:
                 if not recent:
                     typer.echo("No recently added issues")
                 else:
+                    typer.echo(f"Recently Added ({len(recent)}):")
                     for issue in recent:
                         created_str = typer.style(
                             f"[{issue.created_at.strftime('%Y-%m-%d %H:%M')}]",
@@ -1102,7 +1155,7 @@ def register(app: typer.Typer) -> None:
                 }
                 typer.echo(orjson.dumps(output).decode())
             else:
-                typer.echo("In Progress:")
+                typer.echo(f"In Progress ({len(ip_issues)}):")
                 if not ip_issues:
                     typer.echo("  No in-progress issues")
                 else:
@@ -1116,7 +1169,7 @@ def register(app: typer.Typer) -> None:
                             typer.echo(f"  {format_issue_brief(issue)}")
 
                 typer.echo()
-                typer.echo("In Review:")
+                typer.echo(f"In Review ({len(ir_issues)}):")
                 if not ir_issues:
                     typer.echo("  No in-review issues")
                 else:

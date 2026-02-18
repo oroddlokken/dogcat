@@ -26,6 +26,7 @@ from ._formatting import (
     format_issue_full,
     format_issue_table,
     format_issue_tree,
+    format_proposal_brief,
     get_legend,
 )
 from ._helpers import _make_alias, get_storage
@@ -255,6 +256,11 @@ def register(app: typer.Typer) -> None:
             "--expand",
             help="Show subtasks of deferred parents (hidden by default)",
         ),
+        include_inbox: bool = typer.Option(
+            False,
+            "--include-inbox",
+            help="Show pending inbox proposals alongside issues",
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
@@ -431,76 +437,103 @@ def register(app: typer.Typer) -> None:
 
                 if not issues:
                     typer.echo("No issues found")
-                elif tree:
-                    typer.echo(
-                        format_issue_tree(
-                            issues,
-                            blocked_ids=blocked_ids,
-                            blocked_by_map=blocked_by_map,
-                            hidden_counts=hidden_counts,
-                            deferred_blocker_map=deferred_blocker_map,
-                            preview_subtasks=preview_subtasks,
-                        ),
-                    )
-                    typer.echo(get_legend(total_hidden, color=legend_color))
-                elif table:
-                    typer.echo(
-                        format_issue_table(
-                            issues,
-                            blocked_ids=blocked_ids,
-                            blocked_by_map=blocked_by_map,
-                            hidden_counts=hidden_counts,
-                            deferred_blocker_map=deferred_blocker_map,
-                            preview_subtasks=preview_subtasks,
-                        ),
-                    )
-                    typer.echo(get_legend(total_hidden, color=legend_color))
                 else:
-                    for issue in issues:
-                        has_previews = issue.full_id in preview_subtasks
+                    typer.echo(f"Issues ({len(issues)}):")
+                    if tree:
                         typer.echo(
-                            format_issue_brief(
-                                issue,
+                            format_issue_tree(
+                                issues,
                                 blocked_ids=blocked_ids,
                                 blocked_by_map=blocked_by_map,
-                                hidden_subtask_count=(
-                                    None
-                                    if has_previews
-                                    else hidden_counts.get(issue.full_id)
-                                ),
-                                deferred_blockers=deferred_blocker_map.get(
-                                    issue.full_id,
-                                ),
+                                hidden_counts=hidden_counts,
+                                deferred_blocker_map=deferred_blocker_map,
+                                preview_subtasks=preview_subtasks,
                             ),
                         )
-                        if has_previews:
-                            previews = preview_subtasks[issue.full_id]
-                            for preview in previews:
-                                typer.echo(
-                                    "  "
-                                    + format_issue_brief(
-                                        preview,
-                                        blocked_ids=blocked_ids,
-                                        blocked_by_map=blocked_by_map,
+                    elif table:
+                        typer.echo(
+                            format_issue_table(
+                                issues,
+                                blocked_ids=blocked_ids,
+                                blocked_by_map=blocked_by_map,
+                                hidden_counts=hidden_counts,
+                                deferred_blocker_map=deferred_blocker_map,
+                                preview_subtasks=preview_subtasks,
+                            ),
+                        )
+                    else:
+                        for issue in issues:
+                            has_previews = issue.full_id in preview_subtasks
+                            typer.echo(
+                                format_issue_brief(
+                                    issue,
+                                    blocked_ids=blocked_ids,
+                                    blocked_by_map=blocked_by_map,
+                                    hidden_subtask_count=(
+                                        None
+                                        if has_previews
+                                        else hidden_counts.get(issue.full_id)
                                     ),
-                                )
-                            total = hidden_counts.get(issue.full_id, 0)
-                            remaining = total - len(previews)
-                            if remaining > 0:
-                                typer.echo(
-                                    "  "
-                                    + typer.style(
-                                        f"[...and {remaining} more hidden subtasks]",
-                                        fg="yellow",
+                                    deferred_blockers=deferred_blocker_map.get(
+                                        issue.full_id,
                                     ),
-                                )
+                                ),
+                            )
+                            if has_previews:
+                                previews = preview_subtasks[issue.full_id]
+                                for preview in previews:
+                                    typer.echo(
+                                        "  "
+                                        + format_issue_brief(
+                                            preview,
+                                            blocked_ids=blocked_ids,
+                                            blocked_by_map=blocked_by_map,
+                                        ),
+                                    )
+                                total = hidden_counts.get(issue.full_id, 0)
+                                remaining = total - len(previews)
+                                if remaining > 0:
+                                    msg = f"[...and {remaining} more hidden subtasks]"
+                                    typer.echo(
+                                        "  " + typer.style(msg, fg="yellow"),
+                                    )
                     typer.echo(get_legend(total_hidden, color=legend_color))
+
+                # Append inbox proposals if requested
+                if include_inbox:
+                    _show_inbox_proposals(actual_dogcats_dir, namespace, all_namespaces)
 
         except typer.Exit:
             raise
         except Exception as e:
             echo_error(str(e))
             raise typer.Exit(1)
+
+    def _show_inbox_proposals(
+        dogcats_dir: str,
+        namespace: str | None,
+        all_namespaces: bool,
+    ) -> None:
+        """Show open inbox proposals as a section in list output."""
+        try:
+            from dogcat.config import get_namespace_filter
+            from dogcat.inbox import InboxStorage
+
+            inbox = InboxStorage(dogcats_dir=dogcats_dir)
+            proposals = [p for p in inbox.list() if not p.is_closed()]
+
+            # Apply namespace filtering
+            if not all_namespaces:
+                ns_filter = get_namespace_filter(dogcats_dir, namespace)
+                if ns_filter is not None:
+                    proposals = [p for p in proposals if ns_filter(p.namespace)]
+
+            if proposals:
+                typer.echo(f"\nInbox ({len(proposals)}):")
+                for proposal in proposals:
+                    typer.echo(format_proposal_brief(proposal))
+        except (ValueError, RuntimeError):
+            pass  # No inbox file — silently skip
 
     @app.command()
     def show(

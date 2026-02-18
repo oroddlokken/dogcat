@@ -193,6 +193,25 @@ class TestCLIGit:
         assert "setup" in result.stdout
 
 
+class TestCLIPrime:
+    """Test prime command."""
+
+    def test_prime_hides_inbox_by_default(self) -> None:
+        """Test that prime hides inbox section by default."""
+        result = runner.invoke(app, ["prime"])
+        assert result.exit_code == 0
+        assert "## Inbox" not in result.stdout
+        assert "dcat propose" not in result.stdout
+
+    def test_prime_shows_inbox_with_flag(self) -> None:
+        """Test that prime --inbox shows inbox section."""
+        result = runner.invoke(app, ["prime", "--inbox"])
+        assert result.exit_code == 0
+        assert "## Inbox" in result.stdout
+        assert "dcat propose" in result.stdout
+        assert "dcat inbox list" in result.stdout
+
+
 class TestCLIGuide:
     """Test guide command."""
 
@@ -548,6 +567,30 @@ class TestCLIImportBeadsPrefix:
         config_file = dogcats_dir / "config.toml"
         content = config_file.read_text()
         assert 'namespace = "keepme"' in content
+
+
+class TestCLIInfo:
+    """Test info command."""
+
+    def test_info_shows_inbox_statuses(self) -> None:
+        """Test that info shows inbox statuses section."""
+        result = runner.invoke(app, ["info"])
+        assert result.exit_code == 0
+        assert "Inbox Statuses:" in result.stdout
+        assert "open" in result.stdout
+        assert "closed" in result.stdout
+        assert "tombstone" in result.stdout
+
+    def test_info_json_includes_inbox_statuses(self) -> None:
+        """Test that info JSON includes inbox_statuses field."""
+        result = runner.invoke(app, ["info", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert "inbox_statuses" in data
+        values = [s["value"] for s in data["inbox_statuses"]]
+        assert "open" in values
+        assert "closed" in values
+        assert "tombstone" in values
 
 
 class TestFormatIssueBriefMetadataColors:

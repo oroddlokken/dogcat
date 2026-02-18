@@ -335,6 +335,7 @@ def register(app: typer.Typer) -> None:
         understanding what options are available.
         """
         from dogcat.constants import (
+            INBOX_STATUS_OPTIONS,
             PRIORITY_OPTIONS,
             STATUS_OPTIONS,
             STATUS_SHORTHANDS,
@@ -356,6 +357,10 @@ def register(app: typer.Typer) -> None:
                     {"label": label, "value": value}
                     for label, value in PRIORITY_OPTIONS
                 ],
+                "inbox_statuses": [
+                    {"label": label, "value": value}
+                    for label, value in INBOX_STATUS_OPTIONS
+                ],
             }
             typer.echo(orjson.dumps(output, option=orjson.OPT_INDENT_2).decode())
         else:
@@ -376,6 +381,10 @@ def register(app: typer.Typer) -> None:
                 )
                 shorthand_str = f" (shorthand: {shorthand})" if shorthand else ""
                 typer.echo(f"  {value:<12} - {label}{shorthand_str}")
+
+            typer.echo("\nInbox Statuses:")
+            for label, value in INBOX_STATUS_OPTIONS:
+                typer.echo(f"  {value:<12} - {label}")
 
             typer.echo("\nPriorities:")
             for label, value in PRIORITY_OPTIONS:

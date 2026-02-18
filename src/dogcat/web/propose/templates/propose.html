@@ -32,8 +32,17 @@
                                 <div class="dropdown-item{% if ns == namespace %} active{% endif %}"
                                      data-value="{{ ns }}">{{ ns }}</div>
                             {% endfor %}
+                            {% if allow_creating_namespaces %}
+                                <div class="dropdown-item dropdown-item--new" data-value="__new__">New&hellip;</div>
+                            {% endif %}
                         </div>
                     </div>
+                    <input type="text"
+                           id="ns-custom"
+                           name="ns_custom"
+                           class="ns-custom hidden"
+                           placeholder="New namespace"
+                           autocomplete="off">
                     <input type="text"
                            id="title"
                            name="title"
@@ -53,7 +62,11 @@
 (function(){
   var form=document.getElementById("propose-form");
   var btn=document.getElementById("submit-btn");
+  var nsCustom=document.getElementById("ns-custom");
   form.addEventListener("submit",function(){
+    if(nsCustom&&!nsCustom.classList.contains("hidden")&&nsCustom.value.trim()){
+      document.getElementById("namespace").value=nsCustom.value.trim();
+    }
     btn.disabled=true;
     btn.textContent="Submitting\u2026";
   });
@@ -67,8 +80,16 @@
     if(!item)return;
     dd.querySelectorAll(".dropdown-item").forEach(function(i){i.classList.remove("active")});
     item.classList.add("active");
-    hidden.value=item.dataset.value;
-    toggle.textContent=item.dataset.value;
+    if(item.dataset.value==="__new__"){
+      nsCustom.classList.remove("hidden");
+      nsCustom.focus();
+      toggle.textContent="New\u2026";
+    }else{
+      nsCustom.classList.add("hidden");
+      nsCustom.value="";
+      hidden.value=item.dataset.value;
+      toggle.textContent=item.dataset.value;
+    }
     dd.classList.remove("open");
   });
   document.addEventListener("click",function(e){

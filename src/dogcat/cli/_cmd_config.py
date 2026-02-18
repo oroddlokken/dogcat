@@ -20,7 +20,9 @@ config_app = typer.Typer(
 )
 
 # Keys that should be coerced to bool
-_BOOL_KEYS = frozenset({"git_tracking", "disable_legend_colors"})
+_BOOL_KEYS = frozenset(
+    {"git_tracking", "disable_legend_colors", "allow_creating_namespaces"}
+)
 
 # Keys whose values are stored as arrays (list[str])
 _ARRAY_KEYS = frozenset({"visible_namespaces", "hidden_namespaces"})
@@ -54,6 +56,12 @@ _KNOWN_KEYS: dict[str, dict[str, Any]] = {
         "type": "bool",
         "description": "Disable colors in legend (status symbols and priorities)",
         "default": False,
+        "values": "true, false (also: 1/0, yes/no, on/off)",
+    },
+    "allow_creating_namespaces": {
+        "type": "bool",
+        "description": "Allow creating new namespaces in web propose form",
+        "default": True,
         "values": "true, false (also: 1/0, yes/no, on/off)",
     },
 }

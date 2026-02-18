@@ -26,10 +26,14 @@ def _form_context(
 ) -> dict[str, object]:
     """Build the template context dict for propose.html."""
     namespaces: list[str] = request.app.state.namespaces
+    allow_creating_namespaces: bool = getattr(
+        request.app.state, "allow_creating_namespaces", True
+    )
     ctx: dict[str, object] = {
         "request": request,
         "namespace": namespace,
         "namespaces": namespaces,
+        "allow_creating_namespaces": allow_creating_namespaces,
         "csrf_token": request.app.state.csrf_token,
         "submitted": submitted,
         "error": error,
@@ -113,16 +117,20 @@ async def submit_proposal(
         )
 
     valid_namespaces: list[str] = request.app.state.namespaces
+    allow_creating: bool = getattr(request.app.state, "allow_creating_namespaces", True)
     if namespace not in valid_namespaces:
-        return templates.TemplateResponse(
-            request,
-            "propose.html",
-            _form_context(
+        if not allow_creating:
+            return templates.TemplateResponse(
                 request,
-                namespace,
-                error=f"Invalid namespace: {namespace}",
-            ),
-        )
+                "propose.html",
+                _form_context(
+                    request,
+                    namespace,
+                    error=f"Invalid namespace: {namespace}",
+                ),
+            )
+        # Accept new namespace — add it to the known list for this session
+        valid_namespaces.append(namespace)
 
     try:
         from dogcat.idgen import IDGenerator

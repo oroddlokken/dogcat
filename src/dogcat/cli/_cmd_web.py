@@ -28,6 +28,11 @@ def register(app: typer.Typer) -> None:
         namespace: str = typer.Option(
             None, help="Override namespace (auto-detected by default)"
         ),
+        allow_creating_namespaces: bool | None = typer.Option(
+            None,
+            "--allow-creating-namespaces/--disable-creating-namespaces",
+            help="Allow or disallow creating new namespaces (overrides config)",
+        ),
     ) -> None:
         """Start the proposal submission web server."""
         try:
@@ -41,12 +46,22 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(1) from None
 
         from dogcat.cli._helpers import find_dogcats_dir
+        from dogcat.config import load_config
         from dogcat.web.propose import create_app
 
         resolved_dir = find_dogcats_dir(dogcats_dir)
+
+        # Resolve allow_creating_namespaces: CLI flag > config > default (True)
+        if allow_creating_namespaces is None:
+            config = load_config(resolved_dir)
+            resolved_allow = bool(config.get("allow_creating_namespaces", True))
+        else:
+            resolved_allow = allow_creating_namespaces
+
         fastapi_app = create_app(
             dogcats_dir=resolved_dir,
             namespace=namespace,
+            allow_creating_namespaces=resolved_allow,
         )
 
         typer.echo(f"dogcat propose → http://{host}:{port}")
