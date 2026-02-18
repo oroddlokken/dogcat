@@ -230,3 +230,31 @@ class TestCLIShow:
         )
         assert result.exit_code == 0
         assert f"Parent: {parent_full_id}" in result.stdout
+
+
+class TestShowFullOption:
+    """Test --full hidden option on show command."""
+
+    def test_show_with_full_flag(self, tmp_path: Path) -> None:
+        """Test that --full is accepted and produces the same output."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create_result = runner.invoke(
+            app,
+            ["create", "Test issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+
+        # Without --full
+        result_normal = runner.invoke(
+            app,
+            ["show", issue_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+        # With --full (should produce identical output — it's a no-op)
+        result_full = runner.invoke(
+            app,
+            ["show", issue_id, "--full", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result_full.exit_code == 0
+        assert result_normal.stdout == result_full.stdout

@@ -523,6 +523,11 @@ def register(app: typer.Typer) -> None:
             help="Complete from namespace",
             hidden=True,
         ),
+        full: bool = typer.Option(  # noqa: ARG001
+            False,
+            "--full",
+            hidden=True,
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:

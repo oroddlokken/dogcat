@@ -4,6 +4,8 @@
 
 ### Added
 
+- **`--body` alias for `--description`** — `dcat create` and `dcat update` now accept `--body` as a hidden alias for `--description`/`-d` (closes dogcat-4jpv)
+- **Hidden `--full` flag on `dcat show`** — preparatory no-op hook for future functionality (closes dogcat-ns83)
 - **Inbox system** — cross-repo lightweight proposals via `dcat propose` and `dcat inbox` commands. Send proposals to other repos (`dcat propose "Title" -d "Details" --to ~/other-repo`), manage incoming proposals with `dcat inbox list/show/close/delete`. Includes archive support for closed proposals, merge driver support for `inbox.jsonl`, tab completions, demo data, and inbox counts in `dcat status`
 - **Web proposal form** — `dcat web propose` launches a FastAPI server with an HTML form for submitting proposals via browser. Includes CSRF protection, input validation, security headers, namespace selection, and input size limits
 - **FastAPI, uvicorn, jinja2 as optional `[web]` dependencies** — install with `pip install dogcat[web]`

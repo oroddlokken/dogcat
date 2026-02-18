@@ -1221,3 +1221,54 @@ class TestEditAlias:
             "not found" in result.stdout.lower()
             or "not found" in (result.stderr or "").lower()
         )
+
+
+class TestCreateBodyAlias:
+    """Test --body as hidden alias for --description in create."""
+
+    def test_create_with_body(self, tmp_path: Path) -> None:
+        """Test that --body sets the description."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "Body test",
+                "--body",
+                "description via body",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        issue_id = result.stdout.split(": ")[0].split()[-1]
+
+        show_result = runner.invoke(
+            app,
+            ["show", issue_id, "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data = json.loads(show_result.stdout)
+        assert data["description"] == "description via body"
+
+    def test_create_body_and_description_conflict(self, tmp_path: Path) -> None:
+        """Test that --body and --description together produce an error."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "Conflict test",
+                "--body",
+                "b",
+                "--description",
+                "d",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 1
+        assert "Cannot use both" in result.stderr

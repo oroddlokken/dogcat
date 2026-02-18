@@ -62,6 +62,12 @@ def register(app: typer.Typer) -> None:
             "-d",
             help="New description",
         ),
+        body: str | None = typer.Option(
+            None,
+            "--body",
+            help="New description (alias for --description)",
+            hidden=True,
+        ),
         owner: str | None = typer.Option(
             None,
             "--owner",
@@ -154,6 +160,13 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Update an issue."""
         try:
+            # Merge --body into --description (hidden alias)
+            if body is not None:
+                if description is not None:
+                    echo_error("Cannot use both --description and --body together")
+                    raise typer.Exit(1)
+                description = body
+
             storage = get_storage(dogcats_dir)
 
             # Build updates dict

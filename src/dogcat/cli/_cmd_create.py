@@ -96,6 +96,12 @@ def register(app: typer.Typer) -> None:
             "-d",
             help="Issue description",
         ),
+        body: str | None = typer.Option(
+            None,
+            "--body",
+            help="Issue description (alias for --description)",
+            hidden=True,
+        ),
         priority: int | None = typer.Option(
             None,
             "--priority",
@@ -198,6 +204,13 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Create a new issue (implementation)."""
         try:
+            # Merge --body into --description (hidden alias)
+            if body is not None:
+                if description is not None:
+                    echo_error("Cannot use both --description and --body together")
+                    raise typer.Exit(1)
+                description = body
+
             # Parse arguments to extract title and shorthands
             title, shorthand_priority, shorthand_type, shorthand_status = (
                 _parse_args_for_create(

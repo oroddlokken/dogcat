@@ -784,3 +784,65 @@ class TestUpdateLabels:
             ["show", issue_id, "--dogcats-dir", str(dogcats_dir)],
         )
         assert "urgent" not in show_result.stdout
+
+
+class TestUpdateBodyAlias:
+    """Test --body as hidden alias for --description in update."""
+
+    def test_update_with_body(self, tmp_path: Path) -> None:
+        """Test that --body sets the description on update."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create_result = runner.invoke(
+            app,
+            ["create", "Test issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+
+        result = runner.invoke(
+            app,
+            [
+                "update",
+                issue_id,
+                "--body",
+                "updated via body",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+
+        show_result = runner.invoke(
+            app,
+            ["show", issue_id, "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data = json.loads(show_result.stdout)
+        assert data["description"] == "updated via body"
+
+    def test_update_body_and_description_conflict(self, tmp_path: Path) -> None:
+        """Test that --body and --description together produce an error."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create_result = runner.invoke(
+            app,
+            ["create", "Test issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+
+        result = runner.invoke(
+            app,
+            [
+                "update",
+                issue_id,
+                "--body",
+                "b",
+                "--description",
+                "d",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 1
+        assert "Cannot use both" in result.stderr
