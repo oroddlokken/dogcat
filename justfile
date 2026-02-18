@@ -13,11 +13,13 @@ var:
 fmt:
     uv run ruff format src tests dcat.py benchmark.py tabcomp.py
     uv run ruff check --fix --unsafe-fixes src tests dcat.py benchmark.py tabcomp.py
+    uv run djlint src/dogcat/web --reformat --quiet & eslint --no-error-on-unmatched-pattern --fix 'src/dogcat/web/**/static/**/*js' & pnpm run --silent stylelint-fix & wait
 
 # lint the code
 lint:
     uv run ruff format --check --diff src tests dcat.py benchmark.py tabcomp.py
     uv run ruff check src tests dcat.py benchmark.py tabcomp.py
+    uv run djlint src/dogcat/web & eslint --no-error-on-unmatched-pattern 'src/dogcat/web/**/static/**/*js' & pnpm run --silent stylelint & wait
 
 # lint using pyright
 lint-pyright:

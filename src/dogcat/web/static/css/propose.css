@@ -1,0 +1,221 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg: #0f1117;
+  --surface: #1a1d27;
+  --border: #2d3148;
+  --text: #e2e4ed;
+  --muted: #8b8fa3;
+  --accent: #6c8cff;
+  --accent-hover: #8ba4ff;
+  --success: #3ecf8e;
+  --error: #f75e5e;
+  --radius: 8px;
+}
+
+html {
+  font-size: 16px;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 1.5rem 1rem;
+}
+
+.wrap {
+  width: 100%;
+  max-width: 540px;
+}
+
+h1 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-bottom: 1.5rem;
+  letter-spacing: -0.02em;
+}
+
+h1 span {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.row {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.row > .dropdown {
+  flex: 0 0 auto;
+}
+
+.row > input {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+input,
+.dropdown-toggle,
+textarea {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.625rem 0.75rem;
+  font-size: 1rem;
+  font-family: inherit;
+  line-height: 1.25;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+input,
+textarea {
+  width: 100%;
+}
+
+input:focus,
+textarea:focus {
+  border-color: var(--accent);
+}
+
+.dropdown {
+  position: relative;
+}
+
+.dropdown-toggle {
+  padding-right: 2.25rem;
+  cursor: pointer;
+  text-align: left;
+  position: relative;
+  white-space: nowrap;
+}
+
+.dropdown-toggle:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.dropdown-toggle::after {
+  content: "";
+  position: absolute;
+  right: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 5px solid var(--muted);
+  transition: transform 0.15s;
+}
+
+.dropdown.open .dropdown-toggle {
+  border-color: var(--accent);
+}
+
+.dropdown.open .dropdown-toggle::after {
+  transform: translateY(-50%) rotate(180deg);
+}
+
+.dropdown-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: max-content;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  z-index: 10;
+}
+
+.dropdown.open .dropdown-menu {
+  display: block;
+}
+
+.dropdown-item {
+  padding: 0.625rem 0.75rem;
+  cursor: pointer;
+  font-size: 1rem;
+  color: var(--text);
+  transition: background 0.1s;
+}
+
+.dropdown-item:hover,
+.dropdown-item.active {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.dropdown-item.active {
+  color: var(--accent);
+}
+
+textarea {
+  resize: vertical;
+  min-height: 7rem;
+  line-height: 1.5;
+}
+
+.field {
+  margin-bottom: 1rem;
+}
+
+button {
+  width: 100%;
+  padding: 0.75rem;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  margin-top: 0.5rem;
+}
+
+button:hover {
+  background: var(--accent-hover);
+}
+
+button:active {
+  transform: scale(0.985);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.msg {
+  margin-bottom: 1.25rem;
+  padding: 0.875rem 1rem;
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.msg--ok {
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  color: var(--success);
+  border: 1px solid color-mix(in srgb, var(--success) 25%, transparent);
+}
+
+.msg--err {
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+  color: var(--error);
+  border: 1px solid color-mix(in srgb, var(--error) 25%, transparent);
+}

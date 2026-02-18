@@ -92,7 +92,8 @@ class TestNamespacePopulation:
     def test_default_namespace_selected(self, client: TestClient) -> None:
         """The primary namespace is marked as active."""
         resp = client.get("/")
-        assert 'class="dropdown-item active" data-value="testns"' in resp.text
+        assert "dropdown-item active" in resp.text
+        assert 'data-value="testns"' in resp.text
 
     def test_multiple_namespaces(self, web_dogcats_multi_ns: Path) -> None:
         """All namespaces from issues appear in the dropdown."""

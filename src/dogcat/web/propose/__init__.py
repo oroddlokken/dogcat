@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from starlette.responses import Response
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 
 def create_app(
@@ -67,13 +68,15 @@ def create_app(
             response.headers["X-Content-Type-Options"] = "nosniff"
             response.headers["X-Frame-Options"] = "DENY"
             response.headers["Content-Security-Policy"] = (
-                "default-src 'none'; "
-                "style-src 'unsafe-inline'; "
-                "script-src 'unsafe-inline'"
+                "default-src 'none'; style-src 'self'; script-src 'unsafe-inline'"
             )
             return response
 
     app.add_middleware(SecurityHeadersMiddleware)
+
+    from starlette.staticfiles import StaticFiles
+
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     from dogcat.web.propose.routes import router
 

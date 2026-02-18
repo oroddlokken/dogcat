@@ -41,6 +41,7 @@
 
 ### Development
 
+- **Add eslint, stylelint, and djlint for web linting** — set up eslint 9 (flat config), stylelint 16 (standard config), and djlint (jinja profile) with pnpm. Extracted inline CSS from `propose.html` to `static/css/propose.css`, mounted static files in FastAPI, and updated CSP to `style-src 'self'`. `just lint` and `just fmt` now run all web linters in parallel (closes dogcat-3lbi)
 - **Document proposal merge conflict resolution rules** — README documents how inbox.jsonl conflicts are resolved by the merge driver (closes dogcat-2ah1)
 - **Tests for inbox system, CLI commands, web server, and proposal integration** — comprehensive test coverage across `test_inbox.py`, `test_cmd_inbox.py`, `test_cmd_propose.py`, `test_web_propose.py`, and additions to `test_archive.py`, `test_stream.py`, `test_merge_driver.py`, `test_formatting.py`, and `test_demo.py`
 

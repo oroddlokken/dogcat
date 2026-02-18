@@ -53,6 +53,7 @@ dev = [
     "vulture>=2.14",
     "pytest-timeout>=2.4.0",
     "pytest-testmon>=2.2.0",
+    "djlint>=1.36.4",
 ]
 
 [tool.ruff]
@@ -145,6 +146,13 @@ reportUnreachable = true
 #reportImplicitAbstractClass = true
 # reportIncompatibleUnannotatedOverride = true
 # reportInvalidAbstractMethod = true
+
+[tool.djlint]
+ignore = "H023,H030,H031,J018"
+profile = "jinja"
+blank_line_after_tag = "load,extends,include"
+blank_line_before_tag = "load,extends,include"
+max_blank_lines = 1
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

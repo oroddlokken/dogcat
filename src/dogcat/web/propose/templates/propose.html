@@ -1,184 +1,54 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>dogcat &mdash; propose</title>
-<style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{
-  --bg:#0f1117;
-  --surface:#1a1d27;
-  --border:#2d3148;
-  --text:#e2e4ed;
-  --muted:#8b8fa3;
-  --accent:#6c8cff;
-  --accent-hover:#8ba4ff;
-  --success:#3ecf8e;
-  --error:#f75e5e;
-  --radius:8px;
-}
-html{font-size:16px}
-body{
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-  background:var(--bg);
-  color:var(--text);
-  min-height:100dvh;
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  padding:1.5rem 1rem;
-}
-.wrap{
-  width:100%;
-  max-width:540px;
-}
-h1{
-  font-size:1.25rem;
-  font-weight:600;
-  margin-bottom:1.5rem;
-  letter-spacing:-.02em;
-}
-h1 span{color:var(--muted);font-weight:400}
-.row{
-  display:flex;
-  gap:.75rem;
-}
-.row>.dropdown{flex:0 0 auto}
-.row>input{flex:1 1 0;min-width:0}
-input,.dropdown-toggle,textarea{
-  background:var(--surface);
-  color:var(--text);
-  border:1px solid var(--border);
-  border-radius:var(--radius);
-  padding:.625rem .75rem;
-  font-size:1rem;
-  font-family:inherit;
-  line-height:1.25;
-  outline:none;
-  transition:border-color .15s;
-}
-input,textarea{width:100%}
-input:focus,textarea:focus{
-  border-color:var(--accent);
-}
-.dropdown{position:relative}
-.dropdown-toggle{
-  padding-right:2.25rem;
-  cursor:pointer;
-  text-align:left;
-  position:relative;
-  white-space:nowrap;
-}
-.dropdown-toggle:focus{border-color:var(--accent);outline:none}
-.dropdown-toggle::after{
-  content:"";
-  position:absolute;
-  right:.75rem;
-  top:50%;
-  transform:translateY(-50%);
-  width:0;height:0;
-  border-left:5px solid transparent;
-  border-right:5px solid transparent;
-  border-top:5px solid var(--muted);
-  transition:transform .15s;
-}
-.dropdown.open .dropdown-toggle{border-color:var(--accent)}
-.dropdown.open .dropdown-toggle::after{transform:translateY(-50%) rotate(180deg)}
-.dropdown-menu{
-  display:none;
-  position:absolute;
-  top:calc(100% + 4px);
-  left:0;
-  min-width:max-content;
-  background:var(--surface);
-  border:1px solid var(--border);
-  border-radius:var(--radius);
-  overflow:hidden;
-  z-index:10;
-}
-.dropdown.open .dropdown-menu{display:block}
-.dropdown-item{
-  padding:.625rem .75rem;
-  cursor:pointer;
-  font-size:1rem;
-  color:var(--text);
-  transition:background .1s;
-}
-.dropdown-item:hover,.dropdown-item.active{background:color-mix(in srgb,var(--accent) 15%,transparent)}
-.dropdown-item.active{color:var(--accent)}
-textarea{
-  resize:vertical;
-  min-height:7rem;
-  line-height:1.5;
-}
-.field{margin-bottom:1rem}
-button{
-  width:100%;
-  padding:.75rem;
-  background:var(--accent);
-  color:#fff;
-  border:none;
-  border-radius:var(--radius);
-  font-size:1rem;
-  font-weight:600;
-  cursor:pointer;
-  transition:background .15s;
-  margin-top:.5rem;
-}
-button:hover{background:var(--accent-hover)}
-button:active{transform:scale(.985)}
-button:disabled{opacity:.5;cursor:not-allowed}
-.msg{
-  margin-bottom:1.25rem;
-  padding:.875rem 1rem;
-  border-radius:var(--radius);
-  font-size:.875rem;
-  line-height:1.5;
-}
-.msg--ok{background:color-mix(in srgb,var(--success) 12%,transparent);color:var(--success);border:1px solid color-mix(in srgb,var(--success) 25%,transparent)}
-.msg--err{background:color-mix(in srgb,var(--error) 12%,transparent);color:var(--error);border:1px solid color-mix(in srgb,var(--error) 25%,transparent)}
-</style>
-</head>
-<body>
-<div class="wrap">
-  <h1>dogcat <span>propose</span></h1>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>dogcat &mdash; propose</title>
+        <link rel="stylesheet" href="{{ url_for('static', path='css/propose.css') }}">
+    </head>
+    <body>
+        <div class="wrap">
+            <h1>
+                dogcat <span>propose</span>
+            </h1>
 
-  {% if submitted %}
-  <div class="msg msg--ok">
-    Proposal submitted: <strong>{{ proposal_title }}</strong>
-  </div>
-  {% endif %}
+            {% if submitted %}
+                <div class="msg msg--ok">
+                    Proposal submitted: <strong>{{ proposal_title }}</strong>
+                </div>
+            {% endif %}
 
-  {% if error %}
-  <div class="msg msg--err">{{ error }}</div>
-  {% endif %}
+            {% if error %}<div class="msg msg--err">{{ error }}</div>{% endif %}
 
-  <form method="post" action="/" id="propose-form">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" id="namespace" name="namespace" value="{{ namespace }}">
-    <div class="row field">
-      <div class="dropdown" id="ns-dropdown">
-        <div class="dropdown-toggle" id="ns-toggle" tabindex="0" role="button">{{ namespace }}</div>
-        <div class="dropdown-menu" id="ns-menu">
-          {% for ns in namespaces %}
-          <div class="dropdown-item{% if ns == namespace %} active{% endif %}" data-value="{{ ns }}">{{ ns }}</div>
-          {% endfor %}
+            <form method="post" action="/" id="propose-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" id="namespace" name="namespace" value="{{ namespace }}">
+                <div class="row field">
+                    <div class="dropdown" id="ns-dropdown">
+                        <div class="dropdown-toggle" id="ns-toggle" tabindex="0" role="button">{{ namespace }}</div>
+                        <div class="dropdown-menu" id="ns-menu">
+                            {% for ns in namespaces %}
+                                <div class="dropdown-item{% if ns == namespace %} active{% endif %}"
+                                     data-value="{{ ns }}">{{ ns }}</div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    <input type="text"
+                           id="title"
+                           name="title"
+                           required
+                           placeholder="Title"
+                           autocomplete="off">
+                </div>
+                <div class="field">
+                    <textarea id="description" name="description" placeholder="Description"></textarea>
+                </div>
+                <button type="submit" id="submit-btn">Submit proposal</button>
+            </form>
+
         </div>
-      </div>
-      <input type="text" id="title" name="title" required
-             placeholder="Title" autocomplete="off">
-    </div>
-    <div class="field">
-      <textarea id="description" name="description"
-                placeholder="Description"></textarea>
-    </div>
-    <button type="submit" id="submit-btn">Submit proposal</button>
-  </form>
 
-</div>
-
-<script>
+        <script>
 (function(){
   var form=document.getElementById("propose-form");
   var btn=document.getElementById("submit-btn");
@@ -204,6 +74,6 @@ button:disabled{opacity:.5;cursor:not-allowed}
     if(!dd.contains(e.target))dd.classList.remove("open");
   });
 })();
-</script>
-</body>
+        </script>
+    </body>
 </html>
