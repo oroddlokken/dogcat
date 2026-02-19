@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.10.1 (2026-02-19)
+
 ### Fixed
 
 - **`dcat web propose` now fails if db is not initialized** — running the command without an initialized `.dogcats` directory now shows a clear error instead of launching the server (closes dogcat-3noz)
