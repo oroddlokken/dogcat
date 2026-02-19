@@ -143,6 +143,64 @@ else
     ok "PR: ${PR_URL}"
 fi
 
+# ── Status summary ───────────────────────────────────────────────────
+echo ""
+info "Release status for v${VERSION}"
+printf "  ${BOLD}RC tag:${RESET}  %s\n" "$RC_TAG"
+printf "  ${BOLD}Branch:${RESET} %s\n" "$BRANCH"
+printf "  ${BOLD}PR:${RESET}     %s\n" "$PR_URL"
+
+# PR state
+PR_JSON=$(gh pr view "${BRANCH}" --json state,reviewDecision,mergeable,statusCheckRollup 2>/dev/null || true)
+if [[ -n "$PR_JSON" ]]; then
+    PR_STATE=$(echo "$PR_JSON" | jq -r '.state // "UNKNOWN"')
+    REVIEW=$(echo "$PR_JSON" | jq -r '.reviewDecision // "NONE"')
+    MERGEABLE=$(echo "$PR_JSON" | jq -r '.mergeable // "UNKNOWN"')
+
+    # Format PR state
+    case "$PR_STATE" in
+        OPEN)   printf "  ${BOLD}State:${RESET}  ${GREEN}open${RESET}\n" ;;
+        MERGED) printf "  ${BOLD}State:${RESET}  ${GREEN}merged${RESET}\n" ;;
+        CLOSED) printf "  ${BOLD}State:${RESET}  ${RED}closed${RESET}\n" ;;
+        *)      printf "  ${BOLD}State:${RESET}  %s\n" "$PR_STATE" ;;
+    esac
+
+    # Format review decision
+    case "$REVIEW" in
+        APPROVED)          printf "  ${BOLD}Review:${RESET} ${GREEN}approved${RESET}\n" ;;
+        CHANGES_REQUESTED) printf "  ${BOLD}Review:${RESET} ${RED}changes requested${RESET}\n" ;;
+        REVIEW_REQUIRED)   printf "  ${BOLD}Review:${RESET} ${YELLOW}review required${RESET}\n" ;;
+        NONE)              printf "  ${BOLD}Review:${RESET} ${DIM}none${RESET}\n" ;;
+        *)                 printf "  ${BOLD}Review:${RESET} %s\n" "$REVIEW" ;;
+    esac
+
+    # Format mergeable
+    case "$MERGEABLE" in
+        MERGEABLE)   printf "  ${BOLD}Merge:${RESET}  ${GREEN}ready${RESET}\n" ;;
+        CONFLICTING) printf "  ${BOLD}Merge:${RESET}  ${RED}conflicts${RESET}\n" ;;
+        *)           printf "  ${BOLD}Merge:${RESET}  ${DIM}%s${RESET}\n" "$(echo "$MERGEABLE" | tr '[:upper:]' '[:lower:]')" ;;
+    esac
+
+    # Checks summary
+    TOTAL=$(echo "$PR_JSON" | jq '[.statusCheckRollup[]? | select(.name != null)] | length')
+    PASS=$(echo "$PR_JSON" | jq '[.statusCheckRollup[]? | select(.conclusion == "SUCCESS")] | length')
+    FAIL=$(echo "$PR_JSON" | jq '[.statusCheckRollup[]? | select(.conclusion == "FAILURE")] | length')
+    PENDING=$((TOTAL - PASS - FAIL))
+
+    if [[ "$TOTAL" -gt 0 ]]; then
+        if [[ "$FAIL" -gt 0 ]]; then
+            printf "  ${BOLD}Checks:${RESET} ${RED}%d/%d passed, %d failed${RESET}" "$PASS" "$TOTAL" "$FAIL"
+        elif [[ "$PENDING" -gt 0 ]]; then
+            printf "  ${BOLD}Checks:${RESET} ${YELLOW}%d/%d passed, %d pending${RESET}" "$PASS" "$TOTAL" "$PENDING"
+        else
+            printf "  ${BOLD}Checks:${RESET} ${GREEN}%d/%d passed${RESET}" "$PASS" "$TOTAL"
+        fi
+        echo ""
+    else
+        printf "  ${BOLD}Checks:${RESET} ${DIM}none${RESET}\n"
+    fi
+fi
+
 # ── Phase 2: Watch ────────────────────────────────────────────────────
 [[ "$WATCH" == false ]] && exit 0
 
