@@ -45,16 +45,25 @@ def register(app: typer.Typer) -> None:
             )
             raise typer.Exit(1) from None
 
+        from pathlib import Path
+
         from dogcat.cli._helpers import find_dogcats_dir
         from dogcat.config import load_config
         from dogcat.web.propose import create_app
 
         resolved_dir = find_dogcats_dir(dogcats_dir)
 
+        if not Path(resolved_dir).is_dir():
+            typer.echo(
+                "Error: dogcat is not initialized. Run 'dcat init' first.",
+                err=True,
+            )
+            raise typer.Exit(1)
+
         # Resolve allow_creating_namespaces: CLI flag > config > default (True)
         if allow_creating_namespaces is None:
             config = load_config(resolved_dir)
-            resolved_allow = bool(config.get("allow_creating_namespaces", True))
+            resolved_allow = bool(config.get("allow_creating_namespaces", False))
         else:
             resolved_allow = allow_creating_namespaces
 

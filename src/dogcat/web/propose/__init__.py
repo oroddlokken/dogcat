@@ -21,7 +21,7 @@ def create_app(
     dogcats_dir: str = ".dogcats",
     namespace: str | None = None,
     *,
-    allow_creating_namespaces: bool = True,
+    allow_creating_namespaces: bool = False,
 ) -> FastAPI:
     """Create a FastAPI app for submitting inbox proposals.
 

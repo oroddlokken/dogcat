@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`dcat web propose` now fails if db is not initialized** — running the command without an initialized `.dogcats` directory now shows a clear error instead of launching the server (closes dogcat-3noz)
+- **`dcat web propose` no longer allows namespace creation by default** — the "New..." namespace option is now hidden unless explicitly enabled via `--allow-creating-namespaces` or `allow_creating_namespaces` config (closes dogcat-284g)
+
 ## 0.10.0 (2026-02-19)
 
 ### Added
@@ -10,7 +15,7 @@
 - **`dcat rename-namespace` command** — rename all issues in a namespace at once, cascading updates to all references (parent, duplicate_of, dependencies, links), inbox proposals, and config (primary namespace, visible/hidden namespace lists) (closes dogcat-2ssc)
 - **`--include-inbox` flag on `dcat list` and `dcat ready`** — show pending inbox proposals alongside issues (closes dogcat-3y3d)
 - **`--inbox` flag on `dcat prime`** — inbox section is now hidden by default unless `--inbox` is passed (closes dogcat-4iog)
-- **`--allow-creating-namespaces` / `--disable-creating-namespaces` on `dcat web propose`** — control whether the web form allows creating new namespaces, with CLI flag > config > default (True) precedence. Adds `allow_creating_namespaces` config key and "New..." option in the namespace dropdown (closes dogcat-23z4)
+- **`--allow-creating-namespaces` / `--disable-creating-namespaces` on `dcat web propose`** — control whether the web form allows creating new namespaces, with CLI flag > config > default (False) precedence. Adds `allow_creating_namespaces` config key and "New..." option in the namespace dropdown (closes dogcat-23z4)
 - **Inbox proposals in `dcat export`** — export now includes inbox proposals in both JSON (`"proposals"` key) and JSONL formats. Use `--no-inbox` to exclude them (closes dogcat-109b)
 - **Inbox events in `dcat history`** — proposal lifecycle events (create, close, delete) are now recorded and shown in history alongside issue events. Supports `--issue` filtering by proposal ID and `--no-inbox` to exclude inbox events (closes dogcat-o6ym)
 - **Item counts in status listing headers** — all listing commands (`dcat list`, `dcat ready`, `dcat blocked`, `dcat deferred`, `dcat in-progress`, `dcat in-review`, `dcat manual`, `dcat recently-added`, `dcat recently-closed`, `dcat pr`) now show item counts in their headers, e.g. "Ready (3):" (closes dogcat-63au)

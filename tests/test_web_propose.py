@@ -5,15 +5,19 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from typer.testing import CliRunner
 
 if TYPE_CHECKING:
     from pathlib import Path
 from fastapi.testclient import TestClient
 
+from dogcat.cli import app as cli_app
 from dogcat.config import save_config
 from dogcat.inbox import InboxStorage
 from dogcat.storage import JSONLStorage
 from dogcat.web.propose import create_app
+
+runner = CliRunner()
 
 
 @pytest.fixture
@@ -257,14 +261,14 @@ class TestSubmitProposal:
         assert resp.status_code == 200
         assert "Invalid namespace" in resp.text
 
-    def test_submit_new_namespace_when_allowed(
-        self, client: TestClient, web_dogcats: Path
-    ) -> None:
-        """Submitting to a new namespace succeeds when creation is allowed (default)."""
-        resp = client.post(
+    def test_submit_new_namespace_when_allowed(self, web_dogcats: Path) -> None:
+        """Submitting to a new namespace succeeds when explicitly allowed."""
+        app = create_app(dogcats_dir=str(web_dogcats), allow_creating_namespaces=True)
+        ns_client = TestClient(app)
+        resp = ns_client.post(
             "/",
             data={
-                "csrf_token": _csrf(client),
+                "csrf_token": app.state.csrf_token,
                 "namespace": "newproject",
                 "title": "New ns proposal",
                 "description": "",
@@ -276,6 +280,20 @@ class TestSubmitProposal:
         inbox = InboxStorage(dogcats_dir=str(web_dogcats))
         proposals = inbox.list()
         assert any(p.namespace == "newproject" for p in proposals)
+
+    def test_submit_new_namespace_rejected_by_default(self, client: TestClient) -> None:
+        """Submitting to an unknown namespace is rejected by default."""
+        resp = client.post(
+            "/",
+            data={
+                "csrf_token": _csrf(client),
+                "namespace": "newproject",
+                "title": "New ns proposal",
+                "description": "",
+            },
+        )
+        assert resp.status_code == 200
+        assert "Invalid namespace" in resp.text
 
     def test_submit_redirects_with_303(self, client: TestClient) -> None:
         """Successful POST returns a 303 redirect (Post/Redirect/Get)."""
@@ -328,9 +346,9 @@ class TestAppFactory:
         assert DEFAULT_PORT == 48042
 
     def test_allow_creating_namespaces_default(self, web_dogcats: Path) -> None:
-        """By default allow_creating_namespaces is True."""
+        """By default allow_creating_namespaces is False."""
         app = create_app(dogcats_dir=str(web_dogcats))
-        assert app.state.allow_creating_namespaces is True
+        assert app.state.allow_creating_namespaces is False
 
     def test_allow_creating_namespaces_false(self, web_dogcats: Path) -> None:
         """Explicit False is stored in app state."""
@@ -339,14 +357,27 @@ class TestAppFactory:
 
     def test_form_shows_new_option_when_allowed(self, web_dogcats: Path) -> None:
         """Form includes 'New...' dropdown item when namespace creation is allowed."""
-        app = create_app(dogcats_dir=str(web_dogcats))
+        app = create_app(dogcats_dir=str(web_dogcats), allow_creating_namespaces=True)
         client = TestClient(app)
         resp = client.get("/")
         assert "New&hellip;" in resp.text
 
-    def test_form_hides_new_option_when_disallowed(self, web_dogcats: Path) -> None:
-        """Form omits 'New...' dropdown item when namespace creation is disabled."""
-        app = create_app(dogcats_dir=str(web_dogcats), allow_creating_namespaces=False)
+    def test_form_hides_new_option_by_default(self, web_dogcats: Path) -> None:
+        """Form omits 'New...' dropdown item by default."""
+        app = create_app(dogcats_dir=str(web_dogcats))
         client = TestClient(app)
         resp = client.get("/")
         assert "New&hellip;" not in resp.text
+
+
+class TestWebProposeInit:
+    """Tests for dcat web propose initialization checks."""
+
+    def test_fails_without_initialized_db(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Running 'web propose' without .dogcats directory fails."""
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(cli_app, ["web", "propose"])
+        assert result.exit_code == 1
+        assert "not initialized" in result.output
