@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Development
+
+- **Add v0.10.1 fixtures and inbox regression tests** — extend `generate_fixture.py` to capture `inbox.jsonl` alongside `issues.jsonl` for tags that include the inbox system. Add `test_inbox_regression.py` with full proposal field coverage (statuses, timestamps, closed/tombstone fields, get-by-ID). Generate v0.10.1 fixture files (closes dogcat-2sis)
+
 ## 0.10.1 (2026-02-19)
 
 ### Fixed
