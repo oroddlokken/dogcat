@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.10.0 (2026-02-19)
+
 ### Added
 
 - **`dcat stale` command** — list issues with no recent activity. Default threshold is 7 days; supports `--days N`, `--hours N`, and positional shorthand syntax (`7d`, `3h`, `1d12h`). Includes age display, standard filters, and all output modes (closes dogcat-57oq)
