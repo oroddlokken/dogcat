@@ -746,87 +746,73 @@ DOGCAT WORKFLOW GUIDE
 ## Rules
   Run `dcat prime` after compaction, clear, or new session
 {opinionated_rules}
-## Quick Start for AI agents
+## Quick Start
 
-0a. Allowed issue types, priorities, and statuses:
-      Types: bug, chore, epic, feature, question, story, task
-      Priorities: 0 (Critical), 1 (High), 2 (Medium, default), 3 (Low), 4 (Minimal)
-      Statuses: draft, open, in_progress, in_review, blocked, deferred, closed
+Allowed issue types, priorities, and statuses:
+  Types: bug, chore, epic, feature, question, story, task
+  Priorities: 0 (Critical), 1 (High), 2 (Medium, default), 3 (Low), 4 (Minimal)
+  Statuses: draft, open, in_progress, in_review, blocked, deferred, closed
 
-0b. `dcat create` and `dcat update` both support --title, --description,
-    --priority, --acceptance, --notes, --labels, --parent, --manual,
-    --design, --external-ref, --depends-on, --blocks, --duplicate-of,
-    --editor
+`dcat create` and `dcat update` both support --title, --description,
+--priority, --acceptance, --notes, --labels, --parent, --manual,
+--design, --external-ref, --depends-on, --blocks, --duplicate-of, --editor
 
-1. Create an issue:
-   $ dcat create "My first issue" --type bug --priority 1 -d "Description"
+1. Create: $ dcat create "Title" --type bug --priority 1 -d "Description"
 
 2. List issues:
-   $ dcat list                       - Show all open issues
-   $ dcat list <parent_id>           - Show children of a parent issue
-   $ dcat list --parent <parent_id>  - Same, using explicit flag
-   $ dcat ready                      - Show issues ready to work (no blockers)
-   $ dcat blocked                    - Show all blocked issues
+   $ dcat list                  - All open issues
+   $ dcat list <parent_id>     - Children of a parent
+   $ dcat ready                - Ready to work (no blockers)
+   $ dcat blocked              - All blocked issues
+   Use --namespace <ns> or --all-namespaces to filter.
 
-   Use --namespace <ns> to filter by namespace, or --all-namespaces
-   to show issues across all namespaces.
+3. Update: $ dcat update <id> --status in_progress
 
-3. Update an issue:
-   $ dcat update <issue_id> --status in_progress
-
-4. Close an issue:
-   $ dcat close <issue_id> --reason "Fixed"
+4. Close:  $ dcat close <id> --reason "Fixed"
 
 ## Essential Commands
 
   dcat create <title>                        - Create a new issue
   dcat create <title> --depends-on <id>      - Create with dependency
   dcat create <title> --blocks <id>          - Create issue that blocks another
-  dcat update <id> --depends-on <other_id>   - Add dependency to existing issue
-  dcat update <id> --blocks <other_id>       - Mark issue as blocking another
+  dcat update <id> --depends-on <other_id>   - Add dependency
+  dcat update <id> --blocks <other_id>       - Mark as blocking another
   dcat update <id> --remove-depends-on <id>  - Remove a dependency
   dcat update <id> --remove-blocks <id>      - Remove a blocks relationship
   dcat show <id>                             - View issue details
-  dcat search <query>                        - Search issues across all fields
-  dcat search <query> --type bug             - Search with type filter
+  dcat search <query>                        - Search issues (supports --type filter)
   dcat close <id>                            - Mark issue as closed
   dcat reopen <id>                           - Reopen a closed issue
   dcat delete <id>                           - Delete an issue (tombstone)
-  dcat pr                                    - Show in-progress and in-review issues
+  dcat pr                                    - Show in-progress/in-review issues
   dcat history                               - Show change history timeline
   dcat history -i <id>                       - History for a specific issue
   dcat diff                                  - Show uncommitted issue changes
-  dcat label <id> add -l <label>             - Add a label to an issue
+  dcat label <id> add -l <label>             - Add a label
   dcat label <id> remove -l <label>          - Remove a label
-  dcat link <id> add --related <other_id>    - Link two issues (relates_to)
+  dcat link <id> add --related <other_id>    - Link two issues
   dcat link <id> remove --related <other_id> - Remove a link
-  dcat comment <id> add -t "text"            - Add a comment to an issue
-  dcat comment <id> list                     - List comments for an issue
+  dcat comment <id> add -t "text"            - Add a comment
+  dcat comment <id> list                     - List comments
   dcat comment <id> delete -c <comment_id>   - Delete a comment
 
 ## Parent-Child vs Dependencies
 
-Parent-child relationships are **organizational** (grouping), not **blocking**.
-Child issues appear in `dcat ready` even when their parent is still open.
+Parent-child is **organizational** (grouping), not **blocking**.
+Children appear in `dcat ready` even when parent is open.
 
-- Can this child task be started independently? → Keep as parent-child only
-- Must the parent complete first? → Add explicit dependency:
+- Can start independently? → parent-child only
+- Must parent complete first? → add dependency:
     dcat update <child_id> --depends-on <parent_id>
 
 ## Breaking Down Large Tasks
 
-When the user requests a large or complex task, break it into an epic
-with child tasks rather than tackling it as a single issue:
+For large/complex tasks, create an epic with child tasks:
 
-1. Create an epic for the overall goal:
-   $ dcat create "Redesign auth system" --type epic
-
-2. Create child tasks under the epic:
-   $ dcat create "Add OAuth provider" --type task --parent <epic_id>
-   $ dcat create "Migrate user sessions" --type task --parent <epic_id>
-
-3. Add dependencies between child tasks where ordering matters:
-   $ dcat update <task_id> --depends-on <other_task_id>
+  $ dcat create "Redesign auth system" --type epic
+  $ dcat create "Add OAuth provider" --type task --parent <epic_id>
+  $ dcat create "Migrate sessions" --type task --parent <epic_id>
+  $ dcat update <task_id> --depends-on <other_task_id>  # if ordering matters
 
 Prefer multiple small, focused issues over one large issue.
 If unsure about scope, ask the user before creating the breakdown.
@@ -849,13 +835,11 @@ Do NOT attempt to work on manual issues. Leave them for the user.
 
 ## Questions
 
-Questions (type: question) are used to track questions that need answers,
-NOT tasks to work on.
+Questions (type: question) track questions needing answers, not tasks to work on.
 
 ## Labels
 
-Labels are freeform tags (e.g. "backend", "ui", "auth") that appear in
-`dcat list` and `dcat show`, and can be filtered with `--label`.
+Freeform tags shown in list/show, filter with --label.
 
 """
 

@@ -1365,7 +1365,7 @@ class TestPrimeCommand:
         result = runner.invoke(app, ["prime"])
         assert result.exit_code == 0
         assert "## Labels" in result.stdout
-        assert "freeform tags" in result.stdout
+        assert "Freeform tags" in result.stdout
 
 
 class TestStatusCommand:

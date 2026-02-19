@@ -65,12 +65,14 @@ In your `AGENTS.md`/`CLAUDE.md` file, add something like the following:
 
 ## Issue tracking
 
-This project uses **dcat** for issue tracking and **git** for version control. You MUST run `dcat prime` for instructions.
+This project uses **dcat** for issue tracking. You MUST run `dcat prime --opinionated` for instructions.
 Then run `dcat list --agent-only` to see the list of issues. Generally we work on bugs first, and always on high priority issues first.
 
-ALWAYS run `dcat update --status in_progress $issueId` as soon as you pick up an issue — before any planning, research, or exploration.
+When running multiple `dcat` commands, make separate parallel Bash tool calls instead of chaining them with `&&` and `echo` separators.
 
-It is okay to work on multiple issues at the same time - just mark all of them as in_progress, and ask the user which one to prioritize if there is a conflict.
+Mark each issue `in_progress` right when you start working on it — not before. Set `in_review` when work on that issue is done before moving on. The status should reflect what you are *actually* working on right now.
+
+It is okay to work on multiple related issues at the same time, but do NOT batch-mark an entire backlog as `in_progress` upfront. If there is a priority conflict, ask the user which to focus on first.
 
 If the user brings up a new bug, feature or anything else that warrants changes to the code, ALWAYS ask if we should create an issue for it before you start working on the code. When creating issues, set appropriate labels using `--labels` based on the issue content (e.g. `cli`, `tui`, `api`, `docs`, `testing`, `refactor`, `ux`, `performance`, etc.).
 
@@ -88,6 +90,7 @@ NEVER close issues without explicit user approval. When work is complete:
 2. Ask the user to test
 3. Ask if we can close it: "Can I close issue [id] '[title]'?"
 4. Only run `dcat close` after user confirms
+5. Ask: "Should I add this to CHANGELOG.md?" — update if yes
 ``````
 
 This is only a starting point - it's up to you to decide how dogcat fits best in your workflow!  
@@ -131,13 +134,6 @@ You can always run `dcat example-md` to get an example of what to put in your AG
 | `dcat tui` | Launch the interactive TUI dashboard |
 | `dcat new` | Interactive TUI for creating a new issue |
 | `dcat edit [$id]` | Interactive TUI for editing an issue |
-| **Inbox** | |
-| `dcat propose "Title"` | Submit a proposal |
-| `dcat propose "Title" --to ../other-repo` | Submit a proposal to another repo |
-| `dcat inbox list` | List incoming proposals |
-| `dcat inbox show $id` | View proposal details |
-| `dcat inbox close $id --reason "Done"` | Close a proposal |
-| `dcat inbox delete $id` | Tombstone a spam/invalid proposal |
 | **Git & maintenance** | |
 | `dcat git setup` | Install the JSONL merge driver for git |
 | `dcat history` | Show change history timeline |

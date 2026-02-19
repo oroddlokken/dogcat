@@ -868,6 +868,96 @@ class JSONLStorage:
 
         return issue
 
+    def rename_namespace(
+        self,
+        old_namespace: str,
+        new_namespace: str,
+        updated_by: str | None = None,
+    ) -> list[Issue]:
+        """Rename all issues in a namespace, cascading all references.
+
+        Performs a single file rewrite for the entire batch, unlike calling
+        ``change_namespace`` per issue (which rewrites per call).
+
+        Args:
+            old_namespace: The namespace to rename from.
+            new_namespace: The namespace to rename to.
+            updated_by: Who is making the change.
+
+        Returns:
+            List of updated issues.
+
+        Raises:
+            ValueError: If old namespace has no issues, or any new ID
+                would collide with an existing issue.
+        """
+        # Collect issues to rename
+        targets = [i for i in self._issues.values() if i.namespace == old_namespace]
+        if not targets:
+            msg = f"No issues found in namespace '{old_namespace}'"
+            raise ValueError(msg)
+
+        # Pre-check for collisions
+        for issue in targets:
+            new_full_id = f"{new_namespace}-{issue.id}"
+            if new_full_id in self._issues and self._issues[new_full_id] is not issue:
+                msg = f"Issue with ID {new_full_id} already exists"
+                raise ValueError(msg)
+
+        # Build old→new mapping for all affected IDs
+        id_map: dict[str, str] = {}
+        for issue in targets:
+            id_map[issue.full_id] = f"{new_namespace}-{issue.id}"
+
+        now = datetime.now().astimezone()
+
+        # Update the issues themselves and re-key
+        for issue in targets:
+            old_fid = issue.full_id
+            issue.namespace = new_namespace
+            issue.updated_at = now
+            if updated_by:
+                issue.updated_by = updated_by
+            del self._issues[old_fid]
+            self._issues[issue.full_id] = issue
+
+        # Cascade to references in *all* issues
+        for other in self._issues.values():
+            if other.parent and other.parent in id_map:
+                other.parent = id_map[other.parent]
+                other.updated_at = now
+            if other.duplicate_of and other.duplicate_of in id_map:
+                other.duplicate_of = id_map[other.duplicate_of]
+                other.updated_at = now
+
+        # Cascade to dependencies
+        for dep in self._dependencies:
+            if dep.issue_id in id_map:
+                dep.issue_id = id_map[dep.issue_id]
+            if dep.depends_on_id in id_map:
+                dep.depends_on_id = id_map[dep.depends_on_id]
+
+        # Cascade to links
+        for link in self._links:
+            if link.from_id in id_map:
+                link.from_id = id_map[link.from_id]
+            if link.to_id in id_map:
+                link.to_id = id_map[link.to_id]
+
+        self._rebuild_indexes()
+        self._save(_reload=False, _rename_event_ids=id_map)
+
+        # Emit events
+        for issue in targets:
+            self._emit_event(
+                "updated",
+                issue,
+                {"namespace": {"old": old_namespace, "new": new_namespace}},
+                by=updated_by,
+            )
+
+        return targets
+
     def close(
         self,
         issue_id: str,

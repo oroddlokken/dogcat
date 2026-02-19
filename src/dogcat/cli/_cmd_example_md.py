@@ -14,6 +14,9 @@ You MUST run `dcat prime --opinionated` for instructions.
 Then run `dcat list --agent-only` to see the list of issues. Generally we work \
 on bugs first, and always on high priority issues first.
 
+When running multiple `dcat` commands, make separate parallel Bash tool calls \
+instead of chaining them with `&&` and `echo` separators.
+
 Mark each issue `in_progress` right when you start working on it — not before. \
 Set `in_review` when work on that issue is done before moving on. The status \
 should reflect what you are *actually* working on right now.
@@ -36,6 +39,15 @@ ask these as **separate questions in order**:
 implementation?"
 Do NOT combine these into one question. The user may want to update the \
 issue without starting work.
+
+### Closing Issues - IMPORTANT
+
+NEVER close issues without explicit user approval. When work is complete:
+
+1. Set status to `in_review`: `dcat update --status in_review $issueId`
+2. Ask the user to test
+3. Ask if we can close it: "Can I close issue [id] '[title]'?"
+4. Only run `dcat close` after user confirms
 """
 
 

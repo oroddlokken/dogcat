@@ -4,6 +4,7 @@
 
 ### Added
 
+- **`dcat rename-namespace` command** — rename all issues in a namespace at once, cascading updates to all references (parent, duplicate_of, dependencies, links), inbox proposals, and config (primary namespace, visible/hidden namespace lists) (closes dogcat-2ssc)
 - **`--include-inbox` flag on `dcat list` and `dcat ready`** — show pending inbox proposals alongside issues (closes dogcat-3y3d)
 - **`--inbox` flag on `dcat prime`** — inbox section is now hidden by default unless `--inbox` is passed (closes dogcat-4iog)
 - **`--allow-creating-namespaces` / `--disable-creating-namespaces` on `dcat web propose`** — control whether the web form allows creating new namespaces, with CLI flag > config > default (True) precedence. Adds `allow_creating_namespaces` config key and "New..." option in the namespace dropdown (closes dogcat-23z4)
@@ -14,6 +15,10 @@
 - **Web proposal form** — `dcat web propose` launches a FastAPI server with an HTML form for submitting proposals via browser. Includes CSRF protection, input validation, security headers, namespace selection, and input size limits
 - **FastAPI, uvicorn, jinja2 as optional `[web]` dependencies** — install with `pip install dogcat[web]`
 - **Status symbols in `dcat diff` output** — diff now shows the current status symbol (●, ◐, ?, etc.) alongside the event type symbol, giving at-a-glance status context when reviewing changes (closes dogcat-5rdf)
+
+### Changed
+
+- **Trimmed `dcat prime` output** — reduced token count from ~1249 to ~1052 (~200 tokens saved) by deduplicating Quick Start and Essential Commands sections, shortening descriptions, and condensing prose without losing essential information (closes dogcat-oyo9)
 
 ### Fixed
 

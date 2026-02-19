@@ -360,6 +360,35 @@ class InboxStorage:
 
         return tombstone_ids
 
+    def rename_namespace(
+        self,
+        old_namespace: str,
+        new_namespace: str,
+    ) -> int:
+        """Rename all proposals from one namespace to another.
+
+        Args:
+            old_namespace: Namespace to rename from.
+            new_namespace: Namespace to rename to.
+
+        Returns:
+            Number of proposals renamed.
+        """
+        targets = [p for p in self._proposals.values() if p.namespace == old_namespace]
+        if not targets:
+            return 0
+
+        now = datetime.now().astimezone()
+        for proposal in targets:
+            old_fid = proposal.full_id
+            proposal.namespace = new_namespace
+            proposal.updated_at = now
+            del self._proposals[old_fid]
+            self._proposals[proposal.full_id] = proposal
+
+        self._save()
+        return len(targets)
+
     def count(self, *, status: ProposalStatus | None = None) -> int:
         """Count proposals, optionally filtered by status.
 
