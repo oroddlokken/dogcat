@@ -4,10 +4,13 @@
 
 ### Added
 
+- **`dcat stale` command** — list issues with no recent activity. Default threshold is 7 days; supports `--days N`, `--hours N`, and positional shorthand syntax (`7d`, `3h`, `1d12h`). Includes age display, standard filters, and all output modes (closes dogcat-57oq)
 - **`dcat rename-namespace` command** — rename all issues in a namespace at once, cascading updates to all references (parent, duplicate_of, dependencies, links), inbox proposals, and config (primary namespace, visible/hidden namespace lists) (closes dogcat-2ssc)
 - **`--include-inbox` flag on `dcat list` and `dcat ready`** — show pending inbox proposals alongside issues (closes dogcat-3y3d)
 - **`--inbox` flag on `dcat prime`** — inbox section is now hidden by default unless `--inbox` is passed (closes dogcat-4iog)
 - **`--allow-creating-namespaces` / `--disable-creating-namespaces` on `dcat web propose`** — control whether the web form allows creating new namespaces, with CLI flag > config > default (True) precedence. Adds `allow_creating_namespaces` config key and "New..." option in the namespace dropdown (closes dogcat-23z4)
+- **Inbox proposals in `dcat export`** — export now includes inbox proposals in both JSON (`"proposals"` key) and JSONL formats. Use `--no-inbox` to exclude them (closes dogcat-109b)
+- **Inbox events in `dcat history`** — proposal lifecycle events (create, close, delete) are now recorded and shown in history alongside issue events. Supports `--issue` filtering by proposal ID and `--no-inbox` to exclude inbox events (closes dogcat-o6ym)
 - **Item counts in status listing headers** — all listing commands (`dcat list`, `dcat ready`, `dcat blocked`, `dcat deferred`, `dcat in-progress`, `dcat in-review`, `dcat manual`, `dcat recently-added`, `dcat recently-closed`, `dcat pr`) now show item counts in their headers, e.g. "Ready (3):" (closes dogcat-63au)
 - **`--body` alias for `--description`** — `dcat create` and `dcat update` now accept `--body` as a hidden alias for `--description`/`-d` (closes dogcat-4jpv)
 - **Hidden `--full` flag on `dcat show`** — preparatory no-op hook for future functionality (closes dogcat-ns83)

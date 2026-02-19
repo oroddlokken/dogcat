@@ -116,6 +116,67 @@ class EventLog:
         return _FileLock(self._lock_path)
 
 
+class InboxEventLog:
+    """Append-only event log stored alongside proposals in .dogcats/inbox.jsonl."""
+
+    def __init__(self, dogcats_dir: str | Path) -> None:
+        self.dogcats_dir = Path(dogcats_dir)
+        self.path = self.dogcats_dir / "inbox.jsonl"
+        self._lock_path = self.dogcats_dir / ".issues.lock"
+
+    def append(self, event: EventRecord) -> None:
+        """Append a single event record to inbox.jsonl."""
+        data = _serialize(event)
+        with self._file_lock(), self.path.open("ab") as f:
+            f.write(orjson.dumps(data))
+            f.write(b"\n")
+            f.flush()
+
+    def read(
+        self,
+        *,
+        issue_id: str | None = None,
+        limit: int | None = None,
+    ) -> list[EventRecord]:
+        """Read inbox events in reverse chronological order (newest first).
+
+        Args:
+            issue_id: Filter to events for this proposal ID.
+            limit: Maximum number of events to return.
+
+        Returns:
+            List of EventRecord, newest first.
+        """
+        if not self.path.exists():
+            return []
+
+        events: list[EventRecord] = []
+        with self.path.open("rb") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                data = orjson.loads(line)
+                if data.get("record_type") != "event":
+                    continue
+                record = _deserialize(data)
+                if issue_id is not None and record.issue_id != issue_id:
+                    continue
+                events.append(record)
+
+        # Reverse for newest-first
+        events.reverse()
+
+        if limit is not None:
+            events = events[:limit]
+
+        return events
+
+    def _file_lock(self) -> _FileLock:
+        """Create an advisory file lock context manager."""
+        return _FileLock(self._lock_path)
+
+
 class _FileLock:
     """Advisory file lock using fcntl."""
 

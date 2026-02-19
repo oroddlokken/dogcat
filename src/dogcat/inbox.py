@@ -17,6 +17,7 @@ import logging
 
 import orjson
 
+from dogcat.constants import TRACKED_PROPOSAL_FIELDS
 from dogcat.models import (
     Proposal,
     ProposalStatus,
@@ -56,6 +57,11 @@ class InboxStorage:
 
         self._lock_path = self.dogcats_dir / ".issues.lock"
         self._needs_compaction = False
+
+        # Initialize event log for inbox change tracking
+        from dogcat.event_log import InboxEventLog
+
+        self._event_log = InboxEventLog(self.dogcats_dir)
 
         if self.path.exists():
             self._load()
@@ -163,6 +169,56 @@ class InboxStorage:
         """Serialize a proposal to a dict for appending."""
         return proposal_to_dict(proposal)
 
+    # -- Event emission helpers ------------------------------------------
+
+    def _emit_event(
+        self,
+        event_type: str,
+        proposal: Proposal,
+        changes: dict[str, dict[str, Any]],
+        by: str | None = None,
+    ) -> None:
+        """Emit an event to the inbox event log (best-effort)."""
+        from dogcat.event_log import EventRecord
+
+        if not changes:
+            return
+
+        event = EventRecord(
+            event_type=event_type,
+            issue_id=proposal.full_id,
+            timestamp=proposal.updated_at.isoformat(),
+            by=by,
+            title=proposal.title,
+            changes=changes,
+        )
+        try:
+            self._event_log.append(event)
+        except Exception:
+            logging.getLogger(__name__).debug(
+                "Failed to write event for %s",
+                proposal.full_id,
+                exc_info=True,
+            )
+
+    @staticmethod
+    def _tracked_changes(
+        old_values: dict[str, Any],
+        new_values: dict[str, Any],
+    ) -> dict[str, dict[str, Any]]:
+        """Compute tracked field changes between old and new proposal values."""
+        changes: dict[str, dict[str, Any]] = {}
+        for field_name in TRACKED_PROPOSAL_FIELDS:
+            old: Any = old_values.get(field_name)
+            new: Any = new_values.get(field_name)
+            if hasattr(old, "value"):
+                old = old.value
+            if hasattr(new, "value"):
+                new = new.value
+            if old != new:
+                changes[field_name] = {"old": old, "new": new}
+        return changes
+
     def create(self, proposal: Proposal) -> Proposal:
         """Create a new proposal.
 
@@ -185,6 +241,20 @@ class InboxStorage:
 
         self._proposals[proposal.full_id] = proposal
         self._append([self._proposal_record(proposal)])
+
+        # Record creation event
+        changes: dict[str, dict[str, Any]] = {
+            "title": {"old": None, "new": proposal.title},
+        }
+        if proposal.description:
+            changes["description"] = {"old": None, "new": proposal.description}
+        self._emit_event(
+            "created",
+            proposal,
+            changes,
+            by=proposal.proposed_by,
+        )
+
         return proposal
 
     def resolve_id(self, partial_id: str) -> str | None:
@@ -293,6 +363,7 @@ class InboxStorage:
             raise ValueError(msg)
 
         proposal = self._proposals[resolved_id]
+        old_data = proposal_to_dict(proposal)
         now = datetime.now().astimezone()
         proposal.status = ProposalStatus.CLOSED
         proposal.closed_at = now
@@ -305,6 +376,12 @@ class InboxStorage:
             proposal.resolved_issue = resolved_issue
 
         self._append([self._proposal_record(proposal)])
+
+        # Record close event
+        new_data = proposal_to_dict(proposal)
+        changes = self._tracked_changes(old_data, new_data)
+        self._emit_event("closed", proposal, changes, by=closed_by)
+
         return proposal
 
     def delete(
@@ -331,6 +408,7 @@ class InboxStorage:
             raise ValueError(msg)
 
         proposal = self._proposals[resolved_id]
+        old_data = proposal_to_dict(proposal)
         proposal.status = ProposalStatus.TOMBSTONE
         now = datetime.now().astimezone()
         proposal.deleted_at = now
@@ -338,6 +416,12 @@ class InboxStorage:
         if deleted_by:
             proposal.deleted_by = deleted_by
         self._append([self._proposal_record(proposal)])
+
+        # Record delete event
+        new_data = proposal_to_dict(proposal)
+        changes = self._tracked_changes(old_data, new_data)
+        self._emit_event("deleted", proposal, changes, by=deleted_by)
+
         return proposal
 
     def prune_tombstones(self) -> list[str]:

@@ -2376,6 +2376,78 @@ class TestExportWithDepsAndLinks:
         assert len(lines) >= 4
 
 
+class TestExportInbox:
+    """Test export includes inbox proposals."""
+
+    def test_export_json_includes_proposals(self, tmp_path: Path) -> None:
+        """Test that JSON export includes proposals key."""
+        dogcats_dir, _ = _init_and_create(tmp_path, "Issue A")
+        runner.invoke(
+            app,
+            ["propose", "Proposal B", "--to", str(tmp_path)],
+        )
+        result = runner.invoke(
+            app,
+            ["export", "--format", "json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert "proposals" in data
+        assert len(data["proposals"]) == 1
+        assert data["proposals"][0]["title"] == "Proposal B"
+
+    def test_export_jsonl_includes_proposals(self, tmp_path: Path) -> None:
+        """Test that JSONL export includes proposal records."""
+        dogcats_dir, _ = _init_and_create(tmp_path, "Issue A")
+        runner.invoke(
+            app,
+            ["propose", "Proposal B", "--to", str(tmp_path)],
+        )
+        result = runner.invoke(
+            app,
+            ["export", "--format", "jsonl", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        lines = [json.loads(ln) for ln in result.stdout.strip().split("\n") if ln]
+        proposals = [ln for ln in lines if ln.get("record_type") == "proposal"]
+        assert len(proposals) == 1
+        assert proposals[0]["title"] == "Proposal B"
+
+    def test_export_no_inbox_flag(self, tmp_path: Path) -> None:
+        """Test --no-inbox excludes proposals from export."""
+        dogcats_dir, _ = _init_and_create(tmp_path, "Issue A")
+        runner.invoke(
+            app,
+            ["propose", "Hidden proposal", "--to", str(tmp_path)],
+        )
+        result = runner.invoke(
+            app,
+            [
+                "export",
+                "--format",
+                "json",
+                "--no-inbox",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert "proposals" not in data
+
+    def test_export_json_no_inbox_file(self, tmp_path: Path) -> None:
+        """Test export works when no inbox.jsonl exists."""
+        dogcats_dir, _ = _init_and_create(tmp_path, "Issue A")
+        result = runner.invoke(
+            app,
+            ["export", "--format", "json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert "proposals" in data
+        assert len(data["proposals"]) == 0
+
+
 class TestInitExistingDir:
     """Test init when directory already exists."""
 

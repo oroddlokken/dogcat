@@ -136,6 +136,154 @@ class TestHistory:
         assert "Closed" in result.stdout
 
 
+class TestHistoryInbox:
+    """Tests for inbox proposal events in history."""
+
+    def test_history_shows_proposal_created(self, tmp_path: Path) -> None:
+        """Test that creating a proposal appears in history."""
+        dogcats_dir = _init_repo(tmp_path)
+        runner.invoke(
+            app,
+            ["propose", "New idea", "--to", str(tmp_path), "--json"],
+        )
+        result = runner.invoke(
+            app,
+            ["history", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "New idea" in result.stdout
+
+    def test_history_shows_proposal_closed(self, tmp_path: Path) -> None:
+        """Test that closing a proposal appears in history."""
+        dogcats_dir = _init_repo(tmp_path)
+        propose_result = runner.invoke(
+            app,
+            ["propose", "Close me", "--to", str(tmp_path), "--json"],
+        )
+        data = json.loads(propose_result.stdout)
+        proposal_id = f"{data['namespace']}-inbox-{data['id']}"
+        runner.invoke(
+            app,
+            ["inbox", "close", proposal_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+        result = runner.invoke(
+            app,
+            ["history", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Close me" in result.stdout
+        # Should have both created and closed events
+        assert "inbox" in result.stdout
+
+    def test_history_shows_proposal_deleted(self, tmp_path: Path) -> None:
+        """Test that deleting a proposal appears in history."""
+        dogcats_dir = _init_repo(tmp_path)
+        propose_result = runner.invoke(
+            app,
+            ["propose", "Delete me", "--to", str(tmp_path), "--json"],
+        )
+        data = json.loads(propose_result.stdout)
+        proposal_id = f"{data['namespace']}-inbox-{data['id']}"
+        runner.invoke(
+            app,
+            ["inbox", "delete", proposal_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+        result = runner.invoke(
+            app,
+            ["history", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Delete me" in result.stdout
+
+    def test_history_filter_by_proposal_id(self, tmp_path: Path) -> None:
+        """Test filtering history by proposal ID."""
+        dogcats_dir = _init_repo(tmp_path)
+        # Create issue and proposal
+        _create_issue(dogcats_dir, "Regular issue")
+        propose_result = runner.invoke(
+            app,
+            ["propose", "Proposal only", "--to", str(tmp_path), "--json"],
+        )
+        data = json.loads(propose_result.stdout)
+        proposal_id = f"{data['namespace']}-inbox-{data['id']}"
+
+        result = runner.invoke(
+            app,
+            [
+                "history",
+                "--issue",
+                proposal_id,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Proposal only" in result.stdout
+        assert "Regular issue" not in result.stdout
+
+    def test_history_no_inbox_flag(self, tmp_path: Path) -> None:
+        """Test --no-inbox excludes proposal events."""
+        dogcats_dir = _init_repo(tmp_path)
+        _create_issue(dogcats_dir, "Issue event")
+        runner.invoke(
+            app,
+            ["propose", "Proposal event", "--to", str(tmp_path)],
+        )
+        result = runner.invoke(
+            app,
+            [
+                "history",
+                "--no-inbox",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Issue event" in result.stdout
+        assert "Proposal event" not in result.stdout
+
+    def test_history_json_includes_inbox(self, tmp_path: Path) -> None:
+        """Test JSON output includes inbox events."""
+        dogcats_dir = _init_repo(tmp_path)
+        runner.invoke(
+            app,
+            ["propose", "JSON inbox", "--to", str(tmp_path)],
+        )
+        result = runner.invoke(
+            app,
+            ["history", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        events = json.loads(result.stdout)
+        assert any("inbox" in e["issue_id"] for e in events)
+
+    def test_history_merges_issue_and_inbox_events(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test that issue and inbox events are merged chronologically."""
+        dogcats_dir = _init_repo(tmp_path)
+        _create_issue(dogcats_dir, "Issue first")
+        runner.invoke(
+            app,
+            ["propose", "Proposal second", "--to", str(tmp_path)],
+        )
+        _create_issue(dogcats_dir, "Issue third")
+
+        result = runner.invoke(
+            app,
+            ["history", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        events = json.loads(result.stdout)
+        assert len(events) == 3
+        # Should be chronological (oldest first in output)
+        titles = [e.get("title", "") for e in events]
+        assert titles[0] == "Issue first"
+        assert titles[1] == "Proposal second"
+        assert titles[2] == "Issue third"
+
+
 class TestHistoryAlias:
     """Tests for history alias."""
 

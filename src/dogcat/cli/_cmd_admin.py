@@ -225,14 +225,20 @@ def register(app: typer.Typer) -> None:
             "-A",
             help="Export issues from all namespaces",
         ),
+        include_inbox: bool = typer.Option(
+            True,
+            "--include-inbox/--no-inbox",
+            help="Include inbox proposals in export",
+        ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
-        """Export issues, dependencies, and links to stdout in specified format.
+        """Export issues, dependencies, links, and inbox proposals to stdout.
 
-        By default exports all issues. Use filters to narrow the export.
+        By default exports all issues and inbox proposals.
+        Use filters to narrow the export.
 
         Supported formats:
-        - json: table-printed JSON object with issues, dependencies, and links
+        - json: JSON object with issues, dependencies, links, and proposals
         - jsonl: JSON Lines (one record per line)
         """
         try:
@@ -257,7 +263,7 @@ def register(app: typer.Typer) -> None:
                 storage=storage,
             )
 
-            from dogcat.models import issue_to_dict
+            from dogcat.models import issue_to_dict, proposal_to_dict
 
             # Get all deps and links (avoids per-issue iteration dups).
             # When filters are active, scope to exported issues.
@@ -297,13 +303,38 @@ def register(app: typer.Typer) -> None:
                 or (link.from_id in exported_ids or link.to_id in exported_ids)
             ]
 
+            # Load inbox proposals
+            all_proposals: list[dict[str, Any]] = []
+            if include_inbox:
+                try:
+                    from dogcat.inbox import InboxStorage
+
+                    inbox = InboxStorage(dogcats_dir=str(storage.dogcats_dir))
+                    proposals = inbox.list(include_tombstones=True)
+
+                    # Apply namespace filter
+                    if namespace:
+                        proposals = [p for p in proposals if p.namespace == namespace]
+                    elif not all_namespaces:
+                        from dogcat.config import get_namespace_filter
+
+                        ns_filter = get_namespace_filter(str(storage.dogcats_dir))
+                        if ns_filter is not None:
+                            proposals = [p for p in proposals if ns_filter(p.namespace)]
+
+                    all_proposals = [proposal_to_dict(p) for p in proposals]
+                except (ValueError, RuntimeError):
+                    pass  # No inbox file — skip silently
+
             if format_type == "json":
                 # table-printed JSON object with all data
-                output = {
+                output: dict[str, Any] = {
                     "issues": [issue_to_dict(issue) for issue in issues],
                     "dependencies": all_deps,
                     "links": all_links,
                 }
+                if include_inbox:
+                    output["proposals"] = all_proposals
                 typer.echo(orjson.dumps(output, option=orjson.OPT_INDENT_2).decode())
             elif format_type == "jsonl":
                 # JSON Lines format - one record per line
@@ -314,6 +345,8 @@ def register(app: typer.Typer) -> None:
                     typer.echo(orjson.dumps(dep).decode())
                 for link in all_links:
                     typer.echo(orjson.dumps(link).decode())
+                for proposal in all_proposals:
+                    typer.echo(orjson.dumps(proposal).decode())
             else:
                 echo_error(f"Unknown format '{format_type}'")
                 typer.echo("Supported formats: json, jsonl", err=True)
