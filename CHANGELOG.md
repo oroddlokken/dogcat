@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.10.2 (2026-02-21)
+
 ### Fixed
 
 - **Namespace resolution from subdirectories** — running `dcat` from a subfolder no longer creates issues under the wrong namespace. `get_issue_prefix` now walks up the directory tree to find the parent `.dogcats/` directory, matching the behavior of `get_storage` (closes dogcat-ahdx)
