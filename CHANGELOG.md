@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Namespace resolution from subdirectories** — running `dcat` from a subfolder no longer creates issues under the wrong namespace. `get_issue_prefix` now walks up the directory tree to find the parent `.dogcats/` directory, matching the behavior of `get_storage` (closes dogcat-ahdx)
+
 ### Added
 
 - **`dcat graph` command** — visualize the dependency graph as an ASCII DAG with Unicode box-drawing. Parent-child edges render in cyan (`├── `), blocking edges in red (`├─▶ `). Supports `dcat graph <id>` for subgraph view, `--agent-only` filtering, `--json` output, and all standard filters (closes dogcat-2o4w)

@@ -120,6 +120,46 @@ def save_config(dogcats_dir: str, config: dict[str, Any]) -> None:
         tomli_w.dump(config, f)
 
 
+def _resolve_dogcats_path(dogcats_dir: str) -> str:
+    """Resolve the .dogcats directory path, walking up from CWD if needed.
+
+    When commands are run from a subdirectory, ``dogcats_dir`` may be the
+    default ``".dogcats"`` which doesn't exist locally.  This mirrors the
+    walk-up logic in ``cli._helpers.find_dogcats_dir`` so that callers in
+    ``config.py`` (which can't import from ``cli``) get the correct path.
+
+    Args:
+        dogcats_dir: Path to .dogcats directory (may be relative/unresolved)
+
+    Returns:
+        Resolved path to the .dogcats directory, or the original value if
+        no directory is found during the walk-up.
+    """
+    if Path(dogcats_dir).is_dir():
+        return dogcats_dir
+
+    current = Path.cwd()
+    while True:
+        # Check for .dogcatrc first
+        rc_candidate = current / DOGCATRC_FILENAME
+        if rc_candidate.is_file():
+            try:
+                target = parse_dogcatrc(rc_candidate)
+                if target.is_dir():
+                    return str(target)
+            except ValueError:
+                pass
+
+        candidate = current / ".dogcats"
+        if candidate.is_dir():
+            return str(candidate)
+
+        parent = current.parent
+        if parent == current:
+            return dogcats_dir  # Filesystem root — fall back to original
+        current = parent
+
+
 def get_issue_prefix(dogcats_dir: str) -> str:
     """Get the issue prefix from config or return default.
 
@@ -135,6 +175,9 @@ def get_issue_prefix(dogcats_dir: str) -> str:
     Returns:
         Issue prefix string
     """
+    # Resolve the actual .dogcats path (handles subdirectory invocations)
+    dogcats_dir = _resolve_dogcats_path(dogcats_dir)
+
     # Try config file first ("namespace" key, with "issue_prefix" fallback)
     config = load_config(dogcats_dir)
     if "namespace" in config:

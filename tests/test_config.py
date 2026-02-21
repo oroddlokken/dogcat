@@ -10,6 +10,7 @@ from dogcat.config import (
     DEFAULT_PREFIX,
     _detect_prefix_from_directory,
     _detect_prefix_from_issues,
+    _resolve_dogcats_path,
     extract_prefix,
     get_config_path,
     get_issue_prefix,
@@ -695,3 +696,107 @@ class TestGetNamespaceFilter:
 
         result = get_namespace_filter(str(dogcats_dir))
         assert result is None
+
+
+class TestResolveDogcatsPath:
+    """Tests for _resolve_dogcats_path and subdirectory namespace resolution."""
+
+    def test_returns_existing_dir_unchanged(self, tmp_path: Path) -> None:
+        """When dogcats_dir already exists, return it directly."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        assert _resolve_dogcats_path(str(dogcats_dir)) == str(dogcats_dir)
+
+    def test_walks_up_to_find_parent_dogcats(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When CWD is a subfolder, resolve walks up to find parent .dogcats."""
+        # Create project structure: project/.dogcats/ and project/subfolder/
+        project_dir = tmp_path / "my-project"
+        project_dir.mkdir()
+        dogcats_dir = project_dir / ".dogcats"
+        dogcats_dir.mkdir()
+        subfolder = project_dir / "subfolder"
+        subfolder.mkdir()
+
+        # Simulate running from the subfolder
+        monkeypatch.chdir(subfolder)
+
+        resolved = _resolve_dogcats_path(".dogcats")
+        assert resolved == str(dogcats_dir)
+
+    def test_get_issue_prefix_from_subfolder_uses_parent_namespace(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """get_issue_prefix from subfolder uses parent namespace."""
+        # Create project with configured namespace
+        project_dir = tmp_path / "my-project"
+        project_dir.mkdir()
+        dogcats_dir = project_dir / ".dogcats"
+        dogcats_dir.mkdir()
+        set_issue_prefix(str(dogcats_dir), "my-project")
+
+        # Create a subfolder and cd into it
+        subfolder = project_dir / "horse"
+        subfolder.mkdir()
+        monkeypatch.chdir(subfolder)
+
+        # Should resolve to parent's namespace, NOT "horse"
+        prefix = get_issue_prefix(".dogcats")
+        assert prefix == "my-project"
+
+    def test_get_issue_prefix_from_subfolder_detects_dir_name(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Without config, get_issue_prefix from subfolder uses parent dir name."""
+        project_dir = tmp_path / "cool-project"
+        project_dir.mkdir()
+        dogcats_dir = project_dir / ".dogcats"
+        dogcats_dir.mkdir()
+
+        subfolder = project_dir / "horse"
+        subfolder.mkdir()
+        monkeypatch.chdir(subfolder)
+
+        # Should detect "cool-project" (parent of .dogcats), NOT "horse"
+        prefix = get_issue_prefix(".dogcats")
+        assert prefix == "cool-project"
+
+    def test_get_issue_prefix_from_nested_subfolder(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """get_issue_prefix works from deeply nested subfolders."""
+        project_dir = tmp_path / "my-project"
+        project_dir.mkdir()
+        dogcats_dir = project_dir / ".dogcats"
+        dogcats_dir.mkdir()
+        set_issue_prefix(str(dogcats_dir), "my-project")
+
+        # Create nested subfolder structure
+        nested = project_dir / "src" / "lib" / "deep"
+        nested.mkdir(parents=True)
+        monkeypatch.chdir(nested)
+
+        prefix = get_issue_prefix(".dogcats")
+        assert prefix == "my-project"
+
+    def test_falls_back_to_cwd_name_when_no_dogcats_found(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """When no .dogcats exists anywhere, uses CWD name as prefix."""
+        # Create a directory with no .dogcats anywhere above
+        isolated = tmp_path / "no-dogcats" / "my-app"
+        isolated.mkdir(parents=True)
+        monkeypatch.chdir(isolated)
+
+        # Falls through to _detect_prefix_from_directory which uses CWD name
+        prefix = get_issue_prefix(".dogcats")
+        assert prefix == "my-app"
