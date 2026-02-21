@@ -684,6 +684,8 @@ def register(app: typer.Typer) -> None:
 
 ── Useful Commands ─────────────────────────────────────────────────────────
 
+  dcat graph       Visualize the dependency graph as ASCII
+  dcat graph <id>  Show subgraph reachable from an issue
   dcat info        Show valid types, statuses, and priorities
   dcat status      Show project overview and counts
   dcat history     Show change history timeline
@@ -792,6 +794,7 @@ Allowed issue types, priorities, and statuses:
   dcat label <id> remove -l <label>          - Remove a label
   dcat link <id> add --related <other_id>    - Link two issues
   dcat link <id> remove --related <other_id> - Remove a link
+  dcat graph [<id>]                           - Visualize dependency graph
   dcat comment <id> add -t "text"            - Add a comment
   dcat comment <id> list                     - List comments
   dcat comment <id> delete -c <comment_id>   - Delete a comment

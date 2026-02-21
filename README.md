@@ -116,6 +116,9 @@ You can always run `dcat example-md` to get an example of what to put in your AG
 | `dcat search "login"` | Search issues across all fields |
 | `dcat search "bug" --type bug` | Search with type filter |
 | `dcat labels` | List all labels with counts |
+| **Visualizing** | |
+| `dcat graph` | Show the full dependency graph as ASCII |
+| `dcat graph $id` | Show the subgraph reachable from an issue |
 | **Filtering** | |
 | `dcat ready` | List issues not blocked by other issues |
 | `dcat blocked` | List all blocked issues |
