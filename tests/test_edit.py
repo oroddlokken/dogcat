@@ -465,7 +465,7 @@ class TestParentPicker:
 
         async with app.run_test() as _pilot:
             parent_select = cast("Select[str]", app.query_one("#parent-input", Select))
-            assert parent_select.value == Select.BLANK
+            assert parent_select.value == Select.NULL
 
     @pytest.mark.asyncio
     async def test_excludes_self_from_options(self) -> None:
@@ -522,7 +522,7 @@ class TestParentPicker:
         app = IssueEditorApp(issue, storage)
 
         async with app.run_test() as pilot:
-            app.query_one("#parent-input", Select).value = Select.BLANK
+            app.query_one("#parent-input", Select).value = Select.NULL
             await pilot.press("ctrl+s")
 
         storage.update.assert_called_once()

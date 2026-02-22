@@ -90,14 +90,17 @@ def pick_issue(storage: JSONLStorage) -> str | None:
 
     ns_filter = get_namespace_filter(str(storage.dogcats_dir))
 
-    issues: list[tuple[Text, str]] = []
-    for issue in storage.list():
-        if issue.is_tombstone() or issue.is_closed():
-            continue
-        if ns_filter is not None and not ns_filter(issue.namespace):
-            continue
-        label = make_issue_label(issue)
-        issues.append((label, issue.full_id))
+    filtered = [
+        issue
+        for issue in storage.list()
+        if not issue.is_tombstone()
+        and not issue.is_closed()
+        and (ns_filter is None or ns_filter(issue.namespace))
+    ]
+    filtered.sort(key=lambda i: (i.priority, i.id))
+    issues: list[tuple[Text, str]] = [
+        (make_issue_label(issue), issue.full_id) for issue in filtered
+    ]
 
     if not issues:
         return None

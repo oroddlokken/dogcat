@@ -1040,3 +1040,111 @@ class TestIncludeInbox:
         )
         assert result.exit_code == 0
         assert "Inbox" not in result.stdout
+
+    def test_list_include_inbox_filters_foreign_namespace(self, tmp_path: Path) -> None:
+        """Test that list --include-inbox hides proposals from other namespaces."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--namespace", "test", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        # Create a proposal with the local namespace
+        runner.invoke(
+            app,
+            ["propose", "Local proposal", "--to", str(tmp_path)],
+        )
+        # Create a proposal with a foreign namespace
+        runner.invoke(
+            app,
+            [
+                "propose",
+                "Foreign proposal",
+                "--namespace",
+                "other",
+                "--to",
+                str(tmp_path),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["list", "--include-inbox", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Local proposal" in result.stdout
+        assert "Foreign proposal" not in result.stdout
+
+    def test_list_include_inbox_all_namespaces_shows_foreign(
+        self, tmp_path: Path
+    ) -> None:
+        """Test that list --include-inbox -A shows proposals from all namespaces."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--namespace", "test", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        runner.invoke(
+            app,
+            ["propose", "Local proposal", "--to", str(tmp_path)],
+        )
+        runner.invoke(
+            app,
+            [
+                "propose",
+                "Foreign proposal",
+                "--namespace",
+                "other",
+                "--to",
+                str(tmp_path),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "list",
+                "--include-inbox",
+                "-A",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Local proposal" in result.stdout
+        assert "Foreign proposal" in result.stdout
+
+    def test_ready_include_inbox_filters_foreign_namespace(
+        self, tmp_path: Path
+    ) -> None:
+        """Test that ready --include-inbox hides proposals from other namespaces."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--namespace", "test", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        runner.invoke(
+            app,
+            ["propose", "Local ready", "--to", str(tmp_path)],
+        )
+        runner.invoke(
+            app,
+            [
+                "propose",
+                "Foreign ready",
+                "--namespace",
+                "other",
+                "--to",
+                str(tmp_path),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["ready", "--include-inbox", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Local ready" in result.stdout
+        assert "Foreign ready" not in result.stdout

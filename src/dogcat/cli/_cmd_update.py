@@ -98,6 +98,7 @@ def register(app: typer.Typer) -> None:
         labels: str | None = typer.Option(
             None,
             "--labels",
+            "--label",
             "-l",
             help="Labels, comma or space separated (replaces existing)",
             autocompletion=complete_labels,

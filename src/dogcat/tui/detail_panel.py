@@ -238,7 +238,7 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
             with Horizontal(classes="deps-row"):
                 yield Select(
                     options=self._get_parent_options(),
-                    value=(self._issue.parent or Select.BLANK),
+                    value=(self._issue.parent or Select.NULL),
                     prompt="Parent",
                     allow_blank=True,
                     id="parent-input",

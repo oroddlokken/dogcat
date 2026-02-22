@@ -5,7 +5,7 @@ from __future__ import annotations
 import orjson
 import typer
 
-from dogcat.config import extract_prefix, get_namespace_filter
+from dogcat.config import extract_prefix, get_issue_prefix, get_namespace_filter
 
 from ._completions import (
     complete_issue_ids,
@@ -169,6 +169,9 @@ def register(app: typer.Typer) -> None:
                 ns_filter = get_namespace_filter(dogcats_dir, namespace)
                 if ns_filter is not None:
                     proposals = [p for p in proposals if ns_filter(p.namespace)]
+                else:
+                    primary = get_issue_prefix(dogcats_dir)
+                    proposals = [p for p in proposals if p.namespace == primary]
 
             if proposals:
                 typer.echo(f"\nInbox ({len(proposals)}):")

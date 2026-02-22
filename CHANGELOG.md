@@ -6,10 +6,16 @@
 
 ### Fixed
 
+- **`dcat inbox close` and `dcat inbox delete` now accept multiple IDs** — both commands accept variadic proposal IDs for consistency with `dcat close` and `dcat delete`. Partial failures are reported individually and the command exits 1 if any failed (closes dogcat-52tr)
+- **TUI compatibility with Textual 8.0.0** — replace `Select.BLANK` with `Select.NULL` and pin `textual>=8.0.0` to fix `InvalidSelectValueError` crash on TUI mount (closes dogcat-16i1)
+- **TUI issue picker sorting** — `dcat edit` picker now sorts issues by priority then ID, matching `dcat list` and the dashboard (closes dogcat-45ab)
 - **Namespace resolution from subdirectories** — running `dcat` from a subfolder no longer creates issues under the wrong namespace. `get_issue_prefix` now walks up the directory tree to find the parent `.dogcats/` directory, matching the behavior of `get_storage` (closes dogcat-ahdx)
+- **`--include-inbox` now respects namespace filtering** — `dcat list`, `ready`, and `export` with `--include-inbox` no longer show proposals from all namespaces; they default to the primary namespace and require `-A`/`--all-namespaces` to show foreign proposals (closes dogcat-67cg)
 
 ### Added
 
+- **`--label` alias for `--labels`** — `create` and `update` now accept `--label` as a synonym for `--labels` (closes dogcat-531p)
+- **`dcat t` alias** — hidden shorthand for `dcat tui` (closes dogcat-528h)
 - **`dcat graph` command** — visualize the dependency graph as an ASCII DAG with Unicode box-drawing. Parent-child edges render in cyan (`├── `), blocking edges in red (`├─▶ `). Supports `dcat graph <id>` for subgraph view, `--agent-only` filtering, `--json` output, and all standard filters (closes dogcat-2o4w)
 
 ### Development

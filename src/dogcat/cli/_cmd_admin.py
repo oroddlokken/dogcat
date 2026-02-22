@@ -316,11 +316,14 @@ def register(app: typer.Typer) -> None:
                     if namespace:
                         proposals = [p for p in proposals if p.namespace == namespace]
                     elif not all_namespaces:
-                        from dogcat.config import get_namespace_filter
+                        from dogcat.config import get_issue_prefix, get_namespace_filter
 
                         ns_filter = get_namespace_filter(str(storage.dogcats_dir))
                         if ns_filter is not None:
                             proposals = [p for p in proposals if ns_filter(p.namespace)]
+                        else:
+                            primary = get_issue_prefix(str(storage.dogcats_dir))
+                            proposals = [p for p in proposals if p.namespace == primary]
 
                     all_proposals = [proposal_to_dict(p) for p in proposals]
                 except (ValueError, RuntimeError):

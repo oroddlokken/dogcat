@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 import orjson
 import typer
 
-from dogcat.config import get_namespace_filter, load_config
+from dogcat.config import get_issue_prefix, get_namespace_filter, load_config
 from dogcat.constants import MAX_PREVIEW_SUBTASKS, parse_labels
 
 from ._completions import (
@@ -516,7 +516,6 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Show open inbox proposals as a section in list output."""
         try:
-            from dogcat.config import get_namespace_filter
             from dogcat.inbox import InboxStorage
 
             inbox = InboxStorage(dogcats_dir=dogcats_dir)
@@ -527,6 +526,9 @@ def register(app: typer.Typer) -> None:
                 ns_filter = get_namespace_filter(dogcats_dir, namespace)
                 if ns_filter is not None:
                     proposals = [p for p in proposals if ns_filter(p.namespace)]
+                else:
+                    primary = get_issue_prefix(dogcats_dir)
+                    proposals = [p for p in proposals if p.namespace == primary]
 
             if proposals:
                 typer.echo(f"\nInbox ({len(proposals)}):")

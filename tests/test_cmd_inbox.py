@@ -252,6 +252,64 @@ class TestInboxClose:
         data = json.loads(result.stdout)
         assert data["status"] == "closed"
 
+    def test_close_multiple(self, tmp_path: Path) -> None:
+        """Test closing multiple proposals at once."""
+        dogcats_dir = _init(tmp_path)
+        id1 = _create_proposal(tmp_path, "Close first")
+        id2 = _create_proposal(tmp_path, "Close second")
+
+        result = runner.invoke(
+            app,
+            ["inbox", "close", id1, id2, "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Close first" in result.stdout
+        assert "Close second" in result.stdout
+
+    def test_close_multiple_json(self, tmp_path: Path) -> None:
+        """Test closing multiple proposals with --json output."""
+        dogcats_dir = _init(tmp_path)
+        id1 = _create_proposal(tmp_path, "JSON first")
+        id2 = _create_proposal(tmp_path, "JSON second")
+
+        result = runner.invoke(
+            app,
+            [
+                "inbox",
+                "close",
+                id1,
+                id2,
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        lines = result.stdout.strip().splitlines()
+        assert len(lines) == 2
+        for line in lines:
+            data = json.loads(line)
+            assert data["status"] == "closed"
+
+    def test_close_multiple_partial_failure(self, tmp_path: Path) -> None:
+        """Test that closing continues on error and exits 1."""
+        dogcats_dir = _init(tmp_path)
+        valid_id = _create_proposal(tmp_path, "Valid close")
+
+        result = runner.invoke(
+            app,
+            [
+                "inbox",
+                "close",
+                valid_id,
+                "dc-inbox-xxxx",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 1
+        assert "Valid close" in result.stdout
+
     def test_close_nonexistent(self, tmp_path: Path) -> None:
         """Test closing a nonexistent proposal."""
         dogcats_dir = _init(tmp_path)
@@ -304,6 +362,39 @@ class TestInboxDelete:
         assert result.exit_code == 0
         data = json.loads(result.stdout)
         assert data["status"] == "tombstone"
+
+    def test_delete_multiple(self, tmp_path: Path) -> None:
+        """Test deleting multiple proposals at once."""
+        dogcats_dir = _init(tmp_path)
+        id1 = _create_proposal(tmp_path, "Delete first")
+        id2 = _create_proposal(tmp_path, "Delete second")
+
+        result = runner.invoke(
+            app,
+            ["inbox", "delete", id1, id2, "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Delete first" in result.stdout
+        assert "Delete second" in result.stdout
+
+    def test_delete_multiple_partial_failure(self, tmp_path: Path) -> None:
+        """Test that deleting continues on error and exits 1."""
+        dogcats_dir = _init(tmp_path)
+        valid_id = _create_proposal(tmp_path, "Valid delete")
+
+        result = runner.invoke(
+            app,
+            [
+                "inbox",
+                "delete",
+                valid_id,
+                "dc-inbox-xxxx",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 1
+        assert "Valid delete" in result.stdout
 
     def test_delete_nonexistent(self, tmp_path: Path) -> None:
         """Test deleting a nonexistent proposal."""

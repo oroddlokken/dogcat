@@ -19,3 +19,5 @@ def register(app: typer.Typer) -> None:
         storage = get_storage(dogcats_dir)
         tui_app = DogcatTUI(storage)
         tui_app.run()
+
+    app.command(name="t", hidden=True)(tui)

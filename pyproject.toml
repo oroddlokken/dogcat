@@ -9,7 +9,7 @@ dependencies = [
     "watchdog>=4.0.0",
     "rich>=14.3.2",
     "orjson>=3.11.7",
-    "textual>=7.5.0",
+    "textual>=8.0.0",
     "tomli-w>=1.0.0",
     "tomli>=2.0.0; python_version < '3.11'",
 ]

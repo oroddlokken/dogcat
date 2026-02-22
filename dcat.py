@@ -7,7 +7,7 @@
 #   "pydantic",
 #   "rich",
 #   "orjson",
-#   "textual",
+#   "textual>=8.0.0",
 #   "watchdog",
 #   "tomli",
 #   "tomli_w",

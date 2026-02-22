@@ -220,11 +220,43 @@ def register(app: typer.Typer) -> None:
         else:
             typer.echo(_format_proposal_full(proposal))
 
+    def _close_one(
+        inbox: InboxStorage,
+        proposal_id: str,
+        reason: str | None,
+        closed_by: str | None,
+        resolved_issue: str | None,
+        json_output: bool,
+    ) -> bool:
+        """Close a single proposal. Returns True if an error occurred."""
+        from dogcat.models import proposal_to_dict
+
+        try:
+            proposal = inbox.close(
+                proposal_id,
+                reason=reason,
+                closed_by=closed_by,
+                resolved_issue=resolved_issue,
+            )
+
+            if is_json_output(json_output):
+                typer.echo(
+                    orjson.dumps(proposal_to_dict(proposal)).decode(),
+                )
+            else:
+                typer.echo(
+                    f"✓ Closed {proposal.full_id}: {proposal.title}",
+                )
+        except (ValueError, Exception) as e:
+            echo_error(f"closing {proposal_id}: {e}")
+            return True
+        return False
+
     @inbox_app.command("close")
     def inbox_close(
-        proposal_id: str = typer.Argument(
+        proposal_ids: list[str] = typer.Argument(  # noqa: B008
             ...,
-            help="Proposal ID to close",
+            help="Proposal ID(s) to close",
             autocompletion=complete_proposal_ids,
         ),
         reason: str | None = typer.Option(
@@ -254,9 +286,7 @@ def register(app: typer.Typer) -> None:
             help="Path to .dogcats directory",
         ),
     ) -> None:
-        """Close an inbox proposal."""
-        from dogcat.models import proposal_to_dict
-
+        """Close one or more inbox proposals."""
         is_json_output(json_output)
         closed_by = by if by is not None else get_default_operator()
 
@@ -267,31 +297,54 @@ def register(app: typer.Typer) -> None:
             echo_error(str(e))
             raise typer.Exit(1) from None
 
-        try:
-            proposal = inbox.close(
-                proposal_id,
-                reason=reason,
-                closed_by=closed_by,
-                resolved_issue=issue,
-            )
-        except ValueError as e:
-            echo_error(str(e))
-            raise typer.Exit(1) from None
+        has_errors = False
 
-        if is_json_output(json_output):
-            typer.echo(
-                orjson.dumps(proposal_to_dict(proposal)).decode(),
+        for proposal_id in proposal_ids:
+            has_errors = (
+                _close_one(
+                    inbox,
+                    proposal_id,
+                    reason,
+                    closed_by,
+                    issue,
+                    json_output,
+                )
+                or has_errors
             )
-        else:
-            typer.echo(
-                f"✓ Closed {proposal.full_id}: {proposal.title}",
-            )
+
+        if has_errors:
+            raise typer.Exit(1)
+
+    def _delete_one(
+        inbox: InboxStorage,
+        proposal_id: str,
+        deleted_by: str | None,
+        json_output: bool,
+    ) -> bool:
+        """Delete a single proposal. Returns True if an error occurred."""
+        from dogcat.models import proposal_to_dict
+
+        try:
+            proposal = inbox.delete(proposal_id, deleted_by=deleted_by)
+
+            if is_json_output(json_output):
+                typer.echo(
+                    orjson.dumps(proposal_to_dict(proposal)).decode(),
+                )
+            else:
+                typer.echo(
+                    f"✓ Deleted {proposal.full_id}: {proposal.title}",
+                )
+        except (ValueError, Exception) as e:
+            echo_error(f"deleting {proposal_id}: {e}")
+            return True
+        return False
 
     @inbox_app.command("delete")
     def inbox_delete(
-        proposal_id: str = typer.Argument(
+        proposal_ids: list[str] = typer.Argument(  # noqa: B008
             ...,
-            help="Proposal ID to delete",
+            help="Proposal ID(s) to delete",
             autocompletion=complete_proposal_ids,
         ),
         by: str | None = typer.Option(
@@ -309,9 +362,7 @@ def register(app: typer.Typer) -> None:
             help="Path to .dogcats directory",
         ),
     ) -> None:
-        """Delete an inbox proposal (creates tombstone)."""
-        from dogcat.models import proposal_to_dict
-
+        """Delete one or more inbox proposals (creates tombstone)."""
         is_json_output(json_output)
         deleted_by = by if by is not None else get_default_operator()
 
@@ -322,17 +373,18 @@ def register(app: typer.Typer) -> None:
             echo_error(str(e))
             raise typer.Exit(1) from None
 
-        try:
-            proposal = inbox.delete(proposal_id, deleted_by=deleted_by)
-        except ValueError as e:
-            echo_error(str(e))
-            raise typer.Exit(1) from None
+        has_errors = False
 
-        if is_json_output(json_output):
-            typer.echo(
-                orjson.dumps(proposal_to_dict(proposal)).decode(),
+        for proposal_id in proposal_ids:
+            has_errors = (
+                _delete_one(
+                    inbox,
+                    proposal_id,
+                    deleted_by,
+                    json_output,
+                )
+                or has_errors
             )
-        else:
-            typer.echo(
-                f"✓ Deleted {proposal.full_id}: {proposal.title}",
-            )
+
+        if has_errors:
+            raise typer.Exit(1)
