@@ -560,78 +560,235 @@ def register(app: typer.Typer) -> None:
             echo_error(str(e))
             raise typer.Exit(1)
 
+    def _list_by_status(
+        *,
+        status: str,
+        heading: str,
+        empty_msg: str,
+        limit_arg: int | None,
+        limit: int | None,
+        issue_type: str | None,
+        priority: int | None,
+        label: str | None,
+        owner: str | None,
+        parent: str | None,
+        namespace: str | None,
+        all_namespaces: bool,
+        agent_only: bool,
+        tree: bool,
+        table: bool,
+        json_output: bool,
+        dogcats_dir: str,
+    ) -> None:
+        """List issues filtered by a single status."""
+        try:
+            final_limit = limit_arg or limit
+            storage = get_storage(dogcats_dir)
+            issues = storage.list({"status": status})
+            issues.sort(key=lambda i: i.priority)
+
+            issues = apply_common_filters(
+                issues,
+                issue_type=issue_type,
+                priority=priority,
+                label=label,
+                owner=owner,
+                parent=parent,
+                namespace=namespace,
+                all_namespaces=all_namespaces,
+                agent_only=agent_only,
+                dogcats_dir=str(storage.dogcats_dir),
+                storage=storage,
+            )
+
+            if final_limit:
+                issues = issues[:final_limit]
+
+            if is_json_output(json_output):
+                from dogcat.models import issue_to_dict
+
+                output = [issue_to_dict(issue) for issue in issues]
+                typer.echo(orjson.dumps(output).decode())
+            elif not issues:
+                typer.echo(empty_msg)
+            else:
+                typer.echo(f"{heading} ({len(issues)}):")
+                if tree:
+                    typer.echo(format_issue_tree(issues))
+                elif table:
+                    typer.echo(format_issue_table(issues))
+                else:
+                    for issue in issues:
+                        typer.echo(format_issue_brief(issue))
+
+        except typer.Exit:
+            raise
+        except Exception as e:
+            echo_error(str(e))
+            raise typer.Exit(1)
+
     @app.command(name="ir", hidden=True)
     def in_review_shortcut(
-        issue_id: str = typer.Argument(
-            ...,
-            help="Issue ID",
+        limit_arg: int | None = typer.Argument(None, help="Limit results"),
+        limit: int | None = typer.Option(None, "--limit", help="Limit results"),
+        issue_type: str | None = typer.Option(
+            None,
+            "--type",
+            "-t",
+            help="Filter by type",
+            autocompletion=complete_types,
+        ),
+        priority: int | None = typer.Option(
+            None,
+            "--priority",
+            "-p",
+            help="Filter by priority",
+            autocompletion=complete_priorities,
+        ),
+        label: str | None = typer.Option(
+            None,
+            "--label",
+            "-l",
+            help="Filter by label",
+            autocompletion=complete_labels,
+        ),
+        owner: str | None = typer.Option(
+            None,
+            "--owner",
+            "-o",
+            help="Filter by owner",
+            autocompletion=complete_owners,
+        ),
+        parent: str | None = typer.Option(
+            None,
+            "--parent",
+            help="Filter by parent issue ID",
             autocompletion=complete_issue_ids,
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        operator: str | None = typer.Option(
+        namespace: str | None = typer.Option(
             None,
-            "--by",
-            help="Who is making this change",
+            "--namespace",
+            help="Filter by namespace",
+            autocompletion=complete_namespaces,
         ),
-        all_namespaces: bool = typer.Option(  # noqa: ARG001
+        all_namespaces: bool = typer.Option(
             False,
             "--all-namespaces",
             "--all-ns",
             "-A",
-            hidden=True,
+            help="Show issues from all namespaces",
         ),
-        namespace: str | None = typer.Option(  # noqa: ARG001
-            None,
-            "--namespace",
-            hidden=True,
+        agent_only: bool = typer.Option(
+            False,
+            "--agent-only",
+            help="Only show issues available for agents",
         ),
+        tree: bool = typer.Option(False, "--tree", help="Display as tree"),
+        table: bool = typer.Option(False, "--table", help="Display in columns"),
+        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
-        """Set an issue's status to in-review."""
-        _set_status(
-            issue_id,
-            "in_review",
-            "In review",
-            json_output,
-            operator,
-            dogcats_dir,
+        """List issues with in-review status."""
+        _list_by_status(
+            status="in_review",
+            heading="In Review",
+            empty_msg="No in-review issues",
+            limit_arg=limit_arg,
+            limit=limit,
+            issue_type=issue_type,
+            priority=priority,
+            label=label,
+            owner=owner,
+            parent=parent,
+            namespace=namespace,
+            all_namespaces=all_namespaces,
+            agent_only=agent_only,
+            tree=tree,
+            table=table,
+            json_output=json_output,
+            dogcats_dir=dogcats_dir,
         )
 
     @app.command(name="ip", hidden=True)
     def in_progress_shortcut(
-        issue_id: str = typer.Argument(
-            ...,
-            help="Issue ID",
+        limit_arg: int | None = typer.Argument(None, help="Limit results"),
+        limit: int | None = typer.Option(None, "--limit", help="Limit results"),
+        issue_type: str | None = typer.Option(
+            None,
+            "--type",
+            "-t",
+            help="Filter by type",
+            autocompletion=complete_types,
+        ),
+        priority: int | None = typer.Option(
+            None,
+            "--priority",
+            "-p",
+            help="Filter by priority",
+            autocompletion=complete_priorities,
+        ),
+        label: str | None = typer.Option(
+            None,
+            "--label",
+            "-l",
+            help="Filter by label",
+            autocompletion=complete_labels,
+        ),
+        owner: str | None = typer.Option(
+            None,
+            "--owner",
+            "-o",
+            help="Filter by owner",
+            autocompletion=complete_owners,
+        ),
+        parent: str | None = typer.Option(
+            None,
+            "--parent",
+            help="Filter by parent issue ID",
             autocompletion=complete_issue_ids,
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        operator: str | None = typer.Option(
+        namespace: str | None = typer.Option(
             None,
-            "--by",
-            help="Who is making this change",
+            "--namespace",
+            help="Filter by namespace",
+            autocompletion=complete_namespaces,
         ),
-        all_namespaces: bool = typer.Option(  # noqa: ARG001
+        all_namespaces: bool = typer.Option(
             False,
             "--all-namespaces",
             "--all-ns",
             "-A",
-            hidden=True,
+            help="Show issues from all namespaces",
         ),
-        namespace: str | None = typer.Option(  # noqa: ARG001
-            None,
-            "--namespace",
-            hidden=True,
+        agent_only: bool = typer.Option(
+            False,
+            "--agent-only",
+            help="Only show issues available for agents",
         ),
+        tree: bool = typer.Option(False, "--tree", help="Display as tree"),
+        table: bool = typer.Option(False, "--table", help="Display in columns"),
+        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
-        """Set an issue's status to in-progress."""
-        _set_status(
-            issue_id,
-            "in_progress",
-            "In progress",
-            json_output,
-            operator,
-            dogcats_dir,
+        """List issues with in-progress status."""
+        _list_by_status(
+            status="in_progress",
+            heading="In Progress",
+            empty_msg="No in-progress issues",
+            limit_arg=limit_arg,
+            limit=limit,
+            issue_type=issue_type,
+            priority=priority,
+            label=label,
+            owner=owner,
+            parent=parent,
+            namespace=namespace,
+            all_namespaces=all_namespaces,
+            agent_only=agent_only,
+            tree=tree,
+            table=table,
+            json_output=json_output,
+            dogcats_dir=dogcats_dir,
         )
 
     @app.command("deferred")

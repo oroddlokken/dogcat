@@ -299,6 +299,131 @@ class TestCLIConfig:
         assert "No configuration values set" in result.stdout
 
 
+class TestConfigLocal:
+    """Test config --local flag and config.local.toml support."""
+
+    def test_config_set_local(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test setting a config value with --local."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["config", "set", "inbox_remote", "~/git/inbox", "--local"],
+        )
+        assert result.exit_code == 0
+        assert "(local)" in result.stdout
+
+        from dogcat.config import load_local_config, load_shared_config
+
+        local = load_local_config(str(dogcats_dir))
+        assert local["inbox_remote"] == "~/git/inbox"
+
+        shared = load_shared_config(str(dogcats_dir))
+        assert "inbox_remote" not in shared
+
+    def test_config_set_local_only_key_auto_redirects(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Setting a local_only key without --local auto-redirects to local."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["config", "set", "inbox_remote", "~/git/inbox"],
+        )
+        assert result.exit_code == 0
+        assert "machine-specific" in result.stdout
+        assert "(local)" in result.stdout
+
+        from dogcat.config import load_local_config
+
+        local = load_local_config(str(dogcats_dir))
+        assert local["inbox_remote"] == "~/git/inbox"
+
+    def test_config_list_shows_local_indicator(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Config list shows (local) for values from config.local.toml."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        runner.invoke(
+            app,
+            ["config", "set", "inbox_remote", "~/git/inbox", "--local"],
+        )
+
+        result = runner.invoke(app, ["config", "list"])
+        assert result.exit_code == 0
+        assert "inbox_remote = ~/git/inbox (local)" in result.stdout
+        # namespace should NOT have (local)
+        for line in result.stdout.splitlines():
+            if line.startswith("namespace"):
+                assert "(local)" not in line
+
+    def test_config_get_reads_local_value(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Config get reads merged values including local."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        runner.invoke(
+            app,
+            ["config", "set", "inbox_remote", "~/git/inbox", "--local"],
+        )
+
+        result = runner.invoke(app, ["config", "get", "inbox_remote"])
+        assert result.exit_code == 0
+        assert "~/git/inbox" in result.stdout
+
+    def test_config_set_local_warns_when_not_gitignored(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Config set --local warns when config.local.toml is not gitignored."""
+        import subprocess
+
+        monkeypatch.chdir(tmp_path)
+        subprocess.run(
+            ["git", "init"], cwd=str(tmp_path), capture_output=True, check=True
+        )
+
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # Remove config.local.toml from .gitignore
+        gitignore = tmp_path / ".gitignore"
+        if gitignore.exists():
+            lines = gitignore.read_text().splitlines()
+            lines = [ln for ln in lines if "config.local.toml" not in ln]
+            gitignore.write_text("\n".join(lines) + "\n" if lines else "")
+
+        result = runner.invoke(
+            app,
+            ["config", "set", "inbox_remote", "~/git/inbox", "--local"],
+        )
+        assert result.exit_code == 0
+        output = result.stdout + (result.stderr or "")
+        assert "not in .gitignore" in output
+
+
 class TestConfigArrayKeys:
     """Test config array key handling."""
 

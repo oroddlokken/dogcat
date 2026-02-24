@@ -7,11 +7,38 @@ from pathlib import Path
 import orjson
 import typer
 
-from dogcat.config import load_config, save_config, set_issue_prefix
+from dogcat.config import load_shared_config, save_config, set_issue_prefix
 from dogcat.constants import DOGCATRC_FILENAME
 
 from ._helpers import get_storage
 from ._json_state import echo_error, is_json_output
+
+
+def _ensure_gitignore_entry(entry: str, *, quiet: bool = False) -> None:
+    """Add an entry to .gitignore if not already present.
+
+    Args:
+        entry: The gitignore pattern to add.
+        quiet: If True, suppress output messages.
+    """
+    gitignore = Path(".gitignore")
+    if gitignore.exists():
+        content = gitignore.read_text()
+        lines = content.splitlines()
+        if any(ln.strip() == entry for ln in lines):
+            if not quiet:
+                typer.echo(f"✓ {entry} already in .gitignore")
+            return
+        with gitignore.open("a") as f:
+            if content and not content.endswith("\n"):
+                f.write("\n")
+            f.write(f"{entry}\n")
+        if not quiet:
+            typer.echo(f"✓ Added {entry} to .gitignore")
+    else:
+        gitignore.write_text(f"{entry}\n")
+        if not quiet:
+            typer.echo(f"✓ Created .gitignore with {entry}")
 
 
 def register(app: typer.Typer) -> None:
@@ -120,28 +147,19 @@ def register(app: typer.Typer) -> None:
         set_issue_prefix(dogcats_dir, namespace)
         typer.echo(f"✓ Set namespace: {namespace}")
 
+        # Always add config.local.toml to .gitignore (machine-specific settings)
+        _ensure_gitignore_entry(
+            ".dogcats/config.local.toml",
+            quiet=False,
+        )
+
         if no_git:
-            config = load_config(dogcats_dir)
+            config = load_shared_config(dogcats_dir)
             config["git_tracking"] = False
             save_config(dogcats_dir, config)
             typer.echo("✓ Disabled git tracking (git_tracking = false)")
 
-            gitignore = Path(".gitignore")
-            entry = ".dogcats/"
-            if gitignore.exists():
-                content = gitignore.read_text()
-                lines = content.splitlines()
-                if not any(ln.strip() == entry for ln in lines):
-                    with gitignore.open("a") as f:
-                        if content and not content.endswith("\n"):
-                            f.write("\n")
-                        f.write(f"{entry}\n")
-                    typer.echo("✓ Added .dogcats/ to .gitignore")
-                else:
-                    typer.echo("✓ .dogcats/ already in .gitignore")
-            else:
-                gitignore.write_text(f"{entry}\n")
-                typer.echo("✓ Created .gitignore with .dogcats/")
+            _ensure_gitignore_entry(".dogcats/", quiet=False)
 
         if is_json_output(json_output):
             output = {

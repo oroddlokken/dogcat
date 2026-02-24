@@ -446,33 +446,49 @@ class TestCLIInReview:
 
 
 class TestCLIStatusShortcuts:
-    """Test ir and ip status shortcut commands."""
+    """Test ir and ip status listing shortcut commands."""
 
-    def test_ir_sets_status_to_in_review(self, tmp_path: Path) -> None:
-        """Test that 'ir' sets issue status to in_review."""
+    def test_ir_lists_in_review_issues(self, tmp_path: Path) -> None:
+        """Test that 'ir' lists issues with in_review status."""
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
 
         create_result = runner.invoke(
             app,
-            ["create", "Test issue", "--dogcats-dir", str(dogcats_dir)],
+            ["create", "Review issue", "--dogcats-dir", str(dogcats_dir)],
         )
         issue_id = create_result.stdout.split(": ")[0].split()[-1]
+        runner.invoke(
+            app,
+            [
+                "update",
+                issue_id,
+                "--status",
+                "in_review",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
 
         result = runner.invoke(
             app,
-            ["ir", issue_id, "--dogcats-dir", str(dogcats_dir)],
+            ["ir", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
-        assert "✓ In review" in result.stdout
+        assert "In Review (1):" in result.stdout
+        assert "Review issue" in result.stdout
 
-        # Verify status changed
-        show_result = runner.invoke(
+    def test_ir_empty(self, tmp_path: Path) -> None:
+        """Test ir with no in-review issues."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
             app,
-            ["show", issue_id, "--json", "--dogcats-dir", str(dogcats_dir)],
+            ["ir", "--dogcats-dir", str(dogcats_dir)],
         )
-        data = json.loads(show_result.stdout)
-        assert data["status"] == "in_review"
+        assert result.exit_code == 0
+        assert "No in-review issues" in result.stdout
 
     def test_ir_json_output(self, tmp_path: Path) -> None:
         """Test ir with --json flag."""
@@ -481,55 +497,71 @@ class TestCLIStatusShortcuts:
 
         create_result = runner.invoke(
             app,
-            ["create", "Test issue", "--dogcats-dir", str(dogcats_dir)],
+            ["create", "Review issue", "--dogcats-dir", str(dogcats_dir)],
         )
         issue_id = create_result.stdout.split(": ")[0].split()[-1]
+        runner.invoke(
+            app,
+            [
+                "update",
+                issue_id,
+                "--status",
+                "in_review",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
 
         result = runner.invoke(
             app,
-            ["ir", issue_id, "--json", "--dogcats-dir", str(dogcats_dir)],
+            ["ir", "--json", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
         data = json.loads(result.stdout)
-        assert data["status"] == "in_review"
+        assert len(data) == 1
+        assert data[0]["status"] == "in_review"
 
-    def test_ir_nonexistent_issue(self, tmp_path: Path) -> None:
-        """Test ir with nonexistent issue."""
-        dogcats_dir = tmp_path / ".dogcats"
-        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
-
-        result = runner.invoke(
-            app,
-            ["ir", "nonexistent", "--dogcats-dir", str(dogcats_dir)],
-        )
-        assert result.exit_code == 1
-        assert "Error" in result.stdout or "Error" in result.stderr
-
-    def test_ip_sets_status_to_in_progress(self, tmp_path: Path) -> None:
-        """Test that 'ip' sets issue status to in_progress."""
+    def test_ip_lists_in_progress_issues(self, tmp_path: Path) -> None:
+        """Test that 'ip' lists issues with in_progress status."""
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
 
         create_result = runner.invoke(
             app,
-            ["create", "Test issue", "--dogcats-dir", str(dogcats_dir)],
+            ["create", "Progress issue", "--dogcats-dir", str(dogcats_dir)],
         )
         issue_id = create_result.stdout.split(": ")[0].split()[-1]
+        runner.invoke(
+            app,
+            [
+                "update",
+                issue_id,
+                "--status",
+                "in_progress",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
 
         result = runner.invoke(
             app,
-            ["ip", issue_id, "--dogcats-dir", str(dogcats_dir)],
+            ["ip", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
-        assert "✓ In progress" in result.stdout
+        assert "In Progress (1):" in result.stdout
+        assert "Progress issue" in result.stdout
 
-        # Verify status changed
-        show_result = runner.invoke(
+    def test_ip_empty(self, tmp_path: Path) -> None:
+        """Test ip with no in-progress issues."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
             app,
-            ["show", issue_id, "--json", "--dogcats-dir", str(dogcats_dir)],
+            ["ip", "--dogcats-dir", str(dogcats_dir)],
         )
-        data = json.loads(show_result.stdout)
-        assert data["status"] == "in_progress"
+        assert result.exit_code == 0
+        assert "No in-progress issues" in result.stdout
 
 
 class TestCLIDeferred:
@@ -1148,3 +1180,92 @@ class TestIncludeInbox:
         assert result.exit_code == 0
         assert "Local ready" in result.stdout
         assert "Foreign ready" not in result.stdout
+
+    def test_list_include_inbox_shows_remote_proposals(self, tmp_path: Path) -> None:
+        """Test that list --include-inbox shows remote inbox proposals."""
+        from dogcat.config import save_config, save_local_config
+
+        local_dir = tmp_path / "local"
+        local_dir.mkdir()
+        local_dogcats = local_dir / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(local_dogcats)])
+        save_config(str(local_dogcats), {"namespace": "myproj"})
+
+        remote_dir = tmp_path / "remote"
+        remote_dir.mkdir()
+        remote_dogcats = remote_dir / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(remote_dogcats)])
+
+        save_local_config(str(local_dogcats), {"inbox_remote": str(remote_dir)})
+
+        # Create a proposal in the remote inbox targeting our namespace
+        runner.invoke(
+            app,
+            [
+                "propose",
+                "Remote feature idea",
+                "--to",
+                str(remote_dir),
+                "--namespace",
+                "myproj",
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["list", "--include-inbox", "--dogcats-dir", str(local_dogcats)],
+        )
+        assert result.exit_code == 0
+        assert "Remote Inbox" in result.stdout
+        assert "Remote feature idea" in result.stdout
+
+    def test_list_include_inbox_hides_foreign_remote_proposals(
+        self, tmp_path: Path
+    ) -> None:
+        """--include-inbox hides remote proposals from other namespaces."""
+        from dogcat.config import save_config, save_local_config
+
+        local_dir = tmp_path / "local"
+        local_dir.mkdir()
+        local_dogcats = local_dir / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(local_dogcats)])
+        save_config(str(local_dogcats), {"namespace": "myproj"})
+
+        remote_dir = tmp_path / "remote"
+        remote_dir.mkdir()
+        remote_dogcats = remote_dir / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(remote_dogcats)])
+
+        save_local_config(str(local_dogcats), {"inbox_remote": str(remote_dir)})
+
+        # Create proposals for different namespaces
+        runner.invoke(
+            app,
+            [
+                "propose",
+                "Our proposal",
+                "--to",
+                str(remote_dir),
+                "--namespace",
+                "myproj",
+            ],
+        )
+        runner.invoke(
+            app,
+            [
+                "propose",
+                "Other proposal",
+                "--to",
+                str(remote_dir),
+                "--namespace",
+                "other",
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["list", "--include-inbox", "--dogcats-dir", str(local_dogcats)],
+        )
+        assert result.exit_code == 0
+        assert "Our proposal" in result.stdout
+        assert "Other proposal" not in result.stdout

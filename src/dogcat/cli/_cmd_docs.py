@@ -861,9 +861,22 @@ Proposals are lightweight (cross-repo) requests (accept, reject, or ignore).
             guide += inbox_section
         output_parts: list[str] = [guide]
 
-        # Git health checks — always run unless git_tracking is disabled
+        # Remote inbox section — shown when inbox_remote is configured
         dogcats_dir = find_dogcats_dir()
         config = load_config(dogcats_dir)
+        inbox_remote = config.get("inbox_remote")
+        if inbox_remote:
+            remote_section = f"""\
+## Remote Inbox ({inbox_remote})
+
+  dcat inbox list                - Show proposals for this project
+  dcat inbox accept <id>         - Promote proposal to local issue
+  dcat inbox accept <id> -p 1 -l cli  - Accept with priority/labels
+  dcat inbox reject <id> -r "reason"  - Reject proposal with reason
+"""
+            output_parts.append(remote_section)
+
+        # Git health checks — always run unless git_tracking is disabled
         git_tracking = config.get("git_tracking", True)
 
         if git_tracking is not False:

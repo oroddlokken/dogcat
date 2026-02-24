@@ -11,3 +11,4 @@ scratch
 src/dogcat/_version.py
 .dogcats/.issues.lock
 .release-worktree/
+.dogcats/config.local.toml

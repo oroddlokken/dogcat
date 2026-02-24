@@ -1,8 +1,10 @@
 """Tests for Dogcat CLI commands."""
 
 import json
+import subprocess
 from pathlib import Path
 
+import pytest
 from cli_test_helpers import _init_with_namespace, _set_ns_config
 from typer.testing import CliRunner
 
@@ -388,3 +390,90 @@ class TestDoctorInbox:
         assert any(
             "invalid timestamp" in d["message"] for d in data["validation_details"]
         )
+
+
+class TestDoctorLocalConfigGitignore:
+    """Test doctor check for config.local.toml gitignore status."""
+
+    def _init_git_repo(self, path: Path) -> None:
+        """Initialize a git repo at the given path."""
+        subprocess.run(
+            ["git", "init"],
+            cwd=str(path),
+            capture_output=True,
+            check=True,
+        )
+
+    def test_no_check_when_local_config_missing(self, tmp_path: Path) -> None:
+        """Doctor skips check when config.local.toml doesn't exist."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["doctor", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data = json.loads(result.stdout)
+        assert "local_config_gitignored" not in data["checks"]
+
+    def test_warns_when_not_gitignored(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Doctor warns when config.local.toml exists but is not gitignored."""
+        monkeypatch.chdir(tmp_path)
+        self._init_git_repo(tmp_path)
+
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # Create config.local.toml without adding to .gitignore
+        # (remove from .gitignore if init added it)
+        gitignore = tmp_path / ".gitignore"
+        if gitignore.exists():
+            lines = gitignore.read_text().splitlines()
+            lines = [ln for ln in lines if "config.local.toml" not in ln]
+            gitignore.write_text("\n".join(lines) + "\n" if lines else "")
+
+        local_config = dogcats_dir / "config.local.toml"
+        local_config.write_text('inbox_remote = "/some/path"\n')
+
+        result = runner.invoke(
+            app,
+            ["doctor", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data = json.loads(result.stdout)
+        check = data["checks"]["local_config_gitignored"]
+        assert check["passed"] is False
+        assert check.get("optional") is True
+
+    def test_passes_when_gitignored(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Doctor passes when config.local.toml is properly gitignored."""
+        monkeypatch.chdir(tmp_path)
+        self._init_git_repo(tmp_path)
+
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # Ensure it's in .gitignore
+        gitignore = tmp_path / ".gitignore"
+        content = gitignore.read_text() if gitignore.exists() else ""
+        if ".dogcats/config.local.toml" not in content:
+            with gitignore.open("a") as f:
+                f.write(".dogcats/config.local.toml\n")
+
+        local_config = dogcats_dir / "config.local.toml"
+        local_config.write_text('inbox_remote = "/some/path"\n')
+
+        result = runner.invoke(
+            app,
+            ["doctor", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data = json.loads(result.stdout)
+        check = data["checks"]["local_config_gitignored"]
+        assert check["passed"] is True

@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **`dcat ir` and `dcat ip` now list issues by status** — `dcat ir` lists all in-review issues and `dcat ip` lists all in-progress issues, instead of setting an issue's status. Both support standard filters (`--type`, `--priority`, `--label`, `--owner`, `--tree`, `--table`, `--json`) (closes dogcat-2a80, dogcat-3its)
+
+### Added
+
+- **Remote inbox support in `dcat inbox list`** — read and display proposals from a remote inbox alongside local proposals. Configure with `dcat config set inbox_remote <path>`. Remote proposals are namespace-filtered and marked with `(remote)` source in JSON output (closes dogcat-2obs)
+- **`dcat inbox accept` command** — promote a remote inbox proposal to a local issue. Copies title, description, and supports `--priority` and `--labels` overrides. Automatically closes the remote proposal after acceptance (closes dogcat-17sg)
+- **`dcat inbox reject` command** — reject a remote inbox proposal with an optional reason, closing it without creating a local issue (closes dogcat-4cqo)
+- **`dcat inbox show` remote fallback** — when a proposal ID is not found locally, `dcat inbox show` now falls back to the remote inbox (closes dogcat-40r7)
+- **Tab completions for remote proposal IDs** — proposal ID completers now include remote proposals with `(remote)` suffix, with deduplication against local proposals (closes dogcat-d1zp)
+- **Remote inbox section in `dcat prime` output** — `dcat prime` now includes remote inbox commands in its guide when a remote inbox is configured (closes dogcat-3l35)
+- **`config.local.toml` for per-machine settings** — machine-specific configuration (e.g. `inbox_remote`) is stored in `.dogcats/config.local.toml`, which is automatically added to `.gitignore`. Local-only keys are auto-redirected to this file (closes dogcat-4fli)
+- **Gitignore warning for `config.local.toml`** — `dcat doctor` now warns when `config.local.toml` exists but is not gitignored (closes dogcat-6291)
+
+### Development
+
+- **Tests for remote inbox triage workflow** — comprehensive test coverage for accept, reject, remote fallback, namespace filtering, and tab completions (closes dogcat-2red)
+
 ## 0.10.2 (2026-02-21)
 
 ### Fixed

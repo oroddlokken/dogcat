@@ -6,10 +6,16 @@ from typing import Any
 
 import typer
 
-from dogcat.config import load_config, save_config
+from dogcat.config import (
+    load_config,
+    load_local_config,
+    load_shared_config,
+    save_config,
+    save_local_config,
+)
 
 from ._completions import complete_config_keys, complete_config_values
-from ._helpers import SortedGroup, find_dogcats_dir
+from ._helpers import SortedGroup, find_dogcats_dir, is_gitignored
 from ._json_state import echo_error, is_json_output
 
 # Sub-app for 'dcat config' subcommands
@@ -64,6 +70,12 @@ _KNOWN_KEYS: dict[str, dict[str, Any]] = {
         "default": True,
         "values": "true, false (also: 1/0, yes/no, on/off)",
     },
+    "inbox_remote": {
+        "type": "str",
+        "description": "Path to shared remote inbox .dogcats directory",
+        "default": "(none)",
+        "local_only": True,
+    },
 }
 
 _TRUE_VALUES = frozenset({"true", "1", "yes", "on"})
@@ -103,14 +115,44 @@ def register(app: typer.Typer) -> None:
             help="Value to set",
             autocompletion=complete_config_values,
         ),
+        local: bool = typer.Option(
+            False,
+            "--local",
+            help="Save to config.local.toml (gitignored, machine-specific)",
+        ),
     ) -> None:
         """Set a configuration value."""
         dogcats_dir = find_dogcats_dir()
-        config = load_config(dogcats_dir)
         coerced = _coerce_value(key, value)
-        config[key] = coerced
-        save_config(dogcats_dir, config)
-        typer.echo(f"Set {key} = {coerced}")
+
+        # Check if key is local-only
+        key_info = _KNOWN_KEYS.get(key, {})
+        if key_info.get("local_only") and not local:
+            typer.echo(
+                f"Note: '{key}' is a machine-specific setting. "
+                f"Saving to config.local.toml.",
+            )
+            local = True
+
+        if local:
+            config = load_local_config(dogcats_dir)
+            config[key] = coerced
+            save_local_config(dogcats_dir, config)
+            typer.echo(f"Set {key} = {coerced} (local)")
+            from pathlib import Path
+
+            local_file = Path(dogcats_dir) / "config.local.toml"
+            if not is_gitignored(str(local_file)):
+                typer.echo(
+                    "Warning: .dogcats/config.local.toml is not in .gitignore. "
+                    "Add it to avoid committing machine-specific settings.",
+                    err=True,
+                )
+        else:
+            config = load_shared_config(dogcats_dir)
+            config[key] = coerced
+            save_config(dogcats_dir, config)
+            typer.echo(f"Set {key} = {coerced}")
 
     @config_app.command("get")
     def config_get(
@@ -153,11 +195,13 @@ def register(app: typer.Typer) -> None:
             if not config:
                 typer.echo("No configuration values set.")
             else:
+                local_keys = set(load_local_config(dogcats_dir).keys())
                 for k, v in sorted(config.items()):
+                    suffix = " (local)" if k in local_keys else ""
                     if isinstance(v, list):
-                        typer.echo(f"{k} = {', '.join(str(i) for i in v)}")  # type: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+                        typer.echo(f"{k} = {', '.join(str(i) for i in v)}{suffix}")  # type: ignore[reportUnknownArgumentType, reportUnknownVariableType]
                     else:
-                        typer.echo(f"{k} = {v}")
+                        typer.echo(f"{k} = {v}{suffix}")
 
     @config_app.command("keys")
     def config_keys(

@@ -122,6 +122,24 @@ def get_default_operator() -> str:
     return getpass.getuser()
 
 
+def is_gitignored(path: str) -> bool:
+    """Check if a path is covered by .gitignore.
+
+    Returns True if the path is gitignored, False otherwise (including
+    when not in a git repo or git is not available).
+    """
+    try:
+        result = subprocess.run(
+            ["git", "check-ignore", "-q", path],
+            capture_output=True,
+            check=False,
+        )
+    except (FileNotFoundError, OSError):
+        return False
+    else:
+        return result.returncode == 0
+
+
 def find_dogcats_dir(start_dir: str | None = None) -> str:
     """Find .dogcats directory by searching upward from start_dir.
 

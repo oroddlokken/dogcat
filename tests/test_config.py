@@ -8,17 +8,22 @@ import pytest
 from dogcat.config import (
     CONFIG_FILENAME,
     DEFAULT_PREFIX,
+    LOCAL_CONFIG_FILENAME,
     _detect_prefix_from_directory,
     _detect_prefix_from_issues,
     _resolve_dogcats_path,
     extract_prefix,
     get_config_path,
     get_issue_prefix,
+    get_local_config_path,
     get_namespace_filter,
     load_config,
+    load_local_config,
+    load_shared_config,
     migrate_config_keys,
     parse_dogcatrc,
     save_config,
+    save_local_config,
     set_issue_prefix,
 )
 from dogcat.constants import DOGCATRC_FILENAME
@@ -800,3 +805,91 @@ class TestResolveDogcatsPath:
         # Falls through to _detect_prefix_from_directory which uses CWD name
         prefix = get_issue_prefix(".dogcats")
         assert prefix == "my-app"
+
+
+class TestLocalConfig:
+    """Tests for config.local.toml support."""
+
+    def test_get_local_config_path(self, tmp_path: Path) -> None:
+        """Returns path to config.local.toml."""
+        result = get_local_config_path(str(tmp_path))
+        assert result == tmp_path / LOCAL_CONFIG_FILENAME
+
+    def test_load_local_config_missing(self, tmp_path: Path) -> None:
+        """Loading nonexistent local config returns empty dict."""
+        config = load_local_config(str(tmp_path / ".dogcats"))
+        assert config == {}
+
+    def test_save_and_load_local_config(self, tmp_path: Path) -> None:
+        """Save and load local config roundtrip."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+
+        save_local_config(str(dogcats_dir), {"inbox_remote": "~/git/inbox"})
+        loaded = load_local_config(str(dogcats_dir))
+        assert loaded == {"inbox_remote": "~/git/inbox"}
+
+    def test_load_config_merges_local(self, tmp_path: Path) -> None:
+        """load_config merges config.local.toml on top of config.toml."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+
+        save_config(str(dogcats_dir), {"namespace": "myproject", "git_tracking": True})
+        save_local_config(str(dogcats_dir), {"inbox_remote": "~/git/inbox"})
+
+        config = load_config(str(dogcats_dir))
+        assert config["namespace"] == "myproject"
+        assert config["git_tracking"] is True
+        assert config["inbox_remote"] == "~/git/inbox"
+
+    def test_local_overrides_shared(self, tmp_path: Path) -> None:
+        """Local config values override shared config values."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+
+        save_config(str(dogcats_dir), {"namespace": "shared-ns"})
+        save_local_config(str(dogcats_dir), {"namespace": "local-ns"})
+
+        config = load_config(str(dogcats_dir))
+        assert config["namespace"] == "local-ns"
+
+    def test_load_shared_config_ignores_local(self, tmp_path: Path) -> None:
+        """load_shared_config returns only config.toml values."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+
+        save_config(str(dogcats_dir), {"namespace": "myproject"})
+        save_local_config(str(dogcats_dir), {"inbox_remote": "~/git/inbox"})
+
+        config = load_shared_config(str(dogcats_dir))
+        assert config["namespace"] == "myproject"
+        assert "inbox_remote" not in config
+
+    def test_set_issue_prefix_does_not_persist_local(self, tmp_path: Path) -> None:
+        """set_issue_prefix writes to config.toml without persisting local values."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+
+        save_local_config(str(dogcats_dir), {"inbox_remote": "~/git/inbox"})
+        set_issue_prefix(str(dogcats_dir), "myproject")
+
+        # config.toml should NOT have inbox_remote
+        shared = load_shared_config(str(dogcats_dir))
+        assert shared["namespace"] == "myproject"
+        assert "inbox_remote" not in shared
+
+        # But merged config should have both
+        merged = load_config(str(dogcats_dir))
+        assert merged["namespace"] == "myproject"
+        assert merged["inbox_remote"] == "~/git/inbox"
+
+    def test_local_config_invalid_toml(self, tmp_path: Path) -> None:
+        """Invalid local config TOML is ignored gracefully."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+
+        save_config(str(dogcats_dir), {"namespace": "myproject"})
+        (dogcats_dir / LOCAL_CONFIG_FILENAME).write_text("this is [not valid")
+
+        config = load_config(str(dogcats_dir))
+        assert config == {"namespace": "myproject"}

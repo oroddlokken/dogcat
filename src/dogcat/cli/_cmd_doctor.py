@@ -17,7 +17,7 @@ from dogcat.config import (
     save_config,
 )
 
-from ._helpers import find_dogcats_dir, get_storage
+from ._helpers import find_dogcats_dir, get_storage, is_gitignored
 from ._json_state import is_json_output
 from ._validate import detect_concurrent_edits, validate_inbox_jsonl, validate_jsonl
 
@@ -206,6 +206,23 @@ def register(app: typer.Typer) -> None:
             }
             if not mutual_ok:
                 all_passed = False
+
+        # Check 2e: config.local.toml gitignored (if it exists)
+        local_config_file = dogcats_path / "config.local.toml"
+        if local_config_file.exists():
+            local_gitignored = is_gitignored(str(local_config_file))
+            checks["local_config_gitignored"] = {
+                "description": "config.local.toml is gitignored",
+                "fail_description": (
+                    "config.local.toml exists but is not in .gitignore"
+                ),
+                "passed": local_gitignored,
+                "optional": True,
+                "note": (
+                    "Add '.dogcats/config.local.toml' to .gitignore"
+                    " to avoid committing machine-specific settings"
+                ),
+            }
 
         # Check 3: Deep data validation (fields, refs, cycles)
         data_valid = True

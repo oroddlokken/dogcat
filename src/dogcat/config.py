@@ -26,6 +26,7 @@ DEFAULT_PREFIX = "dc"
 
 # Config filename
 CONFIG_FILENAME = "config.toml"
+LOCAL_CONFIG_FILENAME = "config.local.toml"
 
 
 def parse_dogcatrc(rc_path: str | Path) -> Path:
@@ -84,24 +85,85 @@ def get_config_path(dogcats_dir: str) -> Path:
     return Path(dogcats_dir) / CONFIG_FILENAME
 
 
-def load_config(dogcats_dir: str) -> dict[str, Any]:
-    """Load configuration from .dogcats/config.toml.
+def get_local_config_path(dogcats_dir: str) -> Path:
+    """Get the path to the local config file.
 
     Args:
         dogcats_dir: Path to .dogcats directory
 
     Returns:
-        Configuration dictionary, or empty dict if no config exists
+        Path to config.local.toml
     """
-    config_path = get_config_path(dogcats_dir)
-    if not config_path.exists():
-        return {}
+    return Path(dogcats_dir) / LOCAL_CONFIG_FILENAME
 
+
+def _load_toml(path: Path) -> dict[str, Any]:
+    """Load a single TOML file, returning empty dict on missing/invalid."""
+    if not path.exists():
+        return {}
     try:
-        with config_path.open("rb") as f:
+        with path.open("rb") as f:
             return tomllib.load(f)
     except (tomllib.TOMLDecodeError, OSError):
         return {}
+
+
+def load_config(dogcats_dir: str) -> dict[str, Any]:
+    """Load configuration from .dogcats/config.toml, merged with config.local.toml.
+
+    Values in config.local.toml override those in config.toml (shallow merge).
+
+    Args:
+        dogcats_dir: Path to .dogcats directory
+
+    Returns:
+        Merged configuration dictionary, or empty dict if no config exists
+    """
+    config = _load_toml(get_config_path(dogcats_dir))
+    local = _load_toml(get_local_config_path(dogcats_dir))
+    if local:
+        config.update(local)
+    return config
+
+
+def load_shared_config(dogcats_dir: str) -> dict[str, Any]:
+    """Load only the shared config.toml (ignoring config.local.toml).
+
+    Use this when you need to write back to config.toml without
+    accidentally persisting local-only values.
+
+    Args:
+        dogcats_dir: Path to .dogcats directory
+
+    Returns:
+        Configuration dictionary from config.toml only
+    """
+    return _load_toml(get_config_path(dogcats_dir))
+
+
+def load_local_config(dogcats_dir: str) -> dict[str, Any]:
+    """Load only config.local.toml.
+
+    Args:
+        dogcats_dir: Path to .dogcats directory
+
+    Returns:
+        Configuration dictionary from config.local.toml only
+    """
+    return _load_toml(get_local_config_path(dogcats_dir))
+
+
+def save_local_config(dogcats_dir: str, config: dict[str, Any]) -> None:
+    """Save configuration to .dogcats/config.local.toml.
+
+    Args:
+        dogcats_dir: Path to .dogcats directory
+        config: Configuration dictionary to save
+    """
+    config_path = get_local_config_path(dogcats_dir)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with config_path.open("wb") as f:
+        tomli_w.dump(config, f)
 
 
 def save_config(dogcats_dir: str, config: dict[str, Any]) -> None:
@@ -205,7 +267,7 @@ def set_issue_prefix(dogcats_dir: str, prefix: str) -> None:
         dogcats_dir: Path to .dogcats directory
         prefix: Prefix to set
     """
-    config = load_config(dogcats_dir)
+    config = load_shared_config(dogcats_dir)
     config["namespace"] = prefix
     config.pop("issue_prefix", None)
     save_config(dogcats_dir, config)

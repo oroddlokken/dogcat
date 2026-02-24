@@ -537,6 +537,48 @@ def register(app: typer.Typer) -> None:
         except (ValueError, RuntimeError):
             pass  # No inbox file — silently skip
 
+        # Remote inbox proposals
+        try:
+            from pathlib import Path
+
+            from dogcat.inbox import InboxStorage as _InboxStorage
+
+            config = load_config(dogcats_dir)
+            remote_path = config.get("inbox_remote")
+            if not remote_path:
+                return
+
+            remote_dogcats = Path(remote_path).expanduser()
+            if remote_dogcats.name != ".dogcats":
+                candidate = remote_dogcats / ".dogcats"
+                if candidate.is_dir():
+                    remote_dogcats = candidate
+            if not remote_dogcats.is_dir():
+                return
+
+            current_ns = get_issue_prefix(dogcats_dir)
+            remote_inbox = _InboxStorage(dogcats_dir=str(remote_dogcats))
+            remote_proposals = [
+                p
+                for p in remote_inbox.list(
+                    include_tombstones=False,
+                    namespace=current_ns,
+                )
+                if not p.is_closed()
+            ]
+
+            if not all_namespaces and namespace:
+                remote_proposals = [
+                    p for p in remote_proposals if p.namespace == namespace
+                ]
+
+            if remote_proposals:
+                typer.echo(f"\nRemote Inbox ({len(remote_proposals)}) [{remote_path}]:")
+                for proposal in remote_proposals:
+                    typer.echo(format_proposal_brief(proposal))
+        except (ValueError, RuntimeError):
+            pass  # Remote inbox not available — silently skip
+
     @app.command()
     def show(
         issue_id: str = typer.Argument(

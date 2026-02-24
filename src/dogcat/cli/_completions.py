@@ -93,16 +93,22 @@ def complete_proposal_ids(
     args: list[str],  # noqa: ARG001 (always [] from Typer, kept for signature compat)
     incomplete: str,
 ) -> list[tuple[str, str]]:
-    """Complete proposal IDs from inbox, including closed proposals."""
+    """Complete proposal IDs from local and remote inbox."""
     try:
+        from pathlib import Path
+
+        from dogcat.config import get_issue_prefix, load_config
         from dogcat.inbox import InboxStorage
 
         from ._helpers import find_dogcats_dir
 
         dogcats_dir = find_dogcats_dir()
-        inbox = InboxStorage(dogcats_dir=dogcats_dir)
         ns_filter = _ns_filter_from_ctx(ctx, dogcats_dir)
         results: list[tuple[str, str]] = []
+        seen: set[str] = set()
+
+        # Local proposals
+        inbox = InboxStorage(dogcats_dir=dogcats_dir)
         for p in inbox.list(include_tombstones=False):
             if ns_filter is not None and not ns_filter(p.namespace):
                 continue
@@ -110,8 +116,38 @@ def complete_proposal_ids(
             fid = p.full_id
             if fid.startswith(incomplete):
                 results.append((fid, desc))
+                seen.add(fid)
             elif p.id.startswith(incomplete):
                 results.append((p.id, desc))
+                seen.add(fid)
+
+        # Remote proposals
+        config = load_config(dogcats_dir)
+        remote_path = config.get("inbox_remote")
+        if remote_path:
+            remote_dogcats = Path(remote_path).expanduser()
+            if remote_dogcats.name != ".dogcats":
+                candidate = remote_dogcats / ".dogcats"
+                if candidate.is_dir():
+                    remote_dogcats = candidate
+            if remote_dogcats.is_dir():
+                current_ns = get_issue_prefix(dogcats_dir)
+                remote_inbox = InboxStorage(dogcats_dir=str(remote_dogcats))
+                for p in remote_inbox.list(
+                    include_tombstones=False,
+                    namespace=current_ns,
+                ):
+                    if p.is_closed():
+                        continue
+                    fid = p.full_id
+                    if fid in seen:
+                        continue
+                    desc = f"{p.title} (remote)"
+                    if fid.startswith(incomplete):
+                        results.append((fid, desc))
+                    elif p.id.startswith(incomplete):
+                        results.append((p.id, desc))
+
         return sorted(results)
     except Exception:
         return []
