@@ -1579,6 +1579,9 @@ def get_namespaces(
 ) -> dict[str, NamespaceCounts]:
     """Get namespace counts from issues and optionally inbox proposals.
 
+    Namespaces listed in the ``pinned_namespaces`` config key are always
+    included, even when they contain no issues or proposals.
+
     Args:
         storage: Issue storage instance.
         dogcats_dir: Path to .dogcats directory (needed for inbox).
@@ -1606,5 +1609,17 @@ def get_namespaces(
                 counts.inbox += 1
         except Exception:
             pass
+
+    # Include pinned namespaces from config (always present even if empty)
+    try:
+        from dogcat.config import load_config
+
+        resolved_dir = str(dogcats_dir) if dogcats_dir else str(storage.dogcats_dir)
+        config = load_config(resolved_dir)
+        pinned: list[str] = config.get("pinned_namespaces", [])
+        for ns in pinned:
+            ns_counts.setdefault(ns, NamespaceCounts())
+    except Exception:
+        pass
 
     return ns_counts

@@ -46,6 +46,15 @@ h1 {
   letter-spacing: -0.02em;
 }
 
+h1 a {
+  color: inherit;
+  text-decoration: none;
+}
+
+h1 a:hover {
+  color: var(--accent);
+}
+
 h1 span {
   color: var(--muted);
   font-weight: 400;

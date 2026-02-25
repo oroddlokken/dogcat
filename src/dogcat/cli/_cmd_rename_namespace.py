@@ -84,6 +84,12 @@ def register(app: typer.Typer) -> None:
                 hidden[hidden.index(old_namespace)] = new_namespace
                 config_changed = True
 
+            # Update pinned_namespaces
+            pinned: list[str] | None = config.get("pinned_namespaces")
+            if pinned and old_namespace in pinned:
+                pinned[pinned.index(old_namespace)] = new_namespace
+                config_changed = True
+
             if config_changed:
                 save_config(actual_dir, config)
 

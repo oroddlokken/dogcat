@@ -31,7 +31,9 @@ _BOOL_KEYS = frozenset(
 )
 
 # Keys whose values are stored as arrays (list[str])
-_ARRAY_KEYS = frozenset({"visible_namespaces", "hidden_namespaces"})
+_ARRAY_KEYS = frozenset(
+    {"visible_namespaces", "hidden_namespaces", "pinned_namespaces"}
+)
 
 # All known config keys: type, description, default, and allowed values
 _KNOWN_KEYS: dict[str, dict[str, Any]] = {
@@ -56,6 +58,12 @@ _KNOWN_KEYS: dict[str, dict[str, Any]] = {
         "type": "list[str]",
         "description": "Hide issues from these namespaces",
         "default": "[] (show all)",
+        "values": "comma-separated namespace list",
+    },
+    "pinned_namespaces": {
+        "type": "list[str]",
+        "description": "Always show these namespaces even when empty",
+        "default": "[]",
         "values": "comma-separated namespace list",
     },
     "disable_legend_colors": {

@@ -23,6 +23,7 @@ def _form_context(
     submitted: bool = False,
     error: str | None = None,
     proposal_title: str | None = None,
+    proposal_id: str | None = None,
 ) -> dict[str, object]:
     """Build the template context dict for propose.html."""
     namespaces: list[str] = request.app.state.namespaces
@@ -40,6 +41,8 @@ def _form_context(
     }
     if proposal_title is not None:
         ctx["proposal_title"] = proposal_title
+    if proposal_id is not None:
+        ctx["proposal_id"] = proposal_id
     return ctx
 
 
@@ -50,6 +53,10 @@ async def propose_form(request: Request) -> HTMLResponse:
     namespace = request.app.state.namespace
     submitted = request.query_params.get("submitted") == "true"
     proposal_title = request.query_params.get("title")
+    proposal_id = request.query_params.get("id")
+    ns_param = request.query_params.get("namespace")
+    if ns_param and ns_param in request.app.state.namespaces:
+        namespace = ns_param
     return templates.TemplateResponse(
         request,
         "propose.html",
@@ -58,6 +65,7 @@ async def propose_form(request: Request) -> HTMLResponse:
             namespace,
             submitted=submitted,
             proposal_title=proposal_title,
+            proposal_id=proposal_id,
         ),
     )
 
@@ -163,5 +171,12 @@ async def submit_proposal(
             _form_context(request, namespace, error="Failed to submit proposal."),
         )
 
-    query = urlencode({"submitted": "true", "title": title})
+    query = urlencode(
+        {
+            "submitted": "true",
+            "id": proposal.full_id,
+            "title": title,
+            "namespace": namespace,
+        }
+    )
     return RedirectResponse(url=f"/?{query}", status_code=303)

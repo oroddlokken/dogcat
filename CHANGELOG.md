@@ -4,12 +4,16 @@
 
 ### Fixed
 
+- **`dcat web propose` preserves selected namespace after submission** — the POST-Redirect-GET flow now passes the namespace in the query string, so the form stays on the chosen namespace instead of resetting to the default (closes dogcat-51h6)
 - **`dcat init` now adds `.issues.lock` to `.gitignore`** — the lockfile is added alongside `config.local.toml` during initialization, matching what `dcat doctor` already checks for (closes dogcat-50d7)
 
 ### Changed
 
 - **`dcat ir` and `dcat ip` now list issues by status** — `dcat ir` lists all in-review issues and `dcat ip` lists all in-progress issues, instead of setting an issue's status. Both support standard filters (`--type`, `--priority`, `--label`, `--owner`, `--tree`, `--table`, `--json`) (closes dogcat-2a80, dogcat-3its)
 - **`dcat inbox list` groups proposals by namespace** — when proposals span multiple namespaces, they are sorted and grouped under bold namespace headers with counts. Single-namespace output remains flat (closes dogcat-3t9d)
+- **`dcat web propose` confirmation now shows proposal ID** — the success message displays the full proposal ID alongside the title (e.g. `testns-inbox-2hix My proposal`) (closes dogcat-4596)
+- **`dcat web propose` header links to `/`** — the page title is now a clickable link back to the clean form (closes dogcat-18la)
+- **`dcat recently-closed` and `dcat recently-added` support `-n`** — shorthand alias for `--limit` to quickly cap the number of results shown (closes dogcat-5e84)
 
 ### Added
 
@@ -21,6 +25,7 @@
 - **Remote inbox section in `dcat prime` output** — `dcat prime` now includes remote inbox commands in its guide when a remote inbox is configured (closes dogcat-3l35)
 - **`config.local.toml` for per-machine settings** — machine-specific configuration (e.g. `inbox_remote`) is stored in `.dogcats/config.local.toml`, which is automatically added to `.gitignore`. Local-only keys are auto-redirected to this file (closes dogcat-4fli)
 - **Gitignore warning for `config.local.toml`** — `dcat doctor` now warns when `config.local.toml` exists but is not gitignored (closes dogcat-6291)
+- **`pinned_namespaces` config option** — list namespaces in `pinned_namespaces` to keep them visible even when they have no issues or proposals. Supported in `dcat namespaces`, `dcat web propose`, tab completions, and `dcat rename-namespace` (closes dogcat-34c0)
 
 ### Development
 

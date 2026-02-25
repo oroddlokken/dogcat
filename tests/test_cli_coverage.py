@@ -151,6 +151,38 @@ class TestRecentlyClosed:
         ]
         assert len(lines) == 1
 
+    def test_recently_closed_with_n_shorthand(self, tmp_path: Path) -> None:
+        """Test recently-closed respects -n shorthand for --limit."""
+        dogcats_dir, ids = _init_and_create(tmp_path, "Issue A", "Issue B", "Issue C")
+        for issue_id in ids:
+            runner.invoke(
+                app,
+                [
+                    "close",
+                    issue_id,
+                    "--reason",
+                    "Done",
+                    "--dogcats-dir",
+                    str(dogcats_dir),
+                ],
+            )
+
+        result = runner.invoke(
+            app,
+            [
+                "recently-closed",
+                "-n",
+                "1",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        lines = [
+            line for line in result.stdout.strip().split("\n") if line.startswith("✓")
+        ]
+        assert len(lines) == 1
+
 
 class TestSearch:
     """Test the search command."""

@@ -1586,3 +1586,34 @@ class TestGetNamespaces:
 
         result = get_namespaces(storage, include_inbox=False)
         assert result == {}
+
+    def test_pinned_namespaces_always_included(self, temp_dogcats_dir: Path) -> None:
+        """Pinned namespaces appear even with no issues or proposals."""
+        from dogcat.config import save_config
+        from dogcat.storage import NamespaceCounts, get_namespaces
+
+        save_config(str(temp_dogcats_dir), {"pinned_namespaces": ["pinned-ns"]})
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+
+        result = get_namespaces(
+            storage, dogcats_dir=str(temp_dogcats_dir), include_inbox=False
+        )
+        assert result == {"pinned-ns": NamespaceCounts()}
+
+    def test_pinned_namespace_with_existing_issues(
+        self, temp_dogcats_dir: Path
+    ) -> None:
+        """Pinned namespace that also has issues shows correct counts."""
+        from dogcat.config import save_config
+        from dogcat.storage import NamespaceCounts, get_namespaces
+
+        save_config(str(temp_dogcats_dir), {"pinned_namespaces": ["ns-a"]})
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+        storage.create(Issue(id="a1", title="A1", namespace="ns-a"))
+
+        result = get_namespaces(
+            storage, dogcats_dir=str(temp_dogcats_dir), include_inbox=False
+        )
+        assert result == {"ns-a": NamespaceCounts(issues=1)}

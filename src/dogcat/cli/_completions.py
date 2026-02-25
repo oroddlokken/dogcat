@@ -335,7 +335,11 @@ def complete_config_values(
         ]
         return [(v, h) for v, h in options if v.startswith(incomplete)]
 
-    if key in _ARRAY_KEYS and key in ("visible_namespaces", "hidden_namespaces"):
+    if key in _ARRAY_KEYS and key in (
+        "visible_namespaces",
+        "hidden_namespaces",
+        "pinned_namespaces",
+    ):
         try:
             storage = get_storage()
             ns_set: set[str] = set()

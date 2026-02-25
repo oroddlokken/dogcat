@@ -89,6 +89,11 @@ class TestGetForm:
         resp = client.get("/")
         assert "Submit proposal" in resp.text
 
+    def test_form_has_home_link(self, client: TestClient) -> None:
+        """The header links back to /."""
+        resp = client.get("/")
+        assert '<a href="/">' in resp.text
+
 
 class TestNamespacePopulation:
     """Tests for namespace dropdown population."""
@@ -295,6 +300,20 @@ class TestSubmitProposal:
         assert resp.status_code == 200
         assert "Invalid namespace" in resp.text
 
+    def test_submit_shows_proposal_id(self, client: TestClient) -> None:
+        """Submitted proposal confirmation shows the proposal ID."""
+        resp = client.post(
+            "/",
+            data={
+                "csrf_token": _csrf(client),
+                "namespace": "testns",
+                "title": "ID test",
+                "description": "",
+            },
+        )
+        assert resp.status_code == 200
+        assert "testns-inbox-" in resp.text
+
     def test_submit_redirects_with_303(self, client: TestClient) -> None:
         """Successful POST returns a 303 redirect (Post/Redirect/Get)."""
         resp = client.post(
@@ -311,12 +330,79 @@ class TestSubmitProposal:
         assert "submitted=true" in resp.headers["location"]
         assert "title=PRG+test" in resp.headers["location"]
 
+    def test_submit_redirect_includes_id(self, client: TestClient) -> None:
+        """Successful POST redirect includes the proposal ID query param."""
+        resp = client.post(
+            "/",
+            data={
+                "csrf_token": _csrf(client),
+                "namespace": "testns",
+                "title": "ID redirect",
+                "description": "",
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert "id=testns-inbox-" in resp.headers["location"]
+
+    def test_submit_redirect_includes_namespace(self, client: TestClient) -> None:
+        """Successful POST redirect includes the namespace query param."""
+        resp = client.post(
+            "/",
+            data={
+                "csrf_token": _csrf(client),
+                "namespace": "testns",
+                "title": "NS redirect",
+                "description": "",
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert "namespace=testns" in resp.headers["location"]
+
+    def test_submit_preserves_non_default_namespace(
+        self, web_dogcats_multi_ns: Path
+    ) -> None:
+        """After submit to non-default ns, form keeps it selected."""
+        app = create_app(dogcats_dir=str(web_dogcats_multi_ns))
+        multi_client = TestClient(app)
+        token: str = app.state.csrf_token
+        resp = multi_client.post(
+            "/",
+            data={
+                "csrf_token": token,
+                "namespace": "beta",
+                "title": "Beta proposal",
+                "description": "",
+            },
+        )
+        # After redirect, the form should have beta as the active namespace
+        assert 'value="beta"' in resp.text
+        # The hidden namespace input should be set to beta
+        assert 'name="namespace" value="beta"' in resp.text
+
     def test_get_with_submitted_shows_success(self, client: TestClient) -> None:
         """GET /?submitted=true&title=X shows the success message."""
         resp = client.get("/?submitted=true&title=My+proposal")
         assert resp.status_code == 200
         assert "Proposal submitted" in resp.text
         assert "My proposal" in resp.text
+
+    def test_get_with_namespace_param_selects_namespace(
+        self, web_dogcats_multi_ns: Path
+    ) -> None:
+        """GET /?namespace=beta selects that namespace in the form."""
+        app = create_app(dogcats_dir=str(web_dogcats_multi_ns))
+        multi_client = TestClient(app)
+        resp = multi_client.get("/?namespace=beta")
+        assert 'name="namespace" value="beta"' in resp.text
+
+    def test_get_with_invalid_namespace_param_ignores_it(
+        self, client: TestClient
+    ) -> None:
+        """GET /?namespace=bogus falls back to default namespace."""
+        resp = client.get("/?namespace=bogus")
+        assert 'name="namespace" value="testns"' in resp.text
 
 
 class TestAppFactory:
