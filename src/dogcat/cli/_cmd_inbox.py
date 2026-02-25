@@ -76,6 +76,37 @@ def _format_proposal_brief(proposal: Proposal) -> str:
     return f"{emoji} {proposal.full_id}: {proposal.title}"
 
 
+def _echo_proposals_grouped(
+    proposals: list[Proposal],
+    indent: str = "",
+) -> None:
+    """Print proposals grouped by namespace.
+
+    When all proposals share a single namespace, prints them flat (no headers).
+    Otherwise groups under bold namespace headers.
+    """
+    from itertools import groupby
+    from operator import attrgetter
+
+    sorted_proposals = sorted(proposals, key=attrgetter("namespace"))
+    groups = [
+        (ns, list(ps))
+        for ns, ps in groupby(sorted_proposals, key=attrgetter("namespace"))
+    ]
+
+    use_headers = len(groups) > 1
+    for i, (ns, ps) in enumerate(groups):
+        if use_headers:
+            if i > 0:
+                typer.echo()
+            typer.echo(f"{indent}{typer.style(f'{ns} ({len(ps)}):', bold=True)}")
+            for p in ps:
+                typer.echo(f"{indent}  {_format_proposal_brief(p)}")
+        else:
+            for p in ps:
+                typer.echo(f"{indent}{_format_proposal_brief(p)}")
+
+
 def _format_proposal_full(proposal: Proposal) -> str:
     """Format a proposal for detailed display."""
 
@@ -246,8 +277,7 @@ def register(app: typer.Typer) -> None:
             typer.echo("No proposals in inbox.")
         else:
             if proposals:
-                for proposal in proposals:
-                    typer.echo(_format_proposal_brief(proposal))
+                _echo_proposals_grouped(proposals)
             if remote_proposals:
                 if proposals:
                     typer.echo()
@@ -257,8 +287,7 @@ def register(app: typer.Typer) -> None:
                         bold=True,
                     ),
                 )
-                for proposal in remote_proposals:
-                    typer.echo(f"  {_format_proposal_brief(proposal)}")
+                _echo_proposals_grouped(remote_proposals, indent="  ")
 
     @inbox_app.command("show")
     def inbox_show(

@@ -153,6 +153,12 @@ def register(app: typer.Typer) -> None:
             quiet=False,
         )
 
+        # Always add lockfile to .gitignore (never committed)
+        _ensure_gitignore_entry(
+            ".dogcats/.issues.lock",
+            quiet=False,
+        )
+
         if no_git:
             config = load_shared_config(dogcats_dir)
             config["git_tracking"] = False

@@ -18,18 +18,16 @@ def _init(tmp_path: Path) -> Path:
     return dogcats_dir
 
 
-def _create_proposal(tmp_path: Path, title: str = "Test proposal") -> str:
+def _create_proposal(
+    tmp_path: Path,
+    title: str = "Test proposal",
+    namespace: str | None = None,
+) -> str:
     """Create a proposal and return its full ID."""
-    result = runner.invoke(
-        app,
-        [
-            "propose",
-            title,
-            "--to",
-            str(tmp_path),
-            "--json",
-        ],
-    )
+    cmd = ["propose", title, "--to", str(tmp_path), "--json"]
+    if namespace:
+        cmd.extend(["--namespace", namespace])
+    result = runner.invoke(app, cmd)
     data = json.loads(result.stdout)
     return f"{data['namespace']}-inbox-{data['id']}"
 
@@ -109,6 +107,51 @@ class TestInboxList:
         )
         assert result.exit_code == 0
         assert "Closed but visible" in result.stdout
+
+    def test_list_grouped_by_namespace(self, tmp_path: Path) -> None:
+        """Test that proposals from multiple namespaces are grouped."""
+        dogcats_dir = _init(tmp_path)
+        _create_proposal(tmp_path, "Alpha feature", namespace="alpha")
+        _create_proposal(tmp_path, "Beta feature", namespace="beta")
+        _create_proposal(tmp_path, "Alpha bug", namespace="alpha")
+
+        result = runner.invoke(
+            app,
+            [
+                "inbox",
+                "list",
+                "--all-namespaces",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        lines = result.stdout.strip().splitlines()
+        # Should have namespace headers
+        assert any("alpha" in line and "(2):" in line for line in lines)
+        assert any("beta" in line and "(1):" in line for line in lines)
+        # Alpha should come before beta (sorted)
+        alpha_idx = next(
+            i for i, ln in enumerate(lines) if "alpha" in ln and "(2):" in ln
+        )
+        beta_idx = next(
+            i for i, ln in enumerate(lines) if "beta" in ln and "(1):" in ln
+        )
+        assert alpha_idx < beta_idx
+
+    def test_list_single_namespace_no_header(self, tmp_path: Path) -> None:
+        """Test that single-namespace output has no grouping header."""
+        dogcats_dir = _init(tmp_path)
+        _create_proposal(tmp_path, "Only proposal")
+
+        result = runner.invoke(
+            app,
+            ["inbox", "list", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        # Should NOT have a namespace header with count
+        for line in result.stdout.strip().splitlines():
+            assert "):" not in line or "inbox-" in line
 
 
 class TestInboxShow:

@@ -2,9 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`dcat init` now adds `.issues.lock` to `.gitignore`** — the lockfile is added alongside `config.local.toml` during initialization, matching what `dcat doctor` already checks for (closes dogcat-50d7)
+
 ### Changed
 
 - **`dcat ir` and `dcat ip` now list issues by status** — `dcat ir` lists all in-review issues and `dcat ip` lists all in-progress issues, instead of setting an issue's status. Both support standard filters (`--type`, `--priority`, `--label`, `--owner`, `--tree`, `--table`, `--json`) (closes dogcat-2a80, dogcat-3its)
+- **`dcat inbox list` groups proposals by namespace** — when proposals span multiple namespaces, they are sorted and grouped under bold namespace headers with counts. Single-namespace output remains flat (closes dogcat-3t9d)
 
 ### Added
 

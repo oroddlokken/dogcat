@@ -35,6 +35,27 @@ class TestCLIInit:
         )
         assert "Dogcat repository initialized" in result.stdout
 
+    def test_init_adds_gitignore_entries(
+        self,
+        tmp_path: Path,
+        monkeypatch: "pytest.MonkeyPatch",
+    ) -> None:
+        """Init adds config.local.toml and .issues.lock to .gitignore."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+
+        result = runner.invoke(
+            app,
+            ["init", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+
+        gitignore = tmp_path / ".gitignore"
+        assert gitignore.exists()
+        content = gitignore.read_text()
+        assert ".dogcats/config.local.toml" in content
+        assert ".dogcats/.issues.lock" in content
+
 
 class TestCLIInitPrefix:
     """Test init command with --prefix flag."""
