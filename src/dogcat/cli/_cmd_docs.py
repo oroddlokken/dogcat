@@ -738,8 +738,9 @@ def register(app: typer.Typer) -> None:
         opinionated_rules = ""
         if opinionated:
             opinionated_rules = (
-                "  Do NOT use TodoWrite, TaskCreate, or markdown files for\n"
-                "  task tracking — use dcat for all issue and task management\n"
+                "  Before setting in_review: verify your work following the\n"
+                "  project's guidelines and cite actual output. \"Should pass\"\n"
+                "  is not evidence — run the command, read the result.\n"
             )
 
         guide = f"""

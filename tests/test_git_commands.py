@@ -575,7 +575,7 @@ class TestPrimeGitHealth:
             catch_exceptions=False,
         )
         assert result.exit_code == 0
-        assert "Do NOT use TodoWrite" in result.stdout
+        assert "Before setting in_review" in result.stdout
         assert "dogcat health check" in result.stdout
 
     def test_prime_base_excludes_opinionated_rules(
@@ -591,7 +591,7 @@ class TestPrimeGitHealth:
             catch_exceptions=False,
         )
         assert result.exit_code == 0
-        assert "TodoWrite" not in result.stdout
+        assert "Before setting in_review" not in result.stdout
 
     def test_prime_token_count_within_limit(
         self,

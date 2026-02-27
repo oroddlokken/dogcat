@@ -9,6 +9,7 @@
 
 ### Changed
 
+- **`dcat prime --opinionated` now requires verification before status changes** — replaced the old TodoWrite/TaskCreate rule with a project-agnostic verification gate: verify your work following the project's guidelines and cite actual output before setting `in_review` (closes dogcat-oq90)
 - **`dcat ir` and `dcat ip` now list issues by status** — `dcat ir` lists all in-review issues and `dcat ip` lists all in-progress issues, instead of setting an issue's status. Both support standard filters (`--type`, `--priority`, `--label`, `--owner`, `--tree`, `--table`, `--json`) (closes dogcat-2a80, dogcat-3its)
 - **`dcat inbox list` groups proposals by namespace** — when proposals span multiple namespaces, they are sorted and grouped under bold namespace headers with counts. Single-namespace output remains flat (closes dogcat-3t9d)
 - **`dcat web propose` confirmation now shows proposal ID** — the success message displays the full proposal ID alongside the title (e.g. `testns-inbox-2hix My proposal`) (closes dogcat-4596)
