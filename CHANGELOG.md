@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.10.3 (2026-02-28)
+
 ### Fixed
 
 - **`dcat web propose` preserves selected namespace after submission** — the POST-Redirect-GET flow now passes the namespace in the query string, so the form stays on the chosen namespace instead of resetting to the default (closes dogcat-51h6)
