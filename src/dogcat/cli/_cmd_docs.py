@@ -739,7 +739,7 @@ def register(app: typer.Typer) -> None:
         if opinionated:
             opinionated_rules = (
                 "  Before setting in_review: verify your work following the\n"
-                "  project's guidelines and cite actual output. \"Should pass\"\n"
+                '  project\'s guidelines and cite actual output. "Should pass"\n'
                 "  is not evidence — run the command, read the result.\n"
             )
 

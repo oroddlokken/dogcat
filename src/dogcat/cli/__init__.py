@@ -34,6 +34,7 @@ def _global_options(
 from . import (  # noqa: E402
     _cmd_admin,
     _cmd_archive,
+    _cmd_chart,
     _cmd_close,
     _cmd_comment,
     _cmd_config,
@@ -65,6 +66,7 @@ from . import (  # noqa: E402
 for _mod in (
     _cmd_admin,
     _cmd_archive,
+    _cmd_chart,
     _cmd_close,
     _cmd_comment,
     _cmd_config,

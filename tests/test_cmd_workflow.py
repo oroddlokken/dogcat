@@ -369,6 +369,92 @@ class TestCLIInProgress:
         assert data[0]["status"] == "in_progress"
 
 
+class TestCLIOpen:
+    """Test open command."""
+
+    def test_open_no_issues(self, tmp_path: Path) -> None:
+        """Test open with no open issues."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["open", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "No open issues" in result.stdout
+
+    def test_open_shows_only_open(self, tmp_path: Path) -> None:
+        """Test that open shows only open-status issues."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # Create an open issue (default status)
+        create1 = runner.invoke(
+            app,
+            ["create", "Open issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+        open_id = create1.stdout.split(": ")[0].split()[-1]
+
+        # Create an in_progress issue
+        create2 = runner.invoke(
+            app,
+            [
+                "create",
+                "WIP issue",
+                "--status",
+                "in_progress",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        wip_id = create2.stdout.split(": ")[0].split()[-1]
+
+        result = runner.invoke(
+            app,
+            ["open", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert open_id in result.stdout
+        assert wip_id not in result.stdout
+
+    def test_open_json_output(self, tmp_path: Path) -> None:
+        """Test open with --json flag."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        runner.invoke(
+            app,
+            ["create", "Open issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["open", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert len(data) == 1
+        assert data[0]["status"] == "open"
+
+    def test_open_alias(self, tmp_path: Path) -> None:
+        """Test that 'o' alias works for open."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        runner.invoke(
+            app,
+            ["create", "Open issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["o", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Open (1):" in result.stdout
+
+
 class TestCLIInReview:
     """Test in-review command."""
 

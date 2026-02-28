@@ -18,6 +18,9 @@
 
 ### Added
 
+- **`dcat open` command** — shows only issues with `status=open`, with standard filters (`--type`, `--priority`, `--label`, `--owner`, `--tree`, `--table`, `--json`). Aliased as `dcat o` (closes dogcat-5jmp)
+- **`dcat chart` command** — displays a horizontal bar chart of issue distribution by status, type, or priority. Supports `--by`, `--all`, `--json`, and standard filters (closes dogcat-2qb8)
+- **`dcat chart` shows all categories by default and supports label grouping** — running `dcat chart` without `--by` now displays all four distributions (status, type, priority, label). Added `--by label` to group issues by label/tag, sorted by frequency (closes dogcat-4ry9)
 - **Remote inbox support in `dcat inbox list`** — read and display proposals from a remote inbox alongside local proposals. Configure with `dcat config set inbox_remote <path>`. Remote proposals are namespace-filtered and marked with `(remote)` source in JSON output (closes dogcat-2obs)
 - **`dcat inbox accept` command** — promote a remote inbox proposal to a local issue. Copies title, description, and supports `--priority` and `--labels` overrides. Automatically closes the remote proposal after acceptance (closes dogcat-17sg)
 - **`dcat inbox reject` command** — reject a remote inbox proposal with an optional reason, closing it without creating a local issue (closes dogcat-4cqo)
