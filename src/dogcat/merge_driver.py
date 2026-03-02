@@ -10,6 +10,7 @@ The merged result is written to the ours file (%A).
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
@@ -23,6 +24,84 @@ from dogcat.models import classify_record
 logger = logging.getLogger(__name__)
 
 _CONFLICT_MARKERS = (b"<<<<<<<", b"=======", b">>>>>>>")
+
+
+def parse_conflicted_jsonl(
+    raw: bytes,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Extract base, ours, and theirs records from a JSONL file with conflict markers.
+
+    Parses the standard git conflict format::
+
+        <<<<<<< ours
+        ... ours records ...
+        ||||||| base (merge.conflictStyle=diff3)
+        ... base records ...
+        =======
+        ... theirs records ...
+        >>>>>>> theirs
+
+    When ``merge.conflictStyle`` is not ``diff3``, there is no base section
+    between ``|||||||`` and ``=======``. In that case, both the ours and theirs
+    sections still contain valid JSONL records and the base is empty.
+    Non-conflicted lines outside markers are treated as shared context and
+    included in both ours and theirs.
+
+    Returns:
+        (base_records, ours_records, theirs_records)
+    """
+    # States: "outside", "ours", "base", "theirs"
+    state = "outside"
+    shared: list[dict[str, Any]] = []
+    ours_lines: list[bytes] = []
+    base_lines: list[bytes] = []
+    theirs_lines: list[bytes] = []
+    had_conflicts = False
+
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        if stripped.startswith(b"<<<<<<<"):
+            state = "ours"
+            had_conflicts = True
+            continue
+        if stripped.startswith(b"|||||||"):
+            state = "base"
+            continue
+        if stripped.startswith(b"======="):
+            state = "theirs"
+            continue
+        if stripped.startswith(b">>>>>>>"):
+            state = "outside"
+            continue
+
+        if state == "outside":
+            with contextlib.suppress(orjson.JSONDecodeError):
+                shared.append(orjson.loads(stripped))
+        elif state == "ours":
+            ours_lines.append(stripped)
+        elif state == "base":
+            base_lines.append(stripped)
+        elif state == "theirs":
+            theirs_lines.append(stripped)
+
+    if not had_conflicts:
+        return [], [], []
+
+    def _parse_lines(lines: list[bytes]) -> list[dict[str, Any]]:
+        records: list[dict[str, Any]] = []
+        for raw_line in lines:
+            with contextlib.suppress(orjson.JSONDecodeError):
+                records.append(orjson.loads(raw_line))
+        return records
+
+    base_records = _parse_lines(base_lines)
+    ours_records = shared + _parse_lines(ours_lines)
+    theirs_records = shared + _parse_lines(theirs_lines)
+
+    return base_records, ours_records, theirs_records
 
 
 def _parse_jsonl(path: Path) -> list[dict[str, Any]]:

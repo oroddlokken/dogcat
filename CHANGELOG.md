@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`dcat recently-closed` and `dcat recently-added` no longer claim `-n` for `--limit`** — removes the short flag conflict so `-n` is reserved for `--namespace` across the CLI (closes dogcat-sj9g)
+
+### Added
+
+- **`dcat git rebase` command** — auto-resolves JSONL merge conflicts in `.dogcats/` files using the semantic merge driver logic. Scans `issues.jsonl` and `inbox.jsonl` for conflict markers, resolves them, and stages the result with `git add` (closes dogcat-1mer)
+
 ## 0.10.3 (2026-02-28)
 
 ### Fixed
@@ -16,7 +24,7 @@
 - **`dcat inbox list` groups proposals by namespace** — when proposals span multiple namespaces, they are sorted and grouped under bold namespace headers with counts. Single-namespace output remains flat (closes dogcat-3t9d)
 - **`dcat web propose` confirmation now shows proposal ID** — the success message displays the full proposal ID alongside the title (e.g. `testns-inbox-2hix My proposal`) (closes dogcat-4596)
 - **`dcat web propose` header links to `/`** — the page title is now a clickable link back to the clean form (closes dogcat-18la)
-- **`dcat recently-closed` and `dcat recently-added` support `-n`** — shorthand alias for `--limit` to quickly cap the number of results shown (closes dogcat-5e84)
+- **`dcat recently-closed` and `dcat recently-added` support `--limit`** — cap the number of results shown (closes dogcat-5e84)
 
 ### Added
 

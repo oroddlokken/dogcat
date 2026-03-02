@@ -55,15 +55,15 @@ _GIT_GUIDE_TEXT = """\
 
 ── Resolving Merge Conflicts ───────────────────────────────────────────────
 
-  With the merge driver installed, conflicts are rare. If they happen:
+  With the merge driver installed, conflicts are rare. If they happen
+  (e.g. during a rebase where the driver isn't invoked):
 
-  1. Open the conflicted file (.dogcats/issues.jsonl)
-  2. In most cases, keep BOTH sides — each line is an independent event
-  3. Remove the conflict markers (<<<<<<, ======, >>>>>>)
-  4. Save and continue the merge
+    $ dcat git rebase
 
-  If both sides modify the SAME issue, keep the more recent change
-  (or keep both — dogcat replays events in order, so the last one wins).
+  This auto-resolves JSONL conflicts using the same semantic logic as
+  the merge driver, then stages the resolved files. Continue with:
+
+    $ git rebase --continue
 
 ── Using .gitignore ────────────────────────────────────────────────────────
 
@@ -335,6 +335,86 @@ def register(app: typer.Typer) -> None:
 
         typer.echo("✓ Merge driver configured in local git config")
         typer.echo("\nDone! The merge driver will auto-resolve JSONL conflicts.")
+
+    @git_app.command("rebase")
+    def git_rebase() -> None:
+        """Auto-resolve JSONL merge conflicts in .dogcats/ files.
+
+        Scans .dogcats/*.jsonl files for git conflict markers, resolves them
+        using the semantic merge driver logic, writes the clean result, and
+        stages the resolved files with git add.
+
+        Use this after a git rebase or pull --rebase leaves conflicts in
+        the JSONL files:
+
+            git pull --rebase
+            dcat git rebase
+            git rebase --continue
+        """
+        import tempfile
+
+        import orjson
+
+        from dogcat.merge_driver import merge_jsonl, parse_conflicted_jsonl
+
+        dogcats_dir = Path(find_dogcats_dir())
+        if not dogcats_dir.is_dir():
+            echo_error("No .dogcats directory found")
+            raise typer.Exit(1)
+
+        resolved: list[str] = []
+        errors: list[str] = []
+
+        for jsonl_path in sorted(dogcats_dir.glob("*.jsonl")):
+            raw = jsonl_path.read_bytes()
+            # Quick check for conflict markers
+            if b"<<<<<<<" not in raw:
+                continue
+
+            try:
+                base, ours, theirs = parse_conflicted_jsonl(raw)
+                if not ours and not theirs:
+                    # No actual conflict sections found
+                    continue
+
+                merged = merge_jsonl(base, ours, theirs)
+
+                # Atomic write via tempfile + rename
+                with tempfile.NamedTemporaryFile(
+                    mode="wb",
+                    dir=jsonl_path.parent,
+                    delete=False,
+                    suffix=".jsonl",
+                ) as tmp:
+                    for record in merged:
+                        tmp.write(orjson.dumps(record))
+                        tmp.write(b"\n")
+                    tmp_path = Path(tmp.name)
+
+                tmp_path.replace(jsonl_path)
+
+                # Stage the resolved file
+                subprocess.run(
+                    ["git", "add", str(jsonl_path)],
+                    check=True,
+                    capture_output=True,
+                )
+                resolved.append(jsonl_path.name)
+            except Exception as exc:
+                errors.append(f"{jsonl_path.name}: {exc}")
+
+        if not resolved and not errors:
+            typer.echo("No JSONL conflicts found in .dogcats/")
+            raise typer.Exit(0)
+
+        for name in resolved:
+            typer.echo(typer.style(f"✓ Resolved {name}", fg="green"))
+
+        for err in errors:
+            typer.echo(typer.style(f"✗ {err}", fg="red"))
+
+        if errors:
+            raise typer.Exit(1)
 
     @git_app.command("merge-driver", hidden=True)
     def git_merge_driver(

@@ -1212,7 +1212,7 @@ def register(app: typer.Typer) -> None:
     def recently_closed(
         limit_arg: int | None = typer.Argument(None, help="Number of issues to show"),
         limit: int | None = typer.Option(
-            None, "--limit", "-n", help="Number of issues to show"
+            None, "--limit", help="Number of issues to show"
         ),
         all_namespaces: bool = typer.Option(
             False,
@@ -1278,7 +1278,7 @@ def register(app: typer.Typer) -> None:
     def recently_added(
         limit_arg: int | None = typer.Argument(None, help="Number of issues to show"),
         limit: int | None = typer.Option(
-            None, "--limit", "-n", help="Number of issues to show"
+            None, "--limit", help="Number of issues to show"
         ),
         all_namespaces: bool = typer.Option(
             False,
