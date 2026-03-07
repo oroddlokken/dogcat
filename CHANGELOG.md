@@ -8,7 +8,12 @@
 
 ### Added
 
+- **`dcat doctor` detects missing Claude Code PreCompact hook** — when a `.claude/` directory exists, doctor checks whether a PreCompact hook is configured to run `dcat prime`. If missing, `--fix` installs it automatically into `settings.local.json` (preferred) or `settings.json`, merging with existing config. This preserves workflow context during context compaction (closes dogcat-323y)
 - **`dcat git rebase` command** — auto-resolves JSONL merge conflicts in `.dogcats/` files using the semantic merge driver logic. Scans `issues.jsonl` and `inbox.jsonl` for conflict markers, resolves them, and stages the result with `git add` (closes dogcat-1mer)
+
+### Changed
+
+- **`dcat prime` skips output in non-dogcat repos** — when no `.dogcats/` directory is found, `dcat prime` prints a short message and exits cleanly instead of dumping the full workflow guide
 
 ## 0.10.3 (2026-02-28)
 

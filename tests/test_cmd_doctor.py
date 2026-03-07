@@ -392,6 +392,203 @@ class TestDoctorInbox:
         )
 
 
+class TestDoctorPreCompactHook:
+    """Test doctor check for Claude Code PreCompact hook."""
+
+    def test_no_check_without_claude_dir(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Doctor skips PreCompact check when .claude/ doesn't exist."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["doctor", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data = json.loads(result.stdout)
+        assert "claude_precompact" not in data["checks"]
+
+    def test_warns_when_hook_missing(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Doctor warns when .claude/ exists but PreCompact hook is missing."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / "settings.json").write_text("{}")
+
+        result = runner.invoke(
+            app,
+            ["doctor", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data = json.loads(result.stdout)
+        check = data["checks"]["claude_precompact"]
+        assert check["passed"] is False
+        assert check.get("optional") is True
+
+    def test_passes_when_hook_present(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Doctor passes when PreCompact hook with dcat prime exists."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        settings = {
+            "hooks": {
+                "PreCompact": [
+                    {
+                        "matcher": "",
+                        "hooks": [{"type": "command", "command": "dcat prime"}],
+                    }
+                ]
+            }
+        }
+        (claude_dir / "settings.json").write_text(json.dumps(settings))
+
+        result = runner.invoke(
+            app,
+            ["doctor", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data = json.loads(result.stdout)
+        assert data["checks"]["claude_precompact"]["passed"] is True
+
+    def test_detects_hook_in_local_settings(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Doctor finds PreCompact hook in settings.local.json."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / "settings.json").write_text("{}")
+        settings = {
+            "hooks": {
+                "PreCompact": [
+                    {
+                        "matcher": "",
+                        "hooks": [{"type": "command", "command": "dcat prime"}],
+                    }
+                ]
+            }
+        }
+        (claude_dir / "settings.local.json").write_text(json.dumps(settings))
+
+        result = runner.invoke(
+            app,
+            ["doctor", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data = json.loads(result.stdout)
+        assert data["checks"]["claude_precompact"]["passed"] is True
+
+    def test_fix_installs_hook(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Doctor --fix installs PreCompact hook."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / "settings.json").write_text("{}")
+
+        result = runner.invoke(
+            app,
+            ["doctor", "--fix", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert "Installed PreCompact hook" in result.stdout
+
+        # Verify it was written
+        data = json.loads((claude_dir / "settings.json").read_text())
+        hooks = data["hooks"]["PreCompact"]
+        assert any(
+            "dcat prime" in h.get("command", "")
+            for group in hooks
+            for h in group.get("hooks", [])
+        )
+
+    def test_fix_prefers_local_settings(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Doctor --fix writes to settings.local.json when it exists."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / "settings.json").write_text("{}")
+        (claude_dir / "settings.local.json").write_text('{"permissions": {}}')
+
+        runner.invoke(
+            app,
+            ["doctor", "--fix", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        # Hook should be in local, not project settings
+        local_data = json.loads((claude_dir / "settings.local.json").read_text())
+        project_data = json.loads((claude_dir / "settings.json").read_text())
+        assert "PreCompact" in local_data.get("hooks", {})
+        assert "PreCompact" not in project_data.get("hooks", {})
+        # Existing keys preserved
+        assert "permissions" in local_data
+
+    def test_fix_merges_with_existing_hooks(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Doctor --fix merges with existing hooks config."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        existing = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [{"type": "command", "command": "echo hi"}],
+                    }
+                ]
+            }
+        }
+        (claude_dir / "settings.json").write_text(json.dumps(existing))
+
+        runner.invoke(
+            app,
+            ["doctor", "--fix", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        data = json.loads((claude_dir / "settings.json").read_text())
+        assert "PreToolUse" in data["hooks"]
+        assert "PreCompact" in data["hooks"]
+
+
 class TestDoctorLocalConfigGitignore:
     """Test doctor check for config.local.toml gitignore status."""
 

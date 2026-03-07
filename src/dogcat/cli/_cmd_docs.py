@@ -815,6 +815,14 @@ def register(app: typer.Typer) -> None:
         Git health checks are included automatically when in a git repo.
         Disable with: dcat config set git_tracking false
         """
+        dogcats_dir = find_dogcats_dir()
+        if not Path(dogcats_dir).is_dir():
+            typer.echo(
+                "No .dogcats/ found — running in a project without"
+                " dogcat initialized, skipping instructions."
+            )
+            return
+
         opinionated_rules = ""
         if opinionated:
             opinionated_rules = (
@@ -943,7 +951,6 @@ Proposals are lightweight (cross-repo) requests (accept, reject, or ignore).
         output_parts: list[str] = [guide]
 
         # Remote inbox section — shown when inbox_remote is configured
-        dogcats_dir = find_dogcats_dir()
         config = load_config(dogcats_dir)
         inbox_remote = config.get("inbox_remote")
         if inbox_remote:

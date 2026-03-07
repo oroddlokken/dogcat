@@ -342,6 +342,31 @@ def register(app: typer.Typer) -> None:
         if not checks["dependencies"]["passed"]:
             all_passed = False
 
+        # Check 8: Claude Code PreCompact hook
+        claude_dir = _find_claude_dir()
+        if claude_dir is not None:
+            has_hook = _has_precompact_hook(claude_dir)
+
+            if fix and not has_hook:
+                _install_precompact_hook(claude_dir)
+                has_hook = True
+                typer.echo("Fixed: Installed PreCompact hook for dcat prime")
+
+            checks["claude_precompact"] = {
+                "description": "Claude Code PreCompact hook is configured",
+                "fail_description": (
+                    "Claude Code PreCompact hook not found"
+                    " (agents lose context after compaction)"
+                ),
+                "passed": has_hook,
+                "optional": True,
+                "fix": "Run 'dcat doctor --fix' to install",
+                "note": (
+                    "Run 'dcat doctor --fix' to add a PreCompact hook"
+                    " that preserves workflow context during compaction"
+                ),
+            }
+
         # Post-merge concurrent edit detection
         merge_warnings: list[dict[str, Any]] = []
         if post_merge:
@@ -442,3 +467,69 @@ def register(app: typer.Typer) -> None:
                 )
 
         raise typer.Exit(0 if all_passed else 1)
+
+
+def _find_claude_dir() -> Path | None:
+    """Find .claude/ directory by walking up from cwd. Returns None if not found."""
+    current = Path.cwd()
+    while True:
+        candidate = current / ".claude"
+        if candidate.is_dir():
+            return candidate
+        parent = current.parent
+        if parent == current:
+            return None
+        current = parent
+
+
+def _has_precompact_hook(claude_dir: Path) -> bool:
+    """Check if a PreCompact hook running dcat prime exists in any settings file."""
+    for name in ("settings.local.json", "settings.json"):
+        settings_path = claude_dir / name
+        if not settings_path.exists():
+            continue
+        try:
+            data = orjson.loads(settings_path.read_bytes())
+        except (OSError, orjson.JSONDecodeError):
+            continue
+        for group in data.get("hooks", {}).get("PreCompact", []):
+            for hook in group.get("hooks", []):
+                cmd = hook.get("command", "")
+                if "dcat prime" in cmd:
+                    return True
+    return False
+
+
+def _install_precompact_hook(claude_dir: Path) -> None:
+    """Install a PreCompact hook for dcat prime into Claude settings."""
+    # Prefer settings.local.json (gitignored), fall back to settings.json
+    local_path = claude_dir / "settings.local.json"
+    project_path = claude_dir / "settings.json"
+    settings_path = local_path if local_path.exists() else project_path
+
+    try:
+        data: dict[str, Any] = orjson.loads(settings_path.read_bytes())
+    except (OSError, orjson.JSONDecodeError):
+        data = {}
+
+    hooks: dict[str, Any] = data.setdefault("hooks", {})
+    pre_compact: list[dict[str, Any]] = hooks.setdefault("PreCompact", [])
+
+    # Don't duplicate if already present
+    for group in pre_compact:
+        for hook in group.get("hooks", []):
+            if "dcat prime" in hook.get("command", ""):
+                return
+
+    pre_compact.append(
+        {
+            "matcher": "",
+            "hooks": [{"type": "command", "command": "dcat prime"}],
+        },
+    )
+
+    import json
+
+    settings_path.write_text(
+        json.dumps(data, indent=2) + "\n",
+    )
