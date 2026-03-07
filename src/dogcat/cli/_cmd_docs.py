@@ -808,6 +808,12 @@ def register(app: typer.Typer) -> None:
             help="Print estimated token count of the prime output.",
             hidden=True,
         ),
+        replay: bool = typer.Option(
+            False,
+            "--replay",
+            help="Replay the flags from the last dcat prime invocation.",
+            hidden=True,
+        ),
     ) -> None:
         """Show dogcat workflow guide and best practices for AI agents.
 
@@ -822,6 +828,16 @@ def register(app: typer.Typer) -> None:
                 " dogcat initialized, skipping instructions."
             )
             return
+
+        # --replay: load saved flags from previous invocation
+        if replay:
+            saved = _load_prime_flags(dogcats_dir)
+            opinionated = saved.get("opinionated", opinionated)
+            inbox = saved.get("inbox", inbox)
+
+        # Save current flags for --replay (used by PreCompact hook)
+        if not replay:
+            _save_prime_flags(dogcats_dir, opinionated=opinionated, inbox=inbox)
 
         opinionated_rules = ""
         if opinionated:
@@ -1019,3 +1035,42 @@ Proposals are lightweight (cross-repo) requests (accept, reject, or ignore).
         from dogcat._version import version as v
 
         typer.echo(v)
+
+
+def _prime_flags_path(dogcats_dir: str) -> Path:
+    """Return the cache path for prime flags, keyed by project."""
+    import hashlib
+    import os
+
+    project_key = hashlib.sha256(str(Path(dogcats_dir).resolve()).encode()).hexdigest()[
+        :12
+    ]
+    xdg_cache = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    cache_dir = Path(xdg_cache) / "dogcat" / project_key
+    return cache_dir / "prime-flags.json"
+
+
+def _save_prime_flags(dogcats_dir: str, **flags: bool) -> None:
+    """Save prime flags to ~/.cache/dogcat/<key>/prime-flags.json for --replay."""
+    import orjson
+
+    active = {k: v for k, v in flags.items() if v}
+    flags_path = _prime_flags_path(dogcats_dir)
+    flags_path.parent.mkdir(parents=True, exist_ok=True)
+    flags_path.write_bytes(orjson.dumps(active))
+    # Write origin marker so `dcat cache clean` can detect stale entries
+    origin_file = flags_path.parent / ".origin"
+    origin_file.write_text(str(Path(dogcats_dir).resolve()))
+
+
+def _load_prime_flags(dogcats_dir: str) -> dict[str, bool]:
+    """Load saved prime flags. Returns empty dict if no saved flags."""
+    import orjson
+
+    flags_path = _prime_flags_path(dogcats_dir)
+    if not flags_path.exists():
+        return {}
+    try:
+        return orjson.loads(flags_path.read_bytes())
+    except (OSError, orjson.JSONDecodeError):
+        return {}

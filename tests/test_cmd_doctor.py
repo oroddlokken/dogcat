@@ -440,7 +440,7 @@ class TestDoctorPreCompactHook:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Doctor passes when PreCompact hook with dcat prime exists."""
+        """Doctor passes when PreCompact hook with dcat prime --replay exists."""
         monkeypatch.chdir(tmp_path)
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
@@ -452,7 +452,9 @@ class TestDoctorPreCompactHook:
                 "PreCompact": [
                     {
                         "matcher": "",
-                        "hooks": [{"type": "command", "command": "dcat prime"}],
+                        "hooks": [
+                            {"type": "command", "command": "dcat prime --replay"}
+                        ],
                     }
                 ]
             }
@@ -484,7 +486,9 @@ class TestDoctorPreCompactHook:
                 "PreCompact": [
                     {
                         "matcher": "",
-                        "hooks": [{"type": "command", "command": "dcat prime"}],
+                        "hooks": [
+                            {"type": "command", "command": "dcat prime --replay"}
+                        ],
                     }
                 ]
             }
@@ -518,11 +522,11 @@ class TestDoctorPreCompactHook:
         )
         assert "Installed PreCompact hook" in result.stdout
 
-        # Verify it was written
+        # Verify it was written with --replay
         data = json.loads((claude_dir / "settings.json").read_text())
         hooks = data["hooks"]["PreCompact"]
         assert any(
-            "dcat prime" in h.get("command", "")
+            "dcat prime --replay" in h.get("command", "")
             for group in hooks
             for h in group.get("hooks", [])
         )
@@ -554,6 +558,79 @@ class TestDoctorPreCompactHook:
         assert "PreCompact" not in project_data.get("hooks", {})
         # Existing keys preserved
         assert "permissions" in local_data
+
+    def test_warns_when_old_hook_without_replay(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Doctor warns when PreCompact hook uses 'dcat prime' without --replay."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        settings = {
+            "hooks": {
+                "PreCompact": [
+                    {
+                        "matcher": "",
+                        "hooks": [{"type": "command", "command": "dcat prime"}],
+                    }
+                ]
+            }
+        }
+        (claude_dir / "settings.json").write_text(json.dumps(settings))
+
+        result = runner.invoke(
+            app,
+            ["doctor", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data = json.loads(result.stdout)
+        check = data["checks"]["claude_precompact"]
+        assert check["passed"] is False
+        assert check.get("optional") is True
+        assert "--replay" in check.get("description", "")
+
+    def test_fix_upgrades_old_hook(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Doctor --fix upgrades old 'dcat prime' hook to 'dcat prime --replay'."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        settings = {
+            "hooks": {
+                "PreCompact": [
+                    {
+                        "matcher": "",
+                        "hooks": [{"type": "command", "command": "dcat prime"}],
+                    }
+                ]
+            }
+        }
+        (claude_dir / "settings.json").write_text(json.dumps(settings))
+
+        result = runner.invoke(
+            app,
+            ["doctor", "--fix", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert "Upgraded PreCompact hook" in result.stdout
+
+        # Verify the hook was updated
+        data = json.loads((claude_dir / "settings.json").read_text())
+        hooks = data["hooks"]["PreCompact"]
+        assert any(
+            "dcat prime --replay" in h.get("command", "")
+            for group in hooks
+            for h in group.get("hooks", [])
+        )
 
     def test_fix_merges_with_existing_hooks(
         self,

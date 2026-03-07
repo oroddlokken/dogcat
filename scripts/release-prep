@@ -17,7 +17,7 @@ die()   { printf "${RED}✗${RESET} %s\n" "$*" >&2; exit 1; }
 # ── Usage ─────────────────────────────────────────────────────────────
 usage() {
     cat <<EOF
-Usage: $(basename "$0") [-w] [--skip-checks] <version>
+Usage: $(basename "$0") [--no-watch] [--skip-checks] <version>
 
 Prepare a release: run checks, create RC tag, push branch, open PR.
 
@@ -25,21 +25,20 @@ Arguments:
   <version>       Version to release (e.g. 0.9.3 or v0.9.3)
 
 Options:
-  -w, --watch         After prep, watch CI/release actions, wait for merge,
-                      then follow the publish workflow
+  -W, --no-watch      Skip watching CI/release actions after prep
   --skip-checks       Skip local lint-all and test-all
   -h, --help          Show this help
 EOF
 }
 
 # ── Parse args ────────────────────────────────────────────────────────
-WATCH=false
+WATCH=true
 SKIP_CHECKS=false
 VERSION=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -w|--watch)      WATCH=true; shift ;;
+        -W|--no-watch)   WATCH=false; shift ;;
         --skip-checks)   SKIP_CHECKS=true; shift ;;
         -h|--help)       usage; exit 0 ;;
         -*)              die "Unknown option: $1" ;;

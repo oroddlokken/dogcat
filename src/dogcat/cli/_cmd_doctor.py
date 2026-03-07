@@ -345,27 +345,52 @@ def register(app: typer.Typer) -> None:
         # Check 8: Claude Code PreCompact hook
         claude_dir = _find_claude_dir()
         if claude_dir is not None:
-            has_hook = _has_precompact_hook(claude_dir)
+            hook_status = _check_precompact_hook(claude_dir)
 
-            if fix and not has_hook:
+            if fix and hook_status == "missing":
                 _install_precompact_hook(claude_dir)
-                has_hook = True
-                typer.echo("Fixed: Installed PreCompact hook for dcat prime")
+                hook_status = "replay"
+                typer.echo("Fixed: Installed PreCompact hook for dcat prime --replay")
+            elif fix and hook_status == "old":
+                _upgrade_precompact_hook(claude_dir)
+                hook_status = "replay"
+                typer.echo("Fixed: Upgraded PreCompact hook to use dcat prime --replay")
 
-            checks["claude_precompact"] = {
-                "description": "Claude Code PreCompact hook is configured",
-                "fail_description": (
-                    "Claude Code PreCompact hook not found"
-                    " (agents lose context after compaction)"
-                ),
-                "passed": has_hook,
-                "optional": True,
-                "fix": "Run 'dcat doctor --fix' to install",
-                "note": (
-                    "Run 'dcat doctor --fix' to add a PreCompact hook"
-                    " that preserves workflow context during compaction"
-                ),
-            }
+            if hook_status == "missing":
+                checks["claude_precompact"] = {
+                    "description": "Claude Code PreCompact hook is configured",
+                    "fail_description": (
+                        "Claude Code PreCompact hook not found"
+                        " (agents lose context after compaction)"
+                    ),
+                    "passed": False,
+                    "optional": True,
+                    "fix": "Run 'dcat doctor --fix' to install",
+                    "note": (
+                        "Run 'dcat doctor --fix' to add a PreCompact hook"
+                        " that preserves workflow context during compaction"
+                    ),
+                }
+            elif hook_status == "old":
+                checks["claude_precompact"] = {
+                    "description": ("Claude Code PreCompact hook uses --replay"),
+                    "fail_description": (
+                        "PreCompact hook uses 'dcat prime' without --replay"
+                        " (flags like --opinionated are lost after compaction)"
+                    ),
+                    "passed": False,
+                    "optional": True,
+                    "fix": "Run 'dcat doctor --fix' to upgrade",
+                    "note": (
+                        "Run 'dcat doctor --fix' to upgrade the hook"
+                        " so prime flags are preserved across compaction"
+                    ),
+                }
+            else:
+                checks["claude_precompact"] = {
+                    "description": "Claude Code PreCompact hook is configured",
+                    "passed": True,
+                }
 
         # Post-merge concurrent edit detection
         merge_warnings: list[dict[str, Any]] = []
@@ -482,8 +507,13 @@ def _find_claude_dir() -> Path | None:
         current = parent
 
 
-def _has_precompact_hook(claude_dir: Path) -> bool:
-    """Check if a PreCompact hook running dcat prime exists in any settings file."""
+def _check_precompact_hook(claude_dir: Path) -> str:
+    """Check PreCompact hook status.
+
+    Returns:
+        "replay" if hook uses --replay, "old" if hook exists without --replay,
+        "missing" if no hook found.
+    """
     for name in ("settings.local.json", "settings.json"):
         settings_path = claude_dir / name
         if not settings_path.exists():
@@ -496,12 +526,14 @@ def _has_precompact_hook(claude_dir: Path) -> bool:
             for hook in group.get("hooks", []):
                 cmd = hook.get("command", "")
                 if "dcat prime" in cmd:
-                    return True
-    return False
+                    if "--replay" in cmd:
+                        return "replay"
+                    return "old"
+    return "missing"
 
 
 def _install_precompact_hook(claude_dir: Path) -> None:
-    """Install a PreCompact hook for dcat prime into Claude settings."""
+    """Install a PreCompact hook for dcat prime --replay into Claude settings."""
     # Prefer settings.local.json (gitignored), fall back to settings.json
     local_path = claude_dir / "settings.local.json"
     project_path = claude_dir / "settings.json"
@@ -515,16 +547,16 @@ def _install_precompact_hook(claude_dir: Path) -> None:
     hooks: dict[str, Any] = data.setdefault("hooks", {})
     pre_compact: list[dict[str, Any]] = hooks.setdefault("PreCompact", [])
 
-    # Don't duplicate if already present
+    # Don't duplicate if already present with --replay
     for group in pre_compact:
         for hook in group.get("hooks", []):
-            if "dcat prime" in hook.get("command", ""):
+            if "dcat prime --replay" in hook.get("command", ""):
                 return
 
     pre_compact.append(
         {
             "matcher": "",
-            "hooks": [{"type": "command", "command": "dcat prime"}],
+            "hooks": [{"type": "command", "command": "dcat prime --replay"}],
         },
     )
 
@@ -533,3 +565,27 @@ def _install_precompact_hook(claude_dir: Path) -> None:
     settings_path.write_text(
         json.dumps(data, indent=2) + "\n",
     )
+
+
+def _upgrade_precompact_hook(claude_dir: Path) -> None:
+    """Upgrade old 'dcat prime' hook to 'dcat prime --replay'."""
+    for name in ("settings.local.json", "settings.json"):
+        settings_path = claude_dir / name
+        if not settings_path.exists():
+            continue
+        try:
+            data: dict[str, Any] = orjson.loads(settings_path.read_bytes())
+        except (OSError, orjson.JSONDecodeError):
+            continue
+        modified = False
+        for group in data.get("hooks", {}).get("PreCompact", []):
+            for hook in group.get("hooks", []):
+                cmd = hook.get("command", "")
+                if "dcat prime" in cmd and "--replay" not in cmd:
+                    hook["command"] = cmd.replace("dcat prime", "dcat prime --replay")
+                    modified = True
+        if modified:
+            import json
+
+            settings_path.write_text(json.dumps(data, indent=2) + "\n")
+            return

@@ -647,3 +647,68 @@ class TestPrimeGitHealth:
             f"~{estimated_tokens} estimated tokens, "
             f"exceeds limit of {MAX_PRIME_TOKENS_OPINIONATED}"
         )
+
+    def test_prime_replay_preserves_opinionated(
+        self,
+        git_repo: GitRepo,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """--replay replays --opinionated from a previous prime invocation."""
+        monkeypatch.chdir(git_repo.path)
+
+        # First call with --opinionated saves the flag
+        result = runner.invoke(app, ["prime", "--opinionated"], catch_exceptions=False)
+        assert result.exit_code == 0
+        assert "Before setting in_review" in result.stdout
+
+        # Replay without explicit --opinionated should still include it
+        result = runner.invoke(app, ["prime", "--replay"], catch_exceptions=False)
+        assert result.exit_code == 0
+        assert "Before setting in_review" in result.stdout
+
+    def test_prime_replay_without_prior_invocation(
+        self,
+        git_repo: GitRepo,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """--replay with no saved flags falls back to defaults."""
+        monkeypatch.chdir(git_repo.path)
+
+        result = runner.invoke(app, ["prime", "--replay"], catch_exceptions=False)
+        assert result.exit_code == 0
+        assert "Before setting in_review" not in result.stdout
+
+    def test_prime_replay_after_plain_prime(
+        self,
+        git_repo: GitRepo,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """--replay after a plain prime does not include opinionated rules."""
+        monkeypatch.chdir(git_repo.path)
+
+        # First call without --opinionated
+        runner.invoke(app, ["prime"], catch_exceptions=False)
+
+        # Replay should not include opinionated rules
+        result = runner.invoke(app, ["prime", "--replay"], catch_exceptions=False)
+        assert result.exit_code == 0
+        assert "Before setting in_review" not in result.stdout
+
+    def test_plain_prime_overwrites_opinionated_cache(
+        self,
+        git_repo: GitRepo,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A plain 'dcat prime' overwrites a saved --opinionated flag."""
+        monkeypatch.chdir(git_repo.path)
+
+        # Save --opinionated to cache
+        runner.invoke(app, ["prime", "--opinionated"], catch_exceptions=False)
+
+        # Plain prime overwrites the cache
+        runner.invoke(app, ["prime"], catch_exceptions=False)
+
+        # Replay should reflect the last invocation (plain, no --opinionated)
+        result = runner.invoke(app, ["prime", "--replay"], catch_exceptions=False)
+        assert result.exit_code == 0
+        assert "Before setting in_review" not in result.stdout

@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **PreCompact hook now preserves `--opinionated` flag** — `dcat prime` saves its flags to `$XDG_CACHE_HOME/dogcat/` and the hook uses `dcat prime --replay` to restore them after compaction. `dcat doctor` detects old hooks without `--replay` and `--fix` upgrades them (closes dogcat-4469)
+
+### Added
+
+- **`dcat cache clean` and `dcat cache list` commands** — `dcat cache list` shows cached entries with their origin project and staleness status; `dcat cache clean` removes stale entries (or all with `--all`) (closes dogcat-gmsd)
+
 ## 0.11.0 (2026-03-07)
 
 ### Fixed

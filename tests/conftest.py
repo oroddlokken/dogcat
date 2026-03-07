@@ -24,6 +24,12 @@ _GIT_TEST_ENV = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _isolate_xdg_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prevent tests from writing to the real ~/.cache/dogcat/."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg-cache"))
+
+
 @pytest.fixture
 def temp_dogcats_dir(tmp_path: Path) -> Path:
     """Create a temporary .dogcats directory for testing."""
