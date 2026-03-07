@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.11.0 (2026-03-07)
+
 ### Fixed
 
 - **`dcat recently-closed` and `dcat recently-added` no longer claim `-n` for `--limit`** — removes the short flag conflict so `-n` is reserved for `--namespace` across the CLI (closes dogcat-sj9g)
