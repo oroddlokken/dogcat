@@ -856,7 +856,7 @@ class TestUpdateMultipleIssues:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
 
-        ids = []
+        ids: list[str] = []
         for i in range(3):
             result = runner.invoke(
                 app,
@@ -893,7 +893,7 @@ class TestUpdateMultipleIssues:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
 
-        ids = []
+        ids: list[str] = []
         for i in range(2):
             result = runner.invoke(
                 app,
@@ -928,7 +928,7 @@ class TestUpdateMultipleIssues:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
 
-        ids = []
+        ids: list[str] = []
         for i in range(2):
             result = runner.invoke(
                 app,
@@ -963,7 +963,7 @@ class TestUpdateMultipleIssues:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
 
-        ids = []
+        ids: list[str] = []
         for i in range(2):
             result = runner.invoke(
                 app,
@@ -991,7 +991,7 @@ class TestUpdateMultipleIssues:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
 
-        ids = []
+        ids: list[str] = []
         for i in range(2):
             result = runner.invoke(
                 app,
@@ -1019,7 +1019,7 @@ class TestUpdateMultipleIssues:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
 
-        ids = []
+        ids: list[str] = []
         for i in range(2):
             result = runner.invoke(
                 app,
@@ -1112,7 +1112,7 @@ class TestUpdateMultipleIssues:
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
 
-        ids = []
+        ids: list[str] = []
         for i in range(2):
             result = runner.invoke(
                 app,
