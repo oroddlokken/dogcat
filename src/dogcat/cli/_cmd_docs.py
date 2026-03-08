@@ -842,9 +842,26 @@ def register(app: typer.Typer) -> None:
         opinionated_rules = ""
         if opinionated:
             opinionated_rules = (
-                "  Before setting in_review: verify your work following the\n"
-                '  project\'s guidelines and cite actual output. "Should pass"\n'
-                "  is not evidence — run the command, read the result.\n"
+                "  BEFORE writing any code for a new bug,"
+                " feature, or change:\n"
+                "  ask the user if you should create an issue"
+                " first. No exceptions\n"
+                "  for 'small' tasks — the rule exists for"
+                " traceability, not\n"
+                "  because the task is complex.\n"
+                "  When creating or updating issues, write them"
+                " so a fresh agent\n"
+                "  with no prior context can pick them up."
+                " Include the why,\n"
+                "  relevant file paths, error messages, and"
+                " acceptance criteria —\n"
+                "  don't assume shared knowledge.\n"
+                "  Before setting in_review: verify your work"
+                " following the\n"
+                "  project's guidelines and cite actual output."
+                ' "Should pass"\n'
+                "  is not evidence — run the command,"
+                " read the result.\n"
             )
 
         guide = f"""

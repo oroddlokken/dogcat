@@ -10,6 +10,8 @@
 
 ### Added
 
+- **`dcat prime --opinionated` now includes context-rich issue writing rule** — instructs agents to write issues with enough detail (why, file paths, error messages, acceptance criteria) so a fresh agent can pick them up without prior context (closes dogcat-4t9s)
+- **`dcat prime --opinionated` enforces 'create issue first' rule** — adds an explicit rule that agents must ask to create an issue before writing any code, with no exceptions for small tasks. Opinionated rules reordered to match workflow: create issue → write it well → verify before review (closes dogcat-2c1w)
 - **`dcat cache clean` and `dcat cache list` commands** — `dcat cache list` shows cached entries with their origin project and staleness status; `dcat cache clean` removes stale entries (or all with `--all`) (closes dogcat-gmsd)
 
 ## 0.11.0 (2026-03-07)
