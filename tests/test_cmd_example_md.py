@@ -20,13 +20,13 @@ class TestExampleMd:
         assert "dcat prime --opinionated" in result.output
         assert "dcat list --agent-only" in result.output
 
-    def test_contains_status_workflow(self) -> None:
-        """Test that the template includes status workflow guidance."""
+    def test_contains_closing_workflow(self) -> None:
+        """Test that the template includes closing workflow guidance."""
         result = runner.invoke(app, ["example-md"])
-        assert "in_progress" in result.output
         assert "in_review" in result.output
+        assert "NEVER close issues without explicit user approval" in result.output
 
-    def test_contains_issue_creation_guidance(self) -> None:
-        """Test that the template includes issue creation guidance."""
+    def test_contains_findings_guidance(self) -> None:
+        """Test that the template includes the two-step findings pattern."""
         result = runner.invoke(app, ["example-md"])
-        assert "ALWAYS ask if we should create an issue" in result.output
+        assert "Should I update issue" in result.output

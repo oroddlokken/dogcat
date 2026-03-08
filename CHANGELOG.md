@@ -6,6 +6,11 @@
 
 - **`dcat update` supports multiple issue IDs** — apply the same updates (status, priority, owner, labels, type, manual) to several issues at once, e.g. `dcat update id1 id2 id3 --status in_progress`. Single-issue options like `--title` and `--description` are guarded and rejected when multiple IDs are given (closes dogcat-4jll)
 
+### Changed
+
+- **`dcat prime --opinionated` now includes labels, batch-marking, and parallel calls rules** — adds guidance on setting `--labels` when creating issues, not batch-marking `in_progress`, and using parallel tool calls for multiple dcat commands (closes dogcat-2i10)
+- **`dcat example-md` template slimmed down** — removed instructions already covered by `dcat prime --opinionated` to reduce token waste and avoid redundancy (closes dogcat-1vjo, dogcat-5iad)
+
 ## 0.11.2 (2026-03-08)
 
 ### Added
