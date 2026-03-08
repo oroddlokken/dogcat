@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import orjson
 import typer
@@ -21,15 +21,18 @@ from ._completions import (
 from ._helpers import _parse_priority_value, get_default_operator, get_storage
 from ._json_state import echo_error, is_json_output
 
+if TYPE_CHECKING:
+    from dogcat.storage import JSONLStorage
+
 
 def register(app: typer.Typer) -> None:
     """Register update command."""
 
     @app.command()
     def update(
-        issue_id: str = typer.Argument(
+        issue_ids: list[str] = typer.Argument(  # noqa: B008
             ...,
-            help="Issue ID",
+            help="Issue ID(s) to update",
             autocompletion=complete_issue_ids,
         ),
         title: str | None = typer.Option(None, "--title", help="New title"),
@@ -159,7 +162,7 @@ def register(app: typer.Typer) -> None:
         ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
-        """Update an issue."""
+        """Update one or more issues."""
         try:
             # Merge --body into --description (hidden alias)
             if body is not None:
@@ -168,9 +171,37 @@ def register(app: typer.Typer) -> None:
                     raise typer.Exit(1)
                 description = body
 
+            # Guard: single-issue options cannot be used with multiple IDs
+            if len(issue_ids) > 1:
+                provided_single = {
+                    name
+                    for name, val in {
+                        "title": title,
+                        "description": description,
+                        "parent": parent,
+                        "duplicate_of": duplicate_of,
+                        "namespace": namespace,
+                        "acceptance": acceptance,
+                        "notes": notes,
+                        "design": design,
+                        "external_ref": external_ref,
+                        "depends_on": depends_on,
+                        "blocks": blocks,
+                        "remove_depends_on": remove_depends_on,
+                        "remove_blocks": remove_blocks,
+                    }.items()
+                    if val is not None
+                }
+                if provided_single:
+                    opts = ", ".join(
+                        f"--{n.replace('_', '-')}" for n in sorted(provided_single)
+                    )
+                    echo_error(f"Cannot use {opts} with multiple issue IDs")
+                    raise typer.Exit(1)
+
             storage = get_storage(dogcats_dir)
 
-            # Build updates dict
+            # Build updates dict (shared across all issues)
             updates: dict[str, Any] = {}
             if title is not None:
                 updates["title"] = title
@@ -212,23 +243,10 @@ def register(app: typer.Typer) -> None:
                     updates["parent"] = resolved_parent
             if labels is not None:
                 updates["labels"] = parse_labels(labels)
-            if manual is not None:
-                # Get current issue to preserve existing metadata
-                current = storage.get(issue_id)
-                if current is None:
-                    echo_error(f"Issue {issue_id} not found")
-                    raise typer.Exit(1)
-                new_metadata = dict(current.metadata) if current.metadata else {}
-                if manual:
-                    new_metadata["manual"] = True
-                    new_metadata.pop("no_agent", None)  # migrate old key
-                else:
-                    new_metadata.pop("manual", None)
-                    new_metadata.pop("no_agent", None)  # migrate old key
-                updates["metadata"] = new_metadata
 
             if (
                 not updates
+                and manual is None
                 and not namespace
                 and not depends_on
                 and not blocks
@@ -243,22 +261,81 @@ def register(app: typer.Typer) -> None:
                 updated_by if updated_by is not None else get_default_operator()
             )
 
-            if updates:
-                updates["updated_by"] = final_updated_by
-                issue = storage.update(issue_id, updates)
+            has_errors = False
+            for issue_id in issue_ids:
+                has_errors = (
+                    _update_one(
+                        storage,
+                        issue_id,
+                        updates,
+                        manual=manual,
+                        namespace=namespace,
+                        depends_on=depends_on,
+                        blocks=blocks,
+                        remove_depends_on=remove_depends_on,
+                        remove_blocks=remove_blocks,
+                        updated_by=final_updated_by,
+                        json_output=json_output,
+                    )
+                    or has_errors
+                )
+
+            if has_errors:
+                raise typer.Exit(1)
+
+        except typer.Exit:
+            raise
+        except Exception as e:
+            echo_error(str(e))
+            raise typer.Exit(1)
+
+    def _update_one(
+        storage: JSONLStorage,
+        issue_id: str,
+        updates: dict[str, Any],
+        *,
+        manual: bool | None,
+        namespace: str | None,
+        depends_on: str | None,
+        blocks: str | None,
+        remove_depends_on: str | None,
+        remove_blocks: str | None,
+        updated_by: str | None,
+        json_output: bool,
+    ) -> bool:
+        """Update a single issue. Returns True if an error occurred."""
+        try:
+            # Handle manual flag per-issue (needs current metadata)
+            issue_updates = dict(updates)
+            if manual is not None:
+                current = storage.get(issue_id)
+                if current is None:
+                    echo_error(f"Issue {issue_id} not found")
+                    return True
+                new_metadata = dict(current.metadata) if current.metadata else {}
+                if manual:
+                    new_metadata["manual"] = True
+                    new_metadata.pop("no_agent", None)
+                else:
+                    new_metadata.pop("manual", None)
+                    new_metadata.pop("no_agent", None)
+                issue_updates["metadata"] = new_metadata
+
+            if issue_updates:
+                issue_updates["updated_by"] = updated_by
+                issue = storage.update(issue_id, issue_updates)
             else:
                 issue = storage.get(issue_id)
                 if issue is None:
                     echo_error(f"Issue {issue_id} not found")
-                    raise typer.Exit(1)
+                    return True
 
-            # Change namespace if specified (must happen after regular
-            # updates since it re-keys the issue and cascades references)
+            # Change namespace if specified
             if namespace is not None:
                 issue = storage.change_namespace(
                     issue.full_id,
                     namespace,
-                    updated_by=final_updated_by,
+                    updated_by=updated_by,
                 )
 
             # Add dependencies if specified
@@ -267,14 +344,14 @@ def register(app: typer.Typer) -> None:
                     issue_id,
                     depends_on,
                     "blocks",
-                    created_by=final_updated_by,
+                    created_by=updated_by,
                 )
             if blocks:
                 storage.add_dependency(
                     blocks,
                     issue.full_id,
                     "blocks",
-                    created_by=final_updated_by,
+                    created_by=updated_by,
                 )
 
             # Remove dependencies if specified
@@ -282,24 +359,22 @@ def register(app: typer.Typer) -> None:
                 resolved_target = storage.resolve_id(remove_depends_on)
                 if resolved_target is None:
                     echo_error(f"Issue {remove_depends_on} not found")
-                    raise typer.Exit(1)
-                # Check the dependency exists before removing
+                    return True
                 deps = storage.get_dependencies(issue.full_id)
                 if not any(d.depends_on_id == resolved_target for d in deps):
                     echo_error(f"{issue.full_id} does not depend on {resolved_target}")
-                    raise typer.Exit(1)
+                    return True
                 storage.remove_dependency(issue.full_id, resolved_target)
 
             if remove_blocks:
                 resolved_target = storage.resolve_id(remove_blocks)
                 if resolved_target is None:
                     echo_error(f"Issue {remove_blocks} not found")
-                    raise typer.Exit(1)
-                # Check the dependency exists before removing (reversed direction)
+                    return True
                 deps = storage.get_dependencies(resolved_target)
                 if not any(d.depends_on_id == issue.full_id for d in deps):
                     echo_error(f"{issue.full_id} does not block {resolved_target}")
-                    raise typer.Exit(1)
+                    return True
                 storage.remove_dependency(resolved_target, issue.full_id)
 
             if is_json_output(json_output):
@@ -308,12 +383,7 @@ def register(app: typer.Typer) -> None:
                 typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
             else:
                 typer.echo(f"✓ Updated {issue.full_id}: {issue.title}")
-
-        except ValueError as e:
-            echo_error(str(e))
-            raise typer.Exit(1)
-        except typer.Exit:
-            raise
-        except Exception as e:
-            echo_error(str(e))
-            raise typer.Exit(1)
+        except (ValueError, Exception) as e:
+            echo_error(f"updating {issue_id}: {e}")
+            return True
+        return False
