@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.11.4 (2026-03-08)
+
 ### Changed
 
 - **Shortened `dcat prime --opinionated` in_review verification rule** — condensed verbose multi-sentence instruction into a single concise line (closes dogcat-10dk)
