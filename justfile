@@ -75,3 +75,4 @@ next:
 # prepare a release: create RC tag, push branch, open PR
 release-prep *args:
     ./scripts/release-prep {{args}}
+    git pull origin main
