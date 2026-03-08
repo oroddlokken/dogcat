@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.11.2 (2026-03-08)
+
 ### Added
 
 - **`dcat prime --opinionated` now includes context-rich issue writing rule** — instructs agents to write issues with enough detail (why, file paths, error messages, acceptance criteria) so a fresh agent can pick them up without prior context (closes dogcat-4t9s)
