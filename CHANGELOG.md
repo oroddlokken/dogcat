@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.11.3 (2026-03-08)
+
 ### Added
 
 - **`dcat update` supports multiple issue IDs** — apply the same updates (status, priority, owner, labels, type, manual) to several issues at once, e.g. `dcat update id1 id2 id3 --status in_progress`. Single-issue options like `--title` and `--description` are guarded and rejected when multiple IDs are given (closes dogcat-4jll)
