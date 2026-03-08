@@ -27,11 +27,11 @@ NEVER close issues without explicit user approval. When work is complete:
 2. Ask the user to test
 3. Ask if we can close it: "Can I close issue [id] '[title]'?"
 4. Only run `dcat close` after user confirms
-5. Ask: "Should I add this to CHANGELOG.md?" — update if yes
+5. Ask: "Should I add this to CHANGELOG.md?" — update if yes, always under the `[Unreleased]` section
 
 ## Changelog
 
-`CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/) format. Use these section tags under each version heading:
+`CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/) format. Always add entries under the `[Unreleased]` section at the top — never under a released version. Use these section tags under each version heading:
 
 - **Added** — new features
 - **Changed** — changes to existing functionality
