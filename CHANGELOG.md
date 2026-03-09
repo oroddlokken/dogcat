@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.11.5 (2026-03-09)
+
 ### Changed
 
 - **Tightened agent workflow rules** — added explicit guidance for parallel dcat calls, issue status discipline (mark `in_progress` only when starting work), and requiring issue creation before code changes
