@@ -238,7 +238,7 @@ def get_storage(
     """
     # Always resolve via find_dogcats_dir() to respect .dogcatrc priority
     # over a local .dogcats/ directory (which may only contain config.local.toml)
-    if not create_dir:
+    if not create_dir and dogcats_dir == ".dogcats":
         dogcats_dir = find_dogcats_dir()
     return JSONLStorage(f"{dogcats_dir}/issues.jsonl", create_dir=create_dir)
 
