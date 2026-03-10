@@ -28,6 +28,9 @@ DEFAULT_PREFIX = "dc"
 CONFIG_FILENAME = "config.toml"
 LOCAL_CONFIG_FILENAME = "config.local.toml"
 
+# Directory name for repo-local config (next to .dogcatrc)
+DOGCATS_DIR_NAME = ".dogcats"
+
 
 def parse_dogcatrc(rc_path: str | Path) -> Path:
     """Parse a .dogcatrc file and return the resolved .dogcats directory path.
@@ -42,8 +45,7 @@ def parse_dogcatrc(rc_path: str | Path) -> Path:
         Resolved absolute Path to the .dogcats directory
 
     Raises:
-        ValueError: If the file is empty, contains only whitespace, or the
-            resolved path escapes the project boundary
+        ValueError: If the file is empty or contains only whitespace
     """
     rc_path = Path(rc_path)
     content = rc_path.read_text().strip()
@@ -57,20 +59,7 @@ def parse_dogcatrc(rc_path: str | Path) -> Path:
     if not target.is_absolute():
         target = rc_path.parent / target
 
-    resolved = target.resolve()
-    project_root = rc_path.parent.resolve()
-
-    # Ensure the resolved path stays within the project boundary
-    try:
-        resolved.relative_to(project_root)
-    except ValueError:
-        msg = (
-            f"{DOGCATRC_FILENAME} path escapes project boundary: "
-            f"'{content}' resolves to '{resolved}' which is outside '{project_root}'"
-        )
-        raise ValueError(msg) from None
-
-    return resolved
+    return target.resolve()
 
 
 def get_config_path(dogcats_dir: str) -> Path:
@@ -108,10 +97,44 @@ def _load_toml(path: Path) -> dict[str, Any]:
         return {}
 
 
+def _find_rc_parent() -> Path | None:
+    """Walk up from CWD to find a .dogcatrc file.
+
+    Returns:
+        The parent directory containing .dogcatrc, or None if not found.
+    """
+    current = Path.cwd()
+    while True:
+        if (current / DOGCATRC_FILENAME).is_file():
+            return current
+        parent = current.parent
+        if parent == current:
+            return None
+        current = parent
+
+
+def _get_repo_local_config_path() -> Path | None:
+    """Get the repo-local config.local.toml path when using .dogcatrc.
+
+    When a repo uses .dogcatrc to point to a shared .dogcats directory,
+    the repo can have its own .dogcats/config.local.toml for per-repo
+    settings like namespace and visible_namespaces.
+
+    Returns:
+        Path to repo-local config.local.toml, or None if not in a .dogcatrc context.
+    """
+    rc_parent = _find_rc_parent()
+    if rc_parent is None:
+        return None
+    return rc_parent / DOGCATS_DIR_NAME / LOCAL_CONFIG_FILENAME
+
+
 def load_config(dogcats_dir: str) -> dict[str, Any]:
     """Load configuration from .dogcats/config.toml, merged with config.local.toml.
 
     Values in config.local.toml override those in config.toml (shallow merge).
+    When using .dogcatrc, a repo-local config.local.toml (in .dogcats/ next to
+    the .dogcatrc) takes highest precedence.
 
     Args:
         dogcats_dir: Path to .dogcats directory
@@ -123,6 +146,14 @@ def load_config(dogcats_dir: str) -> dict[str, Any]:
     local = _load_toml(get_local_config_path(dogcats_dir))
     if local:
         config.update(local)
+
+    # Repo-local config takes highest precedence
+    repo_local_path = _get_repo_local_config_path()
+    if repo_local_path is not None:
+        repo_local = _load_toml(repo_local_path)
+        if repo_local:
+            config.update(repo_local)
+
     return config
 
 
@@ -142,7 +173,10 @@ def load_shared_config(dogcats_dir: str) -> dict[str, Any]:
 
 
 def load_local_config(dogcats_dir: str) -> dict[str, Any]:
-    """Load only config.local.toml.
+    """Load the local config.local.toml.
+
+    When using .dogcatrc, reads from the repo-local .dogcats/config.local.toml
+    (next to the .dogcatrc) instead of the shared directory.
 
     Args:
         dogcats_dir: Path to .dogcats directory
@@ -150,17 +184,27 @@ def load_local_config(dogcats_dir: str) -> dict[str, Any]:
     Returns:
         Configuration dictionary from config.local.toml only
     """
+    repo_local_path = _get_repo_local_config_path()
+    if repo_local_path is not None:
+        return _load_toml(repo_local_path)
     return _load_toml(get_local_config_path(dogcats_dir))
 
 
 def save_local_config(dogcats_dir: str, config: dict[str, Any]) -> None:
-    """Save configuration to .dogcats/config.local.toml.
+    """Save configuration to config.local.toml.
+
+    When using .dogcatrc, saves to the repo-local .dogcats/config.local.toml
+    (next to the .dogcatrc) instead of the shared directory.
 
     Args:
         dogcats_dir: Path to .dogcats directory
         config: Configuration dictionary to save
     """
-    config_path = get_local_config_path(dogcats_dir)
+    repo_local_path = _get_repo_local_config_path()
+    if repo_local_path is not None:
+        config_path = repo_local_path
+    else:
+        config_path = get_local_config_path(dogcats_dir)
     config_path.parent.mkdir(parents=True, exist_ok=True)
     with config_path.open("wb") as f:
         tomli_w.dump(config, f)

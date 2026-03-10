@@ -6,6 +6,11 @@
 
 - **Searchable parent picker in TUI editor** — replaced the dropdown with a modal picker that supports type-ahead filtering by ID or title, displays issues with colored formatting matching `dcat list`, excludes closed issues (unless they have open children), and adds a `p` keybinding to open the picker in edit mode (closes dogcat-4zlt)
 
+### Changed
+
+- **Relaxed `.dogcatrc` boundary check** — removed the restriction that prevented `.dogcatrc` from pointing to a `.dogcats` directory outside the project root, since external paths are the whole point of the feature
+- **Per-repo `config.local.toml` with shared databases** — when using `.dogcatrc` to share a database across repos, each repo can now have its own `.dogcats/config.local.toml` for settings like `namespace` and `visible_namespaces`, enabling multi-repo workflows where each repo has its own default namespace (closes dogcat-3xz1)
+
 ## 0.11.5 (2026-03-09)
 
 ### Changed
