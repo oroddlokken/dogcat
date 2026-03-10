@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
 from textual.message import Message
+from textual.screen import ModalScreen
 from textual.widget import Widget
 from textual.widgets import (
     Button,
@@ -16,6 +17,7 @@ from textual.widgets import (
     Collapsible,
     Input,
     Label,
+    OptionList,
     Select,
     Static,
     TextArea,
@@ -31,10 +33,123 @@ from dogcat.models import DependencyType
 from dogcat.tui.shared import SHARED_CSS, make_issue_label
 
 if TYPE_CHECKING:
+    from rich.text import Text
     from textual.app import ComposeResult
 
     from dogcat.models import Issue
     from dogcat.storage import JSONLStorage
+
+
+_PARENT_PLACEHOLDER = "No parent"
+
+
+class ParentPickerScreen(ModalScreen[str | None]):
+    """Modal screen for selecting a parent issue with search."""
+
+    BINDINGS: ClassVar = [
+        Binding("escape", "dismiss_picker", "Cancel"),
+    ]
+
+    DEFAULT_CSS = """
+    ParentPickerScreen {
+        align: center middle;
+    }
+
+    #parent-picker-container {
+        width: 90%;
+        max-width: 120;
+        height: 24;
+        max-height: 80%;
+        background: $surface;
+        border: tall $accent;
+        padding: 1 2;
+    }
+
+    #parent-picker-search {
+        margin-bottom: 1;
+    }
+
+    #parent-picker-list {
+        height: 1fr;
+    }
+
+    #parent-picker-clear {
+        margin-top: 1;
+        width: auto;
+    }
+    """
+
+    def __init__(
+        self,
+        issues: list[tuple[str, str, Text]],
+        current_parent: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        # list of (plain_text_for_search, full_id, rich_label)
+        self._issues = issues
+        self._current_parent = current_parent
+        # Visible items in current filter, maps option index to issue index
+        self._visible: list[int] = []
+
+    def compose(self) -> ComposeResult:
+        """Compose the picker UI with search input and option list."""
+        from textual.containers import Vertical
+
+        with Vertical(id="parent-picker-container"):
+            yield Input(
+                placeholder="Type to filter by ID or title...",
+                id="parent-picker-search",
+            )
+            yield OptionList(id="parent-picker-list")
+            yield Button("Clear parent", id="parent-picker-clear", variant="default")
+
+    def on_mount(self) -> None:
+        """Focus search input and populate options on mount."""
+        self._refresh_options("")
+        search = self.query_one("#parent-picker-search", Input)
+        search.focus()
+
+    def _refresh_options(self, query: str) -> None:
+        """Filter and refresh the option list based on search query."""
+        option_list = self.query_one("#parent-picker-list", OptionList)
+        option_list.clear_options()
+        self._visible = []
+        query_lower = query.lower()
+        for idx, (plain_label, full_id, rich_label) in enumerate(self._issues):
+            if (
+                query_lower
+                and query_lower not in full_id.lower()
+                and query_lower not in plain_label.lower()
+            ):
+                continue
+
+            display = rich_label.copy()
+            if full_id == self._current_parent:
+                display.append(" (current)", style="dim")
+            option_list.add_option(display)
+            self._visible.append(idx)
+        if option_list.option_count > 0:
+            option_list.highlighted = 0
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Filter options as the user types."""
+        self._refresh_options(event.value)
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        """Handle issue selection from the option list."""
+        if event.option_index < len(self._visible):
+            issue_idx = self._visible[event.option_index]
+            self.dismiss(self._issues[issue_idx][1])
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle clear parent button press."""
+        if event.button.id == "parent-picker-clear":
+            self.dismiss("")  # empty string signals "clear parent"
+
+    def action_dismiss_picker(self) -> None:
+        """Cancel the picker without changing the parent."""
+        self.dismiss(None)  # None = cancelled, no change
 
 
 class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
@@ -64,6 +179,7 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
     BINDINGS: ClassVar = [
         Binding("ctrl+s", "save", "Save", priority=True),
         Binding("e", "enter_edit", "Edit"),
+        Binding("p", "pick_parent", "Parent", priority=True),
     ]
 
     DEFAULT_CSS = (
@@ -94,6 +210,17 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
     IssueDetailPanel .detail-section-body {
         margin-left: 2;
         margin-bottom: 1;
+    }
+
+    IssueDetailPanel .parent-field {
+        width: 1fr;
+        min-width: 16;
+        height: 3;
+        text-align: left;
+    }
+
+    IssueDetailPanel .parent-placeholder {
+        color: $text-muted;
     }
     """
     )
@@ -153,17 +280,35 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
         dependents = self._storage.get_dependents(self._issue.full_id)
         return [d.issue_id for d in dependents if d.dep_type == DependencyType.BLOCKS]
 
-    def _get_parent_options(self) -> list[tuple[Any, str]]:
-        """Build the list of valid parent options, excluding self and descendants."""
+    def _get_parent_options(self) -> list[tuple[str, str, Text]]:
+        """Build the list of valid parent options.
+
+        Excludes self, descendants, tombstones, and closed issues
+        (unless the closed issue has open children).
+
+        Returns list of (plain_label, full_id, rich_label) tuples where
+        labels use the same format as ``dcat list``.
+        """
         excluded = {self._issue.full_id}
         if not self._create_mode and self._issue.id:
             excluded |= self._get_descendants(self._issue.full_id)
 
-        options: list[tuple[Any, str]] = []
+        # Collect IDs of closed issues that have at least one open child
+        closed_with_open_children: set[str] = set()
+        for issue in self._storage.list():
+            if issue.is_closed() and not issue.is_tombstone():
+                children = self._storage.get_children(issue.full_id)
+                if any(not c.is_closed() and not c.is_tombstone() for c in children):
+                    closed_with_open_children.add(issue.full_id)
+
+        options: list[tuple[str, str, Text]] = []
         for issue in self._storage.list():
             if issue.full_id in excluded or issue.is_tombstone():
                 continue
-            options.append((make_issue_label(issue), issue.full_id))
+            if issue.is_closed() and issue.full_id not in closed_with_open_children:
+                continue
+            rich_label = make_issue_label(issue)
+            options.append((rich_label.plain, issue.full_id, rich_label))
         return options
 
     def compose(self) -> ComposeResult:
@@ -236,13 +381,12 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
                 )
 
             with Horizontal(classes="deps-row"):
-                yield Select(
-                    options=self._get_parent_options(),
-                    value=(self._issue.parent or Select.NULL),
-                    prompt="Parent",
-                    allow_blank=True,
+                yield Button(
+                    self._issue.parent or _PARENT_PLACEHOLDER,
                     id="parent-input",
-                    disabled=ro,
+                    variant="default",
+                    classes="parent-field"
+                    + (" parent-placeholder" if not self._issue.parent else ""),
                 )
                 depends_on_ids = self._get_depends_on_ids()
                 yield Input(
@@ -362,6 +506,44 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
             self.post_message(self.Cancelled())
         elif event.button.id == "save-btn":
             self.do_save()
+        elif event.button.id == "parent-input":
+            self._handle_parent_button(event)
+
+    def _handle_parent_button(self, event: Button.Pressed) -> None:
+        """Open parent picker when the parent button is clicked."""
+        if event.button.id != "parent-input":
+            return
+        if self._view_mode:
+            self.notify("Press [b]e[/b] to enter edit mode", markup=True)
+        else:
+            self._open_parent_picker()
+
+    def _get_selected_parent(self) -> str | None:
+        """Read the currently selected parent from the field."""
+        btn = self.query_one("#parent-input", Button)
+        text = str(btn.label)
+        return text if text != _PARENT_PLACEHOLDER else None
+
+    def _open_parent_picker(self) -> None:
+        """Open the parent picker modal."""
+        options = self._get_parent_options()
+        current = self._get_selected_parent()
+        self.app.push_screen(  # type: ignore[reportUnknownMemberType]
+            ParentPickerScreen(options, current_parent=current),
+            callback=self._on_parent_picked,
+        )
+
+    def _on_parent_picked(self, result: str | None) -> None:
+        """Handle parent picker result."""
+        if result is None:
+            return  # cancelled
+        btn = self.query_one("#parent-input", Button)
+        if result:
+            btn.label = result
+            btn.remove_class("parent-placeholder")
+        else:
+            btn.label = _PARENT_PLACEHOLDER
+            btn.add_class("parent-placeholder")
 
     def check_action(  # type: ignore[override]
         self,
@@ -373,6 +555,8 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
             return self._view_mode
         if action == "save":
             return not self._view_mode
+        if action == "pick_parent":
+            return not self._view_mode
         return True
 
     def action_save(self) -> None:
@@ -382,6 +566,10 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
     def action_enter_edit(self) -> None:
         """Switch from view mode to edit mode (e key)."""
         self.enter_edit()
+
+    def action_pick_parent(self) -> None:
+        """Open the parent picker (p key)."""
+        self._open_parent_picker()
 
     def enter_edit(self) -> None:
         """Enable editing on all form fields."""
@@ -518,8 +706,7 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
             namespace=self._namespace,
         )
 
-        parent_val = cast("Select[str]", self.query_one("#parent-input", Select)).value
-        parent = parent_val if isinstance(parent_val, str) else None
+        parent = self._get_selected_parent()
 
         manual_val = self.query_one("#manual-input", Checkbox).value
         metadata: dict[str, Any] = {}
@@ -586,8 +773,7 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
         if new_ref != self._issue.external_ref:
             updates["external_ref"] = new_ref
 
-        parent_val = cast("Select[str]", self.query_one("#parent-input", Select)).value
-        new_parent = parent_val if isinstance(parent_val, str) else None
+        new_parent = self._get_selected_parent()
         if new_parent != self._issue.parent:
             updates["parent"] = new_parent
 
