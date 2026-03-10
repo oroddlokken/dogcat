@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.11.6 (2026-03-10)
+
 ### Added
 
 - **Searchable parent picker in TUI editor** — replaced the dropdown with a modal picker that supports type-ahead filtering by ID or title, displays issues with colored formatting matching `dcat list`, excludes closed issues (unless they have open children), and adds a `p` keybinding to open the picker in edit mode (closes dogcat-4zlt)
