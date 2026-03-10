@@ -588,25 +588,27 @@ class TestParseDogcatrc:
         with pytest.raises(ValueError, match="empty"):
             parse_dogcatrc(rc_file)
 
-    def test_path_traversal_raises(self, tmp_path: Path) -> None:
-        """Path traversal escaping project boundary raises ValueError."""
+    def test_path_traversal_resolves(self, tmp_path: Path) -> None:
+        """Path traversal outside project boundary is allowed."""
         project_dir = tmp_path / "project"
         project_dir.mkdir()
         rc_file = project_dir / DOGCATRC_FILENAME
-        rc_file.write_text("../../../../etc/something")
+        rc_file.write_text("../.dogcats")
 
-        with pytest.raises(ValueError, match="escapes project boundary"):
-            parse_dogcatrc(rc_file)
+        result = parse_dogcatrc(rc_file)
+        assert result == (tmp_path / ".dogcats").resolve()
 
-    def test_absolute_path_outside_project_raises(self, tmp_path: Path) -> None:
-        """Absolute path outside project boundary raises ValueError."""
+    def test_absolute_path_outside_project_resolves(self, tmp_path: Path) -> None:
+        """Absolute path outside project boundary is allowed."""
         project_dir = tmp_path / "project"
         project_dir.mkdir()
+        external_dir = tmp_path / "shared"
+        external_dir.mkdir()
         rc_file = project_dir / DOGCATRC_FILENAME
-        rc_file.write_text("/tmp/evil/.dogcats")
+        rc_file.write_text(str(external_dir))
 
-        with pytest.raises(ValueError, match="escapes project boundary"):
-            parse_dogcatrc(rc_file)
+        result = parse_dogcatrc(rc_file)
+        assert result == external_dir.resolve()
 
     def test_relative_path_within_project_works(self, tmp_path: Path) -> None:
         """Relative path within project boundary succeeds."""
@@ -617,6 +619,104 @@ class TestParseDogcatrc:
 
         result = parse_dogcatrc(rc_file)
         assert result == (project_dir / "subdir" / ".dogcats").resolve()
+
+
+class TestRepoLocalConfig:
+    """Tests for repo-local config.local.toml when using .dogcatrc."""
+
+    def test_load_config_merges_repo_local(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Repo-local config.local.toml overrides shared config."""
+        # Set up shared .dogcats dir
+        shared_dir = tmp_path / "shared" / ".dogcats"
+        shared_dir.mkdir(parents=True)
+        (shared_dir / "config.toml").write_text('namespace = "shared"\n')
+        (shared_dir / "config.local.toml").write_text(
+            'visible_namespaces = ["shared"]\n'
+        )
+
+        # Set up repo with .dogcatrc
+        repo_dir = tmp_path / "repo"
+        repo_dir.mkdir()
+        (repo_dir / DOGCATRC_FILENAME).write_text(str(shared_dir) + "\n")
+
+        # Set up repo-local config
+        repo_dogcats = repo_dir / ".dogcats"
+        repo_dogcats.mkdir()
+        (repo_dogcats / "config.local.toml").write_text(
+            'namespace = "backend"\nvisible_namespaces = ["backend"]\n'
+        )
+
+        monkeypatch.chdir(repo_dir)
+        config = load_config(str(shared_dir))
+        assert config["namespace"] == "backend"
+        assert config["visible_namespaces"] == ["backend"]
+
+    def test_load_config_without_dogcatrc_ignores_repo_local(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without .dogcatrc, repo-local config is not loaded."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        (dogcats_dir / "config.toml").write_text('namespace = "myproject"\n')
+
+        monkeypatch.chdir(tmp_path)
+        config = load_config(str(dogcats_dir))
+        assert config["namespace"] == "myproject"
+
+    def test_save_local_config_to_repo_local(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """save_local_config writes to repo-local dir when .dogcatrc exists."""
+        shared_dir = tmp_path / "shared" / ".dogcats"
+        shared_dir.mkdir(parents=True)
+        (shared_dir / "config.toml").write_text('namespace = "shared"\n')
+
+        repo_dir = tmp_path / "repo"
+        repo_dir.mkdir()
+        (repo_dir / DOGCATRC_FILENAME).write_text(str(shared_dir) + "\n")
+
+        monkeypatch.chdir(repo_dir)
+        save_local_config(str(shared_dir), {"namespace": "backend"})
+
+        # Should save to repo-local, not shared
+        repo_local = repo_dir / ".dogcats" / "config.local.toml"
+        assert repo_local.exists()
+        shared_local = shared_dir / "config.local.toml"
+        assert not shared_local.exists()
+
+    def test_load_local_config_from_repo_local(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """load_local_config reads from repo-local dir when .dogcatrc exists."""
+        shared_dir = tmp_path / "shared" / ".dogcats"
+        shared_dir.mkdir(parents=True)
+        (shared_dir / "config.local.toml").write_text('namespace = "shared-local"\n')
+
+        repo_dir = tmp_path / "repo"
+        repo_dir.mkdir()
+        (repo_dir / DOGCATRC_FILENAME).write_text(str(shared_dir) + "\n")
+
+        repo_dogcats = repo_dir / ".dogcats"
+        repo_dogcats.mkdir()
+        (repo_dogcats / "config.local.toml").write_text('namespace = "backend"\n')
+
+        monkeypatch.chdir(repo_dir)
+        config = load_local_config(str(shared_dir))
+        assert config["namespace"] == "backend"
+
+    def test_load_local_config_falls_back_to_shared(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without .dogcatrc, load_local_config reads from shared dir."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        (dogcats_dir / "config.local.toml").write_text('namespace = "local"\n')
+
+        monkeypatch.chdir(tmp_path)
+        config = load_local_config(str(dogcats_dir))
+        assert config["namespace"] == "local"
 
 
 class TestGetNamespaceFilter:

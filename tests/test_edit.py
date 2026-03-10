@@ -7,9 +7,18 @@ from unittest.mock import MagicMock
 
 import pytest
 from rich.text import Text
-from textual.widgets import Collapsible, Input, OptionList, Select, Static, TextArea
+from textual.widgets import (
+    Button,
+    Collapsible,
+    Input,
+    OptionList,
+    Select,
+    Static,
+    TextArea,
+)
 
-from dogcat.models import Issue
+from dogcat.models import Issue, Status
+from dogcat.tui.detail_panel import IssueDetailPanel
 from dogcat.tui.editor import IssueEditorApp
 from dogcat.tui.picker import IssuePickerApp
 from dogcat.tui.shared import make_issue_label
@@ -428,8 +437,8 @@ class TestParentPicker:
         return storage
 
     @pytest.mark.asyncio
-    async def test_parent_select_renders(self) -> None:
-        """Parent Select widget is rendered in the form."""
+    async def test_parent_field_renders(self) -> None:
+        """Parent button is rendered in the form."""
         issue = _make_issue()
         storage = _make_storage()
         storage.list.return_value = []
@@ -437,12 +446,12 @@ class TestParentPicker:
         app = IssueEditorApp(issue, storage)
 
         async with app.run_test() as _pilot:
-            parent_select = cast("Select[str]", app.query_one("#parent-input", Select))
-            assert parent_select is not None
+            parent_btn = app.query_one("#parent-input", Button)
+            assert parent_btn is not None
 
     @pytest.mark.asyncio
     async def test_parent_shows_current_value(self) -> None:
-        """Parent Select shows the current parent issue."""
+        """Parent button shows the current parent issue."""
         issue = _make_issue(parent="dc-par1")
         storage = _make_storage()
         parent_issue = _make_issue(id="par1", title="Parent issue")
@@ -451,12 +460,12 @@ class TestParentPicker:
         app = IssueEditorApp(issue, storage)
 
         async with app.run_test() as _pilot:
-            parent_select = cast("Select[str]", app.query_one("#parent-input", Select))
-            assert parent_select.value == "dc-par1"
+            parent_btn = app.query_one("#parent-input", Button)
+            assert str(parent_btn.label) == "dc-par1"
 
     @pytest.mark.asyncio
-    async def test_parent_blank_when_no_parent(self) -> None:
-        """Parent Select is blank when issue has no parent."""
+    async def test_parent_placeholder_when_no_parent(self) -> None:
+        """Parent button shows placeholder when issue has no parent."""
         issue = _make_issue(parent=None)
         storage = _make_storage()
         storage.list.return_value = []
@@ -464,8 +473,8 @@ class TestParentPicker:
         app = IssueEditorApp(issue, storage)
 
         async with app.run_test() as _pilot:
-            parent_select = cast("Select[str]", app.query_one("#parent-input", Select))
-            assert parent_select.value == Select.NULL
+            parent_btn = app.query_one("#parent-input", Button)
+            assert str(parent_btn.label) == "No parent"
 
     @pytest.mark.asyncio
     async def test_excludes_self_from_options(self) -> None:
@@ -475,11 +484,12 @@ class TestParentPicker:
         app = IssueEditorApp(issue, storage)
 
         async with app.run_test() as _pilot:
-            parent_select = cast("Select[str]", app.query_one("#parent-input", Select))
-            option_values = [opt[1] for opt in parent_select._options]
-            assert "dc-test" not in option_values
-            assert "dc-par1" in option_values
-            assert "dc-oth1" in option_values
+            panel = app.query_one("#editor-panel", IssueDetailPanel)
+            options = panel._get_parent_options()
+            option_ids = [opt[1] for opt in options]
+            assert "dc-test" not in option_ids
+            assert "dc-par1" in option_ids
+            assert "dc-oth1" in option_ids
 
     @pytest.mark.asyncio
     async def test_excludes_descendants_from_options(self) -> None:
@@ -489,9 +499,10 @@ class TestParentPicker:
         app = IssueEditorApp(issue, storage)
 
         async with app.run_test() as _pilot:
-            parent_select = cast("Select[str]", app.query_one("#parent-input", Select))
-            option_values = [opt[1] for opt in parent_select._options]
-            assert "dc-ch1" not in option_values
+            panel = app.query_one("#editor-panel", IssueDetailPanel)
+            options = panel._get_parent_options()
+            option_ids = [opt[1] for opt in options]
+            assert "dc-ch1" not in option_ids
 
     @pytest.mark.asyncio
     async def test_save_captures_parent_change(self) -> None:
@@ -504,7 +515,9 @@ class TestParentPicker:
         app = IssueEditorApp(issue, storage)
 
         async with app.run_test() as pilot:
-            app.query_one("#parent-input", Select).value = "dc-par1"
+            # Simulate picker result by calling the callback directly
+            panel = app.query_one("#editor-panel", IssueDetailPanel)
+            panel._on_parent_picked("dc-par1")
             await pilot.press("ctrl+s")
 
         storage.update.assert_called_once()
@@ -522,12 +535,57 @@ class TestParentPicker:
         app = IssueEditorApp(issue, storage)
 
         async with app.run_test() as pilot:
-            app.query_one("#parent-input", Select).value = Select.NULL
+            # Simulate picker clearing parent (empty string)
+            panel = app.query_one("#editor-panel", IssueDetailPanel)
+            panel._on_parent_picked("")
             await pilot.press("ctrl+s")
 
         storage.update.assert_called_once()
         updates = storage.update.call_args[0][1]
         assert updates["parent"] is None
+
+    @pytest.mark.asyncio
+    async def test_excludes_closed_issues_from_options(self) -> None:
+        """Closed issues are excluded from parent options."""
+        issue = _make_issue(id="test", title="Current")
+        storage = _make_storage()
+        open_issue = _make_issue(id="open1", title="Open issue")
+        closed_issue = _make_issue(
+            id="closed1", title="Closed issue", status=Status.CLOSED
+        )
+        storage.list.return_value = [issue, open_issue, closed_issue]
+        storage.get_children.side_effect = lambda _id: []  # type: ignore[misc]
+        app = IssueEditorApp(issue, storage)
+
+        async with app.run_test() as _pilot:
+            panel = app.query_one("#editor-panel", IssueDetailPanel)
+            options = panel._get_parent_options()
+            option_ids = [opt[1] for opt in options]
+            assert "dc-open1" in option_ids
+            assert "dc-closed1" not in option_ids
+
+    @pytest.mark.asyncio
+    async def test_keeps_closed_with_open_children(self) -> None:
+        """Closed issues with open children are kept in parent options."""
+        issue = _make_issue(id="test", title="Current")
+        storage = _make_storage()
+        closed_parent = _make_issue(
+            id="closed1", title="Closed parent", status=Status.CLOSED
+        )
+        open_child = _make_issue(id="child1", title="Open child", parent="dc-closed1")
+        storage.list.return_value = [issue, closed_parent, open_child]
+
+        def _get_children(_id: str) -> list[Issue]:
+            return [open_child] if _id == "dc-closed1" else []
+
+        storage.get_children.side_effect = _get_children
+        app = IssueEditorApp(issue, storage)
+
+        async with app.run_test() as _pilot:
+            panel = app.query_one("#editor-panel", IssueDetailPanel)
+            options = panel._get_parent_options()
+            option_ids = [opt[1] for opt in options]
+            assert "dc-closed1" in option_ids
 
     @pytest.mark.asyncio
     async def test_unchanged_parent_not_in_updates(self) -> None:
