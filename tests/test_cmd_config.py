@@ -147,6 +147,42 @@ class TestFindDogcatsDirWithRc:
         assert result == str(external_dir.resolve())
 
 
+class TestGetStorageWithDogcatrc:
+    """Test get_storage() respects .dogcatrc over local .dogcats/."""
+
+    def test_get_storage_uses_dogcatrc_when_local_dogcats_exists(
+        self,
+        tmp_path: Path,
+        monkeypatch: "pytest.MonkeyPatch",
+    ) -> None:
+        """get_storage() should use .dogcatrc even when local .dogcats/ dir exists."""
+        from dogcat.cli._helpers import get_storage
+        from dogcat.constants import DOGCATRC_FILENAME
+
+        # Create shared .dogcats with issues
+        shared_dir = tmp_path / "shared" / ".dogcats"
+        shared_dir.mkdir(parents=True)
+        (shared_dir / "issues.jsonl").write_text("")
+        (shared_dir / "config.toml").write_text('namespace = "shared"\n')
+
+        # Create repo dir with .dogcatrc + local .dogcats/config.local.toml
+        repo_dir = tmp_path / "myrepo"
+        repo_dir.mkdir()
+        (repo_dir / DOGCATRC_FILENAME).write_text(str(shared_dir) + "\n")
+
+        local_dogcats = repo_dir / ".dogcats"
+        local_dogcats.mkdir()
+        (local_dogcats / "config.local.toml").write_text(
+            'namespace = "myrepo"\nvisible_namespaces = ["myrepo"]\n'
+        )
+
+        monkeypatch.chdir(repo_dir)
+        storage = get_storage()
+
+        # Storage should point to shared, not local
+        assert str(shared_dir) in str(storage.path)
+
+
 class TestCLIConfig:
     """Test dcat config commands."""
 
