@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- **Fixed `get_storage()` bypassing `.dogcatrc` when local `.dogcats/` exists** — always resolve via `find_dogcats_dir()` for the default path so `.dogcatrc` takes priority over a local `.dogcats/` directory that may only contain `config.local.toml` (closes #18, thanks @fredrik-lindseth)
 - **Fixed agnix linter warnings in CLAUDE.md and example-md template** — replaced ambiguous "Generally" phrasing with explicit priority order, reframed negative-only instructions ("Do NOT", "NEVER") as positive alternatives, moved critical sections out of the "lost in the middle" zone, and removed trailing commas in `.vscode/settings.json` (closes dogcat-15gy)
 
 ## 0.11.6 (2026-03-10)
