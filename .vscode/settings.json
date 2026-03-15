@@ -9,7 +9,7 @@
         "**/node_modules": true,        
         "htmlcov": true,
         ".coverage": true,
-        ".coverage.*": true,
+        ".coverage.*": true
     },
     "terminal.integrated.env.linux": {
         "PYTHONPATH": "${workspaceFolder}"
@@ -19,5 +19,5 @@
     },
     "[python]": {
         "editor.defaultFormatter": "ms-python.vscode-pylance"
-    },
+    }
 }

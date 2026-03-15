@@ -11,8 +11,8 @@ _CLAUDE_MD_TEMPLATE = """\
 
 This project uses **dcat** for issue tracking. \
 You MUST run `dcat prime --opinionated` for instructions.
-Then run `dcat list --agent-only` to see the list of issues. Generally we work \
-on bugs first, and always on high priority issues first.
+Then run `dcat list --agent-only` to see the list of issues. Work on bugs \
+before features, and always on high priority issues first.
 
 When running multiple `dcat` commands, make separate parallel Bash tool calls \
 instead of chaining them with `&&` and `echo` separators.
@@ -31,12 +31,12 @@ ask these as **separate questions in order**:
 1. First ask: "Should I update issue [id] with these findings?"
 2. Only after that, separately ask: "Should I start working on the \
 implementation?"
-Do NOT combine these into one question. The user may want to update the \
+Always ask these as separate questions — the user may want to update the \
 issue without starting work.
 
 ### Closing Issues - IMPORTANT
 
-NEVER close issues without explicit user approval. When work is complete:
+Wait for explicit user approval before closing any issue. When work is complete:
 
 1. Set status to `in_review`: `dcat update --status in_review $issueId`
 2. Ask the user to test

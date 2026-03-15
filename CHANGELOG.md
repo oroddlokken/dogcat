@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Fixed agnix linter warnings in CLAUDE.md and example-md template** — replaced ambiguous "Generally" phrasing with explicit priority order, reframed negative-only instructions ("Do NOT", "NEVER") as positive alternatives, moved critical sections out of the "lost in the middle" zone, and removed trailing commas in `.vscode/settings.json` (closes dogcat-15gy)
+
 ## 0.11.6 (2026-03-10)
 
 ### Added
