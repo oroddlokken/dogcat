@@ -198,6 +198,50 @@ class TestCRUDOperations:
         new_time = updated_issue.updated_at
         assert new_time > original_time
 
+    def test_update_status_away_from_closed_clears_closed_fields(
+        self, storage: JSONLStorage
+    ) -> None:
+        """Test that updating status away from closed clears closed_at/reason/by."""
+        issue = Issue(id="issue-1", title="Test")
+        storage.create(issue)
+        storage.close("issue-1", reason="Done", closed_by="alice")
+
+        updated = storage.update("issue-1", {"status": "in_review"})
+        assert updated.status == Status.IN_REVIEW
+        assert updated.closed_at is None
+        assert updated.close_reason is None
+        assert updated.closed_by is None
+
+    def test_update_status_to_closed_sets_closed_at(
+        self, storage: JSONLStorage
+    ) -> None:
+        """Test that updating status to closed sets closed_at."""
+        issue = Issue(id="issue-1", title="Test")
+        storage.create(issue)
+
+        updated = storage.update("issue-1", {"status": "closed"})
+        assert updated.status == Status.CLOSED
+        assert updated.closed_at is not None
+
+    def test_update_status_away_from_closed_persists(
+        self, temp_workspace: Path
+    ) -> None:
+        """Test that cleared closed fields survive reload."""
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+        issue = Issue(id="issue-1", title="Test")
+        storage.create(issue)
+        storage.close("issue-1", reason="Done", closed_by="alice")
+        storage.update("issue-1", {"status": "in_review"})
+
+        reloaded = JSONLStorage(str(storage_path))
+        got = reloaded.get("issue-1")
+        assert got is not None
+        assert got.status == Status.IN_REVIEW
+        assert got.closed_at is None
+        assert got.close_reason is None
+        assert got.closed_by is None
+
     def test_close_issue(self, storage: JSONLStorage) -> None:
         """Test closing an issue."""
         issue = Issue(id="issue-1", title="Test")

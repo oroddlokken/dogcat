@@ -733,6 +733,17 @@ class JSONLStorage:
                 value = IssueType(value)
             setattr(issue, key, value)
 
+        # Handle status transition side effects
+        if "status" in updates:
+            if issue.status == Status.CLOSED and issue.closed_at is None:
+                # Transitioning to closed via update — set closed_at
+                issue.closed_at = datetime.now().astimezone()
+            elif issue.status != Status.CLOSED and issue.closed_at is not None:
+                # Transitioning away from closed — clear closed fields
+                issue.closed_at = None
+                issue.close_reason = None
+                issue.closed_by = None
+
         # Maintain parent-child index if parent changed
         if issue.parent != old_parent:
             if old_parent and old_parent in self._children_by_parent:

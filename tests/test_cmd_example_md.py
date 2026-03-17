@@ -24,7 +24,9 @@ class TestExampleMd:
         """Test that the template includes closing workflow guidance."""
         result = runner.invoke(app, ["example-md"])
         assert "in_review" in result.output
-        assert "Wait for explicit user approval before closing any issue" in result.output
+        assert (
+            "Wait for explicit user approval before closing any issue" in result.output
+        )
 
     def test_contains_findings_guidance(self) -> None:
         """Test that the template includes the two-step findings pattern."""

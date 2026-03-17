@@ -1,6 +1,6 @@
 # Agent Instructions
 
-## Closing Issues - IMPORTANT
+## Issue Closure Workflow
 
 Wait for explicit user approval before closing any issue. When work is complete:
 
@@ -12,16 +12,15 @@ Wait for explicit user approval before closing any issue. When work is complete:
 
 ## Issue tracking
 
-This project uses **dcat** for issue tracking and **git** for version control. You MUST run `dcat prime --opinionated` for instructions.
-Then run `dcat list --agent-only` to see the list of issues. Work on bugs before features, and always on high priority issues first.
+This project uses **dcat** for issue tracking and **git** for version control. Run `dcat prime --opinionated` at the start of each session — it outputs the full workflow guide (issue types, statuses, priorities, and command reference). Then run `dcat list --agent-only` to see the current backlog. Work on bugs before features, high priority first.
 
 When running multiple `dcat` commands, make separate parallel Bash tool calls instead of chaining them with `&&` and `echo` separators.
 
-Mark each issue `in_progress` right when you start working on it — not before. Set `in_review` when work on that issue is done before moving on. The status should reflect what you are *actually* working on right now.
+Mark each issue `in_progress` only when you begin active work on it — one at a time, not the whole backlog at once. Set `in_review` when that issue's work is done before moving on. Status should reflect what you are *actually* working on right now.
 
-It is okay to work on multiple related issues at the same time, but do NOT batch-mark an entire backlog as `in_progress` upfront. If there is a priority conflict, ask the user which to focus on first.
+It is okay to work on multiple related issues at the same time. If there is a priority conflict, ask the user which to focus on first.
 
-If the user brings up a new bug, feature or anything else that warrants changes to the code, ALWAYS ask if we should create an issue for it before you start working on the code. When creating issues, set appropriate labels using `--labels` based on the issue content (e.g. `cli`, `tui`, `api`, `docs`, `testing`, `refactor`, `ux`, `performance`, etc.).
+If the user brings up a new bug, feature or anything else that warrants changes to the code, ask whether to create an issue before starting code work. When creating issues, set appropriate labels using `--labels` based on the issue content (e.g. `cli`, `tui`, `api`, `docs`, `testing`, `refactor`, `ux`, `performance`, etc.).
 
 When research or discussion produces findings relevant to an existing issue, ask these as **separate questions in order**:
 
@@ -35,11 +34,11 @@ Always ask these as separate questions — the user may want to update the issue
 
 `.dogcats/inbox.jsonl` is the append-only JSONL store for proposals — lightweight suggestions submitted from the web UI (or other sources) that haven't been triaged into full issues yet. Each `proposal` record has its own lifecycle (`open` → `closed`/`tombstone`). Managed by `src/dogcat/inbox.py`.
 
+Use `dcat` CLI commands for all issue and proposal mutations. Never edit `.dogcats/issues.jsonl` or `.dogcats/inbox.jsonl` directly — the append-only audit log depends on records written in order by the CLI.
+
 ## Constants
 
-`src/dogcat/constants.py` is the single source of truth for shared values used by dogcat (CLI):
-
-Import from this module rather than hardcoding values in multiple places.
+Import shared values (statuses, priorities, labels, paths, etc.) from `src/dogcat/constants.py`. Hardcoding these values elsewhere causes drift when they change.
 
 ## Tab Completions
 
@@ -55,11 +54,11 @@ Use `just lint` to check for linting errors. Run `just fmt` to automatically fix
 
 Use uv for all dependency management — pip is not used in this project.
 
-We distribute the software with Homebrew. The formula is available at "../homebrew-tap/Formula/dogcat.rb". If you make changes to the CLI that would require a change to the Formula, please inform the user and ask if you should update the formula.
+We distribute the software with Homebrew. The formula is at `../homebrew-tap/Formula/dogcat.rb`. Wait for user confirmation before updating the formula. Inform the user when CLI changes affect dependencies, entry points, or command structure — these may require a formula update.
 
 ## Changelog
 
-`CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/) format. Always add entries under the `[Unreleased]` section at the top — never under a released version. Use these section tags under each version heading:
+`CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/) format. Add all changelog entries under `[Unreleased]` at the top, never under historical version headings — release automation uses this section to determine what ships next. Use these section tags under each version heading:
 
 - **Added** — new features
 - **Changed** — changes to existing functionality
