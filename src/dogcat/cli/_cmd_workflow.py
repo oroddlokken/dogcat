@@ -71,6 +71,11 @@ def register(app: typer.Typer) -> None:
             help="Filter by parent issue ID",
             autocompletion=complete_issue_ids,
         ),
+        no_parent: bool = typer.Option(
+            False,
+            "--no-parent",
+            help="Show only top-level issues (no parent)",
+        ),
         namespace: str | None = typer.Option(
             None,
             "--namespace",
@@ -114,6 +119,7 @@ def register(app: typer.Typer) -> None:
                 label=label,
                 owner=owner,
                 parent=parent,
+                no_parent=no_parent,
                 namespace=namespace,
                 all_namespaces=all_namespaces,
                 agent_only=agent_only,
@@ -218,6 +224,11 @@ def register(app: typer.Typer) -> None:
             help="Filter by parent issue ID",
             autocompletion=complete_issue_ids,
         ),
+        no_parent: bool = typer.Option(
+            False,
+            "--no-parent",
+            help="Show only top-level issues (no parent)",
+        ),
         namespace: str | None = typer.Option(
             None,
             "--namespace",
@@ -258,6 +269,7 @@ def register(app: typer.Typer) -> None:
                 label=label,
                 owner=owner,
                 parent=parent,
+                no_parent=no_parent,
                 namespace=namespace,
                 all_namespaces=all_namespaces,
                 agent_only=agent_only,
@@ -351,6 +363,11 @@ def register(app: typer.Typer) -> None:
             help="Filter by parent issue ID",
             autocompletion=complete_issue_ids,
         ),
+        no_parent: bool = typer.Option(
+            False,
+            "--no-parent",
+            help="Show only top-level issues (no parent)",
+        ),
         namespace: str | None = typer.Option(
             None,
             "--namespace",
@@ -386,6 +403,7 @@ def register(app: typer.Typer) -> None:
                 label=label,
                 owner=owner,
                 parent=parent,
+                no_parent=no_parent,
                 namespace=namespace,
                 all_namespaces=all_namespaces,
                 agent_only=agent_only,
@@ -457,6 +475,11 @@ def register(app: typer.Typer) -> None:
             help="Filter by parent issue ID",
             autocompletion=complete_issue_ids,
         ),
+        no_parent: bool = typer.Option(
+            False,
+            "--no-parent",
+            help="Show only top-level issues (no parent)",
+        ),
         namespace: str | None = typer.Option(
             None,
             "--namespace",
@@ -492,6 +515,7 @@ def register(app: typer.Typer) -> None:
                 label=label,
                 owner=owner,
                 parent=parent,
+                no_parent=no_parent,
                 namespace=namespace,
                 all_namespaces=all_namespaces,
                 agent_only=agent_only,
@@ -563,6 +587,11 @@ def register(app: typer.Typer) -> None:
             help="Filter by parent issue ID",
             autocompletion=complete_issue_ids,
         ),
+        no_parent: bool = typer.Option(
+            False,
+            "--no-parent",
+            help="Show only top-level issues (no parent)",
+        ),
         namespace: str | None = typer.Option(
             None,
             "--namespace",
@@ -598,6 +627,7 @@ def register(app: typer.Typer) -> None:
                 label=label,
                 owner=owner,
                 parent=parent,
+                no_parent=no_parent,
                 namespace=namespace,
                 all_namespaces=all_namespaces,
                 agent_only=agent_only,
@@ -678,6 +708,7 @@ def register(app: typer.Typer) -> None:
         label: str | None,
         owner: str | None,
         parent: str | None,
+        no_parent: bool = False,
         namespace: str | None,
         all_namespaces: bool,
         agent_only: bool,
@@ -700,6 +731,7 @@ def register(app: typer.Typer) -> None:
                 label=label,
                 owner=owner,
                 parent=parent,
+                no_parent=no_parent,
                 namespace=namespace,
                 all_namespaces=all_namespaces,
                 agent_only=agent_only,
@@ -771,6 +803,11 @@ def register(app: typer.Typer) -> None:
             help="Filter by parent issue ID",
             autocompletion=complete_issue_ids,
         ),
+        no_parent: bool = typer.Option(
+            False,
+            "--no-parent",
+            help="Show only top-level issues (no parent)",
+        ),
         namespace: str | None = typer.Option(
             None,
             "--namespace",
@@ -806,6 +843,7 @@ def register(app: typer.Typer) -> None:
             label=label,
             owner=owner,
             parent=parent,
+            no_parent=no_parent,
             namespace=namespace,
             all_namespaces=all_namespaces,
             agent_only=agent_only,
@@ -853,6 +891,11 @@ def register(app: typer.Typer) -> None:
             help="Filter by parent issue ID",
             autocompletion=complete_issue_ids,
         ),
+        no_parent: bool = typer.Option(
+            False,
+            "--no-parent",
+            help="Show only top-level issues (no parent)",
+        ),
         namespace: str | None = typer.Option(
             None,
             "--namespace",
@@ -888,6 +931,7 @@ def register(app: typer.Typer) -> None:
             label=label,
             owner=owner,
             parent=parent,
+            no_parent=no_parent,
             namespace=namespace,
             all_namespaces=all_namespaces,
             agent_only=agent_only,
@@ -935,6 +979,11 @@ def register(app: typer.Typer) -> None:
             help="Filter by parent issue ID",
             autocompletion=complete_issue_ids,
         ),
+        no_parent: bool = typer.Option(
+            False,
+            "--no-parent",
+            help="Show only top-level issues (no parent)",
+        ),
         namespace: str | None = typer.Option(
             None,
             "--namespace",
@@ -970,6 +1019,7 @@ def register(app: typer.Typer) -> None:
                 label=label,
                 owner=owner,
                 parent=parent,
+                no_parent=no_parent,
                 namespace=namespace,
                 all_namespaces=all_namespaces,
                 agent_only=agent_only,
@@ -1078,6 +1128,11 @@ def register(app: typer.Typer) -> None:
             help="Filter by parent issue ID",
             autocompletion=complete_issue_ids,
         ),
+        no_parent: bool = typer.Option(
+            False,
+            "--no-parent",
+            help="Show only top-level issues (no parent)",
+        ),
         namespace: str | None = typer.Option(
             None,
             "--namespace",
@@ -1114,6 +1169,7 @@ def register(app: typer.Typer) -> None:
                 label=label,
                 owner=owner,
                 parent=parent,
+                no_parent=no_parent,
                 namespace=namespace,
                 all_namespaces=all_namespaces,
                 dogcats_dir=str(storage.dogcats_dir),
@@ -1405,6 +1461,11 @@ def register(app: typer.Typer) -> None:
 
     @app.command(name="pr")
     def progress_review(
+        no_parent: bool = typer.Option(
+            False,
+            "--no-parent",
+            help="Show only top-level issues (no parent)",
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
@@ -1412,8 +1473,11 @@ def register(app: typer.Typer) -> None:
         try:
             storage = get_storage(dogcats_dir)
             ip_issues = storage.list({"status": "in_progress"})
-            ip_issues.sort(key=lambda i: i.priority)
             ir_issues = storage.list({"status": "in_review"})
+            if no_parent:
+                ip_issues = [i for i in ip_issues if i.parent is None]
+                ir_issues = [i for i in ir_issues if i.parent is None]
+            ip_issues.sort(key=lambda i: i.priority)
             ir_issues.sort(key=lambda i: i.priority)
 
             if is_json_output(json_output):

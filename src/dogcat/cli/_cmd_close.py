@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 import orjson
 import typer
 
+from dogcat.models import Status
+
 from ._completions import complete_issue_ids
 from ._helpers import get_default_operator, get_storage
 from ._json_state import echo_error, is_json_output
@@ -24,8 +26,8 @@ def register(app: typer.Typer) -> None:
         reason: str | None,
         closed_by: str | None,
         json_output: bool,
-    ) -> bool:
-        """Close a single issue. Returns True if an error occurred."""
+    ) -> tuple[bool, str | None]:
+        """Close a single issue. Returns (had_error, parent_id)."""
         try:
             issue = storage.close(
                 issue_id,
@@ -41,8 +43,27 @@ def register(app: typer.Typer) -> None:
                 typer.echo(f"✓ Closed {issue.full_id}: {issue.title}")
         except (ValueError, Exception) as e:
             echo_error(f"closing {issue_id}: {e}")
-            return True
-        return False
+            return True, None
+        else:
+            return False, issue.parent
+
+    def _check_epic_completion(
+        storage: JSONLStorage,
+        parent_ids: set[str],
+    ) -> None:
+        """Print a message if all children of a parent are now closed."""
+        for parent_id in parent_ids:
+            parent = storage.get(parent_id)
+            if parent is None:
+                continue
+            siblings = storage.get_children(parent_id)
+            if all(s.status in (Status.CLOSED, Status.TOMBSTONE) for s in siblings):
+                typer.echo(
+                    f"All children of {parent.issue_type.value} {parent.full_id}"
+                    f" '{parent.title}' are now closed."
+                    f" Close the {parent.issue_type.value} with:"
+                    f" dcat close {parent.id}"
+                )
 
     @app.command()
     def close(
@@ -81,18 +102,22 @@ def register(app: typer.Typer) -> None:
         storage = get_storage(dogcats_dir)
         final_closed_by = closed_by if closed_by is not None else get_default_operator()
         has_errors = False
+        parent_ids: set[str] = set()
 
         for issue_id in issue_ids:
-            has_errors = (
-                _close_one(
-                    storage,
-                    issue_id,
-                    reason,
-                    final_closed_by,
-                    json_output,
-                )
-                or has_errors
+            had_error, parent_id = _close_one(
+                storage,
+                issue_id,
+                reason,
+                final_closed_by,
+                json_output,
             )
+            has_errors = had_error or has_errors
+            if parent_id:
+                parent_ids.add(parent_id)
+
+        if parent_ids and not is_json_output(json_output):
+            _check_epic_completion(storage, parent_ids)
 
         if has_errors:
             raise typer.Exit(1)

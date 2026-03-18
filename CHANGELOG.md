@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Epic completion notification on close** — when closing the last open child of a parent issue, `dcat close` now prints a message with a command to close the parent (closes dogcat-3o79)
+- **`--no-parent` filter for listing commands** — filters to top-level issues (no parent set). Available on `list`, `ready`, `open`, `blocked`, `in-progress`, `in-review`, `deferred`, `manual`, `export`, and `pr` (closes dogcat-4i7x)
+
 ### Fixed
 
 - **Fixed `get_storage()` bypassing `.dogcatrc` when local `.dogcats/` exists** — always resolve via `find_dogcats_dir()` for the default path so `.dogcatrc` takes priority over a local `.dogcats/` directory that may only contain `config.local.toml` (closes #18, thanks @fredrik-lindseth)

@@ -251,6 +251,7 @@ def apply_common_filters(
     label: str | None = None,
     owner: str | None = None,
     parent: str | None = None,
+    no_parent: bool = False,
     namespace: str | None = None,
     agent_only: bool = False,
     all_namespaces: bool = False,
@@ -283,6 +284,8 @@ def apply_common_filters(
                 for i in issues
                 if i.full_id == resolved_parent or i.full_id in child_ids
             ]
+    if no_parent:
+        issues = [i for i in issues if i.parent is None]
     if agent_only:
         issues = [
             i

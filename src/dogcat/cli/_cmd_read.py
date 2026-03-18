@@ -199,6 +199,11 @@ def register(app: typer.Typer) -> None:
             help="Filter by parent issue ID",
             autocompletion=complete_issue_ids,
         ),
+        no_parent: bool = typer.Option(
+            False,
+            "--no-parent",
+            help="Show only top-level issues (no parent)",
+        ),
         closed: bool = typer.Option(False, "--closed", help="Show only closed issues"),
         open_issues: bool = typer.Option(
             False,
@@ -307,6 +312,10 @@ def register(app: typer.Typer) -> None:
                     for i in issues
                     if i.full_id == resolved_parent or i.full_id in child_ids
                 ]
+
+            # Filter to top-level issues only (--no-parent)
+            if no_parent:
+                issues = [i for i in issues if i.parent is None]
 
             # Apply namespace filtering (skip if --all-namespaces)
             actual_dogcats_dir = str(storage.dogcats_dir)

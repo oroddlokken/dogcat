@@ -354,6 +354,154 @@ class TestCLIClose:
         assert closed_data["notes"] == "Some notes"
         assert "Closed:" not in (closed_data["notes"] or "")
 
+    def test_close_last_child_notifies_epic_complete(self, tmp_path: Path) -> None:
+        """Test that closing the last open child prints epic completion message."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # Create an epic with two children
+        epic_result = runner.invoke(
+            app,
+            ["create", "My Epic", "--type", "epic", "--dogcats-dir", str(dogcats_dir)],
+        )
+        epic_id = epic_result.stdout.split(": ")[0].split()[-1]
+
+        child1_result = runner.invoke(
+            app,
+            [
+                "create",
+                "Child 1",
+                "--parent",
+                epic_id,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        child1_id = child1_result.stdout.split(": ")[0].split()[-1]
+
+        child2_result = runner.invoke(
+            app,
+            [
+                "create",
+                "Child 2",
+                "--parent",
+                epic_id,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        child2_id = child2_result.stdout.split(": ")[0].split()[-1]
+
+        # Close first child — should NOT show completion message
+        result1 = runner.invoke(
+            app,
+            ["close", child1_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert "All children of" not in result1.stdout
+
+        # Close second child — SHOULD show completion message
+        result2 = runner.invoke(
+            app,
+            ["close", child2_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert "All children of epic" in result2.stdout
+        assert "dcat close" in result2.stdout
+        assert "My Epic" in result2.stdout
+
+    def test_close_multiple_children_notifies_once(self, tmp_path: Path) -> None:
+        """Test closing all children at once prints completion once."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        epic_result = runner.invoke(
+            app,
+            [
+                "create",
+                "Batch Epic",
+                "--type",
+                "epic",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        epic_id = epic_result.stdout.split(": ")[0].split()[-1]
+
+        child_ids = []
+        for title in ["Task A", "Task B"]:
+            r = runner.invoke(
+                app,
+                [
+                    "create",
+                    title,
+                    "--parent",
+                    epic_id,
+                    "--dogcats-dir",
+                    str(dogcats_dir),
+                ],
+            )
+            child_ids.append(r.stdout.split(": ")[0].split()[-1])
+
+        # Close both at once
+        result = runner.invoke(
+            app,
+            ["close", *child_ids, "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert result.stdout.count("All children of") == 1
+        assert "Batch Epic" in result.stdout
+
+    def test_close_child_no_notification_when_siblings_open(
+        self, tmp_path: Path
+    ) -> None:
+        """Test no completion message when other children remain open."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        epic_result = runner.invoke(
+            app,
+            [
+                "create",
+                "Open Epic",
+                "--type",
+                "epic",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        epic_id = epic_result.stdout.split(": ")[0].split()[-1]
+
+        child1_result = runner.invoke(
+            app,
+            [
+                "create",
+                "Done task",
+                "--parent",
+                epic_id,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        child1_id = child1_result.stdout.split(": ")[0].split()[-1]
+
+        # Create a second child but leave it open
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Open task",
+                "--parent",
+                epic_id,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["close", child1_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert "All children of" not in result.stdout
+
     def test_show_displays_close_reason(self, tmp_path: Path) -> None:
         """Test that show command displays close reason next to closed date."""
         dogcats_dir = tmp_path / ".dogcats"

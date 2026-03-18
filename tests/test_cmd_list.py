@@ -1642,3 +1642,84 @@ class TestListCollapseDeferredSubtrees:
         assert "Parent issue" in titles
         assert "Child issue" in titles
         assert "Unrelated issue" not in titles
+
+    def test_list_no_parent(self, tmp_path: Path) -> None:
+        """Test list --no-parent shows only top-level issues."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # Create parent issue
+        result = runner.invoke(
+            app,
+            ["create", "Parent issue", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        parent_data = json.loads(result.stdout)
+        parent_full_id = f"{parent_data['namespace']}-{parent_data['id']}"
+
+        # Create child under parent
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Child issue",
+                "--parent",
+                parent_full_id,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        # Create unrelated top-level issue
+        runner.invoke(
+            app,
+            ["create", "Top-level issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["list", "--no-parent", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Parent issue" in result.stdout
+        assert "Top-level issue" in result.stdout
+        assert "Child issue" not in result.stdout
+
+    def test_list_no_parent_json(self, tmp_path: Path) -> None:
+        """Test list --no-parent with --json output."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["create", "Parent issue", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        parent_data = json.loads(result.stdout)
+        parent_full_id = f"{parent_data['namespace']}-{parent_data['id']}"
+
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Child issue",
+                "--parent",
+                parent_full_id,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        runner.invoke(
+            app,
+            ["create", "Top-level issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["list", "--no-parent", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        issues = json.loads(result.stdout)
+        titles = [i["title"] for i in issues]
+        assert "Parent issue" in titles
+        assert "Top-level issue" in titles
+        assert "Child issue" not in titles

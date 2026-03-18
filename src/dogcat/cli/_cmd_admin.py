@@ -212,6 +212,11 @@ def register(app: typer.Typer) -> None:
             help="Filter by parent issue ID",
             autocompletion=complete_issue_ids,
         ),
+        no_parent: bool = typer.Option(
+            False,
+            "--no-parent",
+            help="Export only top-level issues (no parent)",
+        ),
         namespace: str | None = typer.Option(
             None,
             "--namespace",
@@ -257,6 +262,7 @@ def register(app: typer.Typer) -> None:
                 label=label,
                 owner=owner,
                 parent=parent,
+                no_parent=no_parent,
                 namespace=namespace,
                 all_namespaces=all_namespaces,
                 dogcats_dir=str(storage.dogcats_dir),
