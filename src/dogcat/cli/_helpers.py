@@ -6,6 +6,7 @@ import functools
 import getpass
 import inspect
 import subprocess
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -300,6 +301,56 @@ def apply_common_filters(
             issues = [i for i in issues if ns_filter(i.namespace)]
 
     return issues
+
+
+def parse_duration(value: str) -> datetime:
+    """Parse a relative duration string into an absolute datetime.
+
+    Accepted formats: Nd (days), Nw (weeks), Nm (months as 30d).
+    Also accepts ISO8601 date strings directly.
+
+    Returns:
+        Absolute datetime (timezone-aware) representing the snooze expiry.
+
+    Raises:
+        ValueError: If the format is not recognized.
+    """
+    import re
+    from datetime import timedelta
+
+    raw = value.strip().lower()
+
+    # Try relative duration first: e.g. 7d, 2w, 1m
+    match = re.fullmatch(r"(\d+)([dwm])", raw)
+    if match:
+        amount = int(match.group(1))
+        unit = match.group(2)
+        if unit == "d":
+            delta = timedelta(days=amount)
+        elif unit == "w":
+            delta = timedelta(weeks=amount)
+        elif unit == "m":
+            delta = timedelta(days=amount * 30)
+        else:
+            msg = f"Unknown duration unit: {unit}"
+            raise ValueError(msg)
+        return datetime.now().astimezone() + delta
+
+    # Try ISO8601 date/datetime
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError:
+        pass
+    else:
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.now().astimezone().tzinfo)
+        return dt
+
+    msg = (
+        f"Invalid duration '{value}'. "
+        "Use relative (e.g. 7d, 2w, 1m) or ISO8601 date (e.g. 2026-04-01)."
+    )
+    raise ValueError(msg)
 
 
 def _parse_priority_value(value: str) -> int:

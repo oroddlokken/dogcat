@@ -13,6 +13,7 @@ from ._completions import (
     complete_namespaces,
     complete_owners,
     complete_priorities,
+    complete_snooze_durations,
     complete_types,
 )
 from ._formatting import (
@@ -26,6 +27,7 @@ from ._helpers import (
     apply_common_filters,
     get_default_operator,
     get_storage,
+    parse_duration,
 )
 from ._json_state import echo_error, is_json_output
 
@@ -94,6 +96,11 @@ def register(app: typer.Typer) -> None:
             "--agent-only",
             help="Only show issues available for agents",
         ),
+        include_snoozed: bool = typer.Option(
+            False,
+            "--include-snoozed",
+            help="Include snoozed issues in results",
+        ),
         tree: bool = typer.Option(False, "--tree", help="Display as tree"),
         table: bool = typer.Option(False, "--table", help="Display in columns"),
         include_inbox: bool = typer.Option(
@@ -110,7 +117,7 @@ def register(app: typer.Typer) -> None:
 
             final_limit = limit_arg or limit
             storage = get_storage(dogcats_dir)
-            ready_issues = get_ready_work(storage)
+            ready_issues = get_ready_work(storage, include_snoozed=include_snoozed)
 
             ready_issues = apply_common_filters(
                 ready_issues,
@@ -1515,6 +1522,251 @@ def register(app: typer.Typer) -> None:
                     else:
                         for issue in ir_issues:
                             typer.echo(f"  {format_issue_brief(issue)}")
+
+        except typer.Exit:
+            raise
+        except Exception as e:
+            echo_error(str(e))
+            raise typer.Exit(1)
+
+    @app.command()
+    def snooze(
+        issue_id: str = typer.Argument(
+            ...,
+            help="Issue ID to snooze",
+            autocompletion=complete_issue_ids,
+        ),
+        duration: str = typer.Argument(
+            ...,
+            help="Duration (e.g. 7d, 2w, 1m) or ISO8601 date",
+            autocompletion=complete_snooze_durations,
+        ),
+        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+        operator: str | None = typer.Option(
+            None,
+            "--by",
+            help="Who is making this change",
+        ),
+        all_namespaces: bool = typer.Option(  # noqa: ARG001
+            False,
+            "--all-namespaces",
+            "--all-ns",
+            "-A",
+            hidden=True,
+        ),
+        namespace: str | None = typer.Option(  # noqa: ARG001
+            None,
+            "--namespace",
+            hidden=True,
+        ),
+        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+    ) -> None:
+        """Snooze an issue for a duration (hide from list/ready)."""
+        try:
+            snooze_until = parse_duration(duration)
+            storage = get_storage(dogcats_dir)
+            final_operator = (
+                operator if operator is not None else get_default_operator()
+            )
+            issue = storage.update(
+                issue_id,
+                {"snoozed_until": snooze_until, "updated_by": final_operator},
+            )
+
+            if is_json_output(json_output):
+                from dogcat.models import issue_to_dict
+
+                typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
+            else:
+                until_str = snooze_until.strftime("%Y-%m-%d")
+                typer.echo(f"Snoozed {issue.full_id}: {issue.title} until {until_str}")
+
+        except ValueError as e:
+            echo_error(str(e))
+            raise typer.Exit(1)
+        except typer.Exit:
+            raise
+        except Exception as e:
+            echo_error(str(e))
+            raise typer.Exit(1)
+
+    @app.command()
+    def unsnooze(
+        issue_id: str = typer.Argument(
+            ...,
+            help="Issue ID to unsnooze",
+            autocompletion=complete_issue_ids,
+        ),
+        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+        operator: str | None = typer.Option(
+            None,
+            "--by",
+            help="Who is making this change",
+        ),
+        all_namespaces: bool = typer.Option(  # noqa: ARG001
+            False,
+            "--all-namespaces",
+            "--all-ns",
+            "-A",
+            hidden=True,
+        ),
+        namespace: str | None = typer.Option(  # noqa: ARG001
+            None,
+            "--namespace",
+            hidden=True,
+        ),
+        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+    ) -> None:
+        """Remove snooze from an issue (make it visible again)."""
+        try:
+            storage = get_storage(dogcats_dir)
+            existing = storage.get(storage.resolve_id(issue_id) or issue_id)
+            if existing is None:
+                echo_error(f"Issue {issue_id} not found")
+                raise typer.Exit(1)
+            if existing.snoozed_until is None:
+                echo_error(f"Issue {existing.full_id} is not snoozed")
+                raise typer.Exit(1)
+
+            final_operator = (
+                operator if operator is not None else get_default_operator()
+            )
+            issue = storage.update(
+                issue_id,
+                {"snoozed_until": None, "updated_by": final_operator},
+            )
+
+            if is_json_output(json_output):
+                from dogcat.models import issue_to_dict
+
+                typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
+            else:
+                typer.echo(f"Unsnoozed {issue.full_id}: {issue.title}")
+
+        except typer.Exit:
+            raise
+        except Exception as e:
+            echo_error(str(e))
+            raise typer.Exit(1)
+
+    @app.command("snoozed")
+    def snoozed_list(
+        limit_arg: int | None = typer.Argument(None, help="Limit results"),
+        limit: int | None = typer.Option(None, "--limit", help="Limit results"),
+        issue_type: str | None = typer.Option(
+            None,
+            "--type",
+            "-t",
+            help="Filter by type",
+            autocompletion=complete_types,
+        ),
+        priority: int | None = typer.Option(
+            None,
+            "--priority",
+            "-p",
+            help="Filter by priority",
+            autocompletion=complete_priorities,
+        ),
+        label: str | None = typer.Option(
+            None,
+            "--label",
+            "-l",
+            help="Filter by label",
+            autocompletion=complete_labels,
+        ),
+        owner: str | None = typer.Option(
+            None,
+            "--owner",
+            "-o",
+            help="Filter by owner",
+            autocompletion=complete_owners,
+        ),
+        parent: str | None = typer.Option(
+            None,
+            "--parent",
+            help="Filter by parent issue ID",
+            autocompletion=complete_issue_ids,
+        ),
+        no_parent: bool = typer.Option(
+            False,
+            "--no-parent",
+            help="Show only top-level issues (no parent)",
+        ),
+        namespace: str | None = typer.Option(
+            None,
+            "--namespace",
+            help="Filter by namespace",
+            autocompletion=complete_namespaces,
+        ),
+        all_namespaces: bool = typer.Option(
+            False,
+            "--all-namespaces",
+            "--all-ns",
+            "-A",
+            help="Show issues from all namespaces",
+        ),
+        agent_only: bool = typer.Option(
+            False,
+            "--agent-only",
+            help="Only show issues available for agents",
+        ),
+        tree: bool = typer.Option(False, "--tree", help="Display as tree"),
+        table: bool = typer.Option(False, "--table", help="Display in columns"),
+        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+    ) -> None:
+        """Show currently snoozed issues."""
+        try:
+            from datetime import datetime as dt
+
+            final_limit = limit_arg or limit
+            storage = get_storage(dogcats_dir)
+            now = dt.now().astimezone()
+
+            # Get all non-closed issues that are currently snoozed
+            all_issues = storage.list()
+            issues = [
+                i
+                for i in all_issues
+                if i.snoozed_until is not None
+                and i.snoozed_until > now
+                and i.status.value not in ("closed", "tombstone")
+            ]
+
+            issues = apply_common_filters(
+                issues,
+                issue_type=issue_type,
+                priority=priority,
+                label=label,
+                owner=owner,
+                parent=parent,
+                no_parent=no_parent,
+                namespace=namespace,
+                all_namespaces=all_namespaces,
+                agent_only=agent_only,
+                dogcats_dir=str(storage.dogcats_dir),
+                storage=storage,
+            )
+            issues.sort(key=lambda i: (i.snoozed_until or now, i.priority))
+            if final_limit:
+                issues = issues[:final_limit]
+
+            if is_json_output(json_output):
+                from dogcat.models import issue_to_dict
+
+                output = [issue_to_dict(issue) for issue in issues]
+                typer.echo(orjson.dumps(output).decode())
+            elif not issues:
+                typer.echo("No snoozed issues")
+            else:
+                typer.echo(f"Snoozed ({len(issues)}):")
+                if tree:
+                    typer.echo(format_issue_tree(issues))
+                elif table:
+                    typer.echo(format_issue_table(issues))
+                else:
+                    for issue in issues:
+                        typer.echo(format_issue_brief(issue))
 
         except typer.Exit:
             raise

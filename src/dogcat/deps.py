@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from dogcat.models import Issue, Status
@@ -23,12 +24,15 @@ class BlockedIssue:
 def get_ready_work(
     storage: JSONLStorage,
     filters: dict[str, Any] | None = None,
+    *,
+    include_snoozed: bool = False,
 ) -> list[Issue]:
     """Get issues ready to work (no blocking dependencies).
 
     Args:
         storage: The storage instance
         filters: Optional filters to apply
+        include_snoozed: If True, include currently snoozed issues
 
     Returns:
         List of issues with no blockers, sorted by priority
@@ -54,6 +58,13 @@ def get_ready_work(
         return False
 
     work_issues = [i for i in work_issues if not _has_deferred_ancestor(i)]
+
+    # Exclude currently snoozed issues
+    if not include_snoozed:
+        now = datetime.now().astimezone()
+        work_issues = [
+            i for i in work_issues if i.snoozed_until is None or i.snoozed_until <= now
+        ]
 
     # Find issues with no blocking dependencies
     ready: list[Issue] = []

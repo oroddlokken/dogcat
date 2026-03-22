@@ -725,6 +725,32 @@ def register(app: typer.Typer) -> None:
   AI agents using --agent-only will skip manual issues when listing work.
   You can also toggle the Manual checkbox in the TUI editor (dcat edit).
 
+── Snooze ──────────────────────────────────────────────────────────────────
+
+  Temporarily hide an issue from list/ready without changing its status.
+  Useful for "I know about this but don't want to deal with it right now."
+
+    dcat snooze <id> 7d              # hide for 7 days
+    dcat snooze <id> 2w              # hide for 2 weeks
+    dcat snooze <id> 1m              # hide for ~1 month (30 days)
+    dcat unsnooze <id>               # reveal early
+
+  The issue keeps its original status (open, in_progress, etc.) and
+  reappears automatically when the snooze expires. No manual action needed.
+
+  See what's currently snoozed:
+
+    dcat snoozed
+
+  Include snoozed issues in list/ready:
+
+    dcat list --include-snoozed
+
+  You can also snooze via update:
+
+    dcat update <id> --snooze-until 7d
+    dcat update <id> --unsnooze
+
 ── Questions ────────────────────────────────────────────────────────────────
 
   "question" is a special issue type for tracking decisions and
@@ -975,6 +1001,19 @@ Questions (type: question) track questions needing answers, not tasks to work on
 ## Labels
 
 Freeform tags shown in list/show, filter with --label.
+
+## Snooze
+
+Temporarily hide issues from list/ready without changing status:
+  dcat snooze <id> 7d             - Snooze for 7 days
+  dcat snooze <id> 2w             - Snooze for 2 weeks
+  dcat snooze <id> --until 2026-04-01  - Snooze until a date
+  dcat unsnooze <id>              - Remove snooze early
+  dcat snoozed                    - List currently snoozed issues
+  dcat list --include-snoozed     - Show snoozed issues in list
+
+Snoozed issues keep their original status and reappear automatically
+when the snooze period expires.
 
 """
 

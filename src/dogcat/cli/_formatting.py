@@ -177,6 +177,17 @@ def format_issue_brief(
             f"[extref: {issue.external_ref}]",
             fg="bright_black",
         )
+    snoozed_str = ""
+    if issue.snoozed_until is not None:
+        from datetime import datetime as dt
+
+        now = dt.now().astimezone()
+        if issue.snoozed_until > now:
+            until_date = issue.snoozed_until.strftime("%Y-%m-%d")
+            snoozed_color = "bright_black" if is_closed else "bright_magenta"
+            snoozed_str = " " + typer.style(
+                f"[snoozed until {until_date}]", fg=snoozed_color
+            )
     manual_str = ""
     if issue.metadata.get("manual") or issue.metadata.get("no_agent"):
         manual_color = "bright_black" if is_closed else "yellow"
@@ -208,7 +219,7 @@ def format_issue_brief(
         id_title = f"{issue.full_id}: {issue.title}"
     base = f"{status_emoji} {priority_str} {id_title} {type_str}"
 
-    suffixes = parent_str + labels_str + manual_str
+    suffixes = parent_str + labels_str + snoozed_str + manual_str
     suffixes += blocked_by_str + hidden_str + deferred_blocker_str
     suffixes += ext_ref_str + closed_str
     return f"{base}{suffixes}"
@@ -247,6 +258,18 @@ def format_issue_full(issue: Issue, parent_title: str | None = None) -> str:
         lines.append(f"{key('External ref:')} {issue.external_ref}")
     if issue.duplicate_of:
         lines.append(f"{key('Duplicate of:')} {issue.duplicate_of}")
+
+    if issue.snoozed_until is not None:
+        from datetime import datetime as dt
+
+        now = dt.now().astimezone()
+        snooze_date = issue.snoozed_until.strftime("%Y-%m-%d %H:%M")
+        if issue.snoozed_until > now:
+            styled_snooze = typer.style(snooze_date, fg="bright_magenta")
+            lines.append(f"{key('Snoozed until:')} {styled_snooze}")
+        else:
+            styled_snooze = typer.style(f"{snooze_date} (expired)", fg="bright_black")
+            lines.append(f"{key('Snoozed until:')} {styled_snooze}")
 
     dt_fmt = "%Y-%m-%d %H:%M:%S"
     lines.append(f"{key('Created:')} {issue.created_at.strftime(dt_fmt)}")

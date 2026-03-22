@@ -367,6 +367,22 @@ def complete_dep_types(incomplete: str) -> list[tuple[str, str]]:
     return [(v, h) for v, h in options if v.startswith(incomplete)]
 
 
+def complete_snooze_durations(incomplete: str) -> list[tuple[str, str]]:
+    """Complete common snooze duration values."""
+    options = [
+        ("1d", "1 day"),
+        ("3d", "3 days"),
+        ("7d", "1 week"),
+        ("14d", "2 weeks"),
+        ("1w", "1 week"),
+        ("2w", "2 weeks"),
+        ("4w", "4 weeks"),
+        ("1m", "1 month"),
+        ("3m", "3 months"),
+    ]
+    return [(v, h) for v, h in options if v.startswith(incomplete)]
+
+
 def complete_link_types(incomplete: str) -> list[tuple[str, str]]:
     """Complete link type values."""
     options = [

@@ -426,7 +426,7 @@ class TestCLIClose:
         )
         epic_id = epic_result.stdout.split(": ")[0].split()[-1]
 
-        child_ids = []
+        child_ids: list[str] = []
         for title in ["Task A", "Task B"]:
             r = runner.invoke(
                 app,

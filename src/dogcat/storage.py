@@ -684,6 +684,7 @@ class JSONLStorage:
             "delete_reason",
             "original_type",
             "duplicate_of",
+            "snoozed_until",
             "metadata",
             "comments",
         },

@@ -4,6 +4,7 @@
 
 ### Added
 
+- **Snooze/postpone issues** — temporarily hide issues from `list` and `ready` without changing their status. `dcat snooze <id> 7d` hides an issue for 7 days (supports `Nd`, `Nw`, `Nm`, or ISO dates), `dcat unsnooze <id>` reveals it early, and `dcat snoozed` lists all currently snoozed issues. Snoozed issues reappear automatically when the snooze expires. Also available via `dcat update --snooze-until`/`--unsnooze` and visible with `--include-snoozed` or `--all` flags (closes dogcat-28vf)
 - **Epic completion notification on close** — when closing the last open child of a parent issue, `dcat close` now prints a message with a command to close the parent (closes dogcat-3o79)
 - **`--no-parent` filter for listing commands** — filters to top-level issues (no parent set). Available on `list`, `ready`, `open`, `blocked`, `in-progress`, `in-review`, `deferred`, `manual`, `export`, and `pr` (closes dogcat-4i7x)
 

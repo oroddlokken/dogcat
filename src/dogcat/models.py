@@ -105,6 +105,9 @@ class Issue:
     original_type: IssueType | None = None  # For tombstones
     comments: list[Comment] = field(default_factory=list[Comment])
     duplicate_of: str | None = None  # ID of original if this is a duplicate
+    snoozed_until: datetime | None = (
+        None  # Snooze: hide from list/ready until this time
+    )
     metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def is_closed(self) -> bool:
@@ -287,6 +290,9 @@ def issue_to_dict(issue: Issue) -> dict[str, Any]:
             for comment in issue.comments
         ],
         "duplicate_of": issue.duplicate_of,
+        "snoozed_until": (
+            issue.snoozed_until.isoformat() if issue.snoozed_until else None
+        ),
         "metadata": issue.metadata,
     }
 
@@ -402,6 +408,11 @@ def dict_to_issue(data: dict[str, Any]) -> Issue:
         original_type=(IssueType(raw_original_type) if raw_original_type else None),
         comments=comments,
         duplicate_of=data.get("duplicate_of"),
+        snoozed_until=(
+            datetime.fromisoformat(data["snoozed_until"])
+            if data.get("snoozed_until")
+            else None
+        ),
         metadata=data.get("metadata", {}),
     )
 

@@ -15,10 +15,16 @@ from ._completions import (
     complete_namespaces,
     complete_owners,
     complete_priorities,
+    complete_snooze_durations,
     complete_statuses,
     complete_types,
 )
-from ._helpers import _parse_priority_value, get_default_operator, get_storage
+from ._helpers import (
+    _parse_priority_value,
+    get_default_operator,
+    get_storage,
+    parse_duration,
+)
 from ._json_state import echo_error, is_json_output
 
 if TYPE_CHECKING:
@@ -154,6 +160,18 @@ def register(app: typer.Typer) -> None:
             "--manual/--no-manual",
             help="Mark/unmark issue as manual (not for agents)",
         ),
+        snooze_until: str | None = typer.Option(
+            None,
+            "--snooze-until",
+            "--snooze",
+            help="Snooze until duration (e.g. 7d, 2w) or ISO8601 date",
+            autocompletion=complete_snooze_durations,
+        ),
+        unsnooze: bool = typer.Option(
+            False,
+            "--unsnooze",
+            help="Remove snooze from issue",
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         updated_by: str | None = typer.Option(
             None,
@@ -243,6 +261,10 @@ def register(app: typer.Typer) -> None:
                     updates["parent"] = resolved_parent
             if labels is not None:
                 updates["labels"] = parse_labels(labels)
+            if snooze_until is not None:
+                updates["snoozed_until"] = parse_duration(snooze_until)
+            if unsnooze:
+                updates["snoozed_until"] = None
 
             if (
                 not updates

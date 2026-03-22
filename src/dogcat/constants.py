@@ -170,6 +170,7 @@ TRACKED_FIELDS: frozenset[str] = frozenset(
         "design",
         "status",
         "owner",
+        "snoozed_until",
     },
 )
 

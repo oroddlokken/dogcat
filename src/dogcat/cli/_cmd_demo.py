@@ -70,6 +70,7 @@ def register(app: typer.Typer) -> None:
             typer.echo(
                 "  - Full metadata: created_by, updated_by, closed_by, deleted_by",
             )
+            typer.echo("  - 3 snoozed issues (hidden from list/ready by default)")
 
             from dogcat.demo import generate_demo_inbox
 

@@ -21,6 +21,7 @@ Team members:
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 from dogcat.config import get_issue_prefix
@@ -1299,6 +1300,94 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         status=Status.DRAFT,
         labels=["mobile", "ux", "draft"],
         created_by="diana@example.com",
+    )
+
+    # =========================================================================
+    # Snoozed issues
+    # =========================================================================
+
+    # A bug that's known but the fix depends on an upstream release next month
+    snoozed1_id = _create(
+        "Timezone offset bug in date picker",
+        description=(
+            "The date picker shows UTC dates instead of local time for users "
+            "in negative UTC offsets. Root cause is in the upstream datetime "
+            "library — fix is merged there but won't be released until next month."
+        ),
+        notes="Waiting for upstream v3.2 release. Snoozing until then.",
+        priority=2,
+        issue_type=IssueType.BUG,
+        labels=["frontend", "ux", "upstream"],
+        external_ref="BUG-915",
+        owner="eve@example.com",
+        created_by="igor@example.com",
+    )
+    _comment(
+        snoozed1_id,
+        "eve@example.com",
+        "Confirmed the fix in upstream main. Release ETA is mid-April. "
+        "Snoozing this until then so it doesn't clutter the board.",
+    )
+    _update(
+        snoozed1_id,
+        {"snoozed_until": datetime.now(timezone.utc) + timedelta(days=25)},
+        updated_by="eve@example.com",
+    )
+
+    # A task that someone wants to revisit next week after a holiday
+    snoozed2_id = _create(
+        "Evaluate new logging framework options",
+        description=(
+            "Compare structured logging frameworks (structlog, loguru, etc.) "
+            "for potential migration from stdlib logging. Need to benchmark "
+            "performance impact and check compatibility with our ELK stack."
+        ),
+        acceptance=(
+            "- [ ] Benchmark at least 3 frameworks\n"
+            "- [ ] Test ELK integration\n"
+            "- [ ] Write recommendation doc"
+        ),
+        priority=3,
+        issue_type=IssueType.TASK,
+        status=Status.IN_PROGRESS,
+        labels=["backend", "observability", "research"],
+        owner="charlie@example.com",
+        created_by="charlie@example.com",
+    )
+    _comment(
+        snoozed2_id,
+        "charlie@example.com",
+        "Started the benchmarks but heading on PTO. Snoozing for a week.",
+    )
+    _update(
+        snoozed2_id,
+        {"snoozed_until": datetime.now(timezone.utc) + timedelta(days=6)},
+        updated_by="charlie@example.com",
+    )
+
+    # A low-priority feature request snoozed until after the current sprint
+    snoozed3_id = _create(
+        "Add dark mode to admin dashboard",
+        description=(
+            "Multiple users have requested dark mode for the admin dashboard. "
+            "The component library supports theming but we'd need to define "
+            "a dark color palette and test all 40+ screens."
+        ),
+        priority=3,
+        issue_type=IssueType.FEATURE,
+        labels=["frontend", "ux", "admin"],
+        external_ref="FEAT-230",
+        created_by="alice@example.com",
+    )
+    _comment(
+        snoozed3_id,
+        "alice@example.com",
+        "Nice to have but not this sprint. Snoozing for 2 weeks.",
+    )
+    _update(
+        snoozed3_id,
+        {"snoozed_until": datetime.now(timezone.utc) + timedelta(days=14)},
+        updated_by="alice@example.com",
     )
 
     return created_ids

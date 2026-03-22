@@ -256,6 +256,11 @@ def register(app: typer.Typer) -> None:
             "--table",
             help="Display issues in aligned columns",
         ),
+        include_snoozed: bool = typer.Option(
+            False,
+            "--include-snoozed",
+            help="Include snoozed issues in results",
+        ),
         expand: bool = typer.Option(
             False,
             "--expand",
@@ -335,6 +340,17 @@ def register(app: typer.Typer) -> None:
             if closed_excluded_by_default:
                 issues = [
                     i for i in issues if i.status.value not in ("closed", "tombstone")
+                ]
+
+            # Exclude snoozed issues by default (unless --include-snoozed or --all)
+            if not include_snoozed and not all_issues:
+                from datetime import datetime as dt
+
+                now = dt.now().astimezone()
+                issues = [
+                    i
+                    for i in issues
+                    if i.snoozed_until is None or i.snoozed_until <= now
                 ]
 
             # Handle --open filter for multiple statuses
