@@ -421,10 +421,13 @@ def get_namespace_filter(
     visible: list[str] | None = config.get("visible_namespaces")
     hidden: list[str] | None = config.get("hidden_namespaces")
 
-    if not visible and not hidden:
-        return None
-
     primary = get_issue_prefix(dogcats_dir)
+
+    if not visible and not hidden:
+        # In .dogcatrc context (shared database), default to primary namespace
+        if _find_rc_parent() is not None:
+            return lambda ns: ns == primary
+        return None
 
     if visible:
         allowed = set(visible)
