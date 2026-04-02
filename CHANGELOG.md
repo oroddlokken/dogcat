@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.11.7 (2026-04-02)
+
 ### Added
 
 - **Snooze/postpone issues** — temporarily hide issues from `list` and `ready` without changing their status. `dcat snooze <id> 7d` hides an issue for 7 days (supports `Nd`, `Nw`, `Nm`, or ISO dates), `dcat unsnooze <id>` reveals it early, and `dcat snoozed` lists all currently snoozed issues. Snoozed issues reappear automatically when the snooze expires. Also available via `dcat update --snooze-until`/`--unsnooze` and visible with `--include-snoozed` or `--all` flags (closes dogcat-28vf)
