@@ -10,6 +10,7 @@
 
 ### Fixed
 
+- **Fixed namespace filter showing all namespaces in shared database setups** — when using `.dogcatrc` without explicit `visible_namespaces`/`hidden_namespaces` config, `get_namespace_filter()` now defaults to the repo's primary namespace instead of showing issues from all namespaces (closes #20, thanks @fredrik-lindseth)
 - **Fixed `get_storage()` bypassing `.dogcatrc` when local `.dogcats/` exists** — always resolve via `find_dogcats_dir()` for the default path so `.dogcatrc` takes priority over a local `.dogcats/` directory that may only contain `config.local.toml` (closes #18, thanks @fredrik-lindseth)
 - **Fixed agnix linter warnings in CLAUDE.md and example-md template** — replaced ambiguous "Generally" phrasing with explicit priority order, reframed negative-only instructions ("Do NOT", "NEVER") as positive alternatives, moved critical sections out of the "lost in the middle" zone, and removed trailing commas in `.vscode/settings.json` (closes dogcat-15gy)
 - **Fixed `storage.update()` not handling closed field transitions** — updating status away from `closed` now clears `closed_at`, `close_reason`, and `closed_by`; updating status to `closed` now sets `closed_at`. Previously, `dcat update --status in_review` on a closed issue left stale closed fields, causing issues to appear in both in-review lists and with closed annotations (closes dogcat-36bt)
