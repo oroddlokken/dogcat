@@ -722,12 +722,15 @@ class TestRepoLocalConfig:
 class TestGetNamespaceFilter:
     """Tests for get_namespace_filter function."""
 
-    def test_no_config_returns_none(self, tmp_path: Path) -> None:
-        """No config → returns None (no filtering)."""
+    def test_no_config_returns_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No visible/hidden config outside .dogcatrc context → no filtering."""
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
         save_config(str(dogcats_dir), {"namespace": "a"})
 
+        monkeypatch.chdir(tmp_path)
         result = get_namespace_filter(str(dogcats_dir))
         assert result is None
 
@@ -784,20 +787,84 @@ class TestGetNamespaceFilter:
         assert ns_filter("a") is False
         assert ns_filter("b") is False
 
-    def test_empty_visible_list_returns_none(self, tmp_path: Path) -> None:
-        """Empty visible_namespaces behaves as no filtering."""
+    def test_empty_visible_list_returns_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Empty visible_namespaces outside .dogcatrc context → no filtering."""
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
         save_config(str(dogcats_dir), {"namespace": "a", "visible_namespaces": []})
 
+        monkeypatch.chdir(tmp_path)
         result = get_namespace_filter(str(dogcats_dir))
         assert result is None
 
-    def test_empty_hidden_list_returns_none(self, tmp_path: Path) -> None:
-        """Empty hidden_namespaces behaves as no filtering."""
+    def test_empty_hidden_list_returns_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Empty hidden_namespaces outside .dogcatrc context → no filtering."""
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
         save_config(str(dogcats_dir), {"namespace": "a", "hidden_namespaces": []})
+
+        monkeypatch.chdir(tmp_path)
+        result = get_namespace_filter(str(dogcats_dir))
+        assert result is None
+
+    def test_dogcatrc_context_defaults_to_primary_namespace(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """In .dogcatrc context without visible/hidden config, filter to primary."""
+        # Set up shared .dogcats dir
+        shared_dogcats = tmp_path / "shared" / ".dogcats"
+        shared_dogcats.mkdir(parents=True)
+        save_config(str(shared_dogcats), {"namespace": "myrepo"})
+
+        # Set up repo dir with .dogcatrc pointing to shared dir
+        repo_dir = tmp_path / "repo"
+        repo_dir.mkdir()
+        (repo_dir / DOGCATRC_FILENAME).write_text(str(shared_dogcats))
+
+        monkeypatch.chdir(repo_dir)
+
+        ns_filter = get_namespace_filter(str(shared_dogcats))
+        assert ns_filter is not None
+        assert ns_filter("myrepo") is True
+        assert ns_filter("other") is False
+
+    def test_dogcatrc_context_with_visible_uses_visible(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """In .dogcatrc context with visible_namespaces, use that config."""
+        shared_dogcats = tmp_path / "shared" / ".dogcats"
+        shared_dogcats.mkdir(parents=True)
+        save_config(
+            str(shared_dogcats),
+            {"namespace": "a", "visible_namespaces": ["b", "c"]},
+        )
+
+        repo_dir = tmp_path / "repo"
+        repo_dir.mkdir()
+        (repo_dir / DOGCATRC_FILENAME).write_text(str(shared_dogcats))
+
+        monkeypatch.chdir(repo_dir)
+
+        ns_filter = get_namespace_filter(str(shared_dogcats))
+        assert ns_filter is not None
+        assert ns_filter("a") is True
+        assert ns_filter("b") is True
+        assert ns_filter("c") is True
+        assert ns_filter("d") is False
+
+    def test_no_dogcatrc_no_config_returns_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without .dogcatrc and without visible/hidden config, no filtering."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        save_config(str(dogcats_dir), {"namespace": "a"})
+
+        monkeypatch.chdir(tmp_path)
 
         result = get_namespace_filter(str(dogcats_dir))
         assert result is None
