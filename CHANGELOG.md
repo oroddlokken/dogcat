@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Development
+
+- **Upgraded GitHub Actions to Node.js 24** — bumped `actions/checkout` from v4 to v5 and `astral-sh/setup-uv` from v4 to v7 (both native Node 24), and added `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24` env var for `softprops/action-gh-release@v2` which has no Node 24 release yet (closes dogcat-1e2t)
+
 ## 0.11.7 (2026-04-02)
 
 ### Added
