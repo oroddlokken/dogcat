@@ -179,6 +179,61 @@ class TestCLIReady:
         assert normal_id in result.stdout
         assert skip_id not in result.stdout
 
+    def test_ready_manual(self, tmp_path: Path) -> None:
+        """Test that ready --manual shows only manual issues."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        create1 = runner.invoke(
+            app,
+            ["create", "Normal issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+        normal_id = create1.stdout.split(": ")[0].split()[-1]
+
+        create2 = runner.invoke(
+            app,
+            [
+                "create",
+                "Manual issue",
+                "--manual",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        manual_id = create2.stdout.split(": ")[0].split()[-1]
+
+        result = runner.invoke(
+            app,
+            ["ready", "--manual", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert manual_id in result.stdout
+        assert normal_id not in result.stdout
+
+    def test_ready_manual_agent_only_mutex(self, tmp_path: Path) -> None:
+        """Test that --manual and --agent-only cannot be combined on ready."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "ready",
+                "--manual",
+                "--agent-only",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code != 0
+        assert "mutually exclusive" in (result.stdout + result.stderr)
+
 
 class TestCLIBlocked:
     """Test blocked command."""
@@ -367,6 +422,49 @@ class TestCLIInProgress:
         data = json.loads(result.stdout)
         assert len(data) == 1
         assert data[0]["status"] == "in_progress"
+
+    def test_in_progress_manual(self, tmp_path: Path) -> None:
+        """Test that in-progress --manual shows only manual issues."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        create1 = runner.invoke(
+            app,
+            [
+                "create",
+                "Normal WIP",
+                "--status",
+                "in_progress",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        normal_id = create1.stdout.split(": ")[0].split()[-1]
+
+        create2 = runner.invoke(
+            app,
+            [
+                "create",
+                "Manual WIP",
+                "--status",
+                "in_progress",
+                "--manual",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        manual_id = create2.stdout.split(": ")[0].split()[-1]
+
+        result = runner.invoke(
+            app,
+            ["in-progress", "--manual", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert manual_id in result.stdout
+        assert normal_id not in result.stdout
 
 
 class TestCLIOpen:

@@ -244,6 +244,15 @@ def get_storage(
     return JSONLStorage(f"{dogcats_dir}/issues.jsonl", create_dir=create_dir)
 
 
+def check_agent_manual_exclusive(*, agent_only: bool, manual_only: bool) -> None:
+    """Reject --agent-only combined with --manual."""
+    if agent_only and manual_only:
+        msg = "--agent-only and --manual are mutually exclusive"
+        raise typer.BadParameter(
+            msg,
+        )
+
+
 def apply_common_filters(
     issues: list[Any],
     *,
@@ -255,6 +264,7 @@ def apply_common_filters(
     no_parent: bool = False,
     namespace: str | None = None,
     agent_only: bool = False,
+    manual_only: bool = False,
     all_namespaces: bool = False,
     dogcats_dir: str | None = None,
     storage: Any = None,
@@ -266,6 +276,8 @@ def apply_common_filters(
     """
     from dogcat.config import get_namespace_filter
     from dogcat.constants import parse_labels
+
+    check_agent_manual_exclusive(agent_only=agent_only, manual_only=manual_only)
 
     if issue_type:
         issues = [i for i in issues if i.issue_type.value == issue_type]
@@ -292,6 +304,10 @@ def apply_common_filters(
             i
             for i in issues
             if not (i.metadata.get("manual") or i.metadata.get("no_agent"))
+        ]
+    if manual_only:
+        issues = [
+            i for i in issues if i.metadata.get("manual") or i.metadata.get("no_agent")
         ]
 
     # Namespace filtering (skip if --all-namespaces)

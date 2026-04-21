@@ -246,6 +246,11 @@ def register(app: typer.Typer) -> None:
             "--agent-only",
             help="Only show issues available for agents",
         ),
+        manual: bool = typer.Option(
+            False,
+            "--manual",
+            help="Only show issues marked as manual",
+        ),
         tree: bool = typer.Option(
             False,
             "--tree",
@@ -279,6 +284,9 @@ def register(app: typer.Typer) -> None:
             # Validate mutually exclusive options early
             if tree and table:
                 echo_error("--tree and --table are mutually exclusive")
+                raise typer.Exit(1)
+            if agent_only and manual:
+                echo_error("--agent-only and --manual are mutually exclusive")
                 raise typer.Exit(1)
 
             storage = get_storage(dogcats_dir)
@@ -365,6 +373,12 @@ def register(app: typer.Typer) -> None:
                     i
                     for i in issues
                     if not (i.metadata.get("manual") or i.metadata.get("no_agent"))
+                ]
+            elif manual:
+                issues = [
+                    i
+                    for i in issues
+                    if i.metadata.get("manual") or i.metadata.get("no_agent")
                 ]
 
             # Apply date-based filtering for closed issues

@@ -344,6 +344,58 @@ class TestCLIList:
         assert "Normal issue" in result.stdout
         assert "Agent skip issue" not in result.stdout
 
+    def test_list_manual(self, tmp_path: Path) -> None:
+        """Test list --manual shows only manual issues."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        runner.invoke(
+            app,
+            ["create", "Normal issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Manual issue",
+                "--manual",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["list", "--manual", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Manual issue" in result.stdout
+        assert "Normal issue" not in result.stdout
+
+    def test_list_manual_agent_only_mutex(self, tmp_path: Path) -> None:
+        """Test that --manual and --agent-only cannot be combined."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "list",
+                "--manual",
+                "--agent-only",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code != 0
+        assert "mutually exclusive" in (result.stdout + result.stderr)
+
     def test_list_tree_indents_subtasks(self, tmp_path: Path) -> None:
         """Test list --tree indents subtasks under their parents."""
         dogcats_dir = tmp_path / ".dogcats"

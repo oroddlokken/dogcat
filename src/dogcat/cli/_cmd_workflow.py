@@ -25,6 +25,7 @@ from ._formatting import (
 from ._helpers import (
     _make_alias,
     apply_common_filters,
+    check_agent_manual_exclusive,
     get_default_operator,
     get_storage,
     parse_duration,
@@ -96,6 +97,11 @@ def register(app: typer.Typer) -> None:
             "--agent-only",
             help="Only show issues available for agents",
         ),
+        manual: bool = typer.Option(
+            False,
+            "--manual",
+            help="Only show issues marked as manual",
+        ),
         include_snoozed: bool = typer.Option(
             False,
             "--include-snoozed",
@@ -130,6 +136,7 @@ def register(app: typer.Typer) -> None:
                 namespace=namespace,
                 all_namespaces=all_namespaces,
                 agent_only=agent_only,
+                manual_only=manual,
                 dogcats_dir=str(storage.dogcats_dir),
                 storage=storage,
             )
@@ -254,6 +261,11 @@ def register(app: typer.Typer) -> None:
             "--agent-only",
             help="Only show issues available for agents",
         ),
+        manual: bool = typer.Option(
+            False,
+            "--manual",
+            help="Only show issues marked as manual",
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
@@ -280,6 +292,7 @@ def register(app: typer.Typer) -> None:
                 namespace=namespace,
                 all_namespaces=all_namespaces,
                 agent_only=agent_only,
+                manual_only=manual,
                 dogcats_dir=str(storage.dogcats_dir),
                 storage=storage,
             )
@@ -393,6 +406,11 @@ def register(app: typer.Typer) -> None:
             "--agent-only",
             help="Only show issues available for agents",
         ),
+        manual: bool = typer.Option(
+            False,
+            "--manual",
+            help="Only show issues marked as manual",
+        ),
         tree: bool = typer.Option(False, "--tree", help="Display as tree"),
         table: bool = typer.Option(False, "--table", help="Display in columns"),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
@@ -414,6 +432,7 @@ def register(app: typer.Typer) -> None:
                 namespace=namespace,
                 all_namespaces=all_namespaces,
                 agent_only=agent_only,
+                manual_only=manual,
                 dogcats_dir=str(storage.dogcats_dir),
                 storage=storage,
             )
@@ -505,6 +524,11 @@ def register(app: typer.Typer) -> None:
             "--agent-only",
             help="Only show issues available for agents",
         ),
+        manual: bool = typer.Option(
+            False,
+            "--manual",
+            help="Only show issues marked as manual",
+        ),
         tree: bool = typer.Option(False, "--tree", help="Display as tree"),
         table: bool = typer.Option(False, "--table", help="Display in columns"),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
@@ -526,6 +550,7 @@ def register(app: typer.Typer) -> None:
                 namespace=namespace,
                 all_namespaces=all_namespaces,
                 agent_only=agent_only,
+                manual_only=manual,
                 dogcats_dir=str(storage.dogcats_dir),
                 storage=storage,
             )
@@ -617,6 +642,11 @@ def register(app: typer.Typer) -> None:
             "--agent-only",
             help="Only show issues available for agents",
         ),
+        manual: bool = typer.Option(
+            False,
+            "--manual",
+            help="Only show issues marked as manual",
+        ),
         tree: bool = typer.Option(False, "--tree", help="Display as tree"),
         table: bool = typer.Option(False, "--table", help="Display in columns"),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
@@ -638,6 +668,7 @@ def register(app: typer.Typer) -> None:
                 namespace=namespace,
                 all_namespaces=all_namespaces,
                 agent_only=agent_only,
+                manual_only=manual,
                 dogcats_dir=str(storage.dogcats_dir),
                 storage=storage,
             )
@@ -719,6 +750,7 @@ def register(app: typer.Typer) -> None:
         namespace: str | None,
         all_namespaces: bool,
         agent_only: bool,
+        manual_only: bool,
         tree: bool,
         table: bool,
         json_output: bool,
@@ -742,6 +774,7 @@ def register(app: typer.Typer) -> None:
                 namespace=namespace,
                 all_namespaces=all_namespaces,
                 agent_only=agent_only,
+                manual_only=manual_only,
                 dogcats_dir=str(storage.dogcats_dir),
                 storage=storage,
             )
@@ -833,6 +866,11 @@ def register(app: typer.Typer) -> None:
             "--agent-only",
             help="Only show issues available for agents",
         ),
+        manual: bool = typer.Option(
+            False,
+            "--manual",
+            help="Only show issues marked as manual",
+        ),
         tree: bool = typer.Option(False, "--tree", help="Display as tree"),
         table: bool = typer.Option(False, "--table", help="Display in columns"),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
@@ -854,6 +892,7 @@ def register(app: typer.Typer) -> None:
             namespace=namespace,
             all_namespaces=all_namespaces,
             agent_only=agent_only,
+            manual_only=manual,
             tree=tree,
             table=table,
             json_output=json_output,
@@ -921,6 +960,11 @@ def register(app: typer.Typer) -> None:
             "--agent-only",
             help="Only show issues available for agents",
         ),
+        manual: bool = typer.Option(
+            False,
+            "--manual",
+            help="Only show issues marked as manual",
+        ),
         tree: bool = typer.Option(False, "--tree", help="Display as tree"),
         table: bool = typer.Option(False, "--table", help="Display in columns"),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
@@ -942,6 +986,7 @@ def register(app: typer.Typer) -> None:
             namespace=namespace,
             all_namespaces=all_namespaces,
             agent_only=agent_only,
+            manual_only=manual,
             tree=tree,
             table=table,
             json_output=json_output,
@@ -1009,6 +1054,11 @@ def register(app: typer.Typer) -> None:
             "--agent-only",
             help="Only show issues available for agents",
         ),
+        manual: bool = typer.Option(
+            False,
+            "--manual",
+            help="Only show issues marked as manual",
+        ),
         tree: bool = typer.Option(False, "--tree", help="Display as tree"),
         table: bool = typer.Option(False, "--table", help="Display in columns"),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
@@ -1030,6 +1080,7 @@ def register(app: typer.Typer) -> None:
                 namespace=namespace,
                 all_namespaces=all_namespaces,
                 agent_only=agent_only,
+                manual_only=manual,
                 dogcats_dir=str(storage.dogcats_dir),
                 storage=storage,
             )
@@ -1284,6 +1335,16 @@ def register(app: typer.Typer) -> None:
             "-A",
             help="Show issues from all namespaces",
         ),
+        agent_only: bool = typer.Option(
+            False,
+            "--agent-only",
+            help="Only show issues available for agents",
+        ),
+        manual: bool = typer.Option(
+            False,
+            "--manual",
+            help="Only show issues marked as manual",
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
@@ -1295,6 +1356,8 @@ def register(app: typer.Typer) -> None:
             from dogcat.event_log import EventLog, _serialize
 
             from ._formatting import format_event, get_event_legend
+
+            check_agent_manual_exclusive(agent_only=agent_only, manual_only=manual)
 
             storage = get_storage(dogcats_dir)
             final_limit = limit_arg or limit or 10
@@ -1309,6 +1372,22 @@ def register(app: typer.Typer) -> None:
                     events = [
                         e for e in events if ns_filter(extract_prefix(e.issue_id) or "")
                     ]
+
+            if agent_only or manual:
+
+                def _is_manual(event_issue_id: str) -> bool:
+                    issue_obj = storage.get(event_issue_id)
+                    if issue_obj is None:
+                        return False
+                    return bool(
+                        issue_obj.metadata.get("manual")
+                        or issue_obj.metadata.get("no_agent"),
+                    )
+
+                if agent_only:
+                    events = [e for e in events if not _is_manual(e.issue_id)]
+                else:
+                    events = [e for e in events if _is_manual(e.issue_id)]
 
             events = events[:final_limit]
             events.reverse()  # Display oldest-first
@@ -1350,6 +1429,16 @@ def register(app: typer.Typer) -> None:
             "-A",
             help="Show issues from all namespaces",
         ),
+        agent_only: bool = typer.Option(
+            False,
+            "--agent-only",
+            help="Only show issues available for agents",
+        ),
+        manual: bool = typer.Option(
+            False,
+            "--manual",
+            help="Only show issues marked as manual",
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
@@ -1359,6 +1448,8 @@ def register(app: typer.Typer) -> None:
         with the oldest of the recent issues at the top.
         """
         try:
+            check_agent_manual_exclusive(agent_only=agent_only, manual_only=manual)
+
             storage = get_storage(dogcats_dir)
             issues = [
                 i
@@ -1372,6 +1463,19 @@ def register(app: typer.Typer) -> None:
                 ns_filter = get_namespace_filter(actual_dogcats_dir)
                 if ns_filter is not None:
                     issues = [i for i in issues if ns_filter(i.namespace)]
+
+            if agent_only:
+                issues = [
+                    i
+                    for i in issues
+                    if not (i.metadata.get("manual") or i.metadata.get("no_agent"))
+                ]
+            elif manual:
+                issues = [
+                    i
+                    for i in issues
+                    if i.metadata.get("manual") or i.metadata.get("no_agent")
+                ]
 
             final_limit = limit_arg or limit or 10
             # Sort descending to select the N most recent, then reverse for display
@@ -1417,6 +1521,16 @@ def register(app: typer.Typer) -> None:
             "-A",
             help="Show issues from all namespaces",
         ),
+        agent_only: bool = typer.Option(
+            False,
+            "--agent-only",
+            help="Only show issues available for agents",
+        ),
+        manual: bool = typer.Option(
+            False,
+            "--manual",
+            help="Only show issues marked as manual",
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
@@ -1425,6 +1539,8 @@ def register(app: typer.Typer) -> None:
             limit_arg=limit_arg,
             limit=limit,
             all_namespaces=all_namespaces,
+            agent_only=agent_only,
+            manual=manual,
             json_output=json_output,
             dogcats_dir=dogcats_dir,
         )
@@ -1454,6 +1570,16 @@ def register(app: typer.Typer) -> None:
             "-A",
             help="Show issues from all namespaces",
         ),
+        agent_only: bool = typer.Option(
+            False,
+            "--agent-only",
+            help="Only show issues available for agents",
+        ),
+        manual: bool = typer.Option(
+            False,
+            "--manual",
+            help="Only show issues marked as manual",
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
@@ -1462,6 +1588,8 @@ def register(app: typer.Typer) -> None:
             limit_arg=limit_arg,
             limit=limit,
             all_namespaces=all_namespaces,
+            agent_only=agent_only,
+            manual=manual,
             json_output=json_output,
             dogcats_dir=dogcats_dir,
         )
@@ -1473,17 +1601,51 @@ def register(app: typer.Typer) -> None:
             "--no-parent",
             help="Show only top-level issues (no parent)",
         ),
+        agent_only: bool = typer.Option(
+            False,
+            "--agent-only",
+            help="Only show issues available for agents",
+        ),
+        manual: bool = typer.Option(
+            False,
+            "--manual",
+            help="Only show issues marked as manual",
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Show in-progress and in-review issues together."""
         try:
+            check_agent_manual_exclusive(agent_only=agent_only, manual_only=manual)
+
             storage = get_storage(dogcats_dir)
             ip_issues = storage.list({"status": "in_progress"})
             ir_issues = storage.list({"status": "in_review"})
             if no_parent:
                 ip_issues = [i for i in ip_issues if i.parent is None]
                 ir_issues = [i for i in ir_issues if i.parent is None]
+            if agent_only:
+                ip_issues = [
+                    i
+                    for i in ip_issues
+                    if not (i.metadata.get("manual") or i.metadata.get("no_agent"))
+                ]
+                ir_issues = [
+                    i
+                    for i in ir_issues
+                    if not (i.metadata.get("manual") or i.metadata.get("no_agent"))
+                ]
+            elif manual:
+                ip_issues = [
+                    i
+                    for i in ip_issues
+                    if i.metadata.get("manual") or i.metadata.get("no_agent")
+                ]
+                ir_issues = [
+                    i
+                    for i in ir_issues
+                    if i.metadata.get("manual") or i.metadata.get("no_agent")
+                ]
             ip_issues.sort(key=lambda i: i.priority)
             ir_issues.sort(key=lambda i: i.priority)
 
@@ -1710,6 +1872,11 @@ def register(app: typer.Typer) -> None:
             "--agent-only",
             help="Only show issues available for agents",
         ),
+        manual: bool = typer.Option(
+            False,
+            "--manual",
+            help="Only show issues marked as manual",
+        ),
         tree: bool = typer.Option(False, "--tree", help="Display as tree"),
         table: bool = typer.Option(False, "--table", help="Display in columns"),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
@@ -1744,6 +1911,7 @@ def register(app: typer.Typer) -> None:
                 namespace=namespace,
                 all_namespaces=all_namespaces,
                 agent_only=agent_only,
+                manual_only=manual,
                 dogcats_dir=str(storage.dogcats_dir),
                 storage=storage,
             )

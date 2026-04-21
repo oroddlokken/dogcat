@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
 import logging
 
@@ -223,7 +223,7 @@ class JSONLStorage:
                 )
 
     @contextmanager
-    def _file_lock(self) -> Iterator[None]:
+    def _file_lock(self) -> Generator[None, None, None]:
         """Acquire an advisory file lock for exclusive writes."""
         lock_fd = self._lock_path.open("w")
         try:

@@ -110,6 +110,11 @@ def register(app: typer.Typer) -> None:
             "--agent-only",
             help="Only show issues available for agents",
         ),
+        manual: bool = typer.Option(
+            False,
+            "--manual",
+            help="Only show issues marked as manual",
+        ),
         tree: bool = typer.Option(False, "--tree", help="Display as tree"),
         table: bool = typer.Option(False, "--table", help="Display in columns"),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
@@ -180,6 +185,7 @@ def register(app: typer.Typer) -> None:
                 namespace=namespace,
                 all_namespaces=all_namespaces,
                 agent_only=agent_only,
+                manual_only=manual,
                 dogcats_dir=str(storage.dogcats_dir),
                 storage=storage,
             )

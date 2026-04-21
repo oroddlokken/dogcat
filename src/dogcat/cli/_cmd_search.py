@@ -96,6 +96,16 @@ def register(app: typer.Typer) -> None:
             "-A",
             help="Show issues from all namespaces",
         ),
+        agent_only: bool = typer.Option(
+            False,
+            "--agent-only",
+            help="Only show issues available for agents",
+        ),
+        manual: bool = typer.Option(
+            False,
+            "--manual",
+            help="Only show issues marked as manual",
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
@@ -128,7 +138,7 @@ def register(app: typer.Typer) -> None:
                     i for i in issues if i.status.value not in ("closed", "tombstone")
                 ]
 
-            # Apply common filters (namespace, priority, label, owner)
+            # Apply common filters (namespace, priority, label, owner, manual/agent)
             issues = apply_common_filters(
                 issues,
                 priority=priority,
@@ -136,6 +146,8 @@ def register(app: typer.Typer) -> None:
                 owner=owner,
                 namespace=namespace,
                 all_namespaces=all_namespaces,
+                agent_only=agent_only,
+                manual_only=manual,
                 dogcats_dir=str(storage.dogcats_dir),
                 storage=storage,
             )
