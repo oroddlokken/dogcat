@@ -3,24 +3,19 @@
 from __future__ import annotations
 
 import dataclasses
-import fcntl
+import logging
 import os
 import subprocess
 import tempfile
-from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
-
-if TYPE_CHECKING:
-    from collections.abc import Generator
-
-import logging
 
 import orjson
 
 from dogcat._version import version as _dcat_version
 from dogcat.constants import TRACKED_FIELDS
+from dogcat.locking import advisory_file_lock
 from dogcat.models import (
     Dependency,
     DependencyType,
@@ -31,6 +26,9 @@ from dogcat.models import (
     dict_to_issue,
     issue_to_dict,
 )
+
+if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
 
 
 class JSONLStorage:
@@ -222,16 +220,9 @@ class JSONLStorage:
                     issue.full_id,
                 )
 
-    @contextmanager
-    def _file_lock(self) -> Generator[None, None, None]:
+    def _file_lock(self) -> AbstractContextManager[None]:
         """Acquire an advisory file lock for exclusive writes."""
-        lock_fd = self._lock_path.open("w")
-        try:
-            fcntl.flock(lock_fd, fcntl.LOCK_EX)
-            yield
-        finally:
-            fcntl.flock(lock_fd, fcntl.LOCK_UN)
-            lock_fd.close()
+        return advisory_file_lock(self._lock_path)
 
     def _save(
         self,
@@ -332,7 +323,7 @@ class JSONLStorage:
 
                     tmp_file.flush()
                     os.fsync(tmp_file.fileno())
-                except Exception as e:
+                except (OSError, orjson.JSONEncodeError, TypeError) as e:
                     tmp_path.unlink(missing_ok=True)
                     msg = f"Failed to write to temporary file: {e}"
                     raise RuntimeError(msg) from e
@@ -452,7 +443,7 @@ class JSONLStorage:
         )
         try:
             self._event_log.append(event)
-        except Exception:
+        except (OSError, RuntimeError):
             logging.getLogger(__name__).debug(
                 "Failed to write event for %s",
                 issue.full_id,
@@ -675,13 +666,13 @@ class JSONLStorage:
             "design",
             "acceptance",
             "notes",
-            "close_reason",
+            "closed_reason",
             "updated_by",
             "closed_at",
             "closed_by",
             "deleted_at",
             "deleted_by",
-            "delete_reason",
+            "deleted_reason",
             "original_type",
             "duplicate_of",
             "snoozed_until",
@@ -745,7 +736,7 @@ class JSONLStorage:
             elif issue.status != Status.CLOSED and issue.closed_at is not None:
                 # Transitioning away from closed — clear closed fields
                 issue.closed_at = None
-                issue.close_reason = None
+                issue.closed_reason = None
                 issue.closed_by = None
 
         # Maintain parent-child index if parent changed
@@ -1009,7 +1000,7 @@ class JSONLStorage:
         issue.closed_at = now
         issue.updated_at = now
         if reason:
-            issue.close_reason = reason
+            issue.closed_reason = reason
         if closed_by:
             issue.closed_by = closed_by
 
@@ -1060,7 +1051,7 @@ class JSONLStorage:
         issue.status = Status.OPEN
         issue.updated_at = now
         issue.closed_at = None
-        issue.close_reason = None
+        issue.closed_reason = None
         issue.closed_by = None
         if reopened_by:
             issue.updated_by = reopened_by
@@ -1113,7 +1104,7 @@ class JSONLStorage:
         issue.status = Status.TOMBSTONE
         issue.deleted_at = now
         issue.updated_at = now
-        issue.delete_reason = reason
+        issue.deleted_reason = reason
         issue.original_type = issue.issue_type
         if deleted_by:
             issue.deleted_by = deleted_by
@@ -1626,7 +1617,7 @@ def get_namespaces(
             for p in inbox.list(include_tombstones=False):
                 counts = ns_counts.setdefault(p.namespace, NamespaceCounts())
                 counts.inbox += 1
-        except Exception:
+        except (OSError, ValueError, RuntimeError):
             pass
 
     # Include pinned namespaces from config (always present even if empty)
@@ -1638,7 +1629,7 @@ def get_namespaces(
         pinned: list[str] = config.get("pinned_namespaces", [])
         for ns in pinned:
             ns_counts.setdefault(ns, NamespaceCounts())
-    except Exception:
+    except (OSError, ValueError):
         pass
 
     return ns_counts

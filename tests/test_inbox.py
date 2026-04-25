@@ -62,7 +62,7 @@ class TestProposalModel:
         assert proposal.source_repo is None
         assert proposal.closed_at is None
         assert proposal.closed_by is None
-        assert proposal.close_reason is None
+        assert proposal.closed_reason is None
         assert proposal.resolved_issue is None
 
     def test_full_id(self) -> None:
@@ -143,7 +143,7 @@ class TestProposalSerialization:
             created_at=now,
             closed_at=now,
             closed_by="admin@example.com",
-            close_reason="Accepted",
+            closed_reason="Accepted",
             resolved_issue="dogcat-abc1",
         )
         data = proposal_to_dict(proposal)
@@ -155,7 +155,7 @@ class TestProposalSerialization:
         assert data["status"] == "closed"
         assert data["closed_at"] == now.isoformat()
         assert data["closed_by"] == "admin@example.com"
-        assert data["close_reason"] == "Accepted"
+        assert data["closed_reason"] == "Accepted"
         assert data["resolved_issue"] == "dogcat-abc1"
 
     def test_proposal_to_dict_none_dates(self) -> None:
@@ -205,7 +205,7 @@ class TestProposalSerialization:
         assert proposal.source_repo == "/path/to/repo"
         assert proposal.status == ProposalStatus.CLOSED
         assert proposal.closed_by == "admin@example.com"
-        assert proposal.close_reason == "Accepted"
+        assert proposal.closed_reason == "Accepted"
         assert proposal.resolved_issue == "dogcat-abc1"
 
     def test_roundtrip_serialization(self) -> None:
@@ -413,7 +413,7 @@ class TestInboxStorage:
             resolved_issue="test-abc1",
         )
         assert result.status == ProposalStatus.CLOSED
-        assert result.close_reason == "Accepted"
+        assert result.closed_reason == "Accepted"
         assert result.closed_by == "admin@example.com"
         assert result.resolved_issue == "test-abc1"
         assert result.closed_at is not None
@@ -560,7 +560,7 @@ class TestInboxStorage:
         result = s2.get("test-inbox-4kzj")
         assert result is not None
         assert result.status == ProposalStatus.CLOSED
-        assert result.close_reason == "Done"
+        assert result.closed_reason == "Done"
 
     def test_reload(self, inbox_dir: str) -> None:
         """Test reloading storage picks up external changes."""
@@ -601,3 +601,18 @@ class TestInboxStorage:
 
         s.create(Proposal(id="4kzj", title="Test"))
         assert s.get("dc-inbox-4kzj") is not None
+
+    def test_file_lock_open_failure_raises_runtimeerror(self, inbox_dir: str) -> None:
+        """OSError opening the inbox lock file is wrapped in RuntimeError."""
+        from pathlib import Path
+
+        from dogcat.inbox import InboxStorage
+
+        s = InboxStorage(dogcats_dir=inbox_dir)
+        s._lock_path = Path(inbox_dir) / "missing-dir" / "subdir" / ".issues.lock"
+
+        with (
+            pytest.raises(RuntimeError, match="Failed to open lock file"),
+            s._file_lock(),
+        ):
+            pass

@@ -2,28 +2,26 @@
 
 from __future__ import annotations
 
-import fcntl
+import logging
 import os
 import tempfile
-from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-if TYPE_CHECKING:
-    from collections.abc import Generator
-
-import logging
-
 import orjson
 
 from dogcat.constants import TRACKED_PROPOSAL_FIELDS
+from dogcat.locking import advisory_file_lock
 from dogcat.models import (
     Proposal,
     ProposalStatus,
     dict_to_proposal,
     proposal_to_dict,
 )
+
+if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
 
 INBOX_FILENAME = "inbox.jsonl"
 
@@ -100,16 +98,9 @@ class InboxStorage:
                 )
                 self._needs_compaction = True
 
-    @contextmanager
-    def _file_lock(self) -> Generator[None, None, None]:
+    def _file_lock(self) -> AbstractContextManager[None]:
         """Acquire an advisory file lock for exclusive writes."""
-        lock_fd = self._lock_path.open("w")
-        try:
-            fcntl.flock(lock_fd, fcntl.LOCK_EX)
-            yield
-        finally:
-            fcntl.flock(lock_fd, fcntl.LOCK_UN)
-            lock_fd.close()
+        return advisory_file_lock(self._lock_path)
 
     def _save(self) -> None:
         """Compact: rewrite the entire file with only current state."""
@@ -369,7 +360,7 @@ class InboxStorage:
         proposal.closed_at = now
         proposal.updated_at = now
         if reason:
-            proposal.close_reason = reason
+            proposal.closed_reason = reason
         if closed_by:
             proposal.closed_by = closed_by
         if resolved_issue:

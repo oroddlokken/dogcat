@@ -1,11 +1,18 @@
 """Data models for Dogcat issues using dataclasses."""
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any
 
 from dogcat._version import version as _dcat_version
+
+_logger = logging.getLogger(__name__)
+_KNOWN_RECORD_TYPES = frozenset(
+    {"issue", "dependency", "link", "event", "proposal"},
+)
+_UNKNOWN_STATUS_EMOJI = "?"
 
 
 class Status(str, Enum):
@@ -39,6 +46,18 @@ class DependencyType(str, Enum):
     BLOCKS = "blocks"
     PARENT_CHILD = "parent-child"
     RELATED = "related"
+
+
+ISSUE_STATUS_EMOJIS: dict[Status, str] = {
+    Status.DRAFT: "✎",
+    Status.OPEN: "●",
+    Status.IN_PROGRESS: "◐",
+    Status.IN_REVIEW: "?",
+    Status.BLOCKED: "■",
+    Status.DEFERRED: "◇",
+    Status.CLOSED: "✓",
+    Status.TOMBSTONE: "☠",
+}
 
 
 @dataclass
@@ -92,7 +111,7 @@ class Issue:
     design: str | None = None
     acceptance: str | None = None
     notes: str | None = None
-    close_reason: str | None = None
+    closed_reason: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now().astimezone())
     created_by: str | None = None
     updated_at: datetime = field(default_factory=lambda: datetime.now().astimezone())
@@ -101,7 +120,7 @@ class Issue:
     closed_by: str | None = None
     deleted_at: datetime | None = None
     deleted_by: str | None = None
-    delete_reason: str | None = None
+    deleted_reason: str | None = None
     original_type: IssueType | None = None  # For tombstones
     comments: list[Comment] = field(default_factory=list[Comment])
     duplicate_of: str | None = None  # ID of original if this is a duplicate
@@ -129,17 +148,7 @@ class Issue:
 
     def get_status_emoji(self) -> str:
         """Get an emoji representation of the status."""
-        status_emojis = {
-            Status.DRAFT: "✎",
-            Status.OPEN: "●",
-            Status.IN_PROGRESS: "◐",
-            Status.IN_REVIEW: "?",
-            Status.BLOCKED: "■",
-            Status.DEFERRED: "◇",
-            Status.CLOSED: "✓",
-            Status.TOMBSTONE: "☠",
-        }
-        return status_emojis.get(self.status, "?")
+        return ISSUE_STATUS_EMOJIS.get(self.status, _UNKNOWN_STATUS_EMOJI)
 
 
 class ProposalStatus(str, Enum):
@@ -148,6 +157,13 @@ class ProposalStatus(str, Enum):
     OPEN = "open"
     CLOSED = "closed"
     TOMBSTONE = "tombstone"
+
+
+PROPOSAL_STATUS_EMOJIS: dict["ProposalStatus", str] = {
+    ProposalStatus.OPEN: "●",
+    ProposalStatus.CLOSED: "✓",
+    ProposalStatus.TOMBSTONE: "☠",
+}
 
 
 @dataclass
@@ -165,7 +181,7 @@ class Proposal:
     updated_at: datetime = field(default_factory=lambda: datetime.now().astimezone())
     closed_at: datetime | None = None
     closed_by: str | None = None
-    close_reason: str | None = None
+    closed_reason: str | None = None
     resolved_issue: str | None = None  # ID of issue created from this proposal
     deleted_at: datetime | None = None
     deleted_by: str | None = None
@@ -185,12 +201,7 @@ class Proposal:
 
     def get_status_emoji(self) -> str:
         """Get an emoji representation of the status."""
-        status_emojis = {
-            ProposalStatus.OPEN: "●",
-            ProposalStatus.CLOSED: "✓",
-            ProposalStatus.TOMBSTONE: "☠",
-        }
-        return status_emojis.get(self.status, "?")
+        return PROPOSAL_STATUS_EMOJIS.get(self.status, _UNKNOWN_STATUS_EMOJI)
 
 
 def validate_priority(priority: Any) -> None:
@@ -268,7 +279,7 @@ def issue_to_dict(issue: Issue) -> dict[str, Any]:
         "design": issue.design,
         "acceptance": issue.acceptance,
         "notes": issue.notes,
-        "close_reason": issue.close_reason,
+        "closed_reason": issue.closed_reason,
         "created_at": issue.created_at.isoformat(),
         "created_by": issue.created_by,
         "updated_at": issue.updated_at.isoformat(),
@@ -277,7 +288,7 @@ def issue_to_dict(issue: Issue) -> dict[str, Any]:
         "closed_by": issue.closed_by,
         "deleted_at": issue.deleted_at.isoformat() if issue.deleted_at else None,
         "deleted_by": issue.deleted_by,
-        "delete_reason": issue.delete_reason,
+        "deleted_reason": issue.deleted_reason,
         "original_type": issue.original_type.value if issue.original_type else None,
         "comments": [
             {
@@ -297,19 +308,19 @@ def issue_to_dict(issue: Issue) -> dict[str, Any]:
     }
 
 
-def _migrate_close_reason(notes: str | None, close_reason: str | None) -> str | None:
-    """Extract close_reason from legacy notes if not already set."""
-    if close_reason is not None:
-        return close_reason
+def _migrate_close_reason(notes: str | None, closed_reason: str | None) -> str | None:
+    """Extract closed_reason from legacy notes if not already set."""
+    if closed_reason is not None:
+        return closed_reason
     if notes and "\n\nClosed: " in notes:
         parts = notes.split("\n\nClosed: ")
         return parts[-1].strip() or None
     return None
 
 
-def _migrate_notes(notes: str | None, close_reason: str | None) -> str | None:
-    """Strip legacy close reason from notes if close_reason is not yet a field."""
-    if close_reason is not None:
+def _migrate_notes(notes: str | None, closed_reason: str | None) -> str | None:
+    """Strip legacy close reason from notes if closed_reason is not yet a field."""
+    if closed_reason is not None:
         # Already migrated; notes are clean
         return notes
     if notes and "\n\nClosed: " in notes:
@@ -319,24 +330,49 @@ def _migrate_notes(notes: str | None, close_reason: str | None) -> str | None:
     return notes
 
 
+def _migrate_namespace(data: dict[str, Any]) -> tuple[str, str]:
+    """Resolve (namespace, issue_id) from new or legacy id format."""
+    if "namespace" in data:
+        return data["namespace"], data["id"]
+    full_id = data["id"]
+    if "-" in full_id:
+        # Split on last hyphen to handle multi-part namespaces
+        namespace, issue_id = full_id.rsplit("-", 1)
+        return namespace, issue_id
+    return "dc", full_id
+
+
+def _migrate_issue_type(data: dict[str, Any]) -> tuple[str, str]:
+    """Resolve (issue_type, status), migrating legacy 'draft' / 'subtask' types."""
+    raw_issue_type = data.get("issue_type", IssueType.TASK.value)
+    raw_status = data.get("status", Status.OPEN.value)
+    # Legacy issue_type=draft -> status=draft, issue_type=task
+    if raw_issue_type == "draft":
+        raw_issue_type = IssueType.TASK.value
+        if raw_status not in (
+            Status.DRAFT.value,
+            Status.CLOSED.value,
+            Status.TOMBSTONE.value,
+        ):
+            raw_status = Status.DRAFT.value
+    # Legacy issue_type=subtask -> issue_type=task
+    if raw_issue_type == "subtask":
+        raw_issue_type = IssueType.TASK.value
+    return raw_issue_type, raw_status
+
+
+def _migrate_original_type(data: dict[str, Any]) -> str | None:
+    """Migrate legacy original_type values stored on tombstones."""
+    raw = data.get("original_type")
+    if raw in ("draft", "subtask"):
+        return IssueType.TASK.value
+    return raw
+
+
 def dict_to_issue(data: dict[str, Any]) -> Issue:
     """Convert a dictionary to an Issue, deserializing datetimes."""
-    # Handle namespace/id migration
-    if "namespace" in data:
-        # New format: separate namespace and id fields
-        namespace = data["namespace"]
-        issue_id = data["id"]
-    else:
-        # Old format: id contains full ID like "dc-4kzj"
-        full_id = data["id"]
-        if "-" in full_id:
-            # Split on last hyphen to handle multi-part namespaces
-            namespace, issue_id = full_id.rsplit("-", 1)
-        else:
-            namespace = "dc"
-            issue_id = full_id
+    namespace, issue_id = _migrate_namespace(data)
 
-    # Parse datetimes
     created_at = datetime.fromisoformat(data["created_at"])
     updated_at = datetime.fromisoformat(data["updated_at"])
     closed_at = (
@@ -346,40 +382,25 @@ def dict_to_issue(data: dict[str, Any]) -> Issue:
         datetime.fromisoformat(data["deleted_at"]) if data.get("deleted_at") else None
     )
 
-    # Parse comments
-    comments: list[Comment] = []
-    for comment_data in data.get("comments", []):
-        comment = Comment(
-            id=comment_data["id"],
-            issue_id=comment_data["issue_id"],
-            author=comment_data["author"],
-            text=comment_data["text"],
-            created_at=datetime.fromisoformat(comment_data["created_at"]),
+    comments: list[Comment] = [
+        Comment(
+            id=cd["id"],
+            issue_id=cd["issue_id"],
+            author=cd["author"],
+            text=cd["text"],
+            created_at=datetime.fromisoformat(cd["created_at"]),
         )
-        comments.append(comment)
+        for cd in data.get("comments", [])
+    ]
 
-    # Migrate legacy issue_type=draft -> status=draft, issue_type=task
-    raw_issue_type = data.get("issue_type", IssueType.TASK.value)
-    raw_status = data.get("status", Status.OPEN.value)
-    if raw_issue_type == "draft":
-        raw_issue_type = IssueType.TASK.value
-        if raw_status not in (
-            Status.DRAFT.value,
-            Status.CLOSED.value,
-            Status.TOMBSTONE.value,
-        ):
-            raw_status = Status.DRAFT.value
+    raw_issue_type, raw_status = _migrate_issue_type(data)
+    raw_original_type = _migrate_original_type(data)
 
-    # Migrate legacy issue_type=subtask -> issue_type=task
-    if raw_issue_type == "subtask":
-        raw_issue_type = IssueType.TASK.value
+    # Accept both old (close_reason / delete_reason) and new
+    # (closed_reason / deleted_reason) keys for backward compatibility.
+    raw_closed_reason = data.get("closed_reason", data.get("close_reason"))
+    raw_deleted_reason = data.get("deleted_reason", data.get("delete_reason"))
 
-    # Migrate legacy original_type for tombstones
-    raw_original_type = data.get("original_type")
-    if raw_original_type in ("draft", "subtask"):
-        raw_original_type = IssueType.TASK.value
-
-    # Create issue
     return Issue(
         id=issue_id,
         title=data["title"],
@@ -394,8 +415,8 @@ def dict_to_issue(data: dict[str, Any]) -> Issue:
         external_ref=data.get("external_ref"),
         design=data.get("design"),
         acceptance=data.get("acceptance"),
-        notes=_migrate_notes(data.get("notes"), data.get("close_reason")),
-        close_reason=_migrate_close_reason(data.get("notes"), data.get("close_reason")),
+        notes=_migrate_notes(data.get("notes"), raw_closed_reason),
+        closed_reason=_migrate_close_reason(data.get("notes"), raw_closed_reason),
         created_at=created_at,
         created_by=data.get("created_by"),
         updated_at=updated_at,
@@ -404,7 +425,7 @@ def dict_to_issue(data: dict[str, Any]) -> Issue:
         closed_by=data.get("closed_by"),
         deleted_at=deleted_at,
         deleted_by=data.get("deleted_by"),
-        delete_reason=data.get("delete_reason"),
+        deleted_reason=raw_deleted_reason,
         original_type=(IssueType(raw_original_type) if raw_original_type else None),
         comments=comments,
         duplicate_of=data.get("duplicate_of"),
@@ -433,7 +454,7 @@ def proposal_to_dict(proposal: Proposal) -> dict[str, Any]:
         "updated_at": proposal.updated_at.isoformat(),
         "closed_at": proposal.closed_at.isoformat() if proposal.closed_at else None,
         "closed_by": proposal.closed_by,
-        "close_reason": proposal.close_reason,
+        "closed_reason": proposal.closed_reason,
         "resolved_issue": proposal.resolved_issue,
         "deleted_at": proposal.deleted_at.isoformat() if proposal.deleted_at else None,
         "deleted_by": proposal.deleted_by,
@@ -467,7 +488,7 @@ def dict_to_proposal(data: dict[str, Any]) -> Proposal:
         updated_at=updated_at,
         closed_at=closed_at,
         closed_by=data.get("closed_by"),
-        close_reason=data.get("close_reason"),
+        closed_reason=data.get("closed_reason", data.get("close_reason")),
         resolved_issue=data.get("resolved_issue"),
         deleted_at=deleted_at,
         deleted_by=data.get("deleted_by"),
@@ -477,14 +498,27 @@ def dict_to_proposal(data: dict[str, Any]) -> Proposal:
 
 
 def classify_record(data: dict[str, Any]) -> str:
-    """Classify a JSONL record as 'issue', 'dependency', 'link', 'event', or 'proposal'.
+    """Classify a JSONL record as 'issue', 'dependency', 'link', 'event', 'proposal'.
 
     Checks for an explicit ``record_type`` field first, then falls back to
     field-sniffing for backward compatibility with older records.
+
+    Returns ``"unknown"`` (and logs a warning) when ``record_type`` is set
+    to a value outside :data:`_KNOWN_RECORD_TYPES`. Callers compare against
+    specific strings, so unknown records are skipped rather than silently
+    misclassified as ``"issue"`` and merged with the wrong semantics.
     """
     explicit = data.get("record_type")
-    if explicit in ("issue", "dependency", "link", "event", "proposal"):
-        return explicit  # type: ignore[return-value]
+    if explicit is not None:
+        if explicit in _KNOWN_RECORD_TYPES:
+            return explicit  # type: ignore[return-value]
+        _logger.warning(
+            "Unknown record_type %r — skipping. "
+            "Add it to _KNOWN_RECORD_TYPES in models.py and update the "
+            "merge driver / loaders if this is a new record kind.",
+            explicit,
+        )
+        return "unknown"
 
     if "from_id" in data and "to_id" in data:
         return "link"

@@ -9,6 +9,7 @@ from dogcat.inbox import InboxStorage
 from dogcat.models import Issue, Proposal, Status, issue_to_dict
 from dogcat.storage import JSONLStorage
 from dogcat.stream import (
+    FieldChange,
     InboxStreamEmitter,
     StreamEmitter,
     StreamEvent,
@@ -28,7 +29,7 @@ class TestStreamEvent:
             issue_id="issue-1",
             timestamp=datetime.now(timezone.utc),
             by="user@example.com",
-            changes={"title": {"old": None, "new": "Test"}},
+            changes={"title": FieldChange(old=None, new="Test")},
         )
 
         assert event.event_type == "created"
@@ -45,7 +46,7 @@ class TestStreamEvent:
             issue_id="issue-1",
             timestamp=now,
             by="user@example.com",
-            changes={"status": {"old": "open", "new": "in_progress"}},
+            changes={"status": FieldChange(old="open", new="in_progress")},
         )
 
         data = event.to_dict()
@@ -123,8 +124,8 @@ class TestStreamEmitter:
         assert len(events) == 1
         assert events[0].event_type == "updated"
         assert "title" in events[0].changes
-        assert events[0].changes["title"]["old"] == "Original"
-        assert events[0].changes["title"]["new"] == "Updated"
+        assert events[0].changes["title"].old == "Original"
+        assert events[0].changes["title"].new == "Updated"
 
     def test_detect_close(self, temp_dogcats_dir: Path) -> None:
         """Test detecting issue close (status change)."""
@@ -157,8 +158,8 @@ class TestStreamEmitter:
         assert len(events) == 1
         assert events[0].event_type == "closed"
         assert "status" in events[0].changes
-        assert events[0].changes["status"]["old"] == "open"
-        assert events[0].changes["status"]["new"] == "closed"
+        assert events[0].changes["status"].old == "open"
+        assert events[0].changes["status"].new == "closed"
 
     def test_multiple_changes(self, temp_dogcats_dir: Path) -> None:
         """Test detecting multiple changes at once."""
@@ -392,8 +393,8 @@ class TestStreamEmitterIncrementalParsing:
         assert len(captured_events) == 1
         assert captured_events[0].event_type == "updated"
         assert "title" in captured_events[0].changes
-        assert captured_events[0].changes["title"]["old"] == "Original"
-        assert captured_events[0].changes["title"]["new"] == "Updated"
+        assert captured_events[0].changes["title"].old == "Original"
+        assert captured_events[0].changes["title"].new == "Updated"
 
     def test_handle_file_change_survives_missing_file(
         self,

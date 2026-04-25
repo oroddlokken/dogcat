@@ -123,7 +123,7 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(1)
 
     @app.command("link")
-    def link_command(
+    def link(
         issue_id: str = typer.Argument(
             ...,
             help="Issue ID",

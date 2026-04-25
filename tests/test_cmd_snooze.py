@@ -334,3 +334,56 @@ class TestParseDuration:
 
         with pytest.raises(ValueError, match="Invalid duration"):
             parse_duration("banana")
+
+    def test_zero_duration(self) -> None:
+        """'0d' yields a duration equal to (or within microseconds of) now."""
+        from dogcat.cli._helpers import parse_duration
+
+        before = datetime.now().astimezone()
+        result = parse_duration("0d")
+        after = datetime.now().astimezone()
+        assert before <= result <= after
+
+    def test_decimal_amount_rejected(self) -> None:
+        """'1.5d' is rejected — the regex requires integer amounts."""
+        import pytest
+
+        from dogcat.cli._helpers import parse_duration
+
+        with pytest.raises(ValueError, match="Invalid duration"):
+            parse_duration("1.5d")
+
+    def test_empty_string_rejected(self) -> None:
+        """Empty string is rejected with a clear ValueError."""
+        import pytest
+
+        from dogcat.cli._helpers import parse_duration
+
+        with pytest.raises(ValueError, match="Invalid duration"):
+            parse_duration("")
+
+    def test_large_relative_duration(self) -> None:
+        """Large relative durations (e.g. '999d') parse without overflow."""
+        from dogcat.cli._helpers import parse_duration
+
+        result = parse_duration("999d")
+        expected_min = datetime.now().astimezone() + timedelta(days=998, hours=23)
+        assert result > expected_min
+
+    def test_iso_with_timezone(self) -> None:
+        """ISO8601 with explicit timezone offset preserves the offset."""
+        from dogcat.cli._helpers import parse_duration
+
+        result = parse_duration("2099-06-15T12:00:00+05:30")
+        assert result.year == 2099
+        assert result.month == 6
+        assert result.day == 15
+        assert result.utcoffset() == timedelta(hours=5, minutes=30)
+
+    def test_past_date_accepted(self) -> None:
+        """Past ISO date is parsed without error — caller decides if it makes sense."""
+        from dogcat.cli._helpers import parse_duration
+
+        result = parse_duration("2020-01-01")
+        assert result.year == 2020
+        assert result < datetime.now().astimezone()

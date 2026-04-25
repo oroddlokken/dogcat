@@ -8,6 +8,7 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.css.query import NoMatches
 from textual.reactive import reactive
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Input, OptionList, Static
@@ -277,7 +278,7 @@ class DogcatTUI(App[None]):
             selected_text = option_list.get_option_at_index(
                 option_list.highlighted,
             ).prompt
-        except Exception:
+        except (IndexError, AttributeError):
             return None
         for label, full_id in self._issues:
             if label == selected_text:
@@ -355,7 +356,7 @@ class DogcatTUI(App[None]):
                     try:
                         panel = self.query_one("#detail-panel", IssueDetailPanel)
                         panel.focus()
-                    except Exception:
+                    except NoMatches:
                         pass
                 else:
                     # Narrow mode: push modal editor
@@ -406,7 +407,7 @@ class DogcatTUI(App[None]):
 
         try:
             panel = self.query_one("#detail-panel", IssueDetailPanel)
-        except Exception:
+        except NoMatches:
             return False
         else:
             return not panel.is_view_mode
@@ -470,7 +471,7 @@ class DogcatTUI(App[None]):
                 panel = self.query_one("#detail-panel", IssueDetailPanel)
                 panel.enter_edit()
                 self.title = f"Edit: {issue.full_id} - {issue.title}"
-            except Exception:
+            except NoMatches:
                 pass
         else:
             # Narrow mode: push modal editor
@@ -511,7 +512,7 @@ class DogcatTUI(App[None]):
         try:
             self._storage.delete(full_id)
             self.notify(f"Deleted {full_id}")
-        except Exception as e:
+        except (ValueError, RuntimeError, OSError) as e:
             self.notify(f"Delete failed: {e}", severity="error")
             return
         self._load_issues()

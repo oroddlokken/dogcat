@@ -153,7 +153,7 @@ def register(app: typer.Typer) -> None:
     """Register diff command."""
 
     @app.command("diff")
-    def diff_cmd(
+    def diff(
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         verbose: bool = typer.Option(
             False,

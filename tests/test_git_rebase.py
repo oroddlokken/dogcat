@@ -11,6 +11,7 @@ import orjson
 from dogcat.models import Issue
 
 if TYPE_CHECKING:
+    import pytest
     from conftest import GitRepo
 
 
@@ -335,3 +336,22 @@ class TestParseConflictedJsonl:
         assert base == []
         assert ours == []
         assert theirs == []
+
+    def test_malformed_records_logged(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Malformed JSONL inside conflict sections produces a warning."""
+        import logging
+
+        from dogcat.merge_driver import parse_conflicted_jsonl
+
+        good = orjson.dumps({"record_type": "issue", "id": "ok", "namespace": "t"})
+        raw = b"<<<<<<< HEAD\nnot-json-data\n=======\n" + good + b"\n>>>>>>> branch\n"
+
+        with caplog.at_level(logging.WARNING, logger="dogcat.merge_driver"):
+            _, ours, theirs = parse_conflicted_jsonl(raw)
+
+        assert len(ours) == 0
+        assert len(theirs) == 1
+        assert any(
+            "malformed JSONL" in r.message and "ours" in r.message
+            for r in caplog.records
+        )

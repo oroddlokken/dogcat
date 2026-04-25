@@ -438,7 +438,7 @@ def register(app: typer.Typer) -> None:
     )
 
     @app.command(name="new")
-    def new_issue_cmd(
+    def new_issue(
         arg1: str | None = typer.Argument(None, help=_ARG_HELP_SHORTHAND),
         arg2: str | None = typer.Argument(None, help=_ARG_HELP_SHORTHAND),
         arg3: str | None = typer.Argument(None, help=_ARG_HELP_SHORTHAND),
@@ -510,7 +510,7 @@ def register(app: typer.Typer) -> None:
 
     app.command(name="n", hidden=True)(
         _make_alias(
-            new_issue_cmd,
+            new_issue,
             doc="Open a Textual form to create a new issue (alias for 'new').",
         ),
     )

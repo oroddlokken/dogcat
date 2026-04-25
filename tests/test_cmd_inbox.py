@@ -737,7 +737,7 @@ class TestInboxAccept:
         assert proposal is not None
         assert proposal.status.value == "closed"
         assert proposal.resolved_issue is not None
-        assert proposal.close_reason == "Accepted as issue"
+        assert proposal.closed_reason == "Accepted as issue"
 
     def test_accept_with_priority_and_labels(
         self,
@@ -875,7 +875,7 @@ class TestInboxReject:
         proposal = remote_inbox.get(proposal_id)
         assert proposal is not None
         assert proposal.status.value == "closed"
-        assert proposal.close_reason == "Already implemented"
+        assert proposal.closed_reason == "Already implemented"
 
     def test_reject_multiple(
         self,

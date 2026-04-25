@@ -98,7 +98,7 @@ def migrate_issue(beads_issue: dict[str, Any]) -> tuple[Issue, list[Dependency]]
     closed_at_str = beads_issue.get("closed_at")
     deleted_at_str = beads_issue.get("deleted_at")
     deleted_by = beads_issue.get("deleted_by")
-    delete_reason = beads_issue.get("delete_reason")
+    deleted_reason = beads_issue.get("delete_reason")
     labels = beads_issue.get("labels", [])
 
     # Convert status
@@ -130,7 +130,7 @@ def migrate_issue(beads_issue: dict[str, Any]) -> tuple[Issue, list[Dependency]]
         closed_at=parse_datetime(closed_at_str),
         deleted_at=parse_datetime(deleted_at_str),
         deleted_by=deleted_by,
-        delete_reason=delete_reason,
+        deleted_reason=deleted_reason,
         original_type=issue_type if status == Status.TOMBSTONE else None,
     )
 

@@ -121,7 +121,7 @@ class TestInboxFixtureRegression:
         """Fixture preserves close_reason on closed proposals."""
         proposals = loaded_inbox.list()
         closed = [p for p in proposals if p.status == ProposalStatus.CLOSED]
-        with_reason = [p for p in closed if p.close_reason]
+        with_reason = [p for p in closed if p.closed_reason]
         assert len(with_reason) > 0, "No closed proposals with close_reason found"
 
     def test_closed_by_survives(self, loaded_inbox: InboxStorage) -> None:

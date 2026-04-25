@@ -94,6 +94,26 @@ class TestGetForm:
         resp = client.get("/")
         assert '<a href="/">' in resp.text
 
+    def test_csp_disallows_inline_script(self, client: TestClient) -> None:
+        """CSP must not include 'unsafe-inline' for script-src.
+
+        Inline JS allows trivially bypassing XSS protection. The form's JS
+        is served from /static/js/propose.js so 'self' is enough.
+        """
+        resp = client.get("/")
+        csp = resp.headers.get("Content-Security-Policy", "")
+        assert "script-src" in csp
+        assert "unsafe-inline" not in csp
+        assert "script-src 'self'" in csp
+
+    def test_no_inline_script_tag(self, client: TestClient) -> None:
+        """Form HTML loads JS via external src — no inline <script> body."""
+        resp = client.get("/")
+        # External script tag is present, but its body must be empty.
+        assert "static/js/propose.js" in resp.text
+        # No inline IIFE remains.
+        assert "function()" not in resp.text
+
 
 class TestNamespacePopulation:
     """Tests for namespace dropdown population."""

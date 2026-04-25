@@ -432,28 +432,34 @@ def _parse_priority_value(value: str) -> int:
     return priority
 
 
-def _is_priority_shorthand(value: str) -> bool:
-    """Check if a string is a priority shorthand (single char: 0-4)."""
-    return len(value) == 1 and value in PRIORITY_SHORTHANDS
+# (shorthand-kind, lookup-set, case-sensitive). Order matters for resolution
+# precedence in `_classify_shorthand`: priority is checked first.
+_SHORTHAND_KINDS: tuple[tuple[str, frozenset[str], bool], ...] = (
+    ("priority", frozenset(PRIORITY_SHORTHANDS), True),
+    ("type", frozenset(TYPE_SHORTHANDS), False),
+    ("status", frozenset(STATUS_SHORTHANDS), False),
+)
 
 
-def _is_type_shorthand(value: str) -> bool:
-    """Check if a string is a type shorthand (single char: b/f/e/s)."""
-    return len(value) == 1 and value.lower() in TYPE_SHORTHANDS
+def _classify_shorthand(value: str) -> str | None:
+    """Return the shorthand kind ("priority"/"type"/"status") or None.
 
-
-def _is_status_shorthand(value: str) -> bool:
-    """Check if a string is a status shorthand (single char: d)."""
-    return len(value) == 1 and value.lower() in STATUS_SHORTHANDS
+    Replaces the older quartet (``_is_priority_shorthand``,
+    ``_is_type_shorthand``, ``_is_status_shorthand``, ``_is_shorthand``) with
+    a single dictionary-driven lookup; callers compare the returned kind.
+    """
+    if len(value) != 1:
+        return None
+    for kind, lookup, case_sensitive in _SHORTHAND_KINDS:
+        key = value if case_sensitive else value.lower()
+        if key in lookup:
+            return kind
+    return None
 
 
 def _is_shorthand(value: str) -> bool:
     """Check if a string is any shorthand (priority, type, or status)."""
-    return (
-        _is_priority_shorthand(value)
-        or _is_type_shorthand(value)
-        or _is_status_shorthand(value)
-    )
+    return _classify_shorthand(value) is not None
 
 
 def _is_invalid_single_char(value: str) -> bool:
@@ -485,17 +491,18 @@ def _parse_args_for_create(
     for arg in args:
         if arg is None:
             continue
-        if not allow_shorthands and _is_shorthand(arg):
+        kind = _classify_shorthand(arg)
+        if not allow_shorthands and kind is not None:
             msg = (
                 "Shorthands are only available with 'dcat c'. "
                 "Use --type/--priority/--status flags instead."
             )
             raise ValueError(msg)
-        if _is_priority_shorthand(arg) and priority_sh is None:
+        if kind == "priority" and priority_sh is None:
             priority_sh = int(arg)
-        elif _is_type_shorthand(arg) and type_sh is None:
+        elif kind == "type" and type_sh is None:
             type_sh = TYPE_SHORTHANDS[arg.lower()]
-        elif _is_status_shorthand(arg) and status_sh is None:
+        elif kind == "status" and status_sh is None:
             status_sh = STATUS_SHORTHANDS[arg.lower()]
         elif _is_invalid_single_char(arg):
             valid_types = ", ".join(sorted(TYPE_SHORTHANDS.keys()))

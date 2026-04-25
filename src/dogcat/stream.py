@@ -30,6 +30,18 @@ _RETRY_DELAY_MS = 50  # milliseconds between retries
 
 
 @dataclass
+class FieldChange:
+    """An old/new value pair for a single tracked field on an issue."""
+
+    old: Any
+    new: Any
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to the legacy ``{"old": ..., "new": ...}`` shape."""
+        return {"old": self.old, "new": self.new}
+
+
+@dataclass
 class StreamEvent:
     """An event representing a change to an issue."""
 
@@ -40,8 +52,8 @@ class StreamEvent:
     issue_id: str
     timestamp: datetime
     by: str | None = None
-    changes: dict[str, dict[str, Any]] = field(
-        default_factory=dict[str, dict[str, Any]],
+    changes: dict[str, FieldChange] = field(
+        default_factory=dict[str, FieldChange],
     )
 
     def to_dict(self) -> dict[str, Any]:
@@ -51,7 +63,7 @@ class StreamEvent:
             "issue_id": self.issue_id,
             "timestamp": self.timestamp.isoformat(),
             "by": self.by,
-            "changes": self.changes,
+            "changes": {f: c.to_dict() for f, c in self.changes.items()},
         }
 
 
@@ -115,8 +127,8 @@ class StreamEmitter(FileSystemEventHandler):
         for issue_id, new_issue in new_state.items():
             if issue_id not in old_state:
                 # New issue created
-                changes: dict[str, dict[str, Any]] = {
-                    field: {"old": None, "new": value}
+                changes: dict[str, FieldChange] = {
+                    field: FieldChange(old=None, new=value)
                     for field, value in new_issue.items()
                     if value is not None
                 }
@@ -131,16 +143,16 @@ class StreamEmitter(FileSystemEventHandler):
             else:
                 # Check for updates
                 old_issue = old_state[issue_id]
-                changes: dict[str, dict[str, Any]] = {}
+                changes = {}
 
                 for field, new_value in new_issue.items():
                     old_value = old_issue.get(field)
                     if old_value != new_value:
-                        changes[field] = {"old": old_value, "new": new_value}
+                        changes[field] = FieldChange(old=old_value, new=new_value)
 
                 if changes:
                     # Determine event type
-                    if "status" in changes and changes["status"]["new"] == "closed":
+                    if "status" in changes and changes["status"].new == "closed":
                         event_type = "closed"
                     else:
                         event_type = "updated"
@@ -157,11 +169,11 @@ class StreamEmitter(FileSystemEventHandler):
         # Check for deletes (issues in old but not new)
         for issue_id in old_state:
             if issue_id not in new_state:
-                delete_changes: dict[str, dict[str, Any]] = {
-                    "status": {
-                        "old": old_state[issue_id].get("status"),
-                        "new": "deleted",
-                    },
+                delete_changes: dict[str, FieldChange] = {
+                    "status": FieldChange(
+                        old=old_state[issue_id].get("status"),
+                        new="deleted",
+                    ),
                 }
                 event = StreamEvent(
                     event_type="deleted",
@@ -348,8 +360,8 @@ class InboxStreamEmitter(FileSystemEventHandler):
 
         for prop_id, new_prop in new_state.items():
             if prop_id not in old_state:
-                changes: dict[str, dict[str, Any]] = {
-                    f: {"old": None, "new": v}
+                changes: dict[str, FieldChange] = {
+                    f: FieldChange(old=None, new=v)
                     for f, v in new_prop.items()
                     if v is not None
                 }
@@ -368,14 +380,12 @@ class InboxStreamEmitter(FileSystemEventHandler):
                 for f, new_v in new_prop.items():
                     old_v = old_prop.get(f)
                     if old_v != new_v:
-                        changes[f] = {"old": old_v, "new": new_v}
+                        changes[f] = FieldChange(old=old_v, new=new_v)
 
                 if changes:
-                    if "status" in changes and changes["status"]["new"] == "closed":
+                    if "status" in changes and changes["status"].new == "closed":
                         event_type = "proposal_closed"
-                    elif (
-                        "status" in changes and changes["status"]["new"] == "tombstone"
-                    ):
+                    elif "status" in changes and changes["status"].new == "tombstone":
                         event_type = "proposal_deleted"
                     else:
                         event_type = "proposal_updated"

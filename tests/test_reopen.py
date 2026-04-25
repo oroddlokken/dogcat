@@ -73,7 +73,7 @@ class TestStorageReopen:
         issue = storage.reopen("dc-test1")
         assert issue.closed_at is None
         assert issue.closed_by is None
-        assert issue.close_reason is None
+        assert issue.closed_reason is None
 
     def test_reopen_updates_timestamp(self, storage: JSONLStorage) -> None:
         """Test reopen updates the updated_at timestamp."""

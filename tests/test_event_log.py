@@ -220,3 +220,20 @@ class TestEventLogAppendAndRead:
             )
         lines = event_log.path.read_bytes().strip().split(b"\n")
         assert len(lines) == 5
+
+    def test_file_lock_open_failure_raises_runtimeerror(
+        self, event_log: EventLog
+    ) -> None:
+        """OSError opening the event log lock file is wrapped in RuntimeError."""
+        event_log._lock_path = (
+            event_log.dogcats_dir / "missing-dir" / "subdir" / ".issues.lock"
+        )
+
+        with pytest.raises(RuntimeError, match="Failed to open lock file"):
+            event_log.append(
+                EventRecord(
+                    event_type="created",
+                    issue_id="dc-zzzz",
+                    timestamp="2026-02-10T10:00:00+01:00",
+                ),
+            )

@@ -708,10 +708,26 @@ class TestClassifyRecord:
         data = {"record_type": "issue", "from_id": "a", "to_id": "b"}
         assert classify_record(data) == "issue"
 
-    def test_unknown_record_type_falls_back(self) -> None:
-        """Test that unknown record_type values trigger fallback."""
-        data = {"record_type": "unknown", "from_id": "a", "to_id": "b"}
-        assert classify_record(data) == "link"
+    def test_unknown_record_type_returns_unknown(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Unknown record_type values return 'unknown' and log a warning.
+
+        Field-sniffing is bypassed when ``record_type`` is set explicitly —
+        otherwise a future new record kind could be silently merged with
+        the wrong semantics (e.g. 'link' field shape misread as 'issue').
+        """
+        import logging
+
+        data = {"record_type": "comment_thread", "from_id": "a", "to_id": "b"}
+        with caplog.at_level(logging.WARNING, logger="dogcat.models"):
+            assert classify_record(data) == "unknown"
+        assert any("comment_thread" in r.message for r in caplog.records)
+
+    def test_unknown_record_type_skips_field_sniffing(self) -> None:
+        """Explicit unknown record_type does not fall back to field-sniffing."""
+        data = {"record_type": "future_type", "issue_id": "a", "depends_on_id": "b"}
+        assert classify_record(data) == "unknown"
 
     def test_issue_to_dict_includes_record_type(self) -> None:
         """Test that issue_to_dict includes record_type='issue'."""

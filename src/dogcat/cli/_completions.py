@@ -36,18 +36,23 @@ def _ns_filter_from_ctx(
     return get_namespace_filter(dogcats_dir, explicit_ns)
 
 
-def complete_issue_ids(
+def _complete_issues_by_status(
     ctx: Any,
-    args: list[str],  # noqa: ARG001 (always [] from Typer, kept for signature compat)
     incomplete: str,
+    *,
+    keep: Callable[[str], bool],
 ) -> list[tuple[str, str]]:
-    """Complete issue IDs from storage, respecting namespace visibility."""
+    """Shared completion routine for issue-id completers.
+
+    ``keep`` is a predicate over ``Issue.status.value`` that decides which
+    issues are eligible (e.g. exclude closed/tombstone, or only closed).
+    """
     try:
         storage = get_storage()
         ns_filter = _ns_filter_from_ctx(ctx, str(storage.dogcats_dir))
         results: list[tuple[str, str]] = []
         for i in storage.list():
-            if i.status.value in ("closed", "tombstone"):
+            if not keep(i.status.value):
                 continue
             if ns_filter is not None and not ns_filter(i.namespace):
                 continue
@@ -62,30 +67,30 @@ def complete_issue_ids(
         return []
 
 
+def complete_issue_ids(
+    ctx: Any,
+    args: list[str],  # noqa: ARG001 (always [] from Typer, kept for signature compat)
+    incomplete: str,
+) -> list[tuple[str, str]]:
+    """Complete issue IDs from storage, respecting namespace visibility."""
+    return _complete_issues_by_status(
+        ctx,
+        incomplete,
+        keep=lambda s: s not in ("closed", "tombstone"),
+    )
+
+
 def complete_closed_issue_ids(
     ctx: Any,
     args: list[str],  # noqa: ARG001 (always [] from Typer, kept for signature compat)
     incomplete: str,
 ) -> list[tuple[str, str]]:
     """Complete closed issue IDs from storage (for reopen command)."""
-    try:
-        storage = get_storage()
-        ns_filter = _ns_filter_from_ctx(ctx, str(storage.dogcats_dir))
-        results: list[tuple[str, str]] = []
-        for i in storage.list():
-            if i.status.value != "closed":
-                continue
-            if ns_filter is not None and not ns_filter(i.namespace):
-                continue
-            fid = i.full_id
-            short_id = i.id
-            if fid.startswith(incomplete):
-                results.append((fid, i.title))
-            elif short_id.startswith(incomplete):
-                results.append((short_id, i.title))
-        return sorted(results)
-    except Exception:
-        return []
+    return _complete_issues_by_status(
+        ctx,
+        incomplete,
+        keep=lambda s: s == "closed",
+    )
 
 
 def complete_proposal_ids(

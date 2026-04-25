@@ -528,7 +528,7 @@ class DeterministicIssueGenerator:
             closed_by=self.rng.choice(OWNERS) if closed_at else None,
             deleted_at=deleted_at,
             deleted_by=self.rng.choice(OWNERS) if deleted_at else None,
-            delete_reason=delete_reason,
+            deleted_reason=delete_reason,
             original_type=original_type,
             comments=comments,
             metadata=self._generate_metadata(),

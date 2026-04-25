@@ -275,8 +275,8 @@ def format_issue_full(issue: Issue, parent_title: str | None = None) -> str:
     lines.append(f"{key('Created:')} {issue.created_at.strftime(dt_fmt)}")
     if issue.closed_at:
         closed_line = f"{key('Closed:')} {issue.closed_at.strftime(dt_fmt)}"
-        if issue.close_reason:
-            closed_line += f" ({issue.close_reason})"
+        if issue.closed_reason:
+            closed_line += f" ({issue.closed_reason})"
         lines.append(closed_line)
 
     if issue.description:

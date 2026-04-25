@@ -179,7 +179,7 @@ class TestFixtureRegression:
     def test_close_reason_survives(self, loaded_storage: JSONLStorage) -> None:
         """Fixture preserves close_reason on closed issues."""
         issues = loaded_storage.list()
-        with_reason = [i for i in issues if i.close_reason]
+        with_reason = [i for i in issues if i.closed_reason]
         assert len(with_reason) > 0, "No issues with close_reason found"
 
     def test_namespace_survives(self, loaded_storage: JSONLStorage) -> None:
@@ -251,7 +251,7 @@ class TestFixtureRegression:
         """Fixture preserves delete_reason on tombstoned issues."""
         issues = loaded_storage.list()
         tombstones = [i for i in issues if i.status == Status.TOMBSTONE]
-        with_reason = [t for t in tombstones if t.delete_reason]
+        with_reason = [t for t in tombstones if t.deleted_reason]
         assert len(with_reason) > 0, "No tombstones with delete_reason found"
 
     def test_duplicate_of_survives(self, loaded_storage: JSONLStorage) -> None:

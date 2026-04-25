@@ -182,7 +182,7 @@ TRACKED_PROPOSAL_FIELDS: frozenset[str] = frozenset(
         "status",
         "proposed_by",
         "source_repo",
-        "close_reason",
+        "closed_reason",
         "resolved_issue",
     },
 )

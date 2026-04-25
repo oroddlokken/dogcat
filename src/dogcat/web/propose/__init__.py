@@ -74,7 +74,7 @@ def create_app(
             response.headers["X-Content-Type-Options"] = "nosniff"
             response.headers["X-Frame-Options"] = "DENY"
             response.headers["Content-Security-Policy"] = (
-                "default-src 'none'; style-src 'self'; script-src 'unsafe-inline'"
+                "default-src 'none'; style-src 'self'; script-src 'self'"
             )
             return response
 

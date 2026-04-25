@@ -96,7 +96,7 @@ class TestDeterministicIssueGenerator:
         # May be 0 due to randomness, so only check if we have some
         for t in tombstones:
             assert t.deleted_at is not None
-            assert t.delete_reason is not None
+            assert t.deleted_reason is not None
 
 
 class TestParentChildRelations:

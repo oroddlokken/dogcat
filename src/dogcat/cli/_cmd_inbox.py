@@ -133,8 +133,8 @@ def _format_proposal_full(proposal: Proposal) -> str:
     )
     if proposal.closed_at:
         closed_line = f"{_styled('Closed:')} {proposal.closed_at.strftime(dt_fmt)}"
-        if proposal.close_reason:
-            closed_line += f" ({proposal.close_reason})"
+        if proposal.closed_reason:
+            closed_line += f" ({proposal.closed_reason})"
         lines.append(closed_line)
     if proposal.closed_by:
         lines.append(f"{_styled('Closed by:')} {proposal.closed_by}")

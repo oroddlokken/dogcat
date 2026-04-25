@@ -350,7 +350,7 @@ class TestCLIClose:
             ],
         )
         closed_data = json.loads(show_result.stdout)
-        assert closed_data["close_reason"] == "Fixed the bug"
+        assert closed_data["closed_reason"] == "Fixed the bug"
         assert closed_data["notes"] == "Some notes"
         assert "Closed:" not in (closed_data["notes"] or "")
 

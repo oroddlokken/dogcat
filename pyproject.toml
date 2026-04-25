@@ -43,13 +43,11 @@ web = [
 [dependency-groups]
 dev = [
     "dogcat[web]",
-    "httpx>=0.27.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "pytest-cov==7.0.0",
     "pytest-xdist[psutil]",
     "ruff>=0.14.14",
-    "pytest-xdist==3.8.0",
     "pyright>=1.1.408",
     "vulture>=2.14",
     "pytest-timeout>=2.4.0",

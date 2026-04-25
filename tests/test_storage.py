@@ -209,7 +209,7 @@ class TestCRUDOperations:
         updated = storage.update("issue-1", {"status": "in_review"})
         assert updated.status == Status.IN_REVIEW
         assert updated.closed_at is None
-        assert updated.close_reason is None
+        assert updated.closed_reason is None
         assert updated.closed_by is None
 
     def test_update_status_to_closed_sets_closed_at(
@@ -239,7 +239,7 @@ class TestCRUDOperations:
         assert got is not None
         assert got.status == Status.IN_REVIEW
         assert got.closed_at is None
-        assert got.close_reason is None
+        assert got.closed_reason is None
         assert got.closed_by is None
 
     def test_close_issue(self, storage: JSONLStorage) -> None:
@@ -264,7 +264,7 @@ class TestCRUDOperations:
         deleted = storage.delete("issue-1", reason="Duplicate")
         assert deleted.status == Status.TOMBSTONE
         assert deleted.deleted_at is not None
-        assert deleted.delete_reason == "Duplicate"
+        assert deleted.deleted_reason == "Duplicate"
 
     def test_delete_nonexistent_issue_raises(self, storage: JSONLStorage) -> None:
         """Test that deleting nonexistent issue raises."""
@@ -676,7 +676,7 @@ class TestCloseReasonField:
         storage.create(issue)
 
         closed = storage.close("issue-1", reason="Fixed the bug")
-        assert closed.close_reason == "Fixed the bug"
+        assert closed.closed_reason == "Fixed the bug"
 
     def test_close_does_not_embed_reason_in_notes(self, storage: JSONLStorage) -> None:
         """Test that closing does not embed the reason in notes."""
@@ -693,7 +693,7 @@ class TestCloseReasonField:
         storage.create(issue)
 
         closed = storage.close("issue-1")
-        assert closed.close_reason is None
+        assert closed.closed_reason is None
 
     def test_close_reason_persists(self, temp_workspace: Path) -> None:
         """Test that close_reason survives save/load cycle."""
@@ -708,7 +708,7 @@ class TestCloseReasonField:
         storage2 = JSONLStorage(str(storage_path))
         loaded = storage2.get("issue-1")
         assert loaded is not None
-        assert loaded.close_reason == "Done"
+        assert loaded.closed_reason == "Done"
 
     def test_legacy_close_reason_migrated_from_notes(
         self,
@@ -845,6 +845,96 @@ class TestCloseDeleteOperator:
         tombstone = issue_records[-1]
         assert tombstone["deleted_by"] == "bob"
         assert tombstone["status"] == "tombstone"
+
+
+class TestStatusTransitionEdgeCases:
+    """Edge cases for status transitions through storage.update()."""
+
+    def test_closed_open_closed_roundtrip_resets_close_fields(
+        self, storage: JSONLStorage
+    ) -> None:
+        """CLOSED -> OPEN -> CLOSED: close fields clear, then closed_at resets."""
+        issue = Issue(id="rt-1", title="Round trip")
+        storage.create(issue)
+
+        # First close populates all three fields.
+        storage.close("rt-1", reason="initial", closed_by="alice")
+        first = storage.get("rt-1")
+        assert first is not None
+        first_closed_at = first.closed_at
+        assert first_closed_at is not None
+        assert first.closed_reason == "initial"
+        assert first.closed_by == "alice"
+
+        # Reopen via update — all close fields must clear.
+        reopened = storage.update("rt-1", {"status": "open"})
+        assert reopened.status == Status.OPEN
+        assert reopened.closed_at is None
+        assert reopened.closed_reason is None
+        assert reopened.closed_by is None
+
+        # Re-close via update — closed_at gets set fresh; reason/by remain None
+        # because update() doesn't accept them and prior values were cleared.
+        reclosed = storage.update("rt-1", {"status": "closed"})
+        assert reclosed.status == Status.CLOSED
+        assert reclosed.closed_at is not None
+        assert reclosed.closed_at >= first_closed_at
+        assert reclosed.closed_reason is None
+        assert reclosed.closed_by is None
+
+    def test_update_to_closed_without_closed_by(self, storage: JSONLStorage) -> None:
+        """Closing via update (no closed_by argument) leaves closed_by None."""
+        issue = Issue(id="nbc-1", title="No closed_by")
+        storage.create(issue)
+
+        updated = storage.update("nbc-1", {"status": "closed"})
+        assert updated.status == Status.CLOSED
+        assert updated.closed_at is not None
+        assert updated.closed_by is None
+        assert updated.closed_reason is None
+
+    def test_closed_blocked_closed_restores_closed_at(
+        self, storage: JSONLStorage
+    ) -> None:
+        """CLOSED -> BLOCKED -> CLOSED: closed_at clears, then resets on re-close."""
+        issue = Issue(id="cbc-1", title="Close blocked close")
+        storage.create(issue)
+
+        storage.close("cbc-1", reason="initial", closed_by="bob")
+        before = storage.get("cbc-1")
+        assert before is not None
+        assert before.closed_at is not None
+        before_closed_at = before.closed_at
+
+        # Move to BLOCKED — closed fields must clear.
+        blocked = storage.update("cbc-1", {"status": "blocked"})
+        assert blocked.status == Status.BLOCKED
+        assert blocked.closed_at is None
+        assert blocked.closed_reason is None
+        assert blocked.closed_by is None
+
+        # Re-close — closed_at is set anew (not the original).
+        reclosed = storage.update("cbc-1", {"status": "closed"})
+        assert reclosed.status == Status.CLOSED
+        assert reclosed.closed_at is not None
+        assert reclosed.closed_at >= before_closed_at
+
+    def test_bulk_status_updates_consistency(self, storage: JSONLStorage) -> None:
+        """Closing many issues in a loop yields consistent state for each."""
+        ids = [f"bulk-{i}" for i in range(10)]
+        for iid in ids:
+            storage.create(Issue(id=iid, title=f"Bulk {iid}"))
+
+        for iid in ids:
+            storage.update(iid, {"status": "closed"})
+
+        for iid in ids:
+            got = storage.get(iid)
+            assert got is not None
+            assert got.status == Status.CLOSED
+            assert got.closed_at is not None
+            assert got.closed_reason is None
+            assert got.closed_by is None
 
 
 class TestAppendOnlyStorage:
@@ -1377,6 +1467,21 @@ class TestFileLock:
                 line = line.strip()
                 if line:
                     json.loads(line)  # Should not raise
+
+    def test_file_lock_open_failure_raises_runtimeerror(
+        self, temp_workspace: Path
+    ) -> None:
+        """OSError opening the lock file is wrapped in a clear RuntimeError."""
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+        # Point lock at a path inside a missing directory so open('w') fails.
+        storage._lock_path = temp_workspace / "missing-dir" / "subdir" / ".issues.lock"
+
+        with (
+            pytest.raises(RuntimeError, match="Failed to open lock file"),
+            storage._file_lock(),
+        ):
+            pass
 
 
 def _count_lines(path: Path) -> int:

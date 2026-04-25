@@ -10,7 +10,6 @@ The merged result is written to the ours file (%A).
 
 from __future__ import annotations
 
-import contextlib
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
@@ -53,12 +52,12 @@ def parse_conflicted_jsonl(
     # States: "outside", "ours", "base", "theirs"
     state = "outside"
     shared: list[dict[str, Any]] = []
-    ours_lines: list[bytes] = []
-    base_lines: list[bytes] = []
-    theirs_lines: list[bytes] = []
+    ours_lines: list[tuple[int, bytes]] = []
+    base_lines: list[tuple[int, bytes]] = []
+    theirs_lines: list[tuple[int, bytes]] = []
     had_conflicts = False
 
-    for line in raw.splitlines():
+    for line_num, line in enumerate(raw.splitlines(), 1):
         stripped = line.strip()
         if not stripped:
             continue
@@ -78,28 +77,41 @@ def parse_conflicted_jsonl(
             continue
 
         if state == "outside":
-            with contextlib.suppress(orjson.JSONDecodeError):
+            try:
                 shared.append(orjson.loads(stripped))
+            except orjson.JSONDecodeError:
+                logger.warning(
+                    "Skipping malformed JSONL at line %d in shared section",
+                    line_num,
+                )
         elif state == "ours":
-            ours_lines.append(stripped)
+            ours_lines.append((line_num, stripped))
         elif state == "base":
-            base_lines.append(stripped)
+            base_lines.append((line_num, stripped))
         elif state == "theirs":
-            theirs_lines.append(stripped)
+            theirs_lines.append((line_num, stripped))
 
     if not had_conflicts:
         return [], [], []
 
-    def _parse_lines(lines: list[bytes]) -> list[dict[str, Any]]:
+    def _parse_lines(
+        lines: list[tuple[int, bytes]], section: str
+    ) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []
-        for raw_line in lines:
-            with contextlib.suppress(orjson.JSONDecodeError):
+        for line_num, raw_line in lines:
+            try:
                 records.append(orjson.loads(raw_line))
+            except orjson.JSONDecodeError:  # noqa: PERF203
+                logger.warning(
+                    "Skipping malformed JSONL at line %d in %s section",
+                    line_num,
+                    section,
+                )
         return records
 
-    base_records = _parse_lines(base_lines)
-    ours_records = shared + _parse_lines(ours_lines)
-    theirs_records = shared + _parse_lines(theirs_lines)
+    base_records = _parse_lines(base_lines, "base")
+    ours_records = shared + _parse_lines(ours_lines, "ours")
+    theirs_records = shared + _parse_lines(theirs_lines, "theirs")
 
     return base_records, ours_records, theirs_records
 

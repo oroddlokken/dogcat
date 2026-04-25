@@ -209,7 +209,7 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(1)
 
     @app.command(name="remove", hidden=True)
-    def remove_cmd(
+    def remove(
         issue_id: str = typer.Argument(
             ...,
             help="Issue ID",

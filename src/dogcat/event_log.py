@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-import fcntl
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import orjson
-from typing_extensions import Self
 
 from dogcat._version import version as _dcat_version
+from dogcat.locking import advisory_file_lock
+
+if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
 
 
 @dataclass
@@ -133,9 +135,9 @@ class EventLog:
 
         return events
 
-    def _file_lock(self) -> _FileLock:
+    def _file_lock(self) -> AbstractContextManager[None]:
         """Create an advisory file lock context manager."""
-        return _FileLock(self._lock_path)
+        return advisory_file_lock(self._lock_path)
 
 
 class InboxEventLog:
@@ -194,24 +196,6 @@ class InboxEventLog:
 
         return events
 
-    def _file_lock(self) -> _FileLock:
+    def _file_lock(self) -> AbstractContextManager[None]:
         """Create an advisory file lock context manager."""
-        return _FileLock(self._lock_path)
-
-
-class _FileLock:
-    """Advisory file lock using fcntl."""
-
-    def __init__(self, lock_path: Path) -> None:
-        self._lock_path = lock_path
-        self._fd: Any = None
-
-    def __enter__(self) -> Self:
-        self._fd = self._lock_path.open("w")
-        fcntl.flock(self._fd, fcntl.LOCK_EX)
-        return self
-
-    def __exit__(self, *_args: object) -> None:
-        if self._fd:
-            fcntl.flock(self._fd, fcntl.LOCK_UN)
-            self._fd.close()
+        return advisory_file_lock(self._lock_path)

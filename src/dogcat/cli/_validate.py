@@ -148,23 +148,47 @@ def validate_issue(
             },
         )
 
-    # Timestamp validation
-    for ts_field in ("created_at", "updated_at", "closed_at", "deleted_at"):
-        ts = record.get(ts_field)
-        if ts is not None:
-            try:
-                datetime.fromisoformat(ts)
-            except (ValueError, TypeError):
-                errors.append(
-                    {
-                        "level": "error",
-                        "message": (
-                            f"Line {lineno}: issue {full_id} has invalid"
-                            f" timestamp in '{ts_field}': {ts}"
-                        ),
-                    },
-                )
+    errors.extend(
+        _validate_timestamps(
+            record,
+            ("created_at", "updated_at", "closed_at", "deleted_at"),
+            context=f"issue {full_id}",
+            lineno=lineno,
+        ),
+    )
 
+    return errors
+
+
+def _validate_timestamps(
+    record: dict[str, Any],
+    timestamp_fields: tuple[str, ...],
+    *,
+    context: str,
+    lineno: int,
+) -> list[dict[str, str]]:
+    """Validate ISO8601 timestamp fields on a record.
+
+    ``context`` is the human-readable subject (e.g. ``"issue dc-abc1"`` or
+    ``"proposal dc-inbox-4kzj"``) used in error messages.
+    """
+    errors: list[dict[str, str]] = []
+    for ts_field in timestamp_fields:
+        ts = record.get(ts_field)
+        if ts is None:
+            continue
+        try:
+            datetime.fromisoformat(ts)
+        except (ValueError, TypeError):
+            errors.append(
+                {
+                    "level": "error",
+                    "message": (
+                        f"Line {lineno}: {context} has invalid"
+                        f" timestamp in '{ts_field}': {ts}"
+                    ),
+                },
+            )
     return errors
 
 
@@ -302,22 +326,14 @@ def validate_proposal_record(
             },
         )
 
-    # Timestamp validation
-    for ts_field in ("created_at", "updated_at", "closed_at"):
-        ts = record.get(ts_field)
-        if ts is not None:
-            try:
-                datetime.fromisoformat(ts)
-            except (ValueError, TypeError):
-                errors.append(
-                    {
-                        "level": "error",
-                        "message": (
-                            f"Line {lineno}: proposal {full_id} has invalid"
-                            f" timestamp in '{ts_field}': {ts}"
-                        ),
-                    },
-                )
+    errors.extend(
+        _validate_timestamps(
+            record,
+            ("created_at", "updated_at", "closed_at"),
+            context=f"proposal {full_id}",
+            lineno=lineno,
+        ),
+    )
 
     return errors
 
