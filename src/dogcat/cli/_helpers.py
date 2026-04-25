@@ -21,13 +21,14 @@ from dogcat.constants import (
     STATUS_SHORTHANDS,
     TYPE_SHORTHANDS,
 )
-from dogcat.models import is_manual_issue
+from dogcat.models import Issue, Proposal, is_manual_issue
 from dogcat.storage import JSONLStorage
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     import click
+
 
 _type_keys = "/".join(sorted(TYPE_SHORTHANDS.keys()))
 _status_keys = "/".join(sorted(STATUS_SHORTHANDS.keys()))
@@ -135,6 +136,60 @@ def _make_alias(
         for name, ann in source_fn.__annotations__.items()
         if name not in exclude_params
     }
+    return wrapper
+
+
+def require_resolved_id(
+    storage: JSONLStorage, raw_id: str, *, label: str = "Issue"
+) -> str:
+    """Resolve a partial id or echo+exit with a clear error.
+
+    Replaces the six-line ``if foo: resolved = storage.resolve_id(foo); if
+    resolved is None: echo_error(...); raise typer.Exit(1); foo = resolved``
+    pattern in CLI commands that accept reference flags (``--depends-on``,
+    ``--blocks``, ``--duplicate-of``, ``--parent``). ``label`` lets each
+    call site surface the role (``"Parent issue"``, ``"Duplicate target"``)
+    in the error message.
+    """
+    from ._json_state import echo_error
+
+    resolved = storage.resolve_id(raw_id)
+    if resolved is None:
+        echo_error(f"{label} {raw_id} not found")
+        raise typer.Exit(1)
+    return resolved
+
+
+def cli_command(func: Callable[..., Any]) -> Callable[..., Any]:
+    """Wrap a Typer command body in the standard try/except envelope.
+
+    Most CLI commands wrap their body in::
+
+        try:
+            ...
+        except typer.Exit:
+            raise
+        except Exception as e:
+            echo_error(str(e))
+            raise typer.Exit(1)
+
+    This decorator handles that uniform envelope so command bodies can
+    focus on the work. ``typer.BadParameter`` is also re-raised so Typer
+    can surface its own usage message; everything else flows through
+    :func:`echo_error` and exits with rc=1.
+    """
+    from ._json_state import echo_error
+
+    @functools.wraps(func)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return func(*args, **kwargs)
+        except (typer.Exit, typer.BadParameter):
+            raise
+        except Exception as e:  # noqa: BLE001
+            echo_error(str(e))
+            raise typer.Exit(1) from e
+
     return wrapper
 
 
@@ -322,11 +377,11 @@ def check_comments_exclusive(*, has_comments: bool, without_comments: bool) -> N
 
 
 def apply_comment_filter(
-    issues: list[Any],
+    issues: list[Issue],
     *,
     has_comments: bool = False,
     without_comments: bool = False,
-) -> list[Any]:
+) -> list[Issue]:
     """Filter issues by presence/absence of comments.
 
     Comments are hard-deleted from issue.comments, so 'has comments' is
@@ -343,7 +398,7 @@ def apply_comment_filter(
 
 
 def apply_common_filters(
-    issues: list[Any],
+    issues: list[Issue],
     *,
     issue_type: str | None = None,
     priority: int | None = None,
@@ -358,8 +413,8 @@ def apply_common_filters(
     without_comments: bool = False,
     all_namespaces: bool = False,
     dogcats_dir: str | None = None,
-    storage: Any = None,
-) -> list[Any]:
+    storage: JSONLStorage | None = None,
+) -> list[Issue]:
     """Apply common filters to a list of issues.
 
     This is a shared helper to avoid duplicating filter logic across
@@ -591,7 +646,7 @@ def load_open_inbox_proposals(
     namespace: str | None,
     *,
     all_namespaces: bool,
-) -> list[Any]:
+) -> list[Proposal]:
     """Load open (non-closed) inbox proposals from ``dogcats_dir``.
 
     Filters by namespace using the same precedence as issue listings:
@@ -607,7 +662,7 @@ def load_open_inbox_proposals(
     except (ValueError, RuntimeError):
         return []
 
-    proposals: list[Any] = [p for p in inbox.list() if not p.is_closed()]
+    proposals: list[Proposal] = [p for p in inbox.list() if not p.is_closed()]
     if all_namespaces:
         return proposals
 
@@ -624,7 +679,7 @@ def load_remote_inbox_proposals(
     *,
     all_namespaces: bool,
     show_all: bool = False,
-) -> tuple[list[Any], str | None]:
+) -> tuple[list[Proposal], str | None]:
     """Load proposals from the remote inbox configured in ``inbox_remote``.
 
     Returns ``(proposals, remote_path)``. When no remote is configured or
@@ -658,7 +713,7 @@ def load_remote_inbox_proposals(
     )
     try:
         remote_inbox = InboxStorage(dogcats_dir=str(remote_dogcats))
-        proposals: list[Any] = remote_inbox.list(
+        proposals: list[Proposal] = remote_inbox.list(
             include_tombstones=show_all,
             namespace=ns_filter_value,
         )

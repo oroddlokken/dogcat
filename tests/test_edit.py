@@ -36,9 +36,23 @@ def _make_issue(**kwargs: object) -> Issue:
 
 
 def _make_storage() -> MagicMock:
-    """Create a mock storage backend."""
+    """Create a mock storage backend.
+
+    ``create_issue`` mirrors the real factory shape: it builds an Issue
+    from the keyword arguments (with a synthetic id) and records the
+    constructed issue on ``create.call_args`` so existing test assertions
+    keep working after the TUI moved to ``storage.create_issue``.
+    """
     storage = MagicMock()
     storage.get.return_value = None
+    storage.get_issue_ids.return_value = set()
+
+    def _create_issue(**kwargs: Any) -> Issue:
+        issue = Issue(id="abcd", **kwargs)
+        storage.create(issue)
+        return issue
+
+    storage.create_issue.side_effect = _create_issue
     return storage
 
 

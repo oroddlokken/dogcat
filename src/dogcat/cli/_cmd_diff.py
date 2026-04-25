@@ -124,11 +124,11 @@ def _get_current_proposals(
     return {p.full_id: proposal_to_dict(p) for p in inbox.list(include_tombstones=True)}
 
 
-def _field_value(value: Any) -> Any:
-    """Normalize a field value for comparison."""
-    if hasattr(value, "value"):
-        return value.value
-    return value
+from dogcat._diff import field_value as _field_value  # noqa: E402  (re-export)
+
+# ``_field_value`` is now an alias for the canonical helper in ``dogcat._diff``.
+# Storage and ``_validate`` already share that implementation; the inline
+# duplicate here was the third copy.
 
 
 def register(app: typer.Typer) -> None:

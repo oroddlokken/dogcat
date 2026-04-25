@@ -6,7 +6,8 @@ import orjson
 import typer
 
 from dogcat.config import extract_prefix, get_namespace_filter
-from dogcat.models import is_manual_issue
+from dogcat.constants import TERMINAL_STATUSES
+from dogcat.models import Status, is_manual_issue
 
 from ._completions import (
     complete_issue_ids,
@@ -447,53 +448,29 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Show issues currently in progress."""
         set_json(json_output)
-        try:
-            final_limit = limit_arg or limit
-            storage = get_storage(dogcats_dir)
-            issues = storage.list({"status": "in_progress"})
-            issues = apply_common_filters(
-                issues,
-                issue_type=issue_type,
-                priority=priority,
-                label=label,
-                owner=owner,
-                parent=parent,
-                no_parent=no_parent,
-                namespace=namespace,
-                all_namespaces=all_namespaces,
-                agent_only=agent_only,
-                manual_only=manual,
-                has_comments=has_comments,
-                without_comments=without_comments,
-                dogcats_dir=str(storage.dogcats_dir),
-                storage=storage,
-            )
-            issues.sort(key=lambda i: i.priority)
-            if final_limit:
-                issues = issues[:final_limit]
-
-            if is_json():
-                from dogcat.models import issue_to_dict
-
-                output = [issue_to_dict(issue) for issue in issues]
-                typer.echo(orjson.dumps(output).decode())
-            elif not issues:
-                typer.echo("No in-progress issues")
-            else:
-                typer.echo(f"In Progress ({len(issues)}):")
-                if tree or any(i.parent for i in issues):
-                    typer.echo(format_issue_tree(issues))
-                elif table:
-                    typer.echo(format_issue_table(issues))
-                else:
-                    for issue in issues:
-                        typer.echo(format_issue_brief(issue))
-
-        except typer.Exit:
-            raise
-        except Exception as e:
-            echo_error(str(e))
-            raise typer.Exit(1)
+        _list_by_status(
+            status="in_progress",
+            heading="In Progress",
+            empty_msg="No in-progress issues",
+            limit_arg=limit_arg,
+            limit=limit,
+            issue_type=issue_type,
+            priority=priority,
+            label=label,
+            owner=owner,
+            parent=parent,
+            no_parent=no_parent,
+            namespace=namespace,
+            all_namespaces=all_namespaces,
+            agent_only=agent_only,
+            manual_only=manual,
+            has_comments=has_comments,
+            without_comments=without_comments,
+            tree=tree,
+            table=table,
+            dogcats_dir=dogcats_dir,
+            auto_tree=True,
+        )
 
     @app.command("open")
     def open_issues(
@@ -578,53 +555,29 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Show all open issues."""
         set_json(json_output)
-        try:
-            final_limit = limit_arg or limit
-            storage = get_storage(dogcats_dir)
-            issues = storage.list({"status": "open"})
-            issues = apply_common_filters(
-                issues,
-                issue_type=issue_type,
-                priority=priority,
-                label=label,
-                owner=owner,
-                parent=parent,
-                no_parent=no_parent,
-                namespace=namespace,
-                all_namespaces=all_namespaces,
-                agent_only=agent_only,
-                manual_only=manual,
-                has_comments=has_comments,
-                without_comments=without_comments,
-                dogcats_dir=str(storage.dogcats_dir),
-                storage=storage,
-            )
-            issues.sort(key=lambda i: i.priority)
-            if final_limit:
-                issues = issues[:final_limit]
-
-            if is_json():
-                from dogcat.models import issue_to_dict
-
-                output = [issue_to_dict(issue) for issue in issues]
-                typer.echo(orjson.dumps(output).decode())
-            elif not issues:
-                typer.echo("No open issues")
-            else:
-                typer.echo(f"Open ({len(issues)}):")
-                if tree or any(i.parent for i in issues):
-                    typer.echo(format_issue_tree(issues))
-                elif table:
-                    typer.echo(format_issue_table(issues))
-                else:
-                    for issue in issues:
-                        typer.echo(format_issue_brief(issue))
-
-        except typer.Exit:
-            raise
-        except Exception as e:
-            echo_error(str(e))
-            raise typer.Exit(1)
+        _list_by_status(
+            status="open",
+            heading="Open",
+            empty_msg="No open issues",
+            limit_arg=limit_arg,
+            limit=limit,
+            issue_type=issue_type,
+            priority=priority,
+            label=label,
+            owner=owner,
+            parent=parent,
+            no_parent=no_parent,
+            namespace=namespace,
+            all_namespaces=all_namespaces,
+            agent_only=agent_only,
+            manual_only=manual,
+            has_comments=has_comments,
+            without_comments=without_comments,
+            tree=tree,
+            table=table,
+            dogcats_dir=dogcats_dir,
+            auto_tree=True,
+        )
 
     @app.command("in-review")
     def in_review(
@@ -709,53 +662,29 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Show issues currently in review."""
         set_json(json_output)
-        try:
-            final_limit = limit_arg or limit
-            storage = get_storage(dogcats_dir)
-            issues = storage.list({"status": "in_review"})
-            issues = apply_common_filters(
-                issues,
-                issue_type=issue_type,
-                priority=priority,
-                label=label,
-                owner=owner,
-                parent=parent,
-                no_parent=no_parent,
-                namespace=namespace,
-                all_namespaces=all_namespaces,
-                agent_only=agent_only,
-                manual_only=manual,
-                has_comments=has_comments,
-                without_comments=without_comments,
-                dogcats_dir=str(storage.dogcats_dir),
-                storage=storage,
-            )
-            issues.sort(key=lambda i: i.priority)
-            if final_limit:
-                issues = issues[:final_limit]
-
-            if is_json():
-                from dogcat.models import issue_to_dict
-
-                output = [issue_to_dict(issue) for issue in issues]
-                typer.echo(orjson.dumps(output).decode())
-            elif not issues:
-                typer.echo("No in-review issues")
-            else:
-                typer.echo(f"In Review ({len(issues)}):")
-                if tree or any(i.parent for i in issues):
-                    typer.echo(format_issue_tree(issues))
-                elif table:
-                    typer.echo(format_issue_table(issues))
-                else:
-                    for issue in issues:
-                        typer.echo(format_issue_brief(issue))
-
-        except typer.Exit:
-            raise
-        except Exception as e:
-            echo_error(str(e))
-            raise typer.Exit(1)
+        _list_by_status(
+            status="in_review",
+            heading="In Review",
+            empty_msg="No in-review issues",
+            limit_arg=limit_arg,
+            limit=limit,
+            issue_type=issue_type,
+            priority=priority,
+            label=label,
+            owner=owner,
+            parent=parent,
+            no_parent=no_parent,
+            namespace=namespace,
+            all_namespaces=all_namespaces,
+            agent_only=agent_only,
+            manual_only=manual,
+            has_comments=has_comments,
+            without_comments=without_comments,
+            tree=tree,
+            table=table,
+            dogcats_dir=dogcats_dir,
+            auto_tree=True,
+        )
 
     def _set_status(
         issue_id: str,
@@ -815,8 +744,16 @@ def register(app: typer.Typer) -> None:
         tree: bool,
         table: bool,
         dogcats_dir: str,
+        auto_tree: bool = False,
     ) -> None:
-        """List issues filtered by a single status."""
+        """List issues filtered by a single status.
+
+        ``auto_tree=True`` flips the renderer into tree mode whenever any
+        result has a parent, matching the historical behavior of the public
+        list-style commands (``open``, ``in_progress``, ``in_review``,
+        ``deferred``). The hidden shorthand commands keep the literal
+        ``--tree`` flag semantics by leaving ``auto_tree=False``.
+        """
         try:
             final_limit = limit_arg or limit
             storage = get_storage(dogcats_dir)
@@ -853,7 +790,7 @@ def register(app: typer.Typer) -> None:
                 typer.echo(empty_msg)
             else:
                 typer.echo(f"{heading} ({len(issues)}):")
-                if tree:
+                if tree or (auto_tree and any(i.parent for i in issues)):
                     typer.echo(format_issue_tree(issues))
                 elif table:
                     typer.echo(format_issue_table(issues))
@@ -1162,53 +1099,28 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Show issues currently deferred."""
         set_json(json_output)
-        try:
-            final_limit = limit_arg or limit
-            storage = get_storage(dogcats_dir)
-            issues = storage.list({"status": "deferred"})
-            issues = apply_common_filters(
-                issues,
-                issue_type=issue_type,
-                priority=priority,
-                label=label,
-                owner=owner,
-                parent=parent,
-                no_parent=no_parent,
-                namespace=namespace,
-                all_namespaces=all_namespaces,
-                agent_only=agent_only,
-                manual_only=manual,
-                has_comments=has_comments,
-                without_comments=without_comments,
-                dogcats_dir=str(storage.dogcats_dir),
-                storage=storage,
-            )
-            issues.sort(key=lambda i: i.priority)
-            if final_limit:
-                issues = issues[:final_limit]
-
-            if is_json():
-                from dogcat.models import issue_to_dict
-
-                output = [issue_to_dict(issue) for issue in issues]
-                typer.echo(orjson.dumps(output).decode())
-            elif not issues:
-                typer.echo("No deferred issues")
-            else:
-                typer.echo(f"Deferred ({len(issues)}):")
-                if tree:
-                    typer.echo(format_issue_tree(issues))
-                elif table:
-                    typer.echo(format_issue_table(issues))
-                else:
-                    for issue in issues:
-                        typer.echo(format_issue_brief(issue))
-
-        except typer.Exit:
-            raise
-        except Exception as e:
-            echo_error(str(e))
-            raise typer.Exit(1)
+        _list_by_status(
+            status="deferred",
+            heading="Deferred",
+            empty_msg="No deferred issues",
+            limit_arg=limit_arg,
+            limit=limit,
+            issue_type=issue_type,
+            priority=priority,
+            label=label,
+            owner=owner,
+            parent=parent,
+            no_parent=no_parent,
+            namespace=namespace,
+            all_namespaces=all_namespaces,
+            agent_only=agent_only,
+            manual_only=manual,
+            has_comments=has_comments,
+            without_comments=without_comments,
+            tree=tree,
+            table=table,
+            dogcats_dir=dogcats_dir,
+        )
 
     @app.command(name="defer", hidden=True)
     @with_ns_shim
@@ -1307,7 +1219,7 @@ def register(app: typer.Typer) -> None:
                 i
                 for i in issues
                 if is_manual_issue(i.metadata)
-                and i.status.value not in ("closed", "tombstone")
+                and i.status.value not in TERMINAL_STATUSES
             ]
             issues = apply_common_filters(
                 issues,
@@ -1376,12 +1288,14 @@ def register(app: typer.Typer) -> None:
             if current is None:
                 echo_error(f"Issue {issue_id} not found")
                 raise typer.Exit(1)
-            new_metadata = dict(current.metadata) if current.metadata else {}
-            new_metadata["manual"] = True
-            new_metadata.pop("no_agent", None)
+            from dogcat.models import set_manual_flag
+
             issue = storage.update(
                 issue_id,
-                {"metadata": new_metadata, "operator": final_operator},
+                {
+                    "metadata": set_manual_flag(current.metadata or {}, manual=True),
+                    "operator": final_operator,
+                },
             )
 
             if is_json():
@@ -1561,9 +1475,7 @@ def register(app: typer.Typer) -> None:
         try:
             storage = get_storage(dogcats_dir)
             issues = [
-                i
-                for i in storage.list()
-                if i.status.value not in ("closed", "tombstone")
+                i for i in storage.list() if i.status.value not in TERMINAL_STATUSES
             ]
 
             issues = apply_common_filters(
@@ -1608,54 +1520,9 @@ def register(app: typer.Typer) -> None:
             echo_error(str(e))
             raise typer.Exit(1)
 
-    @app.command(name="rc", hidden=True)
-    def recently_closed_alias(
-        limit_arg: int | None = typer.Argument(None, help="Number of issues to show"),
-        limit: int | None = typer.Option(
-            None, "--limit", help="Number of issues to show"
-        ),
-        all_namespaces: bool = typer.Option(
-            False,
-            "--all-namespaces",
-            "--all-ns",
-            "-A",
-            help="Show issues from all namespaces",
-        ),
-        agent_only: bool = typer.Option(
-            False,
-            "--agent-only",
-            help="Only show issues available for agents",
-        ),
-        manual: bool = typer.Option(
-            False,
-            "--manual",
-            help="Only show issues marked as manual",
-        ),
-        has_comments: bool = typer.Option(
-            False,
-            "--has-comments",
-            help="Only show issues that have at least one comment",
-        ),
-        without_comments: bool = typer.Option(
-            False,
-            "--without-comments",
-            help="Only show issues that have no comments",
-        ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
-    ) -> None:
-        """Alias for recently-closed."""
-        recently_closed(
-            limit_arg=limit_arg,
-            limit=limit,
-            all_namespaces=all_namespaces,
-            agent_only=agent_only,
-            manual=manual,
-            has_comments=has_comments,
-            without_comments=without_comments,
-            json_output=json_output,
-            dogcats_dir=dogcats_dir,
-        )
+    app.command(name="rc", hidden=True)(
+        _make_alias(recently_closed, doc="Alias for recently-closed."),
+    )
 
     app.command(name="o", hidden=True)(
         _make_alias(open_issues, doc="Alias for open."),
@@ -1669,54 +1536,9 @@ def register(app: typer.Typer) -> None:
         _make_alias(deferred, doc="Alias for deferred."),
     )
 
-    @app.command(name="ra", hidden=True)
-    def recently_added_alias(
-        limit_arg: int | None = typer.Argument(None, help="Number of issues to show"),
-        limit: int | None = typer.Option(
-            None, "--limit", help="Number of issues to show"
-        ),
-        all_namespaces: bool = typer.Option(
-            False,
-            "--all-namespaces",
-            "--all-ns",
-            "-A",
-            help="Show issues from all namespaces",
-        ),
-        agent_only: bool = typer.Option(
-            False,
-            "--agent-only",
-            help="Only show issues available for agents",
-        ),
-        manual: bool = typer.Option(
-            False,
-            "--manual",
-            help="Only show issues marked as manual",
-        ),
-        has_comments: bool = typer.Option(
-            False,
-            "--has-comments",
-            help="Only show issues that have at least one comment",
-        ),
-        without_comments: bool = typer.Option(
-            False,
-            "--without-comments",
-            help="Only show issues that have no comments",
-        ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
-    ) -> None:
-        """Alias for recently-added."""
-        recently_added(
-            limit_arg=limit_arg,
-            limit=limit,
-            all_namespaces=all_namespaces,
-            agent_only=agent_only,
-            manual=manual,
-            has_comments=has_comments,
-            without_comments=without_comments,
-            json_output=json_output,
-            dogcats_dir=dogcats_dir,
-        )
+    app.command(name="ra", hidden=True)(
+        _make_alias(recently_added, doc="Alias for recently-added."),
+    )
 
     @app.command(name="pr")
     def progress_review(
@@ -1753,7 +1575,7 @@ def register(app: typer.Typer) -> None:
         try:
             storage = get_storage(dogcats_dir)
             ip_issues = apply_common_filters(
-                storage.list({"status": "in_progress"}),
+                storage.list({"status": Status.IN_PROGRESS.value}),
                 no_parent=no_parent,
                 agent_only=agent_only,
                 manual_only=manual,
@@ -1762,7 +1584,7 @@ def register(app: typer.Typer) -> None:
                 storage=storage,
             )
             ir_issues = apply_common_filters(
-                storage.list({"status": "in_review"}),
+                storage.list({"status": Status.IN_REVIEW.value}),
                 no_parent=no_parent,
                 agent_only=agent_only,
                 manual_only=manual,
@@ -2013,7 +1835,7 @@ def register(app: typer.Typer) -> None:
                 for i in all_issues
                 if i.snoozed_until is not None
                 and i.snoozed_until > now
-                and i.status.value not in ("closed", "tombstone")
+                and i.status.value not in TERMINAL_STATUSES
             ]
 
             issues = apply_common_filters(

@@ -482,7 +482,7 @@ class TestCLIUpdate:
             ],
         )
         assert result.exit_code == 1
-        assert "Issue nonexistent not found" in result.output
+        assert "Duplicate target nonexistent not found" in result.output
 
     def test_update_auto_populates_updated_by(self, tmp_path: Path) -> None:
         """Test that update auto-populates updated_by from git config."""

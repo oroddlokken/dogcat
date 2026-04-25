@@ -618,6 +618,67 @@ class TestInboxStorage:
             pass
 
 
+class TestCreateProposalFactory:
+    """Test ``InboxStorage.create_proposal`` factory.
+
+    Regression for dogcat-6a1g: the IDGenerator + Proposal-construction
+    pattern was duplicated across the propose CLI, the web propose endpoint,
+    and the demo. Centralized here.
+    """
+
+    @pytest.fixture
+    def inbox(self, tmp_path: object) -> object:
+        """Create an empty InboxStorage."""
+        from pathlib import Path
+
+        from dogcat.inbox import InboxStorage
+
+        dogcats = Path(str(tmp_path)) / ".dogcats"
+        dogcats.mkdir()
+        return InboxStorage(dogcats_dir=str(dogcats))
+
+    def test_create_proposal_generates_id(self, inbox: object) -> None:
+        """Factory mints an inbox-prefixed id under the given namespace."""
+        from dogcat.inbox import InboxStorage
+
+        s = inbox
+        assert isinstance(s, InboxStorage)
+        proposal = s.create_proposal(title="Idea", namespace="t")
+        assert proposal.namespace == "t"
+        assert proposal.full_id.startswith("t-inbox-")
+        assert proposal.title == "Idea"
+
+    def test_create_proposal_persists(self, inbox: object) -> None:
+        """Returned proposal is stored and resolvable by full_id."""
+        from dogcat.inbox import InboxStorage
+
+        s = inbox
+        assert isinstance(s, InboxStorage)
+        proposal = s.create_proposal(title="Saved", namespace="t")
+        loaded = s.get(proposal.full_id)
+        assert loaded is not None
+        assert loaded.title == "Saved"
+
+    def test_create_proposal_passes_through_optional_fields(
+        self, inbox: object
+    ) -> None:
+        """description, proposed_by, source_repo land on the Proposal."""
+        from dogcat.inbox import InboxStorage
+
+        s = inbox
+        assert isinstance(s, InboxStorage)
+        proposal = s.create_proposal(
+            title="Full",
+            namespace="t",
+            description="desc",
+            proposed_by="user@example.com",
+            source_repo="/some/repo",
+        )
+        assert proposal.description == "desc"
+        assert proposal.proposed_by == "user@example.com"
+        assert proposal.source_repo == "/some/repo"
+
+
 class TestInboxLoadStrictness:
     """Regression tests for dogcat-3jth: malformed mid-file lines must raise.
 

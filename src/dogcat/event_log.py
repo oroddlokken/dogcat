@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, TypedDict
 import orjson
 
 from dogcat._version import version as _dcat_version
+from dogcat.constants import INBOX_FILENAME, ISSUES_FILENAME, LOCK_FILENAME
 from dogcat.locking import advisory_file_lock
 
 if TYPE_CHECKING:
@@ -134,7 +135,7 @@ class _BaseEventLog:
             raise TypeError(msg)
         self.dogcats_dir = Path(dogcats_dir)
         self.path = self.dogcats_dir / self.filename
-        self._lock_path = self.dogcats_dir / ".issues.lock"
+        self._lock_path = self.dogcats_dir / LOCK_FILENAME
 
     def append(self, event: EventRecord) -> None:
         """Append a single event record to the underlying JSONL file."""
@@ -144,7 +145,7 @@ class _BaseEventLog:
             f.write(b"\n")
             f.flush()
 
-    def emit(
+    def try_emit(
         self,
         event_type: str,
         full_id: str,
@@ -157,7 +158,9 @@ class _BaseEventLog:
 
         No-op if ``changes`` is empty. Failures are logged at DEBUG and
         swallowed so the caller's primary write path is never broken by
-        an event-log issue.
+        an event-log issue. The ``try_`` prefix is the swallow signal —
+        callers that need an exception on append failure should call
+        :meth:`append` directly.
         """
         if not changes:
             return
@@ -175,6 +178,10 @@ class _BaseEventLog:
             logging.getLogger(__name__).debug(
                 "Failed to write event for %s", full_id, exc_info=True
             )
+
+    # Back-compat alias: existing callers use ``emit``; remove once all
+    # in-tree call sites have migrated to the explicit ``try_emit`` name.
+    emit = try_emit
 
     @staticmethod
     def build_record(
@@ -249,10 +256,10 @@ class _BaseEventLog:
 class EventLog(_BaseEventLog):
     """Append-only event log stored alongside issues in ``issues.jsonl``."""
 
-    filename = "issues.jsonl"
+    filename = ISSUES_FILENAME
 
 
 class InboxEventLog(_BaseEventLog):
     """Append-only event log stored alongside proposals in ``inbox.jsonl``."""
 
-    filename = "inbox.jsonl"
+    filename = INBOX_FILENAME

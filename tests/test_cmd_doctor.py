@@ -208,6 +208,64 @@ class TestCLIDoctor:
         assert output["checks"]["config_toml_parseable"]["passed"] is False
 
 
+class TestDoctorCheckDataclass:
+    """Unit tests for the DoctorCheck / DoctorReport refactor (dogcat-3gsn).
+
+    The dataclass exists to stop the "if not passed: all_passed = False"
+    bookkeeping repeating after every check; this test pins down the
+    pieces that were previously implicit in the dict-shape pattern.
+    """
+
+    def test_required_check_failure_flips_all_passed(self) -> None:
+        """A non-optional failed check fails the overall report."""
+        from dogcat.cli._cmd_doctor import DoctorCheck, DoctorReport
+
+        report = DoctorReport()
+        report.add("ok", DoctorCheck(description="ok", passed=True))
+        assert report.all_passed is True
+        report.add("bad", DoctorCheck(description="bad", passed=False))
+        assert report.all_passed is False
+
+    def test_optional_check_failure_does_not_flip_all_passed(self) -> None:
+        """An optional failed check is informational; doesn't fail the report."""
+        from dogcat.cli._cmd_doctor import DoctorCheck, DoctorReport
+
+        report = DoctorReport()
+        report.add(
+            "warn",
+            DoctorCheck(description="warn", passed=False, optional=True),
+        )
+        assert report.all_passed is True
+
+    def test_to_dict_omits_unset_optional_fields(self) -> None:
+        """Legacy serialization only emits keys that were actually populated."""
+        from dogcat.cli._cmd_doctor import DoctorCheck
+
+        check = DoctorCheck(description="just a check", passed=True)
+        assert check.to_dict() == {"description": "just a check", "passed": True}
+
+    def test_to_dict_includes_all_set_fields(self) -> None:
+        """All populated fields surface in the legacy dict shape."""
+        from dogcat.cli._cmd_doctor import DoctorCheck
+
+        check = DoctorCheck(
+            description="d",
+            passed=False,
+            fix="run thing",
+            fail_description="oh no",
+            optional=True,
+            note="careful",
+        )
+        assert check.to_dict() == {
+            "description": "d",
+            "passed": False,
+            "fix": "run thing",
+            "fail_description": "oh no",
+            "optional": True,
+            "note": "careful",
+        }
+
+
 class TestDoctorFixDanglingDeps:
     """Tests for ``dcat doctor --fix`` repairing dangling dependencies.
 

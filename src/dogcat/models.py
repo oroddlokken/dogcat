@@ -34,6 +34,23 @@ def is_manual_issue(metadata: dict[str, Any]) -> bool:
     return bool(metadata.get("manual") or metadata.get("no_agent"))
 
 
+def set_manual_flag(metadata: dict[str, Any], *, manual: bool) -> dict[str, Any]:
+    """Toggle the ``manual`` flag on a metadata dict (returning a fresh copy).
+
+    Always strips the legacy ``no_agent`` key so the two synonyms don't
+    drift. Returns a new dict — callers assign it back rather than mutate
+    the original so the caller's pre-change snapshot stays valid for
+    diffing/event emission.
+    """
+    new_metadata = dict(metadata)
+    new_metadata.pop("no_agent", None)
+    if manual:
+        new_metadata["manual"] = True
+    else:
+        new_metadata.pop("manual", None)
+    return new_metadata
+
+
 _logger = logging.getLogger(__name__)
 _KNOWN_RECORD_TYPES = frozenset(
     {"issue", "dependency", "link", "event", "proposal"},

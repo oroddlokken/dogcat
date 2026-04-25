@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 import secrets
 import unicodedata
 from typing import TYPE_CHECKING
@@ -13,6 +12,13 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from dogcat.constants import (
+    MAX_DESC_LEN,
+    MAX_NAMESPACE_LEN,
+    MAX_TITLE_LEN,
+    NAMESPACE_PATTERN,
+    is_valid_namespace,
+)
 from dogcat.web.propose import CSRF_COOKIE_MAX_AGE, CSRF_COOKIE_NAME
 
 if TYPE_CHECKING:
@@ -22,14 +28,18 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-MAX_TITLE_LEN = 500
-MAX_DESC_LEN = 50_000
-# Namespace whitelist: ASCII letters, digits, underscore, hyphen.
-# Matches the format used by issue-id prefixes throughout the codebase
-# and rejects spaces, control characters, and Unicode homoglyphs that
-# would let a submitter spoof an existing namespace visually.
-MAX_NAMESPACE_LEN = 64
-NAMESPACE_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
+# MAX_TITLE_LEN, MAX_DESC_LEN, MAX_NAMESPACE_LEN, NAMESPACE_PATTERN are
+# imported from dogcat.constants — promoted there so CLI / IDGenerator
+# can share the same namespace whitelist (rejects spaces, control chars,
+# Unicode homoglyphs that would let a submitter spoof an existing
+# namespace visually).
+__all__ = (
+    "MAX_DESC_LEN",
+    "MAX_NAMESPACE_LEN",
+    "MAX_TITLE_LEN",
+    "NAMESPACE_PATTERN",
+    "router",
+)
 
 
 def _normalize_namespace(value: str) -> str:
@@ -43,11 +53,7 @@ def _normalize_namespace(value: str) -> str:
 
 def _is_valid_namespace(value: str) -> bool:
     """Return True if ``value`` is a well-formed namespace identifier."""
-    return (
-        bool(value)
-        and len(value) <= MAX_NAMESPACE_LEN
-        and bool(NAMESPACE_PATTERN.fullmatch(value))
-    )
+    return is_valid_namespace(value)
 
 
 def _persist_pinned_namespace(dogcats_dir: str, namespace: str) -> None:
@@ -105,9 +111,7 @@ def _create_proposal_sync(
     create_app override or hand-built test app). Reload-on-mtime keeps the
     cached state fresh after CLI/other-process writes.
     """
-    from dogcat.idgen import IDGenerator
     from dogcat.inbox import InboxStorage
-    from dogcat.models import Proposal
 
     inbox: InboxStorage | None = getattr(request.app.state, "inbox", None)
     dogcats_dir: str = request.app.state.dogcats_dir
@@ -118,19 +122,12 @@ def _create_proposal_sync(
         _refresh_inbox_if_stale(inbox, state_dict)
         request.app.state._inbox_stat = state_dict
 
-    id_gen = IDGenerator(
-        existing_ids=inbox.get_proposal_ids(),
-        prefix=f"{namespace}-inbox",
-    )
-    proposal_id = id_gen.generate_proposal_id(title, namespace=f"{namespace}-inbox")
-    proposal = Proposal(
-        id=proposal_id,
+    proposal = inbox.create_proposal(
         title=title,
         namespace=namespace,
         description=desc,
         proposed_by="web",
     )
-    inbox.create(proposal)
     return proposal.full_id, proposal.namespace
 
 
@@ -276,11 +273,8 @@ async def submit_proposal(
         request.app.state, "allow_creating_namespaces", False
     )
     is_new_namespace = namespace not in valid_namespaces
-    if is_new_namespace:
-        if not allow_creating:
-            return _render_error(f"Invalid namespace: {namespace}")
-        # Accept new namespace — add it to the known list for this session
-        valid_namespaces.append(namespace)
+    if is_new_namespace and not allow_creating:
+        return _render_error(f"Invalid namespace: {namespace}")
 
     dogcats_dir: str = request.app.state.dogcats_dir
     try:
@@ -288,9 +282,14 @@ async def submit_proposal(
             _create_proposal_sync, request, namespace, title, desc
         )
         logger.info("Proposal created: %s", full_id)
-        # Persist the namespace AFTER a successful proposal write — no point
-        # pinning a namespace that failed to land any record.
+        # Mutate in-process state and persist AFTER a successful proposal
+        # write — otherwise a failed write leaves the namespace in
+        # ``valid_namespaces`` for the rest of the process lifetime, the
+        # next submit's ``is_new_namespace`` check returns False, and the
+        # namespace never makes it into ``pinned_namespaces`` (so it
+        # vanishes on restart even though valid_namespaces remembers it).
         if is_new_namespace:
+            valid_namespaces.append(namespace)
             await asyncio.to_thread(_persist_pinned_namespace, dogcats_dir, namespace)
     except (ValueError, RuntimeError, OSError):
         logger.exception("Failed to create proposal")

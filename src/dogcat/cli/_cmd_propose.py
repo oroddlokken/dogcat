@@ -75,9 +75,7 @@ def register(app: typer.Typer) -> None:
         If --to is not specified, uses the current repo's inbox.
         """
         from dogcat.config import load_config
-        from dogcat.idgen import IDGenerator
         from dogcat.inbox import InboxStorage
-        from dogcat.models import Proposal
 
         set_json(json_output)
 
@@ -110,33 +108,20 @@ def register(app: typer.Typer) -> None:
             except Exception:
                 ns = "dc"
 
-        # Generate ID
         try:
             inbox = InboxStorage(dogcats_dir=target_dir)
         except (ValueError, RuntimeError) as e:
             echo_error(str(e))
             raise typer.Exit(1) from None
 
-        id_gen = IDGenerator(
-            existing_ids=inbox.get_proposal_ids(),
-            prefix=f"{ns}-inbox",
-        )
-        proposal_id = id_gen.generate_proposal_id(
-            title,
-            namespace=f"{ns}-inbox",
-        )
-
-        proposal = Proposal(
-            id=proposal_id,
-            title=title,
-            namespace=ns,
-            description=description,
-            proposed_by=proposed_by,
-            source_repo=source_repo,
-        )
-
         try:
-            inbox.create(proposal)
+            proposal = inbox.create_proposal(
+                title=title,
+                namespace=ns,
+                description=description,
+                proposed_by=proposed_by,
+                source_repo=source_repo,
+            )
         except (ValueError, RuntimeError) as e:
             echo_error(str(e))
             raise typer.Exit(1) from None

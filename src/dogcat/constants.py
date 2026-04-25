@@ -195,6 +195,11 @@ EVENT_SYMBOLS: dict[str, str] = {
     "deleted": "\u2717",
 }
 
+# Statuses that mean "this issue won't move" — used by listing commands
+# that filter out closed/tombstoned issues from "active" views.
+TERMINAL_STATUSES: frozenset[str] = frozenset({"closed", "tombstone"})
+
+
 # Status symbols for at-a-glance display
 STATUS_SYMBOLS: dict[str, str] = {
     "draft": "\u270e",  # ✎
@@ -213,3 +218,78 @@ WEB_DEFAULT_HOST = "127.0.0.1"
 WEB_DEFAULT_PORT = 48042
 WEB_HOST_ENV_VAR = "DCAT_WEB_HOST"
 WEB_PORT_ENV_VAR = "DCAT_WEB_PORT"
+
+
+# ---------------------------------------------------------------------------
+# JSONL filenames + .dogcats directory layout
+# ---------------------------------------------------------------------------
+# Single source of truth for the on-disk layout. JSONLStorage / InboxStorage /
+# event_log default arguments compose paths from these constants instead of
+# repeating the literals; the merge driver, doctor, init, etc. read from here
+# too so a future rename only has to touch this file.
+DOGCATS_DIR_NAME = ".dogcats"
+ISSUES_FILENAME = "issues.jsonl"
+INBOX_FILENAME = "inbox.jsonl"
+LOCK_FILENAME = ".issues.lock"
+
+
+# ---------------------------------------------------------------------------
+# Default branch names for compaction safety
+# ---------------------------------------------------------------------------
+# Storage avoids compacting on feature branches because that would create
+# noisy diffs. The hardcoded fallback covers the conventional defaults; the
+# `_is_default_branch` reader also unions in the user's
+# ``init.defaultBranch`` git config, so projects on `develop`/`trunk`/etc.
+# don't silently lose auto-compaction.
+DEFAULT_BRANCH_NAMES: frozenset[str] = frozenset({"main", "master"})
+
+
+# ---------------------------------------------------------------------------
+# Web propose validation limits + namespace rule
+# ---------------------------------------------------------------------------
+# These are the only namespace shape rules in the codebase. Promoted out of
+# the route module so the CLI / IDGenerator / config can reuse the same
+# regex when we extend strict-namespace enforcement to other surfaces.
+MAX_TITLE_LEN = 500
+MAX_DESC_LEN = 50_000
+MAX_NAMESPACE_LEN = 64
+NAMESPACE_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def is_valid_namespace(value: str) -> bool:
+    """Return True if ``value`` is a well-formed namespace identifier.
+
+    Whitelist: ASCII letters, digits, underscore, hyphen, 1-64 chars. The
+    web propose form NFKC-normalizes input before calling this; CLI / API
+    callers should do the same when accepting user input.
+    """
+    return (
+        bool(value)
+        and len(value) <= MAX_NAMESPACE_LEN
+        and bool(NAMESPACE_PATTERN.fullmatch(value))
+    )
+
+
+# ---------------------------------------------------------------------------
+# Web propose security headers + CSRF cookie
+# ---------------------------------------------------------------------------
+# Security policies belong in one auditable location, not buried inside
+# inner-class dispatch handlers. CSRF_COOKIE_NAME stays where it is (the
+# route module) since it's only referenced there.
+CSRF_COOKIE_MAX_AGE_SECONDS = 60 * 60  # 1h — limits the leaked-token window
+WEB_CSP_HEADER = "default-src 'none'; style-src 'self'; script-src 'self'"
+
+
+# ---------------------------------------------------------------------------
+# Claude Code PreCompact hook
+# ---------------------------------------------------------------------------
+# The hook command and its surrounding settings.json shape live here so the
+# doctor's install + upgrade paths and any future ``dcat hook ...`` command
+# all read from one place. The previous string-replace in
+# ``_upgrade_precompact_hook`` was fragile if "dcat prime" ever appeared as
+# a substring elsewhere in a user's settings.
+PRECOMPACT_HOOK_COMMAND = "dcat prime --replay"
+PRECOMPACT_HOOK_RECORD: dict[str, object] = {
+    "matcher": "",
+    "hooks": [{"type": "command", "command": PRECOMPACT_HOOK_COMMAND}],
+}

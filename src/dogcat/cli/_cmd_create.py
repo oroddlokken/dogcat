@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
 import orjson
@@ -10,8 +9,7 @@ import typer
 
 from dogcat.config import get_issue_prefix
 from dogcat.constants import DEFAULT_PRIORITY, DEFAULT_TYPE, parse_labels
-from dogcat.idgen import IDGenerator
-from dogcat.models import Issue, IssueType, Status
+from dogcat.models import IssueType, Status
 
 from ._completions import (
     complete_issue_ids,
@@ -32,6 +30,98 @@ from ._helpers import (
     get_storage,
 )
 from ._json_state import echo_error, is_json, set_json
+
+
+def _resolve_create_overrides(
+    *,
+    priority: int | None,
+    shorthand_priority: int | None,
+    issue_type: str | None,
+    shorthand_type: str | None,
+    status: str | None,
+    shorthand_status: str | None,
+) -> tuple[int, str, Status]:
+    """Combine the (shorthand, --flag, default) precedence for the three options.
+
+    Explicit ``--priority`` / ``--type`` / ``--status`` win over their
+    shorthand equivalents, which in turn win over the package defaults.
+    Returns ``(final_priority, final_type, initial_status)``.
+    """
+    final_priority = (
+        priority
+        if priority is not None
+        else (
+            shorthand_priority if shorthand_priority is not None else DEFAULT_PRIORITY
+        )
+    )
+    final_type = (
+        issue_type
+        if issue_type is not None
+        else (shorthand_type if shorthand_type is not None else DEFAULT_TYPE)
+    )
+    if status:
+        initial_status = Status(status)
+    elif shorthand_status:
+        initial_status = Status(shorthand_status)
+    else:
+        initial_status = Status.OPEN
+    return final_priority, final_type, initial_status
+
+
+def _resolve_create_references(
+    storage: Any,
+    *,
+    depends_on: str | None,
+    blocks: str | None,
+    duplicate_of: str | None,
+    parent: str | None,
+) -> tuple[str | None, str | None]:
+    """Resolve all four reference flags. Echoes+exits on miss.
+
+    Returns the resolved ``(duplicate_of, parent)`` strings (or ``None``
+    when the original flag was not provided). ``depends_on`` and
+    ``blocks`` are validated for existence but their resolved form isn't
+    needed by the caller (``add_dependency`` resolves again).
+    """
+    from ._helpers import require_resolved_id
+
+    if depends_on:
+        require_resolved_id(storage, depends_on)
+    if blocks:
+        require_resolved_id(storage, blocks)
+    if duplicate_of:
+        duplicate_of = require_resolved_id(
+            storage, duplicate_of, label="Duplicate target"
+        )
+    if parent:
+        parent = require_resolved_id(storage, parent, label="Parent issue")
+    return duplicate_of, parent
+
+
+def _apply_create_dependencies(
+    storage: Any,
+    full_id: str,
+    *,
+    depends_on: str | None,
+    blocks: str | None,
+    created_by: str | None,
+) -> None:
+    """Add the post-create ``depends_on`` / ``blocks`` dependency edges."""
+    if depends_on:
+        storage.add_dependency(
+            full_id,
+            depends_on,
+            "blocks",
+            created_by=created_by,
+        )
+    if blocks:
+        storage.add_dependency(
+            blocks,
+            full_id,
+            "blocks",
+            created_by=created_by,
+        )
+
 
 _CREATE_DOC = """\
 Create a new issue.
@@ -259,42 +349,21 @@ def register(app: typer.Typer) -> None:
                 if namespace_opt is not None
                 else get_issue_prefix(dogcats_dir)
             )
-            idgen = IDGenerator(existing_ids=storage.get_issue_ids(), prefix=namespace)
-
-            # Generate ID hash
-            timestamp = datetime.now().astimezone()
-            issue_id = idgen.generate_issue_id(
-                title,
-                timestamp=timestamp,
-                namespace=namespace,
-            )
 
             # Parse labels
             issue_labels = parse_labels(labels) if labels else []
 
-            # Determine final priority and type (explicit options override shorthand)
-            final_priority = (
-                priority
-                if priority is not None
-                else (
-                    shorthand_priority
-                    if shorthand_priority is not None
-                    else DEFAULT_PRIORITY
-                )
+            # Resolve priority / type / status from the (shorthand, --flag,
+            # default) triple. Centralizes the same precedence rule across
+            # the three options so future fields can follow the pattern.
+            final_priority, final_type, initial_status = _resolve_create_overrides(
+                priority=priority,
+                shorthand_priority=shorthand_priority,
+                issue_type=issue_type,
+                shorthand_type=shorthand_type,
+                status=status,
+                shorthand_status=shorthand_status,
             )
-            final_type = (
-                issue_type
-                if issue_type is not None
-                else (shorthand_type if shorthand_type is not None else DEFAULT_TYPE)
-            )
-
-            # Determine initial status
-            if status:
-                initial_status = Status(status)
-            elif shorthand_status:
-                initial_status = Status(shorthand_status)
-            else:
-                initial_status = Status.OPEN
 
             # Build metadata
             issue_metadata: dict[str, Any] = {}
@@ -308,38 +377,19 @@ def register(app: typer.Typer) -> None:
                 created_by if created_by is not None else default_operator
             )
 
-            # Validate dependency targets exist BEFORE creating
-            # the issue (atomic operation)
-            if depends_on:
-                resolved_depends_on = storage.resolve_id(depends_on)
-                if resolved_depends_on is None:
-                    echo_error(f"Issue {depends_on} not found")
-                    raise typer.Exit(1)
-            if blocks:
-                resolved_blocks = storage.resolve_id(blocks)
-                if resolved_blocks is None:
-                    echo_error(f"Issue {blocks} not found")
-                    raise typer.Exit(1)
+            # Validate dependency / parent / duplicate references exist
+            # BEFORE creating the issue (atomic operation).
+            duplicate_of, parent = _resolve_create_references(
+                storage,
+                depends_on=depends_on,
+                blocks=blocks,
+                duplicate_of=duplicate_of,
+                parent=parent,
+            )
 
-            # Resolve duplicate_of if provided
-            if duplicate_of:
-                resolved_dup = storage.resolve_id(duplicate_of)
-                if resolved_dup is None:
-                    echo_error(f"Issue {duplicate_of} not found")
-                    raise typer.Exit(1)
-                duplicate_of = resolved_dup
-
-            # Resolve parent if provided
-            if parent:
-                resolved_parent = storage.resolve_id(parent)
-                if resolved_parent is None:
-                    echo_error(f"Parent issue {parent} not found")
-                    raise typer.Exit(1)
-                parent = resolved_parent
-
-            # Create issue
-            issue = Issue(
-                id=issue_id,
+            # Create issue via the storage factory (encapsulates ID gen +
+            # dataclass build + persistence in a single call).
+            issue = storage.create_issue(
                 title=title,
                 namespace=namespace,
                 description=description,
@@ -358,23 +408,13 @@ def register(app: typer.Typer) -> None:
                 metadata=issue_metadata,
             )
 
-            storage.create(issue)
-
-            # Add dependencies if specified
-            if depends_on:
-                storage.add_dependency(
-                    issue.full_id,
-                    depends_on,
-                    "blocks",
-                    created_by=created_by,
-                )
-            if blocks:
-                storage.add_dependency(
-                    blocks,
-                    issue.full_id,
-                    "blocks",
-                    created_by=created_by,
-                )
+            _apply_create_dependencies(
+                storage,
+                issue.full_id,
+                depends_on=depends_on,
+                blocks=blocks,
+                created_by=created_by,
+            )
 
             if is_json():
                 from dogcat.models import issue_to_dict

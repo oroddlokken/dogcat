@@ -2,23 +2,54 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI
 from fastapi.templating import Jinja2Templates
 
+from dogcat.constants import (
+    CSRF_COOKIE_MAX_AGE_SECONDS,
+    ISSUES_FILENAME,
+    WEB_CSP_HEADER,
+)
+
 if TYPE_CHECKING:
     from starlette.requests import Request
     from starlette.responses import Response
 
+    from dogcat.inbox import InboxStorage
+
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
+
+@dataclass
+class ProposeAppState:
+    """Typed bundle of values stored on ``app.state``.
+
+    Replaces five separate ``app.state.<attr>`` writes (and the matching
+    ``getattr(state, "name", default)`` reads scattered across the route
+    module) with one named container. Mounted on ``app.state.dcat``;
+    individual attributes are also kept on ``app.state`` for back-compat
+    with existing route accesses while the migration proceeds.
+    """
+
+    dogcats_dir: str
+    namespace: str
+    namespaces: list[str]
+    allow_creating_namespaces: bool
+    templates: Jinja2Templates
+    inbox: InboxStorage | None = None
+
+
 # CSRF cookie lifetime. Tokens older than this are rejected even if the
 # cookie still rides along — limits the window where a leaked token is
-# usable. Tokens are also rotated on every successful POST.
-CSRF_COOKIE_MAX_AGE = 3600
+# usable. Tokens are also rotated on every successful POST. The unit-named
+# constant (``..._SECONDS``) lives in :mod:`dogcat.constants`; this re-export
+# keeps existing ``CSRF_COOKIE_MAX_AGE`` imports working.
+CSRF_COOKIE_MAX_AGE = CSRF_COOKIE_MAX_AGE_SECONDS
 CSRF_COOKIE_NAME = "dcat_csrf"
 
 
@@ -45,7 +76,7 @@ def create_app(
 
     # Collect all namespaces from existing issues and inbox, primary first
     try:
-        issues_path = str(Path(dogcats_dir) / "issues.jsonl")
+        issues_path = str(Path(dogcats_dir) / ISSUES_FILENAME)
         storage = JSONLStorage(issues_path)
         from dogcat.storage import NamespaceCounts
 
@@ -64,11 +95,7 @@ def create_app(
         redoc_url=None,
     )
 
-    app.state.dogcats_dir = dogcats_dir
-    app.state.namespace = resolved_namespace
-    app.state.namespaces = namespaces
-    app.state.allow_creating_namespaces = allow_creating_namespaces
-    app.state.templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
     # Hold one InboxStorage on app state instead of constructing per request.
     # The constructor calls _load() which reads + parses the entire inbox
@@ -77,10 +104,29 @@ def create_app(
     # without having to re-parse on every POST.
     from dogcat.inbox import InboxStorage
 
+    inbox: InboxStorage | None
     try:
-        app.state.inbox = InboxStorage(dogcats_dir=dogcats_dir)
+        inbox = InboxStorage(dogcats_dir=dogcats_dir)
     except (ValueError, RuntimeError):
-        app.state.inbox = None
+        inbox = None
+
+    state = ProposeAppState(
+        dogcats_dir=dogcats_dir,
+        namespace=resolved_namespace,
+        namespaces=namespaces,
+        allow_creating_namespaces=allow_creating_namespaces,
+        templates=templates,
+        inbox=inbox,
+    )
+    app.state.dcat = state
+    # Mirror the dataclass fields onto app.state so existing route code
+    # keeps working without a sweep. New code should reach for app.state.dcat.
+    app.state.dogcats_dir = state.dogcats_dir
+    app.state.namespace = state.namespace
+    app.state.namespaces = state.namespaces
+    app.state.allow_creating_namespaces = state.allow_creating_namespaces
+    app.state.templates = state.templates
+    app.state.inbox = state.inbox
 
     from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -89,9 +135,7 @@ def create_app(
             response = await call_next(request)
             response.headers["X-Content-Type-Options"] = "nosniff"
             response.headers["X-Frame-Options"] = "DENY"
-            response.headers["Content-Security-Policy"] = (
-                "default-src 'none'; style-src 'self'; script-src 'self'"
-            )
+            response.headers["Content-Security-Policy"] = WEB_CSP_HEADER
             return response
 
     app.add_middleware(SecurityHeadersMiddleware)
@@ -107,4 +151,4 @@ def create_app(
     return app
 
 
-__all__ = ["create_app"]
+__all__ = ["ProposeAppState", "create_app"]

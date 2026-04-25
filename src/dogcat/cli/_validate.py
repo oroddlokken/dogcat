@@ -6,14 +6,84 @@ to perform deep data integrity checks on issues.jsonl and inbox.jsonl.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from dataclasses import field as dc_field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import orjson
 
 from dogcat.constants import TRACKED_FIELDS
 from dogcat.models import IssueType, ProposalStatus, Status, classify_record
+
+
+@dataclass(frozen=True)
+class ValidationError:
+    """A typed validation error for a JSONL line.
+
+    Canonical shape for issue / proposal validation results. Existing
+    helpers still return the legacy ``list[dict[str, str]]`` shape (with
+    ``"level"`` and ``"message"`` keys) to avoid touching every caller in
+    one pass; new code should construct ``ValidationError`` and call
+    :meth:`to_dict` at the JSON-output boundary so the shape is
+    documented and Pyright catches typos.
+    """
+
+    level: Literal["error", "warning"]
+    message: str
+
+    def to_dict(self) -> dict[str, str]:
+        """Serialize to the legacy ``{"level": ..., "message": ...}`` shape."""
+        return {"level": self.level, "message": self.message}
+
+
+@dataclass(frozen=True)
+class ConcurrentFieldDiff:
+    """A field-level diff across the two sides of a merge.
+
+    ``base`` is the field's value at the merge base; ``branch_1`` and
+    ``branch_2`` are the conflicting parent-side values.
+    """
+
+    base: Any
+    branch_1: Any
+    branch_2: Any
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to the legacy ``{"base", "branch_1", "branch_2"}`` shape."""
+        return {
+            "base": self.base,
+            "branch_1": self.branch_1,
+            "branch_2": self.branch_2,
+        }
+
+
+@dataclass(frozen=True)
+class ConcurrentEditWarning:
+    """A warning that an issue was edited on both sides of the latest merge.
+
+    ``fields`` maps each field name to the per-side diff. Doctor's
+    pretty-printer was previously stringly-typed against the dict shape
+    via ``warn['message']``/``warn.get('fields', {})``.
+    """
+
+    level: Literal["warning"]
+    message: str
+    issue_id: str
+    fields: dict[str, ConcurrentFieldDiff] = dc_field(
+        default_factory=dict[str, "ConcurrentFieldDiff"],
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to the legacy nested-dict shape consumed by the renderer."""
+        return {
+            "level": self.level,
+            "message": self.message,
+            "issue_id": self.issue_id,
+            "fields": {name: diff.to_dict() for name, diff in self.fields.items()},
+        }
+
 
 # Fields required on every issue record
 _REQUIRED_ISSUE_FIELDS = frozenset(
@@ -84,11 +154,18 @@ def parse_raw_records(
     return records, errors
 
 
-def validate_issue(
+def validate_issue_record(
     record: dict[str, Any],
     lineno: int,
 ) -> list[dict[str, str]]:
-    """Validate a single issue record."""
+    """Validate a single issue record from the JSONL log.
+
+    Mirrors :func:`validate_proposal_record` in this module — the
+    ``_record`` suffix disambiguates this from
+    :func:`dogcat.models.validate_issue`, which validates an in-memory
+    ``Issue`` dataclass instead of a raw dict, and would otherwise
+    collide on import.
+    """
     errors: list[dict[str, str]] = []
     full_id = f"{record.get('namespace', '?')}-{record.get('id', '?')}"
 
@@ -287,7 +364,7 @@ def validate_jsonl(path: Path) -> list[dict[str, str]]:
 
     for lineno, record in enumerate(records, start=1):
         if classify_record(record) == "issue":
-            errors.extend(validate_issue(record, lineno))
+            errors.extend(validate_issue_record(record, lineno))
 
     errors.extend(validate_references(records))
     return errors

@@ -461,12 +461,9 @@ def register(app: typer.Typer) -> None:
         ),
     ) -> None:
         """Accept a remote proposal and create a local issue from it."""
-        from datetime import datetime
-
         from dogcat.config import get_issue_prefix
         from dogcat.constants import DEFAULT_PRIORITY, DEFAULT_TYPE, parse_labels
-        from dogcat.idgen import IDGenerator
-        from dogcat.models import Issue, IssueType, Status, issue_to_dict
+        from dogcat.models import IssueType, Status, issue_to_dict
 
         set_json(json_output)
         operator = get_default_operator()
@@ -501,21 +498,12 @@ def register(app: typer.Typer) -> None:
 
             storage = get_storage(actual_dir)
             namespace = get_issue_prefix(actual_dir)
-            idgen = IDGenerator(existing_ids=storage.get_issue_ids(), prefix=namespace)
-
-            timestamp = datetime.now().astimezone()
-            issue_id = idgen.generate_issue_id(
-                proposal.title,
-                timestamp=timestamp,
-                namespace=namespace,
-            )
 
             issue_labels = parse_labels(labels) if labels else []
             final_priority = priority if priority is not None else DEFAULT_PRIORITY
             final_type = issue_type if issue_type is not None else DEFAULT_TYPE
 
-            issue = Issue(
-                id=issue_id,
+            issue = storage.create_issue(
                 title=proposal.title,
                 namespace=namespace,
                 description=proposal.description,
@@ -526,8 +514,6 @@ def register(app: typer.Typer) -> None:
                 labels=issue_labels,
                 created_by=operator,
             )
-
-            storage.create(issue)
 
             # Close the remote proposal with a link back to the new issue.
             # If the close fails (network/lock/OSError), roll back the local

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 import orjson
 import typer
 
 from dogcat.constants import parse_labels
-from dogcat.models import UpdateRequest
+from dogcat.models import UpdateRequest, set_manual_flag
 
 from ._completions import (
     complete_issue_ids,
@@ -26,6 +28,70 @@ from ._helpers import (
     parse_duration,
 )
 from ._json_state import echo_error, is_json, set_json
+
+if TYPE_CHECKING:
+    from dogcat.storage import JSONLStorage
+
+
+def _apply_manual_metadata_update(
+    storage: JSONLStorage,
+    issue_id: str,
+    issue_updates: dict[str, Any],
+    *,
+    manual: bool | None,
+) -> dict[str, Any]:
+    """Patch ``issue_updates['metadata']`` with the new manual flag, if set.
+
+    Returns the same dict so the caller can keep chaining mutations.
+    Raises ``ValueError`` if the issue is missing — same contract the
+    inline code had.
+    """
+    if manual is None:
+        return issue_updates
+    current = storage.get(issue_id)
+    if current is None:
+        msg = f"Issue {issue_id} not found"
+        raise ValueError(msg)
+    issue_updates["metadata"] = set_manual_flag(current.metadata or {}, manual=manual)
+    return issue_updates
+
+
+def _remove_dep_with_check(
+    storage: JSONLStorage,
+    *,
+    subject: str,
+    target_partial_id: str,
+    direction: str,
+) -> None:
+    """Remove a dependency between ``subject`` and the resolved target.
+
+    ``direction='depends_on'`` removes ``subject -> target``; the message
+    is ``"{subject} does not depend on {target}"``.
+
+    ``direction='blocks'`` removes ``target -> subject``; the message is
+    ``"{subject} does not block {target}"``.
+
+    Raises ``ValueError`` if the target doesn't resolve or if the
+    expected dependency isn't there. Centralizes the two near-identical
+    blocks the CLI used to spell out inline.
+    """
+    resolved_target = storage.resolve_id(target_partial_id)
+    if resolved_target is None:
+        msg = f"Issue {target_partial_id} not found"
+        raise ValueError(msg)
+    if direction == "depends_on":
+        deps = storage.get_dependencies(subject)
+        if not any(d.depends_on_id == resolved_target for d in deps):
+            msg = f"{subject} does not depend on {resolved_target}"
+            raise ValueError(msg)
+        storage.remove_dependency(subject, resolved_target)
+        return
+    # The "blocks" direction looks for the inverse edge: target -> subject.
+    deps = storage.get_dependencies(resolved_target)
+    if not any(d.depends_on_id == subject for d in deps):
+        msg = f"{subject} does not block {resolved_target}"
+        raise ValueError(msg)
+    storage.remove_dependency(resolved_target, subject)
 
 
 def register(app: typer.Typer) -> None:
@@ -244,20 +310,20 @@ def register(app: typer.Typer) -> None:
                 if duplicate_of == "":
                     request.duplicate_of = None
                 else:
-                    resolved_dup = storage.resolve_id(duplicate_of)
-                    if resolved_dup is None:
-                        echo_error(f"Issue {duplicate_of} not found")
-                        raise typer.Exit(1)
-                    request.duplicate_of = resolved_dup
+                    from ._helpers import require_resolved_id
+
+                    request.duplicate_of = require_resolved_id(
+                        storage, duplicate_of, label="Duplicate target"
+                    )
             if parent is not None:
                 if parent == "":
                     request.parent = None
                 else:
-                    resolved_parent = storage.resolve_id(parent)
-                    if resolved_parent is None:
-                        echo_error(f"Parent issue {parent} not found")
-                        raise typer.Exit(1)
-                    request.parent = resolved_parent
+                    from ._helpers import require_resolved_id
+
+                    request.parent = require_resolved_id(
+                        storage, parent, label="Parent issue"
+                    )
             if labels is not None:
                 request.labels = parse_labels(labels)
             if snooze_until is not None:
@@ -285,21 +351,9 @@ def register(app: typer.Typer) -> None:
             )
 
             def _update(issue_id: str) -> None:
-                # Handle manual flag per-issue (needs current metadata)
-                issue_updates = dict(updates)
-                if manual is not None:
-                    current = storage.get(issue_id)
-                    if current is None:
-                        msg = f"Issue {issue_id} not found"
-                        raise ValueError(msg)
-                    new_metadata = dict(current.metadata) if current.metadata else {}
-                    if manual:
-                        new_metadata["manual"] = True
-                        new_metadata.pop("no_agent", None)
-                    else:
-                        new_metadata.pop("manual", None)
-                        new_metadata.pop("no_agent", None)
-                    issue_updates["metadata"] = new_metadata
+                issue_updates = _apply_manual_metadata_update(
+                    storage, issue_id, dict(updates), manual=manual
+                )
 
                 if issue_updates:
                     issue_updates["updated_by"] = final_updated_by
@@ -327,26 +381,19 @@ def register(app: typer.Typer) -> None:
                     )
 
                 if remove_depends_on:
-                    resolved_target = storage.resolve_id(remove_depends_on)
-                    if resolved_target is None:
-                        msg = f"Issue {remove_depends_on} not found"
-                        raise ValueError(msg)
-                    deps = storage.get_dependencies(issue.full_id)
-                    if not any(d.depends_on_id == resolved_target for d in deps):
-                        msg = f"{issue.full_id} does not depend on {resolved_target}"
-                        raise ValueError(msg)
-                    storage.remove_dependency(issue.full_id, resolved_target)
-
+                    _remove_dep_with_check(
+                        storage,
+                        subject=issue.full_id,
+                        target_partial_id=remove_depends_on,
+                        direction="depends_on",
+                    )
                 if remove_blocks:
-                    resolved_target = storage.resolve_id(remove_blocks)
-                    if resolved_target is None:
-                        msg = f"Issue {remove_blocks} not found"
-                        raise ValueError(msg)
-                    deps = storage.get_dependencies(resolved_target)
-                    if not any(d.depends_on_id == issue.full_id for d in deps):
-                        msg = f"{issue.full_id} does not block {resolved_target}"
-                        raise ValueError(msg)
-                    storage.remove_dependency(resolved_target, issue.full_id)
+                    _remove_dep_with_check(
+                        storage,
+                        subject=issue.full_id,
+                        target_partial_id=remove_blocks,
+                        direction="blocks",
+                    )
 
                 if is_json():
                     from dogcat.models import issue_to_dict

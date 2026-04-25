@@ -18,7 +18,7 @@ from dogcat.cli import app
 from dogcat.cli._validate import (
     detect_concurrent_edits,
     parse_raw_records,
-    validate_issue,
+    validate_issue_record,
     validate_jsonl,
     validate_references,
 )
@@ -183,47 +183,47 @@ class TestValidateIssue:
 
     def test_valid_issue(self) -> None:
         """A well-formed issue produces no errors."""
-        assert validate_issue(_issue(), lineno=1) == []
+        assert validate_issue_record(_issue(), lineno=1) == []
 
     def test_missing_required_field(self) -> None:
         """Detect missing required fields."""
         record = _issue()
         del record["title"]
-        errors = validate_issue(record, lineno=1)
+        errors = validate_issue_record(record, lineno=1)
         assert len(errors) == 1
         assert "missing required field 'title'" in errors[0]["message"]
 
     def test_invalid_status(self) -> None:
         """Detect invalid status values."""
-        errors = validate_issue(_issue(status="bogus"), lineno=1)
+        errors = validate_issue_record(_issue(status="bogus"), lineno=1)
         assert len(errors) == 1
         assert "invalid status" in errors[0]["message"]
 
     def test_invalid_issue_type(self) -> None:
         """Detect invalid issue_type values."""
-        errors = validate_issue(_issue(issue_type="unicorn"), lineno=1)
+        errors = validate_issue_record(_issue(issue_type="unicorn"), lineno=1)
         assert len(errors) == 1
         assert "invalid issue_type" in errors[0]["message"]
 
     def test_legacy_draft_issue_type_accepted(self) -> None:
         """Legacy issue_type='draft' is accepted (migrated on load)."""
-        errors = validate_issue(_issue(issue_type="draft"), lineno=1)
+        errors = validate_issue_record(_issue(issue_type="draft"), lineno=1)
         assert errors == []
 
     def test_legacy_subtask_issue_type_accepted(self) -> None:
         """Legacy issue_type='subtask' is accepted (migrated on load)."""
-        errors = validate_issue(_issue(issue_type="subtask"), lineno=1)
+        errors = validate_issue_record(_issue(issue_type="subtask"), lineno=1)
         assert errors == []
 
     def test_priority_out_of_range(self) -> None:
         """Detect priority values outside 0-4."""
-        errors = validate_issue(_issue(priority=99), lineno=1)
+        errors = validate_issue_record(_issue(priority=99), lineno=1)
         assert len(errors) == 1
         assert "invalid priority" in errors[0]["message"]
 
     def test_invalid_timestamp(self) -> None:
         """Detect invalid ISO 8601 timestamps."""
-        errors = validate_issue(
+        errors = validate_issue_record(
             _issue(created_at="not-a-timestamp"),
             lineno=1,
         )

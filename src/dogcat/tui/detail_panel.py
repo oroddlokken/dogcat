@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from textual.binding import Binding
@@ -692,16 +691,7 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
         description: str,
     ) -> None:
         """Create a new issue from the form values."""
-        from dogcat.idgen import IDGenerator
-        from dogcat.models import Issue, IssueType, Status
-
-        timestamp = datetime.now().astimezone()
-        idgen = IDGenerator(existing_ids=self._existing_ids, prefix=self._namespace)
-        issue_id = idgen.generate_issue_id(
-            title,
-            timestamp=timestamp,
-            namespace=self._namespace,
-        )
+        from dogcat.models import IssueType, Status
 
         parent = self._get_selected_parent()
 
@@ -710,34 +700,31 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
         if manual_val:
             metadata["manual"] = True
 
-        issue = Issue(
-            id=issue_id,
-            title=title,
-            namespace=self._namespace,
-            description=description or None,
-            status=Status(status_val) if isinstance(status_val, str) else Status.OPEN,
-            priority=priority_val if isinstance(priority_val, int) else 2,
-            issue_type=(
-                IssueType(type_val) if isinstance(type_val, str) else IssueType.TASK
-            ),
-            owner=self.query_one("#owner-input", Input).value.strip() or None,
-            parent=parent,
-            external_ref=(
-                self.query_one("#external-ref-input", Input).value.strip() or None
-            ),
-            labels=parse_labels(self.query_one("#labels-input", Input).value),
-            notes=self.query_one("#notes-input", TextArea).text.strip() or None,
-            acceptance=(
-                self.query_one("#acceptance-input", TextArea).text.strip() or None
-            ),
-            design=self.query_one("#design-input", TextArea).text.strip() or None,
-            metadata=metadata,
-            created_at=timestamp,
-            updated_at=timestamp,
-        )
-
         try:
-            self._storage.create(issue)
+            issue = self._storage.create_issue(
+                title=title,
+                namespace=self._namespace,
+                description=description or None,
+                status=(
+                    Status(status_val) if isinstance(status_val, str) else Status.OPEN
+                ),
+                priority=priority_val if isinstance(priority_val, int) else 2,
+                issue_type=(
+                    IssueType(type_val) if isinstance(type_val, str) else IssueType.TASK
+                ),
+                owner=self.query_one("#owner-input", Input).value.strip() or None,
+                parent=parent,
+                external_ref=(
+                    self.query_one("#external-ref-input", Input).value.strip() or None
+                ),
+                labels=parse_labels(self.query_one("#labels-input", Input).value),
+                notes=self.query_one("#notes-input", TextArea).text.strip() or None,
+                acceptance=(
+                    self.query_one("#acceptance-input", TextArea).text.strip() or None
+                ),
+                design=self.query_one("#design-input", TextArea).text.strip() or None,
+                metadata=metadata,
+            )
             self.post_message(self.Saved(issue))
         except Exception as e:
             self.notify(f"Create failed: {e}", severity="error")
@@ -799,13 +786,11 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
         manual_val = self.query_one("#manual-input", Checkbox).value
         was_manual = is_manual_issue(self._issue.metadata)
         if manual_val != was_manual:
-            new_metadata = dict(self._issue.metadata) if self._issue.metadata else {}
-            if manual_val:
-                new_metadata["manual"] = True
-            else:
-                new_metadata.pop("manual", None)
-            new_metadata.pop("no_agent", None)
-            updates["metadata"] = new_metadata
+            from dogcat.models import set_manual_flag
+
+            updates["metadata"] = set_manual_flag(
+                self._issue.metadata or {}, manual=manual_val
+            )
 
         if not updates:
             self.notify("No changes to save")

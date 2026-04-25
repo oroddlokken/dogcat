@@ -18,13 +18,20 @@ from dogcat._indexes import rebuild_indexes
 from dogcat._jsonl_io import append_jsonl_payload, atomic_rewrite_jsonl
 from dogcat._schema import current_version_tuple, parse_version
 from dogcat._version import version as _dcat_version
-from dogcat.constants import TRACKED_FIELDS
+from dogcat.constants import (
+    DEFAULT_BRANCH_NAMES,
+    DOGCATS_DIR_NAME,
+    ISSUES_FILENAME,
+    LOCK_FILENAME,
+    TRACKED_FIELDS,
+)
 from dogcat.locking import advisory_file_lock
 from dogcat.models import (
     Dependency,
     DependencyType,
     FilterSpec,
     Issue,
+    IssueType,
     Link,
     LinkType,
     Status,
@@ -43,7 +50,7 @@ class JSONLStorage:
 
     def __init__(
         self,
-        path: str = ".dogcats/issues.jsonl",
+        path: str = f"{DOGCATS_DIR_NAME}/{ISSUES_FILENAME}",
         create_dir: bool = False,
     ) -> None:
         """Initialize storage.
@@ -81,7 +88,7 @@ class JSONLStorage:
                 msg,
             )
 
-        self._lock_path = self.dogcats_dir / ".issues.lock"
+        self._lock_path = self.dogcats_dir / LOCK_FILENAME
         self._needs_compaction = False  # Set when corrupt last line is skipped
 
         # Initialize event log for change tracking
@@ -129,6 +136,14 @@ class JSONLStorage:
         while lines and not lines[-1].strip():
             lines.pop()
 
+        # Dispatch table for record-type-specific parsers. ``event`` records
+        # are intentionally absent — they're loaded lazily by EventLog.read
+        # and skipped during issue replay.
+        parsers = {
+            "link": self._parse_link_record,
+            "dependency": self._parse_dependency_record,
+        }
+
         for line_idx, raw_line in enumerate(lines):
             line = raw_line.strip()
             if not line:
@@ -148,52 +163,14 @@ class JSONLStorage:
                     ):
                         newest_record_version = (parsed_v, raw_v)
                 rtype = classify_record(data)
-                if rtype == "link":
-                    op = data.get("op", "add")
-                    key = (
-                        data["from_id"],
-                        data["to_id"],
-                        data.get("link_type", "relates_to"),
-                    )
-                    if op == "remove":
-                        link_map.pop(key, None)
-                    else:
-                        link = Link(
-                            from_id=data["from_id"],
-                            to_id=data["to_id"],
-                            link_type=data.get("link_type", "relates_to"),
-                            created_at=datetime.fromisoformat(
-                                data["created_at"],
-                            ),
-                            created_by=data.get("created_by"),
-                        )
-                        link_map[key] = link
-                elif rtype == "dependency":
-                    op = data.get("op", "add")
-                    key = (
-                        data["issue_id"],
-                        data["depends_on_id"],
-                        data["type"],
-                    )
-                    if op == "remove":
-                        dep_map.pop(key, None)
-                    else:
-                        dep = Dependency(
-                            issue_id=data["issue_id"],
-                            depends_on_id=data["depends_on_id"],
-                            dep_type=DependencyType(data["type"]),
-                            created_at=datetime.fromisoformat(
-                                data["created_at"],
-                            ),
-                            created_by=data.get("created_by"),
-                        )
-                        dep_map[key] = dep
-                elif rtype == "event":
+                if rtype == "event":
                     continue
+                parser = parsers.get(rtype)
+                if parser is not None:
+                    parser(data, link_map=link_map, dep_map=dep_map)
                 else:
-                    # Issue record — last-write-wins
-                    issue = dict_to_issue(data)
-                    self._issues[issue.full_id] = issue
+                    # Default: treat as an issue record (last-write-wins).
+                    self._parse_issue_record(data)
             except (orjson.JSONDecodeError, ValueError, KeyError) as e:
                 if is_last_line:
                     # Tolerate a corrupt last line (crash/disk-full artifact)
@@ -228,6 +205,57 @@ class JSONLStorage:
                     newest_raw,
                     _dcat_version,
                 )
+
+    @staticmethod
+    def _parse_link_record(
+        data: dict[str, Any],
+        *,
+        link_map: dict[tuple[str, str, str], Link],
+        dep_map: dict[tuple[str, str, str], Dependency],  # noqa: ARG004
+    ) -> None:
+        """Apply one link record (``add`` or ``remove`` op) to the in-memory map."""
+        op = data.get("op", "add")
+        key = (
+            data["from_id"],
+            data["to_id"],
+            data.get("link_type", "relates_to"),
+        )
+        if op == "remove":
+            link_map.pop(key, None)
+            return
+        link_map[key] = Link(
+            from_id=data["from_id"],
+            to_id=data["to_id"],
+            link_type=data.get("link_type", "relates_to"),
+            created_at=datetime.fromisoformat(data["created_at"]),
+            created_by=data.get("created_by"),
+        )
+
+    @staticmethod
+    def _parse_dependency_record(
+        data: dict[str, Any],
+        *,
+        link_map: dict[tuple[str, str, str], Link],  # noqa: ARG004
+        dep_map: dict[tuple[str, str, str], Dependency],
+    ) -> None:
+        """Apply one dependency record (``add`` or ``remove`` op) to the map."""
+        op = data.get("op", "add")
+        key = (data["issue_id"], data["depends_on_id"], data["type"])
+        if op == "remove":
+            dep_map.pop(key, None)
+            return
+        dep_map[key] = Dependency(
+            issue_id=data["issue_id"],
+            depends_on_id=data["depends_on_id"],
+            dep_type=DependencyType(data["type"]),
+            created_at=datetime.fromisoformat(data["created_at"]),
+            created_by=data.get("created_by"),
+        )
+
+    def _parse_issue_record(self, data: dict[str, Any]) -> None:
+        """Apply one issue record under last-write-wins semantics."""
+        issue = dict_to_issue(data)
+        self._issues[issue.full_id] = issue
 
     def _rebuild_indexes(self) -> None:
         """Rebuild dependency, link, and parent indexes from the source lists.
@@ -406,7 +434,7 @@ class JSONLStorage:
             ):
                 self._save_locked()
 
-    _DEFAULT_BRANCHES = frozenset({"main", "master"})
+    _DEFAULT_BRANCHES = DEFAULT_BRANCH_NAMES
 
     def _is_default_branch(self) -> bool:
         """Check whether the working tree is on a default branch (main/master).
@@ -416,6 +444,10 @@ class JSONLStorage:
         return — permission denied, lock contention, internal git error —
         returns ``False`` and logs the stderr so we don't silently lose the
         feature-branch protection on a transient problem.
+
+        The known-default-branch set is :data:`DEFAULT_BRANCH_NAMES` plus
+        the user's ``init.defaultBranch`` git config when set, so projects
+        on ``develop``/``trunk``/etc. don't silently lose auto-compaction.
         """
         try:
             result = subprocess.run(
@@ -428,7 +460,8 @@ class JSONLStorage:
         except FileNotFoundError:
             return True  # git not installed — safe to compact
         if result.returncode == 0:
-            return result.stdout.strip() in self._DEFAULT_BRANCHES
+            branch = result.stdout.strip()
+            return branch in self._known_default_branches()
         stderr = (result.stderr or "").strip().lower()
         # "not a git repository" is the only non-zero outcome we treat as
         # "no repo here, safe to compact". Permission denied / locked
@@ -448,6 +481,22 @@ class JSONLStorage:
         # from "permission denied" (not safe). The git module's helper
         # collapses both to None.
 
+    def _known_default_branches(self) -> frozenset[str]:
+        """Return the union of conventional default branches + ``init.defaultBranch``.
+
+        ``init.defaultBranch`` lets users opt their non-conventional default
+        branch (e.g. ``develop``) into auto-compaction without us having to
+        ship a config flag. The git lookup is best-effort: if the helper
+        can't reach git or the value isn't set, we fall back to the
+        compiled defaults.
+        """
+        from dogcat import git as git_helpers
+
+        configured = git_helpers.get_config("init.defaultBranch", cwd=self.dogcats_dir)
+        if configured:
+            return self._DEFAULT_BRANCHES | {configured}
+        return self._DEFAULT_BRANCHES
+
     # -- Event emission helpers ------------------------------------------
 
     def _emit_event(
@@ -458,7 +507,7 @@ class JSONLStorage:
         by: str | None = None,
     ) -> None:
         """Emit an event to the event log (best-effort)."""
-        self._event_log.emit(
+        self._event_log.try_emit(
             event_type,
             issue.full_id,
             issue.updated_at.isoformat(),
@@ -609,6 +658,131 @@ class JSONLStorage:
 
         return issue
 
+    def create_issue(
+        self,
+        *,
+        title: str,
+        namespace: str,
+        description: str | None = None,
+        status: Status = Status.OPEN,
+        priority: int = 2,
+        issue_type: IssueType = IssueType.TASK,
+        owner: str | None = None,
+        parent: str | None = None,
+        labels: list[str] | None = None,
+        external_ref: str | None = None,
+        design: str | None = None,
+        acceptance: str | None = None,
+        notes: str | None = None,
+        duplicate_of: str | None = None,
+        created_by: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        timestamp: datetime | None = None,
+    ) -> Issue:
+        """Generate an ID, build an :class:`Issue`, and persist it.
+
+        Encapsulates the four-step pattern (namespace lookup → IDGenerator →
+        ``generate_issue_id`` → build Issue → ``create``) that was previously
+        re-implemented at every call site (CLI ``new``, ``inbox accept``,
+        TUI detail panel, demo). Callers that need to wire dependencies or
+        validate references stay in their own modules — this only owns the
+        construction step.
+        """
+        from dogcat.idgen import IDGenerator
+
+        ts = timestamp or datetime.now().astimezone()
+        idgen = IDGenerator(existing_ids=self.get_issue_ids(), prefix=namespace)
+        issue_id = idgen.generate_issue_id(
+            title,
+            timestamp=ts,
+            namespace=namespace,
+        )
+        issue = Issue(
+            id=issue_id,
+            title=title,
+            namespace=namespace,
+            description=description,
+            status=status,
+            priority=priority,
+            issue_type=issue_type,
+            owner=owner,
+            parent=parent,
+            labels=list(labels) if labels else [],
+            external_ref=external_ref,
+            design=design,
+            acceptance=acceptance,
+            notes=notes,
+            duplicate_of=duplicate_of,
+            created_by=created_by,
+            metadata=dict(metadata) if metadata else {},
+        )
+        return self.create(issue)
+
+    def _cascade_id_rename(
+        self, old_full_id: str, new_full_id: str
+    ) -> list[dict[str, Any]]:
+        """Rewrite every reference to ``old_full_id`` as ``new_full_id``.
+
+        Walks the three reference collections (issues for parent /
+        duplicate_of, dependency endpoints, link endpoints) and mutates
+        each touched record in place. Returns the list of JSONL records
+        the caller should append to persist the cascade. Caller is
+        responsible for re-keying the issue map and rebuilding indexes.
+        """
+        records: list[dict[str, Any]] = []
+        now = datetime.now().astimezone()
+
+        for other in self._issues.values():
+            changed = False
+            if other.parent == old_full_id:
+                other.parent = new_full_id
+                changed = True
+            if other.duplicate_of == old_full_id:
+                other.duplicate_of = new_full_id
+                changed = True
+            if changed:
+                other.updated_at = now
+                records.append(self._issue_record(other))
+
+        for dep in self._dependencies:
+            changed = False
+            if dep.issue_id == old_full_id:
+                dep.issue_id = new_full_id
+                changed = True
+            if dep.depends_on_id == old_full_id:
+                dep.depends_on_id = new_full_id
+                changed = True
+            if changed:
+                records.append(self._dep_record(dep))
+
+        for link in self._links:
+            changed = False
+            if link.from_id == old_full_id:
+                link.from_id = new_full_id
+                changed = True
+            if link.to_id == old_full_id:
+                link.to_id = new_full_id
+                changed = True
+            if changed:
+                records.append(self._link_record(link))
+
+        return records
+
+    def _resolve_or_raise(self, issue_id: str, *, label: str = "Issue") -> str:
+        """Resolve ``issue_id`` to a full id or raise ``ValueError``.
+
+        Replaces the four-line ``resolved = resolve_id(...); if resolved is
+        None: raise ValueError(...)`` pattern that was repeated across every
+        mutation method (update / close / reopen / delete / dependency /
+        link / comment). ``label`` lets callers surface a more specific
+        noun (``"Parent issue"``, ``"Comment"``) in the error message.
+        """
+        resolved = self.resolve_id(issue_id)
+        if resolved is None:
+            msg = f"{label} {issue_id} not found"
+            raise ValueError(msg)
+        return resolved
+
     def resolve_id(self, partial_id: str) -> str | None:
         """Resolve a partial ID to a full issue ID.
 
@@ -737,10 +911,7 @@ class JSONLStorage:
         """
         from dogcat.models import IssueType, validate_priority
 
-        resolved_id = self.resolve_id(issue_id)
-        if resolved_id is None:
-            msg = f"Issue {issue_id} not found"
-            raise ValueError(msg)
+        resolved_id = self._resolve_or_raise(issue_id)
 
         issue = self._issues[resolved_id]
 
@@ -834,10 +1005,7 @@ class JSONLStorage:
         Raises:
             ValueError: If issue doesn't exist or new ID already taken.
         """
-        resolved_id = self.resolve_id(issue_id)
-        if resolved_id is None:
-            msg = f"Issue {issue_id} not found"
-            raise ValueError(msg)
+        resolved_id = self._resolve_or_raise(issue_id)
 
         issue = self._issues[resolved_id]
         old_full_id = issue.full_id
@@ -863,42 +1031,8 @@ class JSONLStorage:
         # Collect all records to append
         records: list[dict[str, Any]] = [self._issue_record(issue)]
 
-        # Cascade to other issues referencing the old full_id
-        for other in self._issues.values():
-            changed = False
-            if other.parent == old_full_id:
-                other.parent = new_full_id
-                changed = True
-            if other.duplicate_of == old_full_id:
-                other.duplicate_of = new_full_id
-                changed = True
-            if changed:
-                other.updated_at = datetime.now().astimezone()
-                records.append(self._issue_record(other))
-
-        # Cascade to dependencies
-        for dep in self._dependencies:
-            changed = False
-            if dep.issue_id == old_full_id:
-                dep.issue_id = new_full_id
-                changed = True
-            if dep.depends_on_id == old_full_id:
-                dep.depends_on_id = new_full_id
-                changed = True
-            if changed:
-                records.append(self._dep_record(dep))
-
-        # Cascade to links
-        for link in self._links:
-            changed = False
-            if link.from_id == old_full_id:
-                link.from_id = new_full_id
-                changed = True
-            if link.to_id == old_full_id:
-                link.to_id = new_full_id
-                changed = True
-            if changed:
-                records.append(self._link_record(link))
+        # Cascade the rename through everything referencing old_full_id.
+        records.extend(self._cascade_id_rename(old_full_id, new_full_id))
 
         # Rebuild indexes since IDs changed
         self._rebuild_indexes()
@@ -1026,10 +1160,7 @@ class JSONLStorage:
         Raises:
             ValueError: If issue doesn't exist
         """
-        resolved_id = self.resolve_id(issue_id)
-        if resolved_id is None:
-            msg = f"Issue {issue_id} not found"
-            raise ValueError(msg)
+        resolved_id = self._resolve_or_raise(issue_id)
 
         issue = self._issues[resolved_id]
         old_status = issue.status.value
@@ -1072,10 +1203,7 @@ class JSONLStorage:
         Raises:
             ValueError: If issue doesn't exist or is not closed
         """
-        resolved_id = self.resolve_id(issue_id)
-        if resolved_id is None:
-            msg = f"Issue {issue_id} not found"
-            raise ValueError(msg)
+        resolved_id = self._resolve_or_raise(issue_id)
 
         issue = self._issues[resolved_id]
         if issue.status != Status.CLOSED:
@@ -1124,10 +1252,7 @@ class JSONLStorage:
         Raises:
             ValueError: If issue doesn't exist
         """
-        resolved_id = self.resolve_id(issue_id)
-        if resolved_id is None:
-            msg = f"Issue {issue_id} not found"
-            raise ValueError(msg)
+        resolved_id = self._resolve_or_raise(issue_id)
 
         issue = self._issues[resolved_id]
         old_status = issue.status.value
@@ -1213,15 +1338,8 @@ class JSONLStorage:
             msg = f"Invalid dependency type '{dep_type}'. Valid types: {valid_types}"
             raise ValueError(msg) from None
 
-        resolved_issue_id = self.resolve_id(issue_id)
-        if resolved_issue_id is None:
-            msg = f"Issue {issue_id} not found"
-            raise ValueError(msg)
-
-        resolved_depends_on_id = self.resolve_id(depends_on_id)
-        if resolved_depends_on_id is None:
-            msg = f"Issue {depends_on_id} not found"
-            raise ValueError(msg)
+        resolved_issue_id = self._resolve_or_raise(issue_id)
+        resolved_depends_on_id = self._resolve_or_raise(depends_on_id)
 
         # Check if dependency already exists (O(1) index lookup)
         for dep in self._deps_by_issue.get(resolved_issue_id, []):
@@ -1265,15 +1383,8 @@ class JSONLStorage:
         Raises:
             ValueError: If either issue doesn't exist
         """
-        resolved_issue_id = self.resolve_id(issue_id)
-        if resolved_issue_id is None:
-            msg = f"Issue {issue_id} not found"
-            raise ValueError(msg)
-
-        resolved_depends_on_id = self.resolve_id(depends_on_id)
-        if resolved_depends_on_id is None:
-            msg = f"Issue {depends_on_id} not found"
-            raise ValueError(msg)
+        resolved_issue_id = self._resolve_or_raise(issue_id)
+        resolved_depends_on_id = self._resolve_or_raise(depends_on_id)
 
         # Collect removed deps for append-only removal records
         removed = [
@@ -1306,10 +1417,7 @@ class JSONLStorage:
         Raises:
             ValueError: If issue doesn't exist
         """
-        resolved_id = self.resolve_id(issue_id)
-        if resolved_id is None:
-            msg = f"Issue {issue_id} not found"
-            raise ValueError(msg)
+        resolved_id = self._resolve_or_raise(issue_id)
         return list(self._deps_by_issue.get(resolved_id, []))
 
     def get_dependents(self, issue_id: str) -> list[Dependency]:
@@ -1324,10 +1432,7 @@ class JSONLStorage:
         Raises:
             ValueError: If issue doesn't exist
         """
-        resolved_id = self.resolve_id(issue_id)
-        if resolved_id is None:
-            msg = f"Issue {issue_id} not found"
-            raise ValueError(msg)
+        resolved_id = self._resolve_or_raise(issue_id)
         return list(self._deps_by_depends_on.get(resolved_id, []))
 
     def add_link(
@@ -1429,10 +1534,7 @@ class JSONLStorage:
         Raises:
             ValueError: If issue doesn't exist
         """
-        resolved_id = self.resolve_id(issue_id)
-        if resolved_id is None:
-            msg = f"Issue {issue_id} not found"
-            raise ValueError(msg)
+        resolved_id = self._resolve_or_raise(issue_id)
         return list(self._links_by_from.get(resolved_id, []))
 
     def get_incoming_links(self, issue_id: str) -> list[Link]:
@@ -1447,10 +1549,7 @@ class JSONLStorage:
         Raises:
             ValueError: If issue doesn't exist
         """
-        resolved_id = self.resolve_id(issue_id)
-        if resolved_id is None:
-            msg = f"Issue {issue_id} not found"
-            raise ValueError(msg)
+        resolved_id = self._resolve_or_raise(issue_id)
         return list(self._links_by_to.get(resolved_id, []))
 
     def get_children(self, issue_id: str) -> list[Issue]:
@@ -1465,10 +1564,7 @@ class JSONLStorage:
         Raises:
             ValueError: If issue doesn't exist
         """
-        resolved_id = self.resolve_id(issue_id)
-        if resolved_id is None:
-            msg = f"Issue {issue_id} not found"
-            raise ValueError(msg)
+        resolved_id = self._resolve_or_raise(issue_id)
         return [
             self._issues[cid]
             for cid in self._children_by_parent.get(resolved_id, [])

@@ -1880,6 +1880,70 @@ class TestGetNamespaces:
         assert result == {"ns-a": NamespaceCounts(issues=1)}
 
 
+class TestCreateIssueFactory:
+    """Test ``JSONLStorage.create_issue`` factory.
+
+    Regression for dogcat-6a1g: the namespace-lookup → IDGenerator → build
+    Issue → create() pattern was duplicated at four call sites; the factory
+    centralizes it.
+    """
+
+    def test_create_issue_generates_id(self, storage: JSONLStorage) -> None:
+        """The factory mints an id from the IDGenerator under the given namespace."""
+        issue = storage.create_issue(title="Hello", namespace="abc")
+        assert issue.namespace == "abc"
+        assert issue.id  # generated, non-empty
+        assert issue.title == "Hello"
+
+    def test_create_issue_persists(self, storage: JSONLStorage) -> None:
+        """Returned issue is stored and resolvable by full_id."""
+        issue = storage.create_issue(title="Persist me", namespace="t")
+        loaded = storage.get(issue.full_id)
+        assert loaded is not None
+        assert loaded.title == "Persist me"
+
+    def test_create_issue_passes_through_optional_fields(
+        self, storage: JSONLStorage
+    ) -> None:
+        """All forwarded kwargs land on the constructed Issue."""
+        from dogcat.models import IssueType, Status
+
+        issue = storage.create_issue(
+            title="Full",
+            namespace="t",
+            description="desc",
+            status=Status.IN_PROGRESS,
+            priority=1,
+            issue_type=IssueType.BUG,
+            owner="alice",
+            labels=["a", "b"],
+            external_ref="JIRA-1",
+            design="design",
+            acceptance="ok",
+            notes="notes",
+            created_by="bob",
+            metadata={"manual": True},
+        )
+        assert issue.description == "desc"
+        assert issue.status is Status.IN_PROGRESS
+        assert issue.priority == 1
+        assert issue.issue_type is IssueType.BUG
+        assert issue.owner == "alice"
+        assert issue.labels == ["a", "b"]
+        assert issue.external_ref == "JIRA-1"
+        assert issue.design == "design"
+        assert issue.acceptance == "ok"
+        assert issue.notes == "notes"
+        assert issue.created_by == "bob"
+        assert issue.metadata == {"manual": True}
+
+    def test_create_issue_unique_ids(self, storage: JSONLStorage) -> None:
+        """Two calls with the same title under the same namespace get distinct ids."""
+        a = storage.create_issue(title="Same title", namespace="t")
+        b = storage.create_issue(title="Same title", namespace="t")
+        assert a.full_id != b.full_id
+
+
 class TestIsDefaultBranch:
     """Test ``_is_default_branch`` git error handling.
 
@@ -1908,18 +1972,48 @@ class TestIsDefaultBranch:
     def test_feature_branch_returns_false(
         self, storage: JSONLStorage, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """On a feature branch, NOT eligible for compaction."""
+        """On a feature branch, NOT eligible for compaction.
+
+        Mocks dispatch on the git subcommand: ``rev-parse --abbrev-ref HEAD``
+        returns the branch name; ``config init.defaultBranch`` returns rc=1
+        (key unset) so the union with the user's configured default doesn't
+        accidentally include the feature branch.
+        """
         import subprocess
 
         def fake_run(
-            *_args: object, **_kwargs: object
+            argv: list[str], **_kwargs: object
         ) -> subprocess.CompletedProcess[str]:
+            if "config" in argv:
+                return subprocess.CompletedProcess(
+                    args=argv, returncode=1, stdout="", stderr=""
+                )
             return subprocess.CompletedProcess(
-                args=[], returncode=0, stdout="feature/x\n", stderr=""
+                args=argv, returncode=0, stdout="feature/x\n", stderr=""
             )
 
         monkeypatch.setattr(subprocess, "run", fake_run)
         assert storage._is_default_branch() is False
+
+    def test_init_default_branch_config_overrides(
+        self, storage: JSONLStorage, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``init.defaultBranch=develop`` makes ``develop`` count as default."""
+        import subprocess
+
+        def fake_run(
+            argv: list[str], **_kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            if "config" in argv:
+                return subprocess.CompletedProcess(
+                    args=argv, returncode=0, stdout="develop\n", stderr=""
+                )
+            return subprocess.CompletedProcess(
+                args=argv, returncode=0, stdout="develop\n", stderr=""
+            )
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        assert storage._is_default_branch() is True
 
     def test_not_a_git_repo_returns_true(
         self, storage: JSONLStorage, monkeypatch: pytest.MonkeyPatch

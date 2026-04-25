@@ -1410,21 +1410,9 @@ def generate_demo_inbox(dogcats_dir: str) -> int:
 
     inbox = InboxStorage(dogcats_dir=dogcats_dir)
     namespace = get_issue_prefix(dogcats_dir)
-    idgen = IDGenerator(
-        existing_ids=inbox.get_proposal_ids(),
-        prefix=f"{namespace}-inbox",
-    )
 
     def _propose(title: str, **kwargs: Any) -> Proposal:
-        pid = idgen.generate_proposal_id(title, namespace=f"{namespace}-inbox")
-        proposal = Proposal(
-            id=pid,
-            title=title,
-            namespace=namespace,
-            **kwargs,
-        )
-        inbox.create(proposal)
-        return proposal
+        return inbox.create_proposal(title=title, namespace=namespace, **kwargs)
 
     # Open proposals
     _propose(

@@ -13,7 +13,12 @@ from dogcat._diff import tracked_changes
 from dogcat._id_resolve import resolve_partial_id
 from dogcat._jsonl_io import append_jsonl_payload, atomic_rewrite_jsonl
 from dogcat._schema import warn_if_records_from_newer_version
-from dogcat.constants import TRACKED_PROPOSAL_FIELDS
+from dogcat.constants import (
+    DOGCATS_DIR_NAME,
+    INBOX_FILENAME,
+    LOCK_FILENAME,
+    TRACKED_PROPOSAL_FIELDS,
+)
 from dogcat.locking import advisory_file_lock
 from dogcat.models import (
     Proposal,
@@ -25,15 +30,13 @@ from dogcat.models import (
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
 
-INBOX_FILENAME = "inbox.jsonl"
-
 
 class InboxStorage:
     """Manages atomic JSONL storage for inbox proposals."""
 
     def __init__(
         self,
-        dogcats_dir: str = ".dogcats",
+        dogcats_dir: str = DOGCATS_DIR_NAME,
         create_dir: bool = False,
     ) -> None:
         """Initialize inbox storage.
@@ -55,7 +58,7 @@ class InboxStorage:
             )
             raise ValueError(msg)
 
-        self._lock_path = self.dogcats_dir / ".issues.lock"
+        self._lock_path = self.dogcats_dir / LOCK_FILENAME
         self._needs_compaction = False
 
         # Initialize event log for inbox change tracking
@@ -159,7 +162,7 @@ class InboxStorage:
         by: str | None = None,
     ) -> None:
         """Emit an event to the inbox event log (best-effort)."""
-        self._event_log.emit(
+        self._event_log.try_emit(
             event_type,
             proposal.full_id,
             proposal.updated_at.isoformat(),
@@ -246,6 +249,54 @@ class InboxStorage:
 
         return proposal
 
+    def _resolve_or_raise(self, proposal_id: str, *, label: str = "Proposal") -> str:
+        """Resolve ``proposal_id`` to a full id or raise ``ValueError``.
+
+        Mirror of :meth:`JSONLStorage._resolve_or_raise` for the inbox so
+        the close / delete / get paths share one ``resolve-or-fail``
+        sentence instead of repeating it.
+        """
+        resolved = self.resolve_id(proposal_id)
+        if resolved is None:
+            msg = f"{label} {proposal_id} not found"
+            raise ValueError(msg)
+        return resolved
+
+    def create_proposal(
+        self,
+        *,
+        title: str,
+        namespace: str = "dc",
+        description: str | None = None,
+        proposed_by: str | None = None,
+        source_repo: str | None = None,
+    ) -> Proposal:
+        """Generate an ID, build a :class:`Proposal`, and persist it.
+
+        Encapsulates the namespace + IDGenerator + Proposal-construction
+        pattern that the propose CLI, the web propose endpoint, and the
+        demo all reimplemented separately.
+        """
+        from dogcat.idgen import IDGenerator
+
+        idgen = IDGenerator(
+            existing_ids=self.get_proposal_ids(),
+            prefix=f"{namespace}-inbox",
+        )
+        proposal_id = idgen.generate_proposal_id(
+            title,
+            namespace=f"{namespace}-inbox",
+        )
+        proposal = Proposal(
+            id=proposal_id,
+            title=title,
+            namespace=namespace,
+            description=description,
+            proposed_by=proposed_by,
+            source_repo=source_repo,
+        )
+        return self.create(proposal)
+
     def resolve_id(self, partial_id: str) -> str | None:
         """Resolve a partial ID to a full proposal ID.
 
@@ -325,10 +376,7 @@ class InboxStorage:
         Raises:
             ValueError: If proposal doesn't exist.
         """
-        resolved_id = self.resolve_id(proposal_id)
-        if resolved_id is None:
-            msg = f"Proposal {proposal_id} not found"
-            raise ValueError(msg)
+        resolved_id = self._resolve_or_raise(proposal_id)
 
         proposal = self._proposals[resolved_id]
         old_data = proposal_to_dict(proposal)
@@ -370,10 +418,7 @@ class InboxStorage:
         Raises:
             ValueError: If proposal doesn't exist.
         """
-        resolved_id = self.resolve_id(proposal_id)
-        if resolved_id is None:
-            msg = f"Proposal {proposal_id} not found"
-            raise ValueError(msg)
+        resolved_id = self._resolve_or_raise(proposal_id)
 
         proposal = self._proposals[resolved_id]
         old_data = proposal_to_dict(proposal)
