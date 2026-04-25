@@ -56,8 +56,17 @@ def client(web_dogcats: Path) -> TestClient:
 
 
 def _csrf(client: TestClient) -> str:
-    """Extract the CSRF token from the app state."""
-    return client.app.state.csrf_token  # type: ignore[union-attr]
+    """Prime a CSRF session via GET /, return the issued token.
+
+    Side effects: sets the ``dcat_csrf`` cookie on the client. Tests that
+    submit the form should call this once per client to establish a session.
+    """
+    import re
+
+    resp = client.get("/")
+    match = re.search(r'name="csrf_token" value="([^"]+)"', resp.text)
+    assert match, "CSRF token not found in form HTML"
+    return match.group(1)
 
 
 class TestGetForm:
@@ -256,11 +265,10 @@ class TestSubmitProposal:
         """A proposal can be submitted to a non-default namespace."""
         app = create_app(dogcats_dir=str(web_dogcats_multi_ns))
         multi_client = TestClient(app)
-        token: str = app.state.csrf_token
         multi_client.post(
             "/",
             data={
-                "csrf_token": token,
+                "csrf_token": _csrf(multi_client),
                 "namespace": "beta",
                 "title": "Cross-ns",
                 "description": "",
@@ -277,7 +285,7 @@ class TestSubmitProposal:
         resp = restricted_client.post(
             "/",
             data={
-                "csrf_token": app.state.csrf_token,
+                "csrf_token": _csrf(restricted_client),
                 "namespace": "bogus",
                 "title": "Bad ns",
                 "description": "",
@@ -293,7 +301,7 @@ class TestSubmitProposal:
         resp = ns_client.post(
             "/",
             data={
-                "csrf_token": app.state.csrf_token,
+                "csrf_token": _csrf(ns_client),
                 "namespace": "newproject",
                 "title": "New ns proposal",
                 "description": "",
@@ -386,11 +394,10 @@ class TestSubmitProposal:
         """After submit to non-default ns, form keeps it selected."""
         app = create_app(dogcats_dir=str(web_dogcats_multi_ns))
         multi_client = TestClient(app)
-        token: str = app.state.csrf_token
         resp = multi_client.post(
             "/",
             data={
-                "csrf_token": token,
+                "csrf_token": _csrf(multi_client),
                 "namespace": "beta",
                 "title": "Beta proposal",
                 "description": "",
@@ -508,6 +515,291 @@ class TestAppFactory:
         client = TestClient(app)
         resp = client.get("/")
         assert "New&hellip;" not in resp.text
+
+
+class TestAriaSemantics:
+    """Regression tests for dogcat-5vsb: ARIA attributes on the proposal form."""
+
+    def test_dropdown_has_combobox_role_with_aria_state(
+        self, client: TestClient
+    ) -> None:
+        """The namespace dropdown is a combobox with aria-expanded/controls."""
+        resp = client.get("/")
+        assert 'role="combobox"' in resp.text
+        assert 'aria-expanded="false"' in resp.text
+        assert 'aria-controls="ns-menu"' in resp.text
+        assert 'role="listbox"' in resp.text
+        assert 'role="option"' in resp.text
+
+    def test_active_option_marked_aria_selected(self, client: TestClient) -> None:
+        """The currently-selected namespace has aria-selected=true."""
+        resp = client.get("/")
+        assert 'aria-selected="true"' in resp.text
+
+    def test_form_has_aria_labelledby(self, client: TestClient) -> None:
+        """The form is associated with the page heading."""
+        resp = client.get("/")
+        assert 'id="page-title"' in resp.text
+        assert 'aria-labelledby="page-title"' in resp.text
+
+    def test_required_title_has_aria_required(self, client: TestClient) -> None:
+        """Required title input is also marked aria-required for screen readers."""
+        resp = client.get("/")
+        # aria-required on the title input
+        assert 'aria-required="true"' in resp.text
+
+    def test_status_region_uses_aria_live(self, client: TestClient) -> None:
+        """A polite live region announces submission outcomes."""
+        resp = client.get("/")
+        assert 'aria-live="polite"' in resp.text
+        assert 'role="status"' in resp.text
+
+    def test_error_message_uses_role_alert_and_aria_invalid(
+        self, client: TestClient
+    ) -> None:
+        """Title-validation errors mark the field invalid and use role=alert."""
+        resp = client.post(
+            "/",
+            data={
+                "csrf_token": _csrf(client),
+                "namespace": "testns",
+                "title": "  ",
+                "description": "",
+            },
+        )
+        assert 'role="alert"' in resp.text
+        assert 'aria-invalid="true"' in resp.text
+
+
+class TestNewNamespacePersistence:
+    """Regression tests for dogcat-5a2f: dynamically created namespaces survive restart.
+
+    Previously they were appended to the in-memory namespaces list only and
+    vanished when the server stopped.
+    """
+
+    def test_new_namespace_pinned_in_local_config(self, web_dogcats: Path) -> None:
+        """Submitting to a new namespace persists it under pinned_namespaces."""
+        from dogcat.config import load_local_config
+
+        app = create_app(dogcats_dir=str(web_dogcats), allow_creating_namespaces=True)
+        client = TestClient(app)
+        client.post(
+            "/",
+            data={
+                "csrf_token": _csrf(client),
+                "namespace": "freshly_minted",
+                "title": "first",
+                "description": "",
+            },
+        )
+        local = load_local_config(str(web_dogcats))
+        assert "freshly_minted" in local.get("pinned_namespaces", [])
+
+    def test_new_namespace_visible_after_restart(self, web_dogcats: Path) -> None:
+        """A new namespace appears in the dropdown of a freshly-built app."""
+        app1 = create_app(dogcats_dir=str(web_dogcats), allow_creating_namespaces=True)
+        client1 = TestClient(app1)
+        client1.post(
+            "/",
+            data={
+                "csrf_token": _csrf(client1),
+                "namespace": "persisted",
+                "title": "first",
+                "description": "",
+            },
+        )
+
+        # Simulate restart: build a new app from the same dogcats dir.
+        app2 = create_app(dogcats_dir=str(web_dogcats), allow_creating_namespaces=True)
+        client2 = TestClient(app2)
+        resp = client2.get("/")
+        assert 'data-value="persisted"' in resp.text
+
+    def test_pinned_namespace_not_duplicated(self, web_dogcats: Path) -> None:
+        """Submitting twice to the same new namespace doesn't dup the pin."""
+        from dogcat.config import load_local_config
+
+        app = create_app(dogcats_dir=str(web_dogcats), allow_creating_namespaces=True)
+        client = TestClient(app)
+        for i in range(3):
+            client.post(
+                "/",
+                data={
+                    "csrf_token": _csrf(client),
+                    "namespace": "once",
+                    "title": f"submission-{i}",
+                    "description": "",
+                },
+            )
+        local = load_local_config(str(web_dogcats))
+        pinned = local.get("pinned_namespaces", [])
+        assert pinned.count("once") == 1
+
+
+class TestNamespaceValidation:
+    """Regression tests for dogcat-1819: namespace format whitelist.
+
+    The form previously accepted arbitrary strings (spaces, control chars,
+    Unicode homoglyphs); now only ``[A-Za-z0-9_-]`` is allowed and input
+    is NFKC-normalized before checking.
+    """
+
+    @pytest.mark.parametrize(
+        "bad_ns",
+        [
+            "with spaces",
+            "ctrl\x01char",
+            "newline\nhere",
+            "tab\there",
+            "../etc/passwd",
+            "name/with/slashes",
+            "name.with.dots",
+            "name:with:colons",
+            "   ",  # whitespace-only collapses to empty after strip
+            "a" * 65,  # over the length cap
+        ],
+    )
+    def test_invalid_namespace_rejected(self, web_dogcats: Path, bad_ns: str) -> None:
+        """Malformed namespaces are rejected with a clear error."""
+        app = create_app(dogcats_dir=str(web_dogcats), allow_creating_namespaces=True)
+        client = TestClient(app)
+        resp = client.post(
+            "/",
+            data={
+                "csrf_token": _csrf(client),
+                "namespace": bad_ns,
+                "title": "x",
+                "description": "",
+            },
+        )
+        assert resp.status_code == 200
+        assert "Namespace must be" in resp.text or "Invalid namespace" in resp.text
+        # And nothing was written to the inbox.
+        inbox = InboxStorage(dogcats_dir=str(web_dogcats))
+        assert inbox.list() == []
+
+    def test_unicode_homoglyph_rejected(self, web_dogcats: Path) -> None:
+        """Unicode chars that look like ASCII are rejected, not silently accepted."""
+        app = create_app(dogcats_dir=str(web_dogcats), allow_creating_namespaces=True)
+        client = TestClient(app)
+        # Build "t<Cyrillic e>stns" without writing the homoglyph literally,
+        # to keep ruff's RUF001 check happy.
+        cyrillic_e = chr(0x0435)
+        spoofed = "t" + cyrillic_e + "stns"
+        resp = client.post(
+            "/",
+            data={
+                "csrf_token": _csrf(client),
+                "namespace": spoofed,
+                "title": "spoof",
+                "description": "",
+            },
+        )
+        assert "Namespace must be" in resp.text
+
+    def test_fullwidth_namespace_normalized(self, web_dogcats: Path) -> None:
+        """NFKC folds fullwidth ASCII to plain ASCII before whitelist check."""
+        app = create_app(dogcats_dir=str(web_dogcats), allow_creating_namespaces=True)
+        client = TestClient(app)
+        # Construct fullwidth "testns" via codepoints (U+FF54..) so the source
+        # file stays free of ambiguous Latin lookalikes.
+        fullwidth = "".join(chr(0xFF00 + ord(c) - 0x20) for c in "testns")
+        resp = client.post(
+            "/",
+            data={
+                "csrf_token": _csrf(client),
+                "namespace": fullwidth,
+                "title": "fullwidth",
+                "description": "",
+            },
+        )
+        assert "Proposal submitted" in resp.text or "submitted=true" in resp.text
+        inbox = InboxStorage(dogcats_dir=str(web_dogcats))
+        assert any(p.namespace == "testns" for p in inbox.list())
+
+    def test_valid_namespace_accepted(self, web_dogcats: Path) -> None:
+        """Underscores and hyphens are allowed."""
+        app = create_app(dogcats_dir=str(web_dogcats), allow_creating_namespaces=True)
+        client = TestClient(app)
+        for ns in ("alpha", "beta-1", "snake_case", "MixedCase"):
+            resp = client.post(
+                "/",
+                data={
+                    "csrf_token": _csrf(client),
+                    "namespace": ns,
+                    "title": f"ok-{ns}",
+                    "description": "",
+                },
+            )
+            assert "Namespace must be" not in resp.text
+
+
+class TestCSRFPerSession:
+    """Regression tests for dogcat-5dd4: CSRF tokens must rotate per session.
+
+    Previously a single token was minted at app start and shared across all
+    sessions, so any client that ever obtained it could reuse it indefinitely
+    until server restart.
+    """
+
+    def test_each_session_gets_a_distinct_token(self, web_dogcats: Path) -> None:
+        """Two independent clients see different CSRF tokens."""
+        app = create_app(dogcats_dir=str(web_dogcats))
+        c1 = TestClient(app)
+        c2 = TestClient(app)
+        t1 = _csrf(c1)
+        t2 = _csrf(c2)
+        assert t1 != t2
+        # And both are non-empty, urlsafe-ish.
+        assert len(t1) > 20
+        assert len(t2) > 20
+
+    def test_token_from_one_session_rejected_in_another(
+        self, web_dogcats: Path
+    ) -> None:
+        """A token leaked from session A cannot be used by session B."""
+        app = create_app(dogcats_dir=str(web_dogcats))
+        attacker = TestClient(app)
+        victim = TestClient(app)
+        victim_token = _csrf(victim)
+
+        # Attacker tries to submit using the victim's token but their own
+        # cookie jar (their cookie is either absent or different).
+        resp = attacker.post(
+            "/",
+            data={
+                "csrf_token": victim_token,
+                "namespace": "testns",
+                "title": "Forged",
+                "description": "",
+            },
+        )
+        assert "Invalid form submission" in resp.text
+
+    def test_csrf_cookie_has_security_flags(self, client: TestClient) -> None:
+        """The CSRF cookie is HttpOnly and SameSite=Strict."""
+        resp = client.get("/")
+        set_cookie = resp.headers.get("set-cookie", "")
+        assert "dcat_csrf=" in set_cookie
+        assert "HttpOnly" in set_cookie
+        # Starlette spells it lowercase; accept either.
+        assert "samesite=strict" in set_cookie.lower()
+
+    def test_post_without_cookie_is_rejected(self, web_dogcats: Path) -> None:
+        """POST without a CSRF cookie fails even if form has a value."""
+        app = create_app(dogcats_dir=str(web_dogcats))
+        client = TestClient(app)
+        resp = client.post(
+            "/",
+            data={
+                "csrf_token": "anything",
+                "namespace": "testns",
+                "title": "No cookie",
+                "description": "",
+            },
+        )
+        assert "Invalid form submission" in resp.text
 
 
 class TestWebProposeInit:

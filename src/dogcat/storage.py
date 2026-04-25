@@ -244,95 +244,114 @@ class JSONLStorage:
                 according to this old→new mapping (used by ``change_namespace``).
         """
         with self._file_lock():
-            if _reload and self.path.exists():
-                self._load()
-            # Write to temporary file first
-            with tempfile.NamedTemporaryFile(
-                mode="wb",
-                dir=self.dogcats_dir,
-                delete=False,
-                suffix=".jsonl",
-            ) as tmp_file:
-                tmp_path = Path(tmp_file.name)
+            self._save_locked(
+                _reload=_reload,
+                _prune_event_ids=_prune_event_ids,
+                _rename_event_ids=_rename_event_ids,
+            )
 
-                try:
-                    line_count = 0
-                    # Write all issues
-                    for issue in self._issues.values():
-                        data = issue_to_dict(issue)
-                        tmp_file.write(orjson.dumps(data))
-                        tmp_file.write(b"\n")
-                        line_count += 1
+    def _save_locked(
+        self,
+        *,
+        _reload: bool = True,
+        _prune_event_ids: set[str] | None = None,
+        _rename_event_ids: dict[str, str] | None = None,
+    ) -> None:
+        """Body of :meth:`_save` that assumes the file lock is already held.
 
-                    # Write all dependencies
-                    for dep in self._dependencies:
-                        dep_data = {
-                            "record_type": "dependency",
-                            "dcat_version": _dcat_version,
-                            "issue_id": dep.issue_id,
-                            "depends_on_id": dep.depends_on_id,
-                            "type": dep.dep_type.value,
-                            "created_at": dep.created_at.isoformat(),
-                            "created_by": dep.created_by,
-                        }
-                        tmp_file.write(orjson.dumps(dep_data))
-                        tmp_file.write(b"\n")
-                        line_count += 1
+        Use this from inside an existing ``self._file_lock()`` context to
+        avoid re-entering the advisory lock (which would deadlock since
+        ``advisory_file_lock`` opens a fresh fd each time).
+        """
+        if _reload and self.path.exists():
+            self._load()
+        # Write to temporary file first
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=self.dogcats_dir,
+            delete=False,
+            suffix=".jsonl",
+        ) as tmp_file:
+            tmp_path = Path(tmp_file.name)
 
-                    # Write all links
-                    for link in self._links:
-                        link_data = {
-                            "record_type": "link",
-                            "dcat_version": _dcat_version,
-                            "from_id": link.from_id,
-                            "to_id": link.to_id,
-                            "link_type": link.link_type,
-                            "created_at": link.created_at.isoformat(),
-                            "created_by": link.created_by,
-                        }
-                        tmp_file.write(orjson.dumps(link_data))
-                        tmp_file.write(b"\n")
-                        line_count += 1
-
-                    # Preserve event records from the current file
-                    if self.path.exists():
-                        with self.path.open("rb") as src:
-                            for raw_line in src:
-                                raw_line = raw_line.strip()
-                                if not raw_line:
-                                    continue
-                                try:
-                                    data = orjson.loads(raw_line)
-                                except (orjson.JSONDecodeError, ValueError):
-                                    continue  # Skip malformed lines
-                                if data.get("record_type") == "event":
-                                    eid = data.get("issue_id", "")
-                                    if _prune_event_ids and eid in _prune_event_ids:
-                                        continue
-                                    if _rename_event_ids and eid in _rename_event_ids:
-                                        data["issue_id"] = _rename_event_ids[eid]
-                                        raw_line = orjson.dumps(data)
-                                    tmp_file.write(raw_line)
-                                    tmp_file.write(b"\n")
-                                    line_count += 1
-
-                    tmp_file.flush()
-                    os.fsync(tmp_file.fileno())
-                except (OSError, orjson.JSONEncodeError, TypeError) as e:
-                    tmp_path.unlink(missing_ok=True)
-                    msg = f"Failed to write to temporary file: {e}"
-                    raise RuntimeError(msg) from e
-
-            # Atomic rename to target file
             try:
-                tmp_path.replace(self.path)
-            except OSError as e:
+                line_count = 0
+                # Write all issues
+                for issue in self._issues.values():
+                    data = issue_to_dict(issue)
+                    tmp_file.write(orjson.dumps(data))
+                    tmp_file.write(b"\n")
+                    line_count += 1
+
+                # Write all dependencies
+                for dep in self._dependencies:
+                    dep_data = {
+                        "record_type": "dependency",
+                        "dcat_version": _dcat_version,
+                        "issue_id": dep.issue_id,
+                        "depends_on_id": dep.depends_on_id,
+                        "type": dep.dep_type.value,
+                        "created_at": dep.created_at.isoformat(),
+                        "created_by": dep.created_by,
+                    }
+                    tmp_file.write(orjson.dumps(dep_data))
+                    tmp_file.write(b"\n")
+                    line_count += 1
+
+                # Write all links
+                for link in self._links:
+                    link_data = {
+                        "record_type": "link",
+                        "dcat_version": _dcat_version,
+                        "from_id": link.from_id,
+                        "to_id": link.to_id,
+                        "link_type": link.link_type,
+                        "created_at": link.created_at.isoformat(),
+                        "created_by": link.created_by,
+                    }
+                    tmp_file.write(orjson.dumps(link_data))
+                    tmp_file.write(b"\n")
+                    line_count += 1
+
+                # Preserve event records from the current file
+                if self.path.exists():
+                    with self.path.open("rb") as src:
+                        for raw_line in src:
+                            raw_line = raw_line.strip()
+                            if not raw_line:
+                                continue
+                            try:
+                                data = orjson.loads(raw_line)
+                            except (orjson.JSONDecodeError, ValueError):
+                                continue  # Skip malformed lines
+                            if data.get("record_type") == "event":
+                                eid = data.get("issue_id", "")
+                                if _prune_event_ids and eid in _prune_event_ids:
+                                    continue
+                                if _rename_event_ids and eid in _rename_event_ids:
+                                    data["issue_id"] = _rename_event_ids[eid]
+                                    raw_line = orjson.dumps(data)
+                                tmp_file.write(raw_line)
+                                tmp_file.write(b"\n")
+                                line_count += 1
+
+                tmp_file.flush()
+                os.fsync(tmp_file.fileno())
+            except (OSError, orjson.JSONEncodeError, TypeError) as e:
                 tmp_path.unlink(missing_ok=True)
-                msg = f"Failed to write storage file: {e}"
+                msg = f"Failed to write to temporary file: {e}"
                 raise RuntimeError(msg) from e
 
-            self._base_lines = line_count
-            self._appended_lines = 0
+        # Atomic rename to target file
+        try:
+            tmp_path.replace(self.path)
+        except OSError as e:
+            tmp_path.unlink(missing_ok=True)
+            msg = f"Failed to write storage file: {e}"
+            raise RuntimeError(msg) from e
+
+        self._base_lines = line_count
+        self._appended_lines = 0
 
     def _append(self, records: list[dict[str, Any]]) -> None:
         """Append records to the JSONL file without rewriting it.
@@ -376,8 +395,15 @@ class JSONLStorage:
                 msg = f"Failed to append to storage file: {e}"
                 raise RuntimeError(msg) from e
 
-        self._appended_lines += len(records)
-        self._maybe_compact()
+            self._appended_lines += len(records)
+            # Eligibility check + compaction must run under the same lock
+            # the append used. Otherwise two processes can both see counts
+            # that look stale-and-eligible and rewrite the file twice.
+            if (
+                should_compact(self._base_lines, self._appended_lines)
+                and self._is_default_branch()
+            ):
+                self._save_locked()
 
     _DEFAULT_BRANCHES = frozenset({"main", "master"})
 
@@ -399,18 +425,6 @@ class JSONLStorage:
             return result.stdout.strip() in self._DEFAULT_BRANCHES
         except FileNotFoundError:
             return True  # git not installed — safe to compact
-
-    def _maybe_compact(self) -> None:
-        """Compact the file if appended lines exceed the threshold.
-
-        Skips automatic compaction on non-default branches to prevent
-        merge conflicts when multiple branches compact independently.
-        """
-        if (
-            should_compact(self._base_lines, self._appended_lines)
-            and self._is_default_branch()
-        ):
-            self._save()
 
     # -- Event emission helpers ------------------------------------------
 

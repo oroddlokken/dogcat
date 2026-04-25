@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -15,6 +14,12 @@ if TYPE_CHECKING:
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+
+# CSRF cookie lifetime. Tokens older than this are rejected even if the
+# cookie still rides along — limits the window where a leaked token is
+# usable. Tokens are also rotated on every successful POST.
+CSRF_COOKIE_MAX_AGE = 3600
+CSRF_COOKIE_NAME = "dcat_csrf"
 
 
 def create_app(
@@ -63,7 +68,6 @@ def create_app(
     app.state.namespace = resolved_namespace
     app.state.namespaces = namespaces
     app.state.allow_creating_namespaces = allow_creating_namespaces
-    app.state.csrf_token = secrets.token_urlsafe(32)
     app.state.templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
     from starlette.middleware.base import BaseHTTPMiddleware

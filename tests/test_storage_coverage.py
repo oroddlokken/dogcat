@@ -263,6 +263,48 @@ class TestCompaction:
         # Compaction should have triggered, resetting appended_lines
         assert storage._appended_lines == 0
 
+    def test_compaction_check_runs_under_append_lock(
+        self, temp_dogcats_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Eligibility check + compaction must execute while the append lock is held.
+
+        Regression test for dogcat-h0tt: previously the check ran after the
+        lock was released, allowing two concurrent processes to both decide
+        to compact based on stale counts.
+        """
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+
+        for i in range(25):
+            storage.create(Issue(id=f"issue-{i}", title=f"Issue {i}"))
+        storage._save()
+
+        # Probe: was the lock file held when _save_locked ran?
+        observed: dict[str, bool] = {"locked": False}
+        original = storage._save_locked
+
+        def probe(**kwargs: object) -> None:
+            import fcntl as _fcntl
+
+            with storage._lock_path.open("w") as fd:
+                try:
+                    _fcntl.flock(fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+                    _fcntl.flock(fd, _fcntl.LOCK_UN)
+                    observed["locked"] = False
+                except BlockingIOError:
+                    observed["locked"] = True
+            original(**kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(storage, "_save_locked", probe)
+
+        for i in range(26):
+            storage.update("issue-0", {"title": f"Updated {i}"})
+
+        assert observed["locked"], (
+            "Compaction must run inside the append lock — otherwise the "
+            "check race from dogcat-h0tt is reintroduced."
+        )
+
 
 class TestLinksWithSaveReload:
     """Test that links survive save/reload cycle."""

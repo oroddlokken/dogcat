@@ -9,49 +9,74 @@
     </head>
     <body>
         <div class="wrap">
-            <h1>
+            <h1 id="page-title">
                 <a href="/">dogcat <span>propose</span></a>
             </h1>
 
-            {% if submitted %}
-                <div class="msg msg--ok">
-                    Proposal submitted: <strong>{{ proposal_id }}</strong> {{ proposal_title }}
-                </div>
-            {% endif %}
+            <div id="form-status" class="msg-region" role="status" aria-live="polite" aria-atomic="true">
+                {% if submitted %}
+                    <div class="msg msg--ok">
+                        Proposal submitted: <strong>{{ proposal_id }}</strong> {{ proposal_title }}
+                    </div>
+                {% endif %}
+                {% if error %}<div class="msg msg--err" role="alert">{{ error }}</div>{% endif %}
+            </div>
 
-            {% if error %}<div class="msg msg--err">{{ error }}</div>{% endif %}
-
-            <form method="post" action="/" id="propose-form">
+            <form method="post" action="/" id="propose-form" aria-labelledby="page-title">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <input type="hidden" id="namespace" name="namespace" value="{{ namespace }}">
                 <div class="row field">
                     <div class="dropdown" id="ns-dropdown">
-                        <div class="dropdown-toggle" id="ns-toggle" tabindex="0" role="button">{{ namespace }}</div>
-                        <div class="dropdown-menu" id="ns-menu">
+                        <label id="ns-label" class="visually-hidden" for="ns-toggle">Namespace</label>
+                        <div class="dropdown-toggle"
+                             id="ns-toggle"
+                             tabindex="0"
+                             role="combobox"
+                             aria-haspopup="listbox"
+                             aria-expanded="false"
+                             aria-controls="ns-menu"
+                             aria-labelledby="ns-label">{{ namespace }}</div>
+                        <div class="dropdown-menu"
+                             id="ns-menu"
+                             role="listbox"
+                             aria-labelledby="ns-label">
                             {% for ns in namespaces %}
-                                <div class="dropdown-item{% if ns == namespace %} active{% endif %}"
+                                <div class="dropdown-item{%- if ns == namespace %} active{% endif -%}"
+                                     role="option"
+                                     aria-selected="{%- if ns == namespace -%}true{%- else -%}false{%- endif -%}"
                                      data-value="{{ ns }}">{{ ns }}</div>
                             {% endfor %}
                             {% if allow_creating_namespaces %}
-                                <div class="dropdown-item dropdown-item--new" data-value="__new__">New&hellip;</div>
+                                <div class="dropdown-item dropdown-item--new"
+                                     role="option"
+                                     aria-selected="false"
+                                     data-value="__new__">New&hellip;</div>
                             {% endif %}
                         </div>
                     </div>
+                    <label for="ns-custom" class="visually-hidden">New namespace name</label>
                     <input type="text"
                            id="ns-custom"
                            name="ns_custom"
                            class="ns-custom hidden"
                            placeholder="New namespace"
                            autocomplete="off">
+                    <label for="title" class="visually-hidden">Proposal title</label>
                     <input type="text"
                            id="title"
                            name="title"
                            required
+                           aria-required="true"
+                           {% if error and 'Title' in error %}aria-invalid="true"{% endif %}
                            placeholder="Title"
                            autocomplete="off">
                 </div>
                 <div class="field">
-                    <textarea id="description" name="description" placeholder="Description"></textarea>
+                    <label for="description" class="visually-hidden">Proposal description</label>
+                    <textarea id="description"
+                              name="description"
+                              {% if error and 'Description' in error %}aria-invalid="true"{% endif %}
+                              placeholder="Description"></textarea>
                 </div>
                 <button type="submit" id="submit-btn">Submit proposal</button>
             </form>
