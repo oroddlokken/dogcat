@@ -92,6 +92,12 @@ order. For each key (identity tuple) in the union of base, ours, and theirs:
   edits become common enough to matter — the post-merge concurrent-
   edit detector (``dcat doctor --post-merge``) surfaces this case
   today so it's visible rather than silent.
+- *Octopus merges are not supported.* Git's octopus strategy
+  (``git merge a b c``) bypasses per-file merge drivers when any
+  branch produces a content conflict and aborts with "Should not be
+  doing an octopus." Sequential merges (``git merge a && git merge
+  b && git merge c``) work. Exercised by
+  ``tests/test_git_workflows.py::test_octopus_merge_aborts_use_sequential``.
 - For dep/link records, ``_dep_key`` / ``_link_key`` are the source of
   truth for identity and the only fields that matter for graph
   correctness. The remaining fields (``created_at``, ``created_by``)

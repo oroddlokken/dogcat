@@ -29,10 +29,11 @@ def _run_doctor(repo: GitRepo) -> tuple[int, str]:
     # Doctor is a CLI command; for test purposes we'll check storage validity
     try:
         _ = JSONLStorage(str(repo.storage_path))
-        # If load succeeds, storage is valid
-        return (0, "OK")
     except Exception as e:
         return (1, str(e))
+    else:
+        # If load succeeds, storage is valid
+        return (0, "OK")
 
 
 def _create_conflict_marker(repo: GitRepo) -> None:
@@ -40,9 +41,7 @@ def _create_conflict_marker(repo: GitRepo) -> None:
     content = repo.storage_path.read_text()
     # Add conflict markers
     with_markers = content.replace("[", "<<<<<<< HEAD\n[", 1)  # Insert at first [
-    with_markers = with_markers.replace(
-        "]", "]\n=======\n]", 1
-    )  # Add middle separator
+    with_markers = with_markers.replace("]", "]\n=======\n]", 1)  # Add middle separator
     with_markers += "\n>>>>>>> branch\n"  # Close conflict
     repo.storage_path.write_text(with_markers)
 

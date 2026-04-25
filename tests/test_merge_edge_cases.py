@@ -23,13 +23,8 @@ class TestMergeEdgeCases:
 
         Merge should produce the non-empty side's content.
         """
-        # Base: empty
         base: list[dict[str, Any]] = []
-
-        # Ours: empty
         ours: list[dict[str, Any]] = []
-
-        # Theirs: has records
         theirs = [
             {
                 "record_type": "issue",
@@ -180,10 +175,8 @@ class TestMergeEdgeCases:
         Conservative approach: merge driver ignores unknown types rather than
         passing them through, preventing corruption with future schema changes.
         """
-        # Base: empty
         base: list[dict[str, Any]] = []
-
-        # Ours: has unknown record type
+        # Ours: unknown record type
         ours = [
             {
                 "record_type": "future_feature",  # Unknown type

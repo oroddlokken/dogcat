@@ -147,6 +147,20 @@ You can always run `dcat example-md` to get an example of what to put in your AG
 | `dcat config` | Manage dogcat configuration |
 | `dcat stream` | Stream issue changes in real-time (JSONL) |
 
+### Git Workflows: Merges and Field-Level Conflicts
+
+Dogcat uses a custom merge driver (`dcat git setup` installs it) to automatically resolve JSONL conflicts. The driver implements a state-based merge algebra:
+
+- **Issues**: Last-Writer-Wins (LWW) by `updated_at` timestamp. When both branches edit the same issue, the one with the later timestamp wins **entirely** — this means concurrent edits to different fields on the same issue may result in data loss. For example, if branch A edits the title and branch B edits the priority (with a later timestamp), B's entire record wins and A's title edit is lost.
+
+- **Proposals**: LWW by status finality (`open < closed < tombstone`), then by `updated_at`. Once a proposal is closed or tombstoned, it cannot be reverted.
+
+- **Dependencies & Links**: Three-way merge with add/remove semantics. Deletes on one side win over silent no-ops on the other.
+
+- **Events**: Append-only, deduplicated by identity.
+
+**Detecting field-level conflicts:** After a merge, run `dcat doctor --post-merge` to detect concurrent edits. The output shows which fields were affected and their values on each branch. This helps identify unintended data loss from LWW resolution. If you detect unexpected conflicts, coordinate edits across branches or use `dcat update` to manually restore lost changes.
+
 ## Screenshots
 
 Compact table view showing tasks with ID, Parent, Type, Priority, and Title columns:  

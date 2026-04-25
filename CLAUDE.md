@@ -56,6 +56,10 @@ Use uv for all dependency management — pip is not used in this project.
 
 We distribute the software with Homebrew. The formula is at `../homebrew-tap/Formula/dogcat.rb`. Wait for user confirmation before updating the formula. Inform the user when CLI changes affect dependencies, entry points, or command structure — these may require a formula update.
 
+## Merge driver changes
+
+`docs/merge-coverage.md` maps every claim in `src/dogcat/merge_driver.py` module docstring to the test that exercises it. When you change the docstring or add a merge-driver test, update the matrix in the same change so the two stay aligned. If you add a row marked `gap`, link an open issue tracking the gap.
+
 ## Changelog
 
 `CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/) format. Add all changelog entries under `[Unreleased]` at the top, never under historical version headings — release automation uses this section to determine what ships next. Use these section tags under each version heading:

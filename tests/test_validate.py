@@ -495,6 +495,53 @@ class TestDetectConcurrentEdits:
         )
         assert warnings == []
 
+    def test_detects_field_level_loss_different_fields(self, git_repo: GitRepo) -> None:
+        """Detect when branches edit different fields on the same issue.
+
+        This is the field-level loss case: A edits title, B edits priority,
+        B's timestamp is later so B's entire record wins via LWW, losing A's
+        title change. The detection should surface both field changes.
+        """
+        repo = git_repo
+        _install_merge_driver(repo)
+
+        # Seed issue
+        s = repo.storage()
+        s.create(Issue(id="shared", namespace="test", title="Original", priority=2))
+        repo.commit_all("Seed")
+
+        # Branch A: change title only
+        repo.create_branch("branch-a")
+        s = repo.storage()
+        s.update("test-shared", {"title": "Title from A"})
+        repo.commit_all("Update title on A")
+
+        # Branch B: change priority only (with later timestamp)
+        repo.switch_branch("main")
+        repo.create_branch("branch-b")
+        s = repo.storage()
+        s.update("test-shared", {"priority": 3})
+        repo.commit_all("Update priority on B")
+
+        # Merge
+        repo.switch_branch("main")
+        repo.merge("branch-a")
+        repo.merge("branch-b")
+
+        # Detect concurrent edits
+        warnings = detect_concurrent_edits(
+            cwd=repo.path,
+            storage_rel=".dogcats/issues.jsonl",
+        )
+
+        # Both fields must be surfaced — the whole point of field-level detection
+        # is that the user can see what each branch tried to change.
+        assert len(warnings) == 1
+        assert warnings[0]["issue_id"] == "test-shared"
+        fields = warnings[0]["fields"]
+        assert "title" in fields, f"title not in detected fields: {fields}"
+        assert "priority" in fields, f"priority not in detected fields: {fields}"
+
 
 # ---------------------------------------------------------------------------
 # Integration: dcat doctor --post-merge
@@ -519,28 +566,33 @@ class TestDoctorPostMerge:
         git_repo: GitRepo,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Doctor --post-merge reports concurrent edits after a merge."""
+        """Doctor --post-merge surfaces field names of concurrent edits.
+
+        Stresses the user-facing case from dogcat-46xd: branches edit
+        DIFFERENT fields, so LWW silently drops one — doctor's CLI output
+        must name both affected fields so the user can recover.
+        """
         repo = git_repo
         monkeypatch.chdir(repo.path)
         _install_merge_driver(repo)
 
         # Seed issue
         s = repo.storage()
-        s.create(Issue(id="shared", namespace="test", title="Original"))
+        s.create(Issue(id="shared", namespace="test", title="Original", priority=2))
         repo.commit_all("Seed")
 
-        # Branch A: change title
+        # Branch A: change title only
         repo.create_branch("branch-a")
         s = repo.storage()
         s.update("test-shared", {"title": "Title from A"})
-        repo.commit_all("Update on A")
+        repo.commit_all("Update title on A")
 
-        # Branch B: change title differently
+        # Branch B: change priority only (later timestamp wins entire record)
         repo.switch_branch("main")
         repo.create_branch("branch-b")
         s = repo.storage()
-        s.update("test-shared", {"title": "Title from B"})
-        repo.commit_all("Update on B")
+        s.update("test-shared", {"priority": 3})
+        repo.commit_all("Update priority on B")
 
         # Merge
         repo.switch_branch("main")
@@ -558,6 +610,14 @@ class TestDoctorPostMerge:
         )
         assert "Concurrent edits detected" in result.stdout
         assert "test-shared" in result.stdout
+        # Both affected field names must appear in the CLI output so the
+        # user can see what each branch tried to change before LWW collapsed it.
+        assert "title:" in result.stdout, (
+            f"'title:' not found in doctor output:\n{result.stdout}"
+        )
+        assert "priority:" in result.stdout, (
+            f"'priority:' not found in doctor output:\n{result.stdout}"
+        )
 
     def test_post_merge_json_includes_concurrent_edits(
         self,

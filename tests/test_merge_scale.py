@@ -26,20 +26,19 @@ class TestMergeScale:
         Verifies correctness and performance (< 1s load).
         """
         # Create 100 issues on base (shared starting point)
-        base: list[dict[str, Any]] = []
-        for i in range(100):
-            base.append(
-                {
-                    "record_type": "issue",
-                    "namespace": "test",
-                    "id": f"base{i:03d}",
-                    "title": f"Base issue {i}",
-                    "status": "open",
-                    "priority": 2,
-                    "issue_type": "task",
-                    "updated_at": "2026-01-01T00:00:00+00:00",
-                }
-            )
+        base: list[dict[str, Any]] = [
+            {
+                "record_type": "issue",
+                "namespace": "test",
+                "id": f"base{i:03d}",
+                "title": f"Base issue {i}",
+                "status": "open",
+                "priority": 2,
+                "issue_type": "task",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+            }
+            for i in range(100)
+        ]
 
         # Ours: add 100 more unique issues
         ours = base.copy()
@@ -93,20 +92,19 @@ class TestMergeScale:
         Each edit has different timestamp. Verify LWW picks the absolute latest.
         """
         # Create 50 base issues
-        base: list[dict[str, Any]] = []
-        for i in range(50):
-            base.append(
-                {
-                    "record_type": "issue",
-                    "namespace": "test",
-                    "id": f"shared{i:02d}",
-                    "title": f"Shared {i}",
-                    "status": "open",
-                    "priority": 2,
-                    "issue_type": "task",
-                    "updated_at": "2026-01-01T00:00:00+00:00",
-                }
-            )
+        base: list[dict[str, Any]] = [
+            {
+                "record_type": "issue",
+                "namespace": "test",
+                "id": f"shared{i:02d}",
+                "title": f"Shared {i}",
+                "status": "open",
+                "priority": 2,
+                "issue_type": "task",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+            }
+            for i in range(50)
+        ]
 
         # Ours: edit all 50 issues 5 times each with interleaved timestamps
         ours = base.copy()
@@ -180,20 +178,19 @@ class TestMergeScale:
         Verify merge result has correct counts and dep state.
         """
         # Create 50 base issues
-        base: list[dict[str, Any]] = []
-        for i in range(50):
-            base.append(
-                {
-                    "record_type": "issue",
-                    "namespace": "test",
-                    "id": f"issue{i:02d}",
-                    "title": f"Issue {i}",
-                    "status": "open",
-                    "priority": 2,
-                    "issue_type": "task",
-                    "updated_at": "2026-01-01T00:00:00+00:00",
-                }
-            )
+        base: list[dict[str, Any]] = [
+            {
+                "record_type": "issue",
+                "namespace": "test",
+                "id": f"issue{i:02d}",
+                "title": f"Issue {i}",
+                "status": "open",
+                "priority": 2,
+                "issue_type": "task",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+            }
+            for i in range(50)
+        ]
 
         # Ours: add issues, deps, events
         ours = base.copy()
@@ -259,7 +256,7 @@ class TestMergeScale:
         deps = [r for r in result if r.get("record_type") == "dependency"]
         events = [r for r in result if r.get("record_type") == "event"]
 
-        # Should have: 50 issues, 100 unique deps (50 from each side with different targets)
+        # 50 issues, 100 unique deps (50 from each side with different targets)
         assert len(issues) == 50, f"Expected 50 issues, got {len(issues)}"
         # Deps should include all unique deps from both sides
         assert len(deps) >= 50, f"Expected >= 50 deps, got {len(deps)}"
@@ -275,20 +272,19 @@ class TestMergeScale:
         Verify merge reconciles correctly.
         """
         # Create a "compacted" base (snapshot form)
-        base: list[dict[str, Any]] = []
-        for i in range(100):
-            base.append(
-                {
-                    "record_type": "issue",
-                    "namespace": "test",
-                    "id": f"issue{i:03d}",
-                    "title": f"Issue {i}",
-                    "status": "open",
-                    "priority": 2,
-                    "issue_type": "task",
-                    "updated_at": "2026-01-01T12:00:00+00:00",
-                }
-            )
+        base: list[dict[str, Any]] = [
+            {
+                "record_type": "issue",
+                "namespace": "test",
+                "id": f"issue{i:03d}",
+                "title": f"Issue {i}",
+                "status": "open",
+                "priority": 2,
+                "issue_type": "task",
+                "updated_at": "2026-01-01T12:00:00+00:00",
+            }
+            for i in range(100)
+        ]
 
         # Ours: compacted file (just snapshot, no events)
         ours = base.copy()

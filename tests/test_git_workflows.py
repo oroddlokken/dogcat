@@ -131,7 +131,7 @@ class TestCherryPick:
 
         # Get the commit hash of the "Create test-x1" commit
         logs = repo.git("log", "--oneline", "--reverse")
-        lines = [l.strip() for l in logs.stdout.split("\n") if "test-x1" in l]
+        lines = [line.strip() for line in logs.stdout.split("\n") if "test-x1" in line]
         assert len(lines) >= 1, "Could not find create x1 commit"
         create_x_hash = lines[0].split()[0]
 
@@ -161,7 +161,7 @@ class TestCherryPick:
         )
 
         logs = repo.git("log", "--oneline", "--reverse")
-        lines = [l.strip() for l in logs.stdout.split("\n") if "test-ev1" in l]
+        lines = [line.strip() for line in logs.stdout.split("\n") if "test-ev1" in line]
         create_hash = lines[0].split()[0]
 
         repo.switch_branch("main")
@@ -180,7 +180,9 @@ class TestMultipleMerges:
         """Three branches each create a different issue. Merge sequentially.
 
         Verify all three issues land, no conflict markers, JSONL loads cleanly.
-        (Tests sequential merges instead of octopus, which has driver limitations.)
+        Sequential merges are the supported path; see
+        test_octopus_merge_aborts_use_sequential below for the octopus
+        limitation.
         """
         repo = git_repo
         _install_merge_driver(repo)
@@ -222,6 +224,50 @@ class TestMultipleMerges:
         assert issue_a.title == "Issue from branch 1"
         assert issue_b.title == "Issue from branch 2"
         assert issue_c.title == "Issue from branch 3"
+
+    def test_octopus_merge_aborts_use_sequential(self, git_repo: GitRepo) -> None:
+        """Octopus merges that touch .dogcats/issues.jsonl abort cleanly.
+
+        Git's octopus strategy bypasses per-file merge drivers when a content
+        conflict appears; it falls back to the lower-level merge program and
+        aborts. Documented limitation — users should sequential-merge instead.
+        Asserting the failure here so any future change in git behavior (or
+        in the driver) is caught loudly rather than silently corrupting state.
+        """
+        _install_merge_driver(repo := git_repo)
+
+        repo.create_branch("octofeat1")
+        _create_issue_on_branch(repo, "octofeat1", "o1", "Octo 1")
+
+        repo.switch_branch("main")
+        repo.create_branch("octofeat2")
+        _create_issue_on_branch(repo, "octofeat2", "o2", "Octo 2")
+
+        repo.switch_branch("main")
+        repo.create_branch("octofeat3")
+        _create_issue_on_branch(repo, "octofeat3", "o3", "Octo 3")
+
+        repo.switch_branch("main")
+        result = repo.git(
+            "merge",
+            "octofeat1",
+            "octofeat2",
+            "octofeat3",
+            "-m",
+            "octopus",
+            check=False,
+        )
+        assert result.returncode != 0, (
+            "octopus merge unexpectedly succeeded — if git or the driver now "
+            "supports this, update the docs/test rather than letting silent "
+            "behavior creep in"
+        )
+        # No partial state left behind: working tree is clean after abort.
+        repo.git("merge", "--abort", check=False)
+        status = repo.git("status", "--porcelain")
+        assert status.stdout.strip() == "", (
+            f"working tree dirty after octopus abort:\n{status.stdout}"
+        )
 
     def test_merge_with_dependency_relations(self, git_repo: GitRepo) -> None:
         """Two branches: one creates issues, another adds a dependency.

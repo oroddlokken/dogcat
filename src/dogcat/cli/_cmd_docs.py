@@ -52,6 +52,29 @@ _GIT_GUIDE_TEXT = """\
   files. Without the driver, git's default text merge will conflict
   whenever two branches both modify the issue file.
 
+── Merge Semantics & Field-Level Conflicts ────────────────────────────────
+
+  The merge driver uses Last-Writer-Wins (LWW) by updated_at timestamp:
+
+  • Issues: The entire record with the latest timestamp wins. This means
+    if branch A edits the title and branch B edits the priority (with a
+    later timestamp), B's entire record wins and A's title edit is lost.
+
+  • Proposals: LWW by status finality (open < closed < tombstone), then
+    by updated_at. Once closed/tombstoned, it cannot be reverted.
+
+  • Dependencies & Links: Three-way merge with add/remove semantics.
+
+  • Events: Append-only log, deduplicated by identity.
+
+  To detect concurrent edits and field-level conflicts after a merge:
+
+    $ dcat doctor --post-merge
+
+  This shows which fields were affected and their values on each branch,
+  helping you identify unintended data loss. If you detect conflicts,
+  you can manually restore lost changes with 'dcat update'.
+
 ── Resolving Merge Conflicts ───────────────────────────────────────────────
 
   With the merge driver installed, conflicts are rare. If they happen
