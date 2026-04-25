@@ -485,6 +485,38 @@ class TestTUIWithRealStorage:
         assert issue.status.value == "tombstone"
 
     @pytest.mark.asyncio
+    async def test_issue_list_does_not_overflow_terminal_height(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """OptionList stays within terminal bounds when issues exceed visible rows.
+
+        Regression for dogcat-1ygm: with default OptionList sizing
+        (height: auto, max-height: 100%), many issues caused the list to render
+        past the footer with no scrollbar. An explicit height: 1fr fixes it.
+        """
+        from dogcat.storage import JSONLStorage
+
+        storage_path = tmp_path / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+        for i in range(40):
+            storage.create(Issue(id=f"r{i:03d}", title=f"Issue {i}"))
+
+        app = DogcatTUI(storage)
+        # Small terminal: 80 cols x 24 rows. 40 issues cannot fit.
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+
+            option_list = app.query_one("#issue-list", OptionList)
+            assert option_list.option_count == 40
+
+            # The OptionList must not extend past the terminal height (24).
+            assert option_list.region.bottom <= 24, (
+                f"OptionList bottom {option_list.region.bottom} exceeds "
+                f"terminal height 24 — items will be clipped without a scrollbar"
+            )
+
+    @pytest.mark.asyncio
     async def test_refresh_reloads_from_disk(self, tmp_path: Path) -> None:
         """Pressing refresh reloads issues from the real JSONL file."""
         from dogcat.storage import JSONLStorage

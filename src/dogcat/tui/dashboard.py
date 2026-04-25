@@ -105,6 +105,7 @@ class DogcatTUI(App[None]):
 
     #issue-list {
         margin: 0 2 1 2;
+        height: 1fr;
     }
 
     /* Split-pane layout */
