@@ -835,6 +835,47 @@ class TestInboxAccept:
         issue_data = json.loads(result.stdout)
         assert issue_data["description"] == "This is the detailed description"
 
+    def test_accept_rolls_back_local_issue_on_remote_close_failure(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """If closing the remote proposal fails, the local issue is deleted.
+
+        Without rollback, a failed close would leave an orphaned local issue
+        with no link back to the remote proposal — silent inconsistency.
+        """
+        local_dogcats, remote_dogcats = _setup_remote_inbox(tmp_path)
+        proposal_id = _create_remote_proposal(remote_dogcats, "Will fail to close")
+
+        from dogcat.inbox import InboxStorage
+
+        original_close = InboxStorage.close
+
+        def boom(self: InboxStorage, *args: object, **kwargs: object) -> None:  # noqa: ARG001
+            msg = "simulated remote close failure"
+            raise RuntimeError(msg)
+
+        monkeypatch.setattr(InboxStorage, "close", boom)
+        monkeypatch.chdir(local_dogcats.parent)
+        result = runner.invoke(app, ["inbox", "accept", proposal_id])
+        assert result.exit_code == 1
+        output = result.stdout + (result.stderr or "")
+        assert "Failed to close remote proposal" in output or "Rolled back" in output
+
+        # Restore close so we can inspect storage state.
+        monkeypatch.setattr(InboxStorage, "close", original_close)
+
+        # Local issue must be tombstoned so the orphan does not linger.
+        from dogcat.storage import JSONLStorage
+
+        local_storage = JSONLStorage(str(local_dogcats / "issues.jsonl"))
+        active = [i for i in local_storage.list() if not i.is_tombstone()]
+        assert active == [], (
+            "Expected no active local issues after rollback, "
+            f"found {[i.full_id for i in active]}"
+        )
+
 
 class TestInboxReject:
     """Test inbox reject command."""

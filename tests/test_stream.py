@@ -549,3 +549,129 @@ class TestInboxStreamEmitter:
         assert emitter._file_position > initial_pos
         assert len(captured) == 1
         assert captured[0].event_type == "proposal_created"
+
+
+class TestStreamEmitterPathFiltering:
+    """Regression tests for dogcat-55zt: watchdog dispatch paths.
+
+    StreamEmitter.on_modified, on_moved, and the InboxStreamEmitter
+    counterparts were never directly exercised — tests called
+    _handle_file_change instead, so the path-suffix check (e.g. a typo
+    like endswith('issue.jsonl') instead of 'issues.jsonl') would not
+    have been caught.
+    """
+
+    def test_on_modified_triggers_handler_for_issues_jsonl(
+        self, temp_dogcats_dir: Path
+    ) -> None:
+        """on_modified handles a FileModifiedEvent ending in issues.jsonl."""
+        from watchdog.events import FileModifiedEvent
+
+        from dogcat.stream import StreamEmitter
+
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        emitter = StreamEmitter(str(storage_path))
+
+        called: list[bool] = []
+
+        def fake_handle() -> None:
+            called.append(True)
+
+        emitter._handle_file_change = fake_handle  # type: ignore[method-assign]
+        emitter.on_modified(FileModifiedEvent(str(storage_path)))
+        assert called == [True]
+
+    def test_on_modified_ignores_unrelated_files(self, temp_dogcats_dir: Path) -> None:
+        """on_modified ignores files that aren't issues.jsonl."""
+        from watchdog.events import FileModifiedEvent
+
+        from dogcat.stream import StreamEmitter
+
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        emitter = StreamEmitter(str(storage_path))
+
+        called: list[bool] = []
+        emitter._handle_file_change = lambda: called.append(True)  # type: ignore[method-assign]
+        emitter.on_modified(FileModifiedEvent(str(temp_dogcats_dir / "other.txt")))
+        assert called == []
+
+    def test_on_moved_triggers_handler_for_atomic_replace(
+        self, temp_dogcats_dir: Path
+    ) -> None:
+        """on_moved handles a FileMovedEvent landing on issues.jsonl.
+
+        Atomic-rewrite renames a tempfile onto issues.jsonl, so the move
+        event is the load-bearing notification on macOS/Linux.
+        """
+        from watchdog.events import FileMovedEvent
+
+        from dogcat.stream import StreamEmitter
+
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        emitter = StreamEmitter(str(storage_path))
+        called: list[bool] = []
+        emitter._handle_file_change = lambda: called.append(True)  # type: ignore[method-assign]
+
+        evt = FileMovedEvent(
+            str(temp_dogcats_dir / "tmp.jsonl"),
+            str(storage_path),
+        )
+        emitter.on_moved(evt)
+        assert called == [True]
+
+    def test_inbox_on_modified_triggers_for_inbox_jsonl(
+        self, temp_dogcats_dir: Path
+    ) -> None:
+        """InboxStreamEmitter.on_modified responds to inbox.jsonl events."""
+        from watchdog.events import FileModifiedEvent
+
+        inbox_path = temp_dogcats_dir / "inbox.jsonl"
+        emitter = InboxStreamEmitter(str(inbox_path))
+        called: list[bool] = []
+        emitter._handle_file_change = lambda: called.append(True)  # type: ignore[method-assign]
+        emitter.on_modified(FileModifiedEvent(str(inbox_path)))
+        assert called == [True]
+
+    def test_inbox_on_modified_ignores_issues_jsonl(
+        self, temp_dogcats_dir: Path
+    ) -> None:
+        """InboxStreamEmitter must NOT fire for issues.jsonl events.
+
+        The two emitters are scheduled on the same directory; without the
+        path filter they'd dispatch on each other's writes and double-fire.
+        """
+        from watchdog.events import FileModifiedEvent
+
+        inbox_path = temp_dogcats_dir / "inbox.jsonl"
+        emitter = InboxStreamEmitter(str(inbox_path))
+        called: list[bool] = []
+        emitter._handle_file_change = lambda: called.append(True)  # type: ignore[method-assign]
+        emitter.on_modified(FileModifiedEvent(str(temp_dogcats_dir / "issues.jsonl")))
+        assert called == []
+
+
+class TestStreamWatcherObserverIntegration:
+    """Real Observer start/stop integration test for StreamWatcher.
+
+    Uses a real watchdog Observer against a temp file to make sure the
+    schedule call wires the right handler types and doesn't choke on
+    realistic FS events.
+    """
+
+    def test_start_then_stop_runs_cleanly(self, temp_dogcats_dir: Path) -> None:
+        """StreamWatcher.start() then .stop() round-trips with no error."""
+        import time
+
+        from dogcat.stream import StreamWatcher
+
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage_path.touch()
+        watcher = StreamWatcher(storage_path=str(storage_path))
+        watcher.start()
+        try:
+            # Give the observer thread a moment to settle.
+            time.sleep(0.1)
+            assert watcher.observer.is_alive()
+        finally:
+            watcher.stop()
+        assert not watcher.observer.is_alive()

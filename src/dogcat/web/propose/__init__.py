@@ -70,6 +70,18 @@ def create_app(
     app.state.allow_creating_namespaces = allow_creating_namespaces
     app.state.templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
+    # Hold one InboxStorage on app state instead of constructing per request.
+    # The constructor calls _load() which reads + parses the entire inbox
+    # file; under per-request construction, submit latency grew linearly with
+    # inbox size. Reload-on-mtime-change keeps the in-memory state fresh
+    # without having to re-parse on every POST.
+    from dogcat.inbox import InboxStorage
+
+    try:
+        app.state.inbox = InboxStorage(dogcats_dir=dogcats_dir)
+    except (ValueError, RuntimeError):
+        app.state.inbox = None
+
     from starlette.middleware.base import BaseHTTPMiddleware
 
     class SecurityHeadersMiddleware(BaseHTTPMiddleware):

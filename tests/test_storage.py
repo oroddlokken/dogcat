@@ -1281,22 +1281,57 @@ class TestAllDependenciesAndLinksProperties:
 
 
 class TestCheckIdUniqueness:
-    """Test check_id_uniqueness() method."""
+    """Test check_id_uniqueness() method.
+
+    Real check now scans the JSONL log for hash collisions: two distinct
+    issues sharing a full_id but with different created_at values would
+    collapse into one under last-write-wins replay.
+    """
 
     def test_check_id_uniqueness_returns_true(self, storage: JSONLStorage) -> None:
-        """Test that check_id_uniqueness always returns True."""
+        """An empty database has no collisions."""
         assert storage.check_id_uniqueness() is True
 
     def test_check_id_uniqueness_with_issues(self, storage: JSONLStorage) -> None:
-        """Test check_id_uniqueness with populated storage."""
+        """Distinct issues with distinct ids do not collide."""
         storage.create(Issue(id="a", namespace="t", title="A"))
         storage.create(Issue(id="b", namespace="t", title="B"))
 
         assert storage.check_id_uniqueness() is True
 
     def test_check_id_uniqueness_empty_storage(self, storage: JSONLStorage) -> None:
-        """Test check_id_uniqueness with empty storage."""
+        """An empty file has no collisions."""
         assert storage.check_id_uniqueness() is True
+
+    def test_check_id_uniqueness_repeated_updates_are_fine(
+        self, storage: JSONLStorage
+    ) -> None:
+        """Many updates to one issue (same created_at) are not a collision."""
+        storage.create(Issue(id="a", namespace="t", title="A"))
+        storage.update("t-a", {"title": "A2"})
+        storage.update("t-a", {"title": "A3"})
+        assert storage.check_id_uniqueness() is True
+
+    def test_check_id_uniqueness_detects_hash_collision(self, tmp_path: Path) -> None:
+        """Two issue records sharing a full_id but with different created_at fail."""
+        from dogcat.storage import JSONLStorage
+
+        path = tmp_path / "issues.jsonl"
+        # Write two creation records with the same id+namespace but different
+        # created_at — exactly the shape a hand-edit or merge collision would
+        # produce.
+        path.write_text(
+            '{"record_type": "issue", "id": "abcd", "namespace": "t", '
+            '"title": "first", "status": "open", "priority": 2, '
+            '"created_at": "2026-04-25T12:00:00+00:00", '
+            '"updated_at": "2026-04-25T12:00:00+00:00"}\n'
+            '{"record_type": "issue", "id": "abcd", "namespace": "t", '
+            '"title": "collision", "status": "open", "priority": 2, '
+            '"created_at": "2026-04-25T13:00:00+00:00", '
+            '"updated_at": "2026-04-25T13:00:00+00:00"}\n'
+        )
+        s = JSONLStorage(str(path))
+        assert s.check_id_uniqueness() is False
 
 
 class TestFindDanglingDependencies:
@@ -1843,3 +1878,105 @@ class TestGetNamespaces:
             storage, dogcats_dir=str(temp_dogcats_dir), include_inbox=False
         )
         assert result == {"ns-a": NamespaceCounts(issues=1)}
+
+
+class TestIsDefaultBranch:
+    """Test ``_is_default_branch`` git error handling.
+
+    Regression for dogcat-5l16: any non-zero git returncode used to fall
+    through to "safe to compact", silently disabling the feature-branch
+    protection on permission errors / lock contention. Now only
+    FileNotFoundError and "not a git repository" return True.
+    """
+
+    def test_main_branch_returns_true(
+        self, storage: JSONLStorage, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """On main branch, eligible for compaction."""
+        import subprocess
+
+        def fake_run(
+            *_args: object, **_kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="main\n", stderr=""
+            )
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        assert storage._is_default_branch() is True
+
+    def test_feature_branch_returns_false(
+        self, storage: JSONLStorage, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """On a feature branch, NOT eligible for compaction."""
+        import subprocess
+
+        def fake_run(
+            *_args: object, **_kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="feature/x\n", stderr=""
+            )
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        assert storage._is_default_branch() is False
+
+    def test_not_a_git_repo_returns_true(
+        self, storage: JSONLStorage, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``not a git repository`` stderr is treated as 'no repo, safe'."""
+        import subprocess
+
+        def fake_run(
+            *_args: object, **_kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(
+                args=[],
+                returncode=128,
+                stdout="",
+                stderr="fatal: not a git repository (or any parent up to ...)\n",
+            )
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        assert storage._is_default_branch() is True
+
+    def test_git_not_installed_returns_true(
+        self, storage: JSONLStorage, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If git is missing entirely, treat as no-repo and allow compaction."""
+        import subprocess
+
+        def fake_run(
+            *_args: object, **_kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            msg = "git not on PATH"
+            raise FileNotFoundError(msg)
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        assert storage._is_default_branch() is True
+
+    def test_permission_error_returns_false(
+        self,
+        storage: JSONLStorage,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Permission denied (non-zero rc, non-'no repo' stderr) blocks compaction."""
+        import subprocess
+
+        def fake_run(
+            *_args: object, **_kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(
+                args=[],
+                returncode=128,
+                stdout="",
+                stderr="fatal: unable to read .git/HEAD: Permission denied\n",
+            )
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        with caplog.at_level("WARNING"):
+            assert storage._is_default_branch() is False
+        joined = " ".join(rec.getMessage() for rec in caplog.records)
+        assert "git rev-parse failed" in joined
+        assert "Permission denied" in joined

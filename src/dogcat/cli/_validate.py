@@ -6,7 +6,6 @@ to perform deep data integrity checks on issues.jsonl and inbox.jsonl.
 
 from __future__ import annotations
 
-import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
@@ -393,33 +392,21 @@ def _detect_cycles(
 # ---------------------------------------------------------------------------
 
 
-def _git_cmd(
-    *args: str,
-    cwd: Path | None = None,
-) -> subprocess.CompletedProcess[str]:
-    """Run a git command, returning the CompletedProcess."""
-    return subprocess.run(
-        ["git", *args],
-        capture_output=True,
-        text=True,
-        check=False,
-        cwd=str(cwd) if cwd else None,
-    )
-
-
 def _load_issues_at_ref(
     ref: str,
     storage_rel: str,
     cwd: Path,
 ) -> dict[str, dict[str, Any]]:
     """Load issue states from a git ref."""
-    result = _git_cmd("show", f"{ref}:{storage_rel}", cwd=cwd)
-    if result.returncode != 0:
+    import dogcat.git as git_helpers
+
+    raw = git_helpers.show_file(f"{ref}:{storage_rel}", cwd=cwd)
+    if raw is None:
         return {}
 
     issues: dict[str, dict[str, Any]] = {}
-    for line in result.stdout.splitlines():
-        line = line.strip()
+    for raw_line in raw.splitlines():
+        line = raw_line.strip()
         if not line:
             continue
         try:
@@ -449,40 +436,23 @@ def detect_concurrent_edits(
     Returns a list of warning dicts describing concurrent edits.
     Each warning has 'level', 'message', and 'fields' keys.
     """
+    import dogcat.git as git_helpers
+
     warnings: list[dict[str, Any]] = []
     work_dir = cwd or Path.cwd()
 
-    # Find latest merge commit
-    result = _git_cmd(
-        "log",
-        "--merges",
-        "-1",
-        "--format=%H",
-        cwd=work_dir,
-    )
-    if result.returncode != 0 or not result.stdout.strip():
+    merge_commit = git_helpers.latest_merge_commit(cwd=work_dir)
+    if merge_commit is None:
         return warnings
-    merge_commit = result.stdout.strip()
 
-    # Get both parent commits
-    result = _git_cmd(
-        "rev-parse",
-        f"{merge_commit}^1",
-        f"{merge_commit}^2",
-        cwd=work_dir,
-    )
-    if result.returncode != 0:
-        return warnings
-    parents = result.stdout.strip().splitlines()
-    if len(parents) != 2:  # noqa: PLR2004
+    parents = git_helpers.merge_parents(merge_commit, cwd=work_dir)
+    if parents is None:
         return warnings
     parent1, parent2 = parents
 
-    # Find merge base
-    result = _git_cmd("merge-base", parent1, parent2, cwd=work_dir)
-    if result.returncode != 0:
+    base = git_helpers.merge_base(parent1, parent2, cwd=work_dir)
+    if base is None:
         return warnings
-    base = result.stdout.strip()
 
     # Load issue states at each ref
     base_issues = _load_issues_at_ref(base, storage_rel, work_dir)

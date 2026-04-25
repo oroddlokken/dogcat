@@ -139,14 +139,56 @@ class TestLoadSaveConfig:
         config = load_config(str(dogcats_dir))
         assert config == {}
 
-    def test_load_invalid_toml(self, tmp_path: Path) -> None:
-        """Loading invalid TOML returns empty dict."""
+    def test_load_invalid_toml(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Loading invalid TOML returns empty dict and warns.
+
+        Regression for dogcat-5ctk: a typo in config.toml previously
+        degraded to "all defaults" silently — the user had no signal that
+        their settings weren't being honored. Now logs a warning at
+        WARNING level so LOGLEVEL=WARNING surfaces it.
+        """
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
         (dogcats_dir / CONFIG_FILENAME).write_text("this is [not valid toml")
 
-        config = load_config(str(dogcats_dir))
+        with caplog.at_level("WARNING", logger="dogcat.config"):
+            config = load_config(str(dogcats_dir))
         assert config == {}
+        assert any("Failed to parse" in rec.getMessage() for rec in caplog.records), (
+            f"Expected parse warning; got {[r.getMessage() for r in caplog.records]}"
+        )
+
+    def test_check_toml_parseable_returns_none_on_valid(self, tmp_path: Path) -> None:
+        """check_toml_parseable returns None for a valid TOML file."""
+        from dogcat.config import check_toml_parseable
+
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        path = dogcats_dir / CONFIG_FILENAME
+        path.write_text('namespace = "abc"\n')
+        assert check_toml_parseable(path) is None
+
+    def test_check_toml_parseable_returns_error_on_invalid(
+        self, tmp_path: Path
+    ) -> None:
+        """check_toml_parseable returns the parse error string on invalid TOML."""
+        from dogcat.config import check_toml_parseable
+
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        path = dogcats_dir / CONFIG_FILENAME
+        path.write_text("this is [not valid toml")
+        result = check_toml_parseable(path)
+        assert result is not None
+        assert result  # non-empty error message
+
+    def test_check_toml_parseable_missing_returns_none(self, tmp_path: Path) -> None:
+        """A missing file is not a parse error — existence is a separate check."""
+        from dogcat.config import check_toml_parseable
+
+        assert check_toml_parseable(tmp_path / "absent.toml") is None
 
     def test_save_overwrites_existing(self, tmp_path: Path) -> None:
         """Save overwrites existing config file."""

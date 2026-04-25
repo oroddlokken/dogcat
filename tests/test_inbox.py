@@ -616,3 +616,57 @@ class TestInboxStorage:
             s._file_lock(),
         ):
             pass
+
+
+class TestInboxLoadStrictness:
+    """Regression tests for dogcat-3jth: malformed mid-file lines must raise.
+
+    InboxStorage previously skipped any malformed line silently, so a
+    corrupt mid-file proposal vanished on next compaction. The strict
+    policy mirrors JSONLStorage: a corrupt last line is tolerated (likely
+    crash artifact), anything else raises so the user can recover from git.
+    """
+
+    def test_malformed_mid_file_line_raises(self, tmp_path: object) -> None:
+        """A malformed line that is NOT the last raises ValueError on load."""
+        from pathlib import Path
+
+        from dogcat.inbox import InboxStorage
+
+        dogcats = Path(str(tmp_path)) / ".dogcats"
+        dogcats.mkdir()
+        inbox_path = dogcats / "inbox.jsonl"
+        first = (
+            '{"record_type": "proposal", "id": "aaaa", "namespace": "test", '
+            '"title": "first", "created_at": "2026-04-25T12:00:00+00:00", '
+            '"updated_at": "2026-04-25T12:00:00+00:00", "status": "open"}'
+        )
+        second = (
+            '{"record_type": "proposal", "id": "bbbb", "namespace": "test", '
+            '"title": "ok", "created_at": "2026-04-25T12:00:01+00:00", '
+            '"updated_at": "2026-04-25T12:00:01+00:00", "status": "open"}'
+        )
+        inbox_path.write_text(first + "\n" + "{not json\n" + second + "\n")
+
+        with pytest.raises(ValueError, match="Invalid JSONL record at line"):
+            InboxStorage(dogcats_dir=str(dogcats))
+
+    def test_malformed_last_line_tolerated(self, tmp_path: object) -> None:
+        """A malformed LAST line is tolerated (crash/disk-full artifact)."""
+        from pathlib import Path
+
+        from dogcat.inbox import InboxStorage
+
+        dogcats = Path(str(tmp_path)) / ".dogcats"
+        dogcats.mkdir()
+        inbox_path = dogcats / "inbox.jsonl"
+        good = (
+            '{"record_type": "proposal", "id": "aaaa", "namespace": "test", '
+            '"title": "ok", "created_at": "2026-04-25T12:00:00+00:00", '
+            '"updated_at": "2026-04-25T12:00:00+00:00", "status": "open"}'
+        )
+        inbox_path.write_text(good + "\n" + "{half-written")
+
+        s = InboxStorage(dogcats_dir=str(dogcats))
+        assert len(s.list()) == 1
+        assert s._needs_compaction is True

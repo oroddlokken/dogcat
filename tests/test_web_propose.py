@@ -115,6 +115,25 @@ class TestGetForm:
         assert "unsafe-inline" not in csp
         assert "script-src 'self'" in csp
 
+    def test_x_content_type_options_header(self, client: TestClient) -> None:
+        """The nosniff header is set on responses.
+
+        Without this header, a browser may sniff a response body for
+        executable content and bypass the declared content-type.
+        """
+        resp = client.get("/")
+        assert resp.headers.get("X-Content-Type-Options") == "nosniff"
+
+    def test_x_frame_options_header(self, client: TestClient) -> None:
+        """The X-Frame-Options DENY header is set on responses.
+
+        Without this header, the form could be rendered inside an attacker
+        frame and used for clickjacking against the namespace dropdown or
+        submit button.
+        """
+        resp = client.get("/")
+        assert resp.headers.get("X-Frame-Options") == "DENY"
+
     def test_no_inline_script_tag(self, client: TestClient) -> None:
         """Form HTML loads JS via external src — no inline <script> body."""
         resp = client.get("/")
@@ -786,6 +805,21 @@ class TestCSRFPerSession:
         # Starlette spells it lowercase; accept either.
         assert "samesite=strict" in set_cookie.lower()
 
+    def test_csrf_cookie_max_age_matches_constant(self, client: TestClient) -> None:
+        """Set-Cookie carries Max-Age equal to CSRF_COOKIE_MAX_AGE.
+
+        Without this assertion a regression that silently extends session
+        lifetime (e.g. dropping max_age, or bumping it without intent) would
+        slip through.
+        """
+        from dogcat.web.propose import CSRF_COOKIE_MAX_AGE
+
+        resp = client.get("/")
+        set_cookie = resp.headers.get("set-cookie", "")
+        # Max-Age is case-insensitive in the spec; accept either spelling.
+        lower = set_cookie.lower()
+        assert f"max-age={CSRF_COOKIE_MAX_AGE}" in lower
+
     def test_post_without_cookie_is_rejected(self, web_dogcats: Path) -> None:
         """POST without a CSRF cookie fails even if form has a value."""
         app = create_app(dogcats_dir=str(web_dogcats))
@@ -813,3 +847,205 @@ class TestWebProposeInit:
         result = runner.invoke(cli_app, ["web", "propose"])
         assert result.exit_code == 1
         assert "not initialized" in result.output
+
+
+class TestLengthLimits:
+    """Boundary tests for MAX_TITLE_LEN / MAX_DESC_LEN enforcement.
+
+    These guard against a typo loosening the bounds shipping silently.
+    """
+
+    def test_title_at_limit_accepted(
+        self, client: TestClient, web_dogcats: Path
+    ) -> None:
+        """A title exactly MAX_TITLE_LEN characters is accepted."""
+        from dogcat.web.propose.routes import MAX_TITLE_LEN
+
+        title = "a" * MAX_TITLE_LEN
+        resp = client.post(
+            "/",
+            data={
+                "csrf_token": _csrf(client),
+                "namespace": "testns",
+                "title": title,
+                "description": "",
+            },
+        )
+        assert resp.status_code == 200
+        assert "Title must be" not in resp.text
+        inbox = InboxStorage(dogcats_dir=str(web_dogcats))
+        assert any(p.title == title for p in inbox.list())
+
+    def test_title_over_limit_rejected(
+        self, client: TestClient, web_dogcats: Path
+    ) -> None:
+        """A title MAX_TITLE_LEN+1 characters is rejected."""
+        from dogcat.web.propose.routes import MAX_TITLE_LEN
+
+        resp = client.post(
+            "/",
+            data={
+                "csrf_token": _csrf(client),
+                "namespace": "testns",
+                "title": "a" * (MAX_TITLE_LEN + 1),
+                "description": "",
+            },
+        )
+        assert resp.status_code == 200
+        assert "Title must be" in resp.text
+        inbox = InboxStorage(dogcats_dir=str(web_dogcats))
+        assert inbox.list() == []
+
+    def test_description_at_limit_accepted(
+        self, client: TestClient, web_dogcats: Path
+    ) -> None:
+        """A description exactly MAX_DESC_LEN characters is accepted."""
+        from dogcat.web.propose.routes import MAX_DESC_LEN
+
+        description = "d" * MAX_DESC_LEN
+        resp = client.post(
+            "/",
+            data={
+                "csrf_token": _csrf(client),
+                "namespace": "testns",
+                "title": "boundary",
+                "description": description,
+            },
+        )
+        assert resp.status_code == 200
+        assert "Description must be" not in resp.text
+        inbox = InboxStorage(dogcats_dir=str(web_dogcats))
+        assert any(p.description == description for p in inbox.list())
+
+    def test_description_over_limit_rejected(
+        self, client: TestClient, web_dogcats: Path
+    ) -> None:
+        """A description MAX_DESC_LEN+1 characters is rejected."""
+        from dogcat.web.propose.routes import MAX_DESC_LEN
+
+        resp = client.post(
+            "/",
+            data={
+                "csrf_token": _csrf(client),
+                "namespace": "testns",
+                "title": "boundary",
+                "description": "d" * (MAX_DESC_LEN + 1),
+            },
+        )
+        assert resp.status_code == 200
+        assert "Description must be" in resp.text
+        inbox = InboxStorage(dogcats_dir=str(web_dogcats))
+        assert inbox.list() == []
+
+
+class TestPersistentInboxStorage:
+    """Regression tests for dogcat-4r5i: web app holds persistent InboxStorage.
+
+    Previously every POST constructed a fresh InboxStorage which read+parsed
+    the entire file. The persistent instance lives on app.state and is
+    refreshed on mtime change.
+    """
+
+    def test_app_state_holds_inbox_storage(self, web_dogcats: Path) -> None:
+        """create_app stashes a persistent InboxStorage on app.state."""
+        from dogcat.inbox import InboxStorage
+
+        app = create_app(dogcats_dir=str(web_dogcats))
+        assert isinstance(app.state.inbox, InboxStorage)
+
+    def test_submit_uses_persistent_inbox_instance(self, web_dogcats: Path) -> None:
+        """Submit reuses the same InboxStorage instance — no per-request rebuild."""
+        from dogcat.inbox import InboxStorage
+
+        app = create_app(dogcats_dir=str(web_dogcats))
+        client = TestClient(app)
+        original_inbox = app.state.inbox
+
+        client.post(
+            "/",
+            data={
+                "csrf_token": _csrf(client),
+                "namespace": "testns",
+                "title": "First",
+                "description": "",
+            },
+        )
+        client.post(
+            "/",
+            data={
+                "csrf_token": _csrf(client),
+                "namespace": "testns",
+                "title": "Second",
+                "description": "",
+            },
+        )
+        # The state-held instance should still be the same object.
+        assert app.state.inbox is original_inbox
+        assert isinstance(app.state.inbox, InboxStorage)
+
+    def test_submit_picks_up_external_writes_via_reload(
+        self, web_dogcats: Path
+    ) -> None:
+        """Mtime-based reload surfaces writes made by another process."""
+        from dogcat.inbox import InboxStorage
+        from dogcat.models import Proposal
+
+        app = create_app(dogcats_dir=str(web_dogcats))
+        client = TestClient(app)
+
+        # An external writer adds a proposal — touches the inbox file.
+        external = InboxStorage(dogcats_dir=str(web_dogcats))
+        external.create(Proposal(id="ext1", title="external", namespace="testns"))
+
+        # The persistent instance hasn't seen the new record yet — but the
+        # next submit must still succeed (reload picks the new state up).
+        resp = client.post(
+            "/",
+            data={
+                "csrf_token": _csrf(client),
+                "namespace": "testns",
+                "title": "After external write",
+                "description": "",
+            },
+        )
+        assert resp.status_code == 200
+        # Both proposals should be present on disk.
+        verify = InboxStorage(dogcats_dir=str(web_dogcats))
+        titles = {p.title for p in verify.list()}
+        assert "external" in titles
+        assert "After external write" in titles
+
+
+class TestAllowCreatingNamespacesDefault:
+    """Regression tests for dogcat-kz1a: getattr default must not flip the policy.
+
+    Both call sites previously defaulted to True when ``allow_creating_namespaces``
+    was unset on app.state — opposite of create_app's default of False — so a
+    bare app construction silently allowed namespace minting.
+    """
+
+    def test_missing_attr_defaults_to_disallow(self, web_dogcats: Path) -> None:
+        """If the attribute is missing on app.state, namespace creation is denied."""
+        app = create_app(dogcats_dir=str(web_dogcats))
+        # Simulate an older / hand-built app that never set the flag.
+        del app.state.allow_creating_namespaces
+        client = TestClient(app)
+        resp = client.post(
+            "/",
+            data={
+                "csrf_token": _csrf(client),
+                "namespace": "freshly_minted",
+                "title": "should fail",
+                "description": "",
+            },
+        )
+        assert resp.status_code == 200
+        assert "Invalid namespace" in resp.text
+
+    def test_form_hides_new_option_when_attr_missing(self, web_dogcats: Path) -> None:
+        """The form's 'New...' option is hidden when the attribute is missing."""
+        app = create_app(dogcats_dir=str(web_dogcats))
+        del app.state.allow_creating_namespaces
+        client = TestClient(app)
+        resp = client.get("/")
+        assert "New&hellip;" not in resp.text

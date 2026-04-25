@@ -29,16 +29,11 @@ _RETRY_ATTEMPTS = 3
 _RETRY_DELAY_MS = 50  # milliseconds between retries
 
 
-@dataclass
-class FieldChange:
-    """An old/new value pair for a single tracked field on an issue."""
-
-    old: Any
-    new: Any
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to the legacy ``{"old": ..., "new": ...}`` shape."""
-        return {"old": self.old, "new": self.new}
+# FieldChange is the canonical dataclass for per-field change records.
+# Defined in event_log.py so non-streaming callers (storage, inbox) can use
+# it without dragging in watchdog. Re-exported here to keep existing imports
+# (`from dogcat.stream import FieldChange`) working.
+from dogcat.event_log import FieldChange  # noqa: E402
 
 
 @dataclass

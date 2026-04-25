@@ -334,14 +334,26 @@ class JSONLStorage:
             # Preserve event records from the current file
             if self.path.exists():
                 with self.path.open("rb") as src:
-                    for raw_line in src:
+                    for line_idx, raw_line in enumerate(src):
                         raw_line = raw_line.strip()
                         if not raw_line:
                             continue
                         try:
                             data = orjson.loads(raw_line)
-                        except (orjson.JSONDecodeError, ValueError):
-                            continue  # Skip malformed lines
+                        except (orjson.JSONDecodeError, ValueError) as e:
+                            # Surface malformed records during compaction so a
+                            # corrupt event isn't quietly dropped on rewrite.
+                            # The compacted file inherits the unparseable line
+                            # being skipped, so the warning is the user's only
+                            # signal to recover from git.
+                            logging.getLogger(__name__).warning(
+                                "Skipping malformed line %d in %s during "
+                                "compaction: %s",
+                                line_idx + 1,
+                                self.path,
+                                e,
+                            )
+                            continue
                         if data.get("record_type") == "event":
                             eid = data.get("issue_id", "")
                             if _prune_event_ids and eid in _prune_event_ids:
@@ -399,7 +411,11 @@ class JSONLStorage:
     def _is_default_branch(self) -> bool:
         """Check whether the working tree is on a default branch (main/master).
 
-        Returns True if not in a git repository (safe to compact).
+        ``True`` when there is genuinely no git repository (FileNotFoundError
+        on the binary or git reports "not a git repo"). Any other non-zero
+        return — permission denied, lock contention, internal git error —
+        returns ``False`` and logs the stderr so we don't silently lose the
+        feature-branch protection on a transient problem.
         """
         try:
             result = subprocess.run(
@@ -409,11 +425,28 @@ class JSONLStorage:
                 check=False,
                 cwd=str(self.dogcats_dir),
             )
-            if result.returncode != 0:
-                return True  # Not a git repo — safe to compact
-            return result.stdout.strip() in self._DEFAULT_BRANCHES
         except FileNotFoundError:
             return True  # git not installed — safe to compact
+        if result.returncode == 0:
+            return result.stdout.strip() in self._DEFAULT_BRANCHES
+        stderr = (result.stderr or "").strip().lower()
+        # "not a git repository" is the only non-zero outcome we treat as
+        # "no repo here, safe to compact". Permission denied / locked
+        # index / internal errors should NOT bypass the protection.
+        if "not a git repository" in stderr:
+            return True
+        logging.getLogger(__name__).warning(
+            "git rev-parse failed (rc=%s) under %s: %s. "
+            "Skipping compaction to be safe.",
+            result.returncode,
+            self.dogcats_dir,
+            result.stderr.strip() if result.stderr else "<no stderr>",
+        )
+        return False
+        # NOTE: kept inline here (not via dogcat.git.current_branch) because
+        # the storage path needs the stderr to distinguish "no repo" (safe)
+        # from "permission denied" (not safe). The git module's helper
+        # collapses both to None.
 
     # -- Event emission helpers ------------------------------------------
 
@@ -433,6 +466,49 @@ class JSONLStorage:
             changes,
             by=by,
         )
+
+    def _build_event_record(
+        self,
+        event_type: str,
+        issue: Issue,
+        changes: dict[str, dict[str, Any]],
+        by: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Build the event JSONL dict for a mutation without writing it.
+
+        Returns ``None`` when there are no changes to record, matching the
+        no-op semantics of :meth:`_emit_event`. Used by mutation methods
+        that want to coalesce the issue record + event record into a single
+        locked append, halving file-lock + fsync churn per mutation.
+        """
+        return self._event_log.build_record(
+            event_type,
+            issue.full_id,
+            issue.updated_at.isoformat(),
+            issue.title,
+            changes,
+            by=by,
+        )
+
+    def _append_with_event(
+        self,
+        records: list[dict[str, Any]],
+        event_record: dict[str, Any] | None,
+    ) -> None:
+        """Append data records and (optionally) an event record in one call.
+
+        Equivalent to ``_append(records)`` followed by ``_event_log.emit(...)``
+        but covered by a single file lock and a single fsync — eliminates
+        the write amplification a 26-id ``dcat close`` batch otherwise pays.
+        """
+        if event_record is None:
+            self._append(records)
+            return
+        # Best-effort event record: failures inside _append still raise, but
+        # the event payload is always cheap to serialize, so swallowing it
+        # here would be premature — let the caller's existing exception
+        # handling decide.
+        self._append([*records, event_record])
 
     @staticmethod
     def _field_value(value: Any) -> Any:
@@ -515,9 +591,9 @@ class JSONLStorage:
         self._issues[issue.full_id] = issue
         if issue.parent:
             self._children_by_parent.setdefault(issue.parent, []).append(issue.full_id)
-        self._append([self._issue_record(issue)])
 
-        # Emit creation event
+        # Build creation event alongside the issue record so we pay one lock
+        # + one fsync instead of two.
         changes: dict[str, dict[str, Any]] = {}
         for field_name in TRACKED_FIELDS:
             value = getattr(issue, field_name, None)
@@ -526,7 +602,10 @@ class JSONLStorage:
                     "old": None,
                     "new": self._field_value(value),
                 }
-        self._emit_event("created", issue, changes, by=issue.created_by)
+        event_record = self._build_event_record(
+            "created", issue, changes, by=issue.created_by
+        )
+        self._append_with_event([self._issue_record(issue)], event_record)
 
         return issue
 
@@ -717,9 +796,6 @@ class JSONLStorage:
         # Update timestamp
         issue.updated_at = datetime.now().astimezone()
 
-        self._append([self._issue_record(issue)])
-
-        # Emit update event
         new_values = {k: getattr(issue, k, None) for k in old_values}
         changes = self._tracked_changes(old_values, new_values)
         if old_metadata is not None:
@@ -730,7 +806,8 @@ class JSONLStorage:
         event_type = "updated"
         if "status" in changes and changes["status"]["new"] == "closed":
             event_type = "closed"
-        self._emit_event(event_type, issue, changes, by=by)
+        event_record = self._build_event_record(event_type, issue, changes, by=by)
+        self._append_with_event([self._issue_record(issue)], event_record)
 
         return issue
 
@@ -966,15 +1043,13 @@ class JSONLStorage:
         if closed_by:
             issue.closed_by = closed_by
 
-        self._append([self._issue_record(issue)])
-
-        # Emit close event
-        self._emit_event(
+        event_record = self._build_event_record(
             "closed",
             issue,
             {"status": {"old": old_status, "new": "closed"}},
             by=closed_by,
         )
+        self._append_with_event([self._issue_record(issue)], event_record)
 
         return issue
 
@@ -1018,20 +1093,15 @@ class JSONLStorage:
         if reopened_by:
             issue.updated_by = reopened_by
 
-        self._append([self._issue_record(issue)])
-
-        # Emit reopen event
         changes: dict[str, dict[str, Any]] = {
             "status": {"old": old_status, "new": "open"},
         }
         if reason:
             changes["reopen_reason"] = {"old": None, "new": reason}
-        self._emit_event(
-            "reopened",
-            issue,
-            changes,
-            by=reopened_by,
+        event_record = self._build_event_record(
+            "reopened", issue, changes, by=reopened_by
         )
+        self._append_with_event([self._issue_record(issue)], event_record)
 
         return issue
 
@@ -1096,19 +1166,20 @@ class JSONLStorage:
         ]
         self._rebuild_indexes()
 
-        # Append tombstone + removal records (instead of rewriting the file)
+        # Append tombstone + removal records (instead of rewriting the file).
+        # The delete event ships in the same locked append to halve the
+        # write amplification (was issue+deps+links append, then a separate
+        # event append).
         records: list[dict[str, Any]] = [issue_to_dict(issue)]
         records.extend(self._dep_record(d, op="remove") for d in removed_deps)
         records.extend(self._link_record(lnk, op="remove") for lnk in removed_links)
-        self._append(records)
-
-        # Emit delete event
-        self._emit_event(
+        event_record = self._build_event_record(
             "deleted",
             issue,
             {"status": {"old": old_status, "new": "tombstone"}},
             by=deleted_by,
         )
+        self._append_with_event(records, event_record)
 
         return issue
 
@@ -1459,14 +1530,46 @@ class JSONLStorage:
         return list(self._links)
 
     def check_id_uniqueness(self) -> bool:
-        """Check if all issue IDs are unique.
+        """Check the JSONL log for hash-colliding issue records.
+
+        Two distinct issues with the same ``full_id`` would collapse into
+        a single in-memory entry under last-write-wins replay, hiding the
+        collision. We detect it by walking the raw log and verifying that
+        every issue record sharing a ``full_id`` also shares a single
+        ``created_at`` value.
 
         Returns:
-            True if all IDs are unique (dict keys are always unique,
-            so this checks the loaded state is consistent).
+            True when no collisions are found (or the file does not yet
+            exist). False when at least one collision is detected.
         """
-        # Since _issues is a dict, IDs are unique by construction after replay.
-        # This always returns True but provides a public API for doctor checks.
+        if not self.path.exists():
+            return True
+        seen: dict[str, str] = {}
+        try:
+            with self.path.open("rb") as f:
+                for raw_line in f:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    try:
+                        data = orjson.loads(line)
+                    except (orjson.JSONDecodeError, ValueError):
+                        continue
+                    if classify_record(data) != "issue":
+                        continue
+                    namespace = data.get("namespace", "")
+                    issue_id = data.get("id", "")
+                    if not issue_id:
+                        continue
+                    full_id = f"{namespace}-{issue_id}" if namespace else issue_id
+                    created_at = data.get("created_at", "")
+                    prior = seen.get(full_id)
+                    if prior is None:
+                        seen[full_id] = created_at
+                    elif prior != created_at:
+                        return False
+        except OSError:
+            return False
         return True
 
     def find_dangling_dependencies(self) -> list[Dependency]:
@@ -1515,18 +1618,19 @@ class JSONLStorage:
         # Collect IDs to prune: tombstones + any orphaned event references
         prune_ids = set(tombstone_ids)
         if self.path.exists():
-            for raw_line in self.path.open("rb"):
-                raw_line = raw_line.strip()
-                if not raw_line:
-                    continue
-                try:
-                    data = orjson.loads(raw_line)
-                except (orjson.JSONDecodeError, ValueError):
-                    continue
-                if data.get("record_type") == "event":
-                    eid = data.get("issue_id", "")
-                    if eid and eid not in self._issues:
-                        prune_ids.add(eid)
+            with self.path.open("rb") as src:
+                for raw_line in src:
+                    raw_line = raw_line.strip()
+                    if not raw_line:
+                        continue
+                    try:
+                        data = orjson.loads(raw_line)
+                    except (orjson.JSONDecodeError, ValueError):
+                        continue
+                    if data.get("record_type") == "event":
+                        eid = data.get("issue_id", "")
+                        if eid and eid not in self._issues:
+                            prune_ids.add(eid)
 
         if prune_ids:
             self._save(_reload=False, _prune_event_ids=prune_ids)

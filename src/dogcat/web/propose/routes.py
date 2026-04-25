@@ -68,15 +68,56 @@ def _persist_pinned_namespace(dogcats_dir: str, namespace: str) -> None:
     save_local_config(dogcats_dir, config)
 
 
+def _refresh_inbox_if_stale(inbox: object, inbox_path_state: dict[str, float]) -> None:
+    """Reload the cached InboxStorage if the file changed since last reload.
+
+    Stat is cheap; reload is also cheap until inbox grows large. Either way
+    skipping the per-request reload when nothing changed is the win.
+    """
+    from dogcat.inbox import InboxStorage
+
+    if not isinstance(inbox, InboxStorage):
+        return
+    try:
+        mtime = inbox.path.stat().st_mtime
+        size = inbox.path.stat().st_size
+    except OSError:
+        return
+    cached = inbox_path_state.get("mtime")
+    cached_size = inbox_path_state.get("size")
+    if cached == mtime and cached_size == size:
+        return
+    try:
+        inbox.reload()
+    except (ValueError, RuntimeError, OSError):
+        return
+    inbox_path_state["mtime"] = mtime
+    inbox_path_state["size"] = size
+
+
 def _create_proposal_sync(
-    dogcats_dir: str, namespace: str, title: str, desc: str | None
+    request: Request, namespace: str, title: str, desc: str | None
 ) -> tuple[str, str]:
-    """Blocking inbox write — returns (full_id, namespace) for the new proposal."""
+    """Blocking inbox write — returns (full_id, namespace) for the new proposal.
+
+    Uses the persistent ``app.state.inbox`` when present, falling back to a
+    fresh constructor only when the app was built without one (e.g. older
+    create_app override or hand-built test app). Reload-on-mtime keeps the
+    cached state fresh after CLI/other-process writes.
+    """
     from dogcat.idgen import IDGenerator
     from dogcat.inbox import InboxStorage
     from dogcat.models import Proposal
 
-    inbox = InboxStorage(dogcats_dir=dogcats_dir)
+    inbox: InboxStorage | None = getattr(request.app.state, "inbox", None)
+    dogcats_dir: str = request.app.state.dogcats_dir
+    if inbox is None:
+        inbox = InboxStorage(dogcats_dir=dogcats_dir)
+    else:
+        state_dict: dict[str, float] = getattr(request.app.state, "_inbox_stat", {})
+        _refresh_inbox_if_stale(inbox, state_dict)
+        request.app.state._inbox_stat = state_dict
+
     id_gen = IDGenerator(
         existing_ids=inbox.get_proposal_ids(),
         prefix=f"{namespace}-inbox",
@@ -117,7 +158,7 @@ def _form_context(
     """Build the template context dict for propose.html."""
     namespaces: list[str] = request.app.state.namespaces
     allow_creating_namespaces: bool = getattr(
-        request.app.state, "allow_creating_namespaces", True
+        request.app.state, "allow_creating_namespaces", False
     )
     ctx: dict[str, object] = {
         "request": request,
@@ -176,7 +217,6 @@ async def submit_proposal(
     import hmac
 
     templates = request.app.state.templates
-    dogcats_dir: str = request.app.state.dogcats_dir
 
     cookie_token = request.cookies.get(CSRF_COOKIE_NAME, "")
     # Both must be present and equal — empty strings are rejected even if
@@ -232,7 +272,9 @@ async def submit_proposal(
         )
 
     valid_namespaces: list[str] = request.app.state.namespaces
-    allow_creating: bool = getattr(request.app.state, "allow_creating_namespaces", True)
+    allow_creating: bool = getattr(
+        request.app.state, "allow_creating_namespaces", False
+    )
     is_new_namespace = namespace not in valid_namespaces
     if is_new_namespace:
         if not allow_creating:
@@ -240,9 +282,10 @@ async def submit_proposal(
         # Accept new namespace — add it to the known list for this session
         valid_namespaces.append(namespace)
 
+    dogcats_dir: str = request.app.state.dogcats_dir
     try:
         full_id, _ = await asyncio.to_thread(
-            _create_proposal_sync, dogcats_dir, namespace, title, desc
+            _create_proposal_sync, request, namespace, title, desc
         )
         logger.info("Proposal created: %s", full_id)
         # Persist the namespace AFTER a successful proposal write — no point

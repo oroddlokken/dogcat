@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict
 
 import orjson
 
@@ -14,6 +14,44 @@ from dogcat.locking import advisory_file_lock
 
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
+
+
+class FieldChangeDict(TypedDict):
+    """Documented dict shape for a single field change in the JSONL store.
+
+    Records on disk use this shape: ``{"old": ..., "new": ...}``. Keep this
+    TypedDict in sync with :class:`FieldChange` — they're the dict and
+    dataclass faces of the same value. The dict form is what crosses the
+    JSONL boundary; the dataclass form is what new code should prefer
+    in-memory because attribute access (``c.new``) reads better than
+    dict indexing (``c["new"]``).
+    """
+
+    old: Any
+    new: Any
+
+
+@dataclass
+class FieldChange:
+    """An old/new value pair for a single tracked field on an issue.
+
+    Canonical in-memory representation of a per-field change record. The
+    JSONL store and most legacy callsites still pass the equivalent
+    :class:`FieldChangeDict` shape; use :meth:`to_dict` / :meth:`from_dict`
+    at the boundary.
+    """
+
+    old: Any
+    new: Any
+
+    def to_dict(self) -> FieldChangeDict:
+        """Serialize to the on-disk ``{"old": ..., "new": ...}`` shape."""
+        return {"old": self.old, "new": self.new}
+
+    @classmethod
+    def from_dict(cls, data: FieldChangeDict | dict[str, Any]) -> FieldChange:
+        """Build a FieldChange from a dict (forgiving of missing keys)."""
+        return cls(old=data.get("old"), new=data.get("new"))
 
 
 @dataclass
@@ -137,6 +175,35 @@ class _BaseEventLog:
             logging.getLogger(__name__).debug(
                 "Failed to write event for %s", full_id, exc_info=True
             )
+
+    @staticmethod
+    def build_record(
+        event_type: str,
+        full_id: str,
+        timestamp: str,
+        title: str | None,
+        changes: dict[str, dict[str, Any]],
+        by: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Build the JSONL dict for an event without writing it.
+
+        Used by callers that want to bundle the event record with another
+        record into a single locked append, halving lock acquisitions and
+        fsyncs for each mutation. Returns ``None`` when there are no
+        changes to record (parity with :meth:`emit` no-op).
+        """
+        if not changes:
+            return None
+        return _serialize(
+            EventRecord(
+                event_type=event_type,
+                issue_id=full_id,
+                timestamp=timestamp,
+                by=by,
+                title=title,
+                changes=changes,
+            )
+        )
 
     def read(
         self,

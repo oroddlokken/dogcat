@@ -86,6 +86,7 @@ class InboxStorage:
             if not line:
                 continue
 
+            is_last_line = line_idx == len(lines) - 1
             try:
                 data = orjson.loads(line)
                 parsed_records.append(data)
@@ -94,13 +95,23 @@ class InboxStorage:
                 proposal = dict_to_proposal(data)
                 self._proposals[proposal.full_id] = proposal
             except (orjson.JSONDecodeError, ValueError, KeyError) as e:
-                logging.getLogger(__name__).warning(
-                    "Skipping malformed line %d in %s: %s",
-                    line_idx + 1,
-                    self.path,
-                    e,
-                )
-                self._needs_compaction = True
+                if is_last_line:
+                    # Tolerate a corrupt last line (crash/disk-full artifact)
+                    # the same way JSONLStorage does, so a half-written
+                    # record from an interrupted append doesn't prevent the
+                    # inbox from loading.
+                    logging.getLogger(__name__).warning(
+                        "Skipping malformed last line in %s: %s",
+                        self.path,
+                        e,
+                    )
+                    self._needs_compaction = True
+                else:
+                    msg = (
+                        f"Invalid JSONL record at line {line_idx + 1} in "
+                        f"{self.path}: {e}"
+                    )
+                    raise ValueError(msg) from e
 
         warn_if_records_from_newer_version(parsed_records, source=str(self.path))
 
@@ -157,6 +168,43 @@ class InboxStorage:
             by=by,
         )
 
+    def _build_event_record(
+        self,
+        event_type: str,
+        proposal: Proposal,
+        changes: dict[str, dict[str, Any]],
+        by: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Build the event JSONL dict for a proposal mutation.
+
+        Mirrors :meth:`JSONLStorage._build_event_record` so callers can
+        bundle proposal+event records into a single locked append.
+        """
+        return self._event_log.build_record(
+            event_type,
+            proposal.full_id,
+            proposal.updated_at.isoformat(),
+            proposal.title,
+            changes,
+            by=by,
+        )
+
+    def _append_with_event(
+        self,
+        records: list[dict[str, Any]],
+        event_record: dict[str, Any] | None,
+    ) -> None:
+        """Append data records and (optionally) an event record in one call.
+
+        Single-lock equivalent of ``_append`` followed by
+        ``_event_log.emit``. Halves lock acquisitions and fsyncs per
+        mutation in batched flows like ``dcat inbox close A B C``.
+        """
+        if event_record is None:
+            self._append(records)
+            return
+        self._append([*records, event_record])
+
     @staticmethod
     def _tracked_changes(
         old_values: dict[str, Any],
@@ -186,20 +234,15 @@ class InboxStorage:
             raise ValueError(msg)
 
         self._proposals[proposal.full_id] = proposal
-        self._append([self._proposal_record(proposal)])
-
-        # Record creation event
         changes: dict[str, dict[str, Any]] = {
             "title": {"old": None, "new": proposal.title},
         }
         if proposal.description:
             changes["description"] = {"old": None, "new": proposal.description}
-        self._emit_event(
-            "created",
-            proposal,
-            changes,
-            by=proposal.proposed_by,
+        event_record = self._build_event_record(
+            "created", proposal, changes, by=proposal.proposed_by
         )
+        self._append_with_event([self._proposal_record(proposal)], event_record)
 
         return proposal
 
@@ -300,12 +343,12 @@ class InboxStorage:
         if resolved_issue:
             proposal.resolved_issue = resolved_issue
 
-        self._append([self._proposal_record(proposal)])
-
-        # Record close event
         new_data = proposal_to_dict(proposal)
         changes = self._tracked_changes(old_data, new_data)
-        self._emit_event("closed", proposal, changes, by=closed_by)
+        event_record = self._build_event_record(
+            "closed", proposal, changes, by=closed_by
+        )
+        self._append_with_event([self._proposal_record(proposal)], event_record)
 
         return proposal
 
@@ -340,12 +383,12 @@ class InboxStorage:
         proposal.updated_at = now
         if deleted_by:
             proposal.deleted_by = deleted_by
-        self._append([self._proposal_record(proposal)])
-
-        # Record delete event
         new_data = proposal_to_dict(proposal)
         changes = self._tracked_changes(old_data, new_data)
-        self._emit_event("deleted", proposal, changes, by=deleted_by)
+        event_record = self._build_event_record(
+            "deleted", proposal, changes, by=deleted_by
+        )
+        self._append_with_event([self._proposal_record(proposal)], event_record)
 
         return proposal
 

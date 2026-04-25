@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import typer
@@ -118,15 +117,9 @@ _GIT_GUIDE_TEXT = """\
 
 def _git_repo_root() -> Path | None:
     """Return the git repository root, or ``None`` if not inside a repo."""
-    result = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        return None
-    return Path(result.stdout.strip())
+    import dogcat.git as git_helpers
+
+    return git_helpers.repo_root()
 
 
 def _run_git_checks() -> tuple[bool, dict[str, dict[str, object]]]:
@@ -181,13 +174,9 @@ def _run_git_checks() -> tuple[bool, dict[str, dict[str, object]]]:
     }
 
     # Check 4: Is the merge driver configured with the correct command?
-    driver_result = subprocess.run(
-        ["git", "config", MERGE_DRIVER_GIT_KEY],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    driver_value = driver_result.stdout.strip() if driver_result.returncode == 0 else ""
+    import dogcat.git as git_helpers
+
+    driver_value = git_helpers.get_config(MERGE_DRIVER_GIT_KEY) or ""
     driver_correct = driver_value == MERGE_DRIVER_CMD
     checks["merge_driver"] = {
         "description": "JSONL merge driver is configured",
@@ -310,14 +299,14 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(1)
 
         # Configure the merge driver
-        subprocess.run(
-            ["git", "config", MERGE_DRIVER_GIT_KEY, MERGE_DRIVER_CMD],
-            check=True,
-        )
-        subprocess.run(
-            ["git", "config", MERGE_DRIVER_GIT_NAME_KEY, MERGE_DRIVER_NAME],
-            check=True,
-        )
+        import dogcat.git as git_helpers
+
+        if not git_helpers.set_config(MERGE_DRIVER_GIT_KEY, MERGE_DRIVER_CMD):
+            echo_error("Failed to set git config for merge driver command")
+            raise typer.Exit(1)
+        if not git_helpers.set_config(MERGE_DRIVER_GIT_NAME_KEY, MERGE_DRIVER_NAME):
+            echo_error("Failed to set git config for merge driver name")
+            raise typer.Exit(1)
 
         # Ensure .gitattributes exists with the merge driver entry at repo root
         gitattrs = repo_root / ".gitattributes"
@@ -395,11 +384,11 @@ def register(app: typer.Typer) -> None:
                 tmp_path.replace(jsonl_path)
 
                 # Stage the resolved file
-                subprocess.run(
-                    ["git", "add", str(jsonl_path)],
-                    check=True,
-                    capture_output=True,
-                )
+                import dogcat.git as git_helpers
+
+                if not git_helpers.add_paths([str(jsonl_path)]):
+                    msg = f"git add failed for {jsonl_path}"
+                    raise RuntimeError(msg)
                 resolved.append(jsonl_path.name)
             except Exception as exc:
                 errors.append(f"{jsonl_path.name}: {exc}")
@@ -1062,12 +1051,10 @@ Proposals are lightweight (cross-repo) requests (accept, reject, or ignore).
         git_tracking = config.get("git_tracking", True)
 
         if git_tracking is not False:
-            git_result = subprocess.run(
-                ["git", "rev-parse", "--git-dir"],
-                capture_output=True,
-                check=False,
-            )
-            if git_result.returncode == 0:
+            import dogcat.git as git_helpers
+
+            git_dir = git_helpers._run(["rev-parse", "--git-dir"])
+            if git_dir is not None and git_dir.returncode == 0:
                 all_passed, checks = _run_git_checks()
                 output_parts.append("## dogcat health check\n")
                 for check in checks.values():

@@ -5,7 +5,6 @@ from __future__ import annotations
 import functools
 import getpass
 import inspect
-import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -180,19 +179,11 @@ def get_default_operator() -> str:
     Returns:
         User email from git config, or machine username as fallback.
     """
-    try:
-        result = subprocess.run(
-            ["git", "config", "user.email"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    except (FileNotFoundError, OSError):
-        # git not installed or other OS error
-        pass
+    import dogcat.git as git_helpers
 
+    email = git_helpers.user_email()
+    if email:
+        return email
     return getpass.getuser()
 
 
@@ -202,16 +193,9 @@ def is_gitignored(path: str) -> bool:
     Returns True if the path is gitignored, False otherwise (including
     when not in a git repo or git is not available).
     """
-    try:
-        result = subprocess.run(
-            ["git", "check-ignore", "-q", path],
-            capture_output=True,
-            check=False,
-        )
-    except (FileNotFoundError, OSError):
-        return False
-    else:
-        return result.returncode == 0
+    import dogcat.git as git_helpers
+
+    return git_helpers.is_path_ignored(path)
 
 
 def find_dogcats_dir(start_dir: str | None = None) -> str:
@@ -270,27 +254,18 @@ def _find_dogcats_via_worktree() -> str | None:
     Returns:
         Path to .dogcats directory, or None if not found or not in a git repo.
     """
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--git-common-dir"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0 or not result.stdout.strip():
-            return None
+    import dogcat.git as git_helpers
 
-        # --git-common-dir returns the path to the shared .git directory.
-        # The main worktree root is its parent.
-        common_git_dir = Path(result.stdout.strip()).resolve()
-        main_worktree_root = common_git_dir.parent
+    common_git_dir = git_helpers.common_dir()
+    if common_git_dir is None:
+        return None
 
-        candidate = main_worktree_root / ".dogcats"
-        if candidate.is_dir():
-            return str(candidate)
-    except (FileNotFoundError, OSError):
-        pass
-
+    # --git-common-dir returns the path to the shared .git directory.
+    # The main worktree root is its parent.
+    main_worktree_root = common_git_dir.resolve().parent
+    candidate = main_worktree_root / ".dogcats"
+    if candidate.is_dir():
+        return str(candidate)
     return None
 
 

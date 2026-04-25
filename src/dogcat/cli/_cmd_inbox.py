@@ -529,13 +529,36 @@ def register(app: typer.Typer) -> None:
 
             storage.create(issue)
 
-            # Close the remote proposal with a link to the new issue
-            remote_inbox.close(
-                proposal.full_id,
-                reason="Accepted as issue",
-                closed_by=operator,
-                resolved_issue=issue.full_id,
-            )
+            # Close the remote proposal with a link back to the new issue.
+            # If the close fails (network/lock/OSError), roll back the local
+            # create so we don't leave an orphaned issue with no record on
+            # the remote side that the proposal was ever accepted.
+            try:
+                remote_inbox.close(
+                    proposal.full_id,
+                    reason="Accepted as issue",
+                    closed_by=operator,
+                    resolved_issue=issue.full_id,
+                )
+            except (ValueError, RuntimeError, OSError) as close_err:
+                try:
+                    storage.delete(
+                        issue.full_id,
+                        reason="rollback: remote inbox close failed",
+                        deleted_by=operator,
+                    )
+                except (ValueError, RuntimeError) as rollback_err:
+                    echo_error(
+                        f"Failed to close remote proposal: {close_err}. "
+                        f"Rollback of local issue {issue.full_id} ALSO failed: "
+                        f"{rollback_err}. Investigate before re-running accept.",
+                    )
+                    raise typer.Exit(1) from None
+                echo_error(
+                    f"Failed to close remote proposal: {close_err}. "
+                    f"Rolled back local issue {issue.full_id}.",
+                )
+                raise typer.Exit(1) from None
 
             if is_json():
                 typer.echo(orjson.dumps(issue_to_dict(issue)).decode())

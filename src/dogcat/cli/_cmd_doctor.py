@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -143,6 +142,26 @@ def register(app: typer.Typer) -> None:
         }
         if not checks["config_toml"]["passed"]:
             all_passed = False
+
+        # Check 2a-bis: config.toml is parseable as TOML
+        # _load_toml swallows TOMLDecodeError and returns {}, so without an
+        # explicit check the user gets "all defaults" with no signal that
+        # their config is broken.
+        if config_exists:
+            from dogcat.config import check_toml_parseable
+
+            config_parse_error = check_toml_parseable(config_path)
+            checks["config_toml_parseable"] = {
+                "description": f"{dogcats_dir}/config.toml is valid TOML",
+                "fail_description": (
+                    f"{dogcats_dir}/config.toml has a TOML parse error: "
+                    f"{config_parse_error}"
+                ),
+                "passed": config_parse_error is None,
+                "fix": "Edit config.toml to fix the TOML syntax error",
+            }
+            if config_parse_error is not None:
+                all_passed = False
 
         # Check 2b: namespace is set and non-empty in config
         # Only check if config.toml exists (skip if Check 2a failed)
@@ -434,24 +453,21 @@ def register(app: typer.Typer) -> None:
         # Post-merge concurrent edit detection
         merge_warnings: list[dict[str, Any]] = []
         if post_merge:
+            import dogcat.git as git_helpers
+
             # storage_rel must be relative to the git repo root
-            try:
-                repo_root = Path(
-                    subprocess.run(
-                        ["git", "rev-parse", "--show-toplevel"],
-                        capture_output=True,
-                        text=True,
-                        check=True,
-                    ).stdout.strip(),
-                )
-                storage_rel = str(
-                    dogcats_path.resolve().relative_to(repo_root) / "issues.jsonl",
-                )
-                merge_warnings = detect_concurrent_edits(
-                    storage_rel=storage_rel,
-                )
-            except (subprocess.CalledProcessError, ValueError):
-                pass  # Not in a git repo or path not relative
+            repo_root_path = git_helpers.repo_root()
+            if repo_root_path is not None:
+                try:
+                    storage_rel = str(
+                        dogcats_path.resolve().relative_to(repo_root_path)
+                        / "issues.jsonl",
+                    )
+                    merge_warnings = detect_concurrent_edits(
+                        storage_rel=storage_rel,
+                    )
+                except ValueError:
+                    pass  # Path not relative to repo root
 
         # Output results
         if is_json():
@@ -657,11 +673,42 @@ def _install_precompact_hook(claude_dir: Path) -> None:
         },
     )
 
-    import json
+    _atomic_write_json(settings_path, data)
 
-    settings_path.write_text(
-        json.dumps(data, indent=2) + "\n",
-    )
+
+def _atomic_write_json(target: Path, data: dict[str, Any]) -> None:
+    """Write ``data`` to ``target`` as pretty-printed JSON atomically.
+
+    Mirrors the write-temp + fsync + replace pattern used by
+    ``atomic_rewrite_jsonl``. Two concurrent ``dcat doctor --fix`` runs (or
+    doctor racing against another writer of settings.json) would otherwise
+    risk a partial file or last-writer-wins clobber.
+    """
+    payload = orjson.dumps(data, option=orjson.OPT_INDENT_2 | orjson.OPT_APPEND_NEWLINE)
+    import os
+    import tempfile
+
+    parent = target.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="wb",
+        dir=parent,
+        delete=False,
+        suffix=".json",
+    ) as tmp_file:
+        tmp_path = Path(tmp_file.name)
+        try:
+            tmp_file.write(payload)
+            tmp_file.flush()
+            os.fsync(tmp_file.fileno())
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
+    try:
+        tmp_path.replace(target)
+    except OSError:
+        tmp_path.unlink(missing_ok=True)
+        raise
 
 
 def _upgrade_precompact_hook(claude_dir: Path) -> None:
@@ -682,7 +729,5 @@ def _upgrade_precompact_hook(claude_dir: Path) -> None:
                     hook["command"] = cmd.replace("dcat prime", "dcat prime --replay")
                     modified = True
         if modified:
-            import json
-
-            settings_path.write_text(json.dumps(data, indent=2) + "\n")
+            _atomic_write_json(settings_path, data)
             return

@@ -27,7 +27,7 @@ class TestFindDogcatsViaWorktree:
             {"returncode": 0, "stdout": str(git_dir) + "\n"},
         )()
 
-        with patch("dogcat.cli._helpers.subprocess.run", return_value=mock_result):
+        with patch("dogcat.git.subprocess.run", return_value=mock_result):
             result = _find_dogcats_via_worktree()
 
         assert result == str(dogcats_dir)
@@ -46,7 +46,7 @@ class TestFindDogcatsViaWorktree:
             {"returncode": 0, "stdout": str(git_dir) + "\n"},
         )()
 
-        with patch("dogcat.cli._helpers.subprocess.run", return_value=mock_result):
+        with patch("dogcat.git.subprocess.run", return_value=mock_result):
             result = _find_dogcats_via_worktree()
 
         assert result is None
@@ -59,7 +59,7 @@ class TestFindDogcatsViaWorktree:
             {"returncode": 128, "stdout": ""},
         )()
 
-        with patch("dogcat.cli._helpers.subprocess.run", return_value=mock_result):
+        with patch("dogcat.git.subprocess.run", return_value=mock_result):
             result = _find_dogcats_via_worktree()
 
         assert result is None
@@ -67,7 +67,7 @@ class TestFindDogcatsViaWorktree:
     def test_returns_none_when_git_not_installed(self) -> None:
         """Test returns None when git is not installed."""
         with patch(
-            "dogcat.cli._helpers.subprocess.run",
+            "dogcat.git.subprocess.run",
             side_effect=FileNotFoundError,
         ):
             result = _find_dogcats_via_worktree()
@@ -77,7 +77,7 @@ class TestFindDogcatsViaWorktree:
     def test_returns_none_on_os_error(self) -> None:
         """Test returns None on OSError from subprocess."""
         with patch(
-            "dogcat.cli._helpers.subprocess.run",
+            "dogcat.git.subprocess.run",
             side_effect=OSError("permission denied"),
         ):
             result = _find_dogcats_via_worktree()
@@ -92,7 +92,7 @@ class TestFindDogcatsViaWorktree:
             {"returncode": 0, "stdout": "  \n"},
         )()
 
-        with patch("dogcat.cli._helpers.subprocess.run", return_value=mock_result):
+        with patch("dogcat.git.subprocess.run", return_value=mock_result):
             result = _find_dogcats_via_worktree()
 
         assert result is None
@@ -125,7 +125,7 @@ class TestFindDogcatsDirWorktreeFallback:
             {"returncode": 0, "stdout": str(git_dir) + "\n"},
         )()
 
-        with patch("dogcat.cli._helpers.subprocess.run", return_value=mock_result):
+        with patch("dogcat.git.subprocess.run", return_value=mock_result):
             result = find_dogcats_dir(str(isolated))
 
         assert result == str(dogcats)
@@ -146,7 +146,7 @@ class TestFindDogcatsDirWorktreeFallback:
             {"returncode": 128, "stdout": ""},
         )()
 
-        with patch("dogcat.cli._helpers.subprocess.run", return_value=mock_result):
+        with patch("dogcat.git.subprocess.run", return_value=mock_result):
             result = find_dogcats_dir(str(isolated))
 
         assert result == ".dogcats"

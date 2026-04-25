@@ -253,11 +253,11 @@ class TestCompaction:
         assert storage._base_lines == 50
         assert storage._appended_lines == 0
 
-        # _append() only counts issue records (not event log records written
-        # separately by EventLog.append), so each update adds 1 to _appended_lines.
-        # Compaction triggers when _appended_lines > base_lines * 0.5 = 25,
-        # so we need 26 updates.
-        for i in range(26):
+        # Each update now appends issue + event records together in one
+        # locked call (dogcat-4odi), so _appended_lines grows by 2 per
+        # update. Compaction triggers when ratio > 0.5; 13 updates → 26
+        # appended lines vs 50 base = above threshold.
+        for i in range(13):
             storage.update("issue-0", {"title": f"Updated {i}"})
 
         # Compaction should have triggered, resetting appended_lines

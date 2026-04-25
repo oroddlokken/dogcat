@@ -187,6 +187,126 @@ class TestCLIDoctor:
         finally:
             os.chdir(old_cwd)
 
+    def test_doctor_detects_unparseable_config(self, tmp_path: Path) -> None:
+        """Doctor reports config.toml that exists but doesn't parse.
+
+        Regression for dogcat-5ctk: previously the parse error was
+        swallowed and the doctor reported success while the user's
+        settings were silently ignored.
+        """
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        (dogcats_dir / "issues.jsonl").touch()
+        (dogcats_dir / "config.toml").write_text("this is [not valid toml")
+
+        result = runner.invoke(
+            app, ["doctor", "--dogcats-dir", str(dogcats_dir), "--json"]
+        )
+        assert result.exit_code != 0
+        output = json.loads(result.stdout)
+        assert "config_toml_parseable" in output["checks"]
+        assert output["checks"]["config_toml_parseable"]["passed"] is False
+
+
+class TestDoctorFixDanglingDeps:
+    """Tests for ``dcat doctor --fix`` repairing dangling dependencies.
+
+    Regression for dogcat-3v9b: the helper ``remove_dependencies`` was
+    unit-tested but the doctor wiring that calls it was not.
+    """
+
+    def test_fix_removes_dangling_dependency(self, tmp_path: Path) -> None:
+        """A dependency referencing a missing issue is removed by --fix."""
+        dogcats_dir = tmp_path / ".dogcats"
+        _init_with_namespace(dogcats_dir, "ns")
+
+        from dogcat.storage import JSONLStorage
+
+        storage_path = dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path))
+        from dogcat.models import Issue
+
+        storage.create(Issue(id="aaaa", namespace="ns", title="A"))
+
+        # Hand-write a dependency record pointing at a non-existent issue,
+        # the way a hand-edit or merge artifact would surface a dangling dep.
+        with storage_path.open("ab") as f:
+            f.write(
+                b'{"record_type": "dependency", '
+                b'"issue_id": "ns-aaaa", '
+                b'"depends_on_id": "ns-ghost", '
+                b'"type": "blocks", '
+                b'"created_at": "2026-04-25T12:00:00+00:00"}\n'
+            )
+
+        # Sanity: dep is dangling now
+        storage2 = JSONLStorage(str(storage_path))
+        assert len(storage2.find_dangling_dependencies()) == 1
+
+        runner.invoke(app, ["doctor", "--fix", "--dogcats-dir", str(dogcats_dir)])
+
+        storage3 = JSONLStorage(str(storage_path))
+        assert storage3.find_dangling_dependencies() == []
+
+
+class TestDoctorFixIssuePrefixMigration:
+    """Tests for ``dcat doctor --fix`` migrating ``issue_prefix`` → ``namespace``.
+
+    Regression for dogcat-3v9b: ``migrate_config_keys`` was unit-tested
+    but the doctor wiring that calls it was not.
+    """
+
+    def test_fix_migrates_deprecated_issue_prefix_key(self, tmp_path: Path) -> None:
+        """A config.toml with ``issue_prefix`` is migrated to ``namespace``."""
+        from dogcat.config import load_config
+
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        (dogcats_dir / "issues.jsonl").touch()
+        (dogcats_dir / "config.toml").write_text('issue_prefix = "legacy"\n')
+
+        result = runner.invoke(
+            app, ["doctor", "--fix", "--dogcats-dir", str(dogcats_dir)]
+        )
+        # The fix should run and either succeed or progress.
+        assert "Fixed" in result.stdout or result.exit_code == 0
+
+        config = load_config(str(dogcats_dir))
+        assert config.get("namespace") == "legacy"
+        assert "issue_prefix" not in config
+
+
+class TestAtomicSettingsWrite:
+    """Regression tests for dogcat-3yz1: settings.json must be written atomically.
+
+    The previous ``settings_path.write_text(...)`` call could leave a
+    partial file on crash and would last-writer-wins on concurrent edits.
+    The replacement uses a temp + fsync + replace pattern.
+    """
+
+    def test_settings_json_replaced_atomically(self, tmp_path: Path) -> None:
+        """``_atomic_write_json`` produces valid JSON and replaces target."""
+        from dogcat.cli._cmd_doctor import _atomic_write_json
+
+        target = tmp_path / "settings.json"
+        target.write_text('{"old": true}')
+        _atomic_write_json(target, {"hooks": {"PreCompact": []}})
+        assert target.exists()
+        # Reload and verify shape — atomic replace should not leave junk.
+        reloaded = json.loads(target.read_text())
+        assert reloaded == {"hooks": {"PreCompact": []}}
+
+    def test_settings_json_no_temp_left_behind(self, tmp_path: Path) -> None:
+        """No leftover .json tempfiles remain after a successful write."""
+        from dogcat.cli._cmd_doctor import _atomic_write_json
+
+        target = tmp_path / "settings.json"
+        _atomic_write_json(target, {"k": 1})
+        siblings = [
+            p for p in tmp_path.iterdir() if p != target and p.suffix == ".json"
+        ]
+        assert siblings == []
+
 
 class TestDoctorNamespaceConfig:
     """Test doctor checks for namespace config mutual exclusivity."""

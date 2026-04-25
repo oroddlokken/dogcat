@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from typing import Any
 
 import orjson
 import typer
 
+import dogcat.git as git_helpers
 from dogcat.constants import TRACKED_FIELDS, TRACKED_PROPOSAL_FIELDS
 
 from ._formatting import format_event, get_event_legend
@@ -18,16 +18,7 @@ from ._json_state import echo_error, is_json, set_json
 
 def _get_git_root(cwd: Path | None = None) -> Path | None:
     """Get the root directory of the current git repository."""
-    result = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        text=True,
-        check=False,
-        cwd=str(cwd) if cwd else None,
-    )
-    if result.returncode != 0:
-        return None
-    return Path(result.stdout.strip())
+    return git_helpers.repo_root(cwd=cwd)
 
 
 def _get_git_file(
@@ -42,16 +33,7 @@ def _get_git_file(
         return None
 
     git_ref = f"{ref}:{rel_path}" if ref else f":{rel_path}"
-    result = subprocess.run(
-        ["git", "show", git_ref],
-        capture_output=True,
-        check=False,
-        cwd=str(git_root),
-    )
-
-    if result.returncode != 0:
-        return None
-    return result.stdout
+    return git_helpers.show_file(git_ref, cwd=git_root)
 
 
 def _parse_issues_from_bytes(raw: bytes) -> dict[str, dict[str, Any]]:

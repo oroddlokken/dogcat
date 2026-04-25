@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -20,6 +21,8 @@ import tomli_w
 
 from dogcat.constants import DOGCATRC_FILENAME
 from dogcat.models import classify_record
+
+_logger = logging.getLogger(__name__)
 
 # Default prefix for issue IDs
 DEFAULT_PREFIX = "dc"
@@ -87,14 +90,49 @@ def get_local_config_path(dogcats_dir: str) -> Path:
 
 
 def _load_toml(path: Path) -> dict[str, Any]:
-    """Load a single TOML file, returning empty dict on missing/invalid."""
+    """Load a single TOML file, returning empty dict on missing/invalid.
+
+    Parse errors are surfaced as a logger warning so that a typo in
+    config.toml doesn't silently degrade to "all defaults" — the user
+    needs a signal that their settings aren't being honored. ``dcat
+    doctor`` also re-runs this via :func:`check_toml_parseable` and
+    reports parse failure as a separate check.
+    """
     if not path.exists():
         return {}
     try:
         with path.open("rb") as f:
             return tomllib.load(f)
-    except (tomllib.TOMLDecodeError, OSError):
+    except tomllib.TOMLDecodeError as e:
+        _logger.warning(
+            "Failed to parse %s: %s. Falling back to defaults — fix the "
+            "TOML to restore configured values.",
+            path,
+            e,
+        )
         return {}
+    except OSError as e:
+        _logger.warning("Failed to read %s: %s", path, e)
+        return {}
+
+
+def check_toml_parseable(path: Path) -> str | None:
+    """Try to parse a TOML file and return an error string on failure.
+
+    Used by ``dcat doctor`` to distinguish "config exists" from "config
+    parses". Returns ``None`` for missing files (the existence check is a
+    separate concern) and for files that parse cleanly.
+    """
+    if not path.exists():
+        return None
+    try:
+        with path.open("rb") as f:
+            tomllib.load(f)
+    except tomllib.TOMLDecodeError as e:
+        return str(e)
+    except OSError as e:
+        return str(e)
+    return None
 
 
 def _find_rc_parent() -> Path | None:
