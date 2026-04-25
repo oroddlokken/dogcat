@@ -251,6 +251,16 @@ def register(app: typer.Typer) -> None:
             "--manual",
             help="Only show issues marked as manual",
         ),
+        has_comments: bool = typer.Option(
+            False,
+            "--has-comments",
+            help="Only show issues that have at least one comment",
+        ),
+        without_comments: bool = typer.Option(
+            False,
+            "--without-comments",
+            help="Only show issues that have no comments",
+        ),
         tree: bool = typer.Option(
             False,
             "--tree",
@@ -287,6 +297,11 @@ def register(app: typer.Typer) -> None:
                 raise typer.Exit(1)
             if agent_only and manual:
                 echo_error("--agent-only and --manual are mutually exclusive")
+                raise typer.Exit(1)
+            if has_comments and without_comments:
+                echo_error(
+                    "--has-comments and --without-comments are mutually exclusive"
+                )
                 raise typer.Exit(1)
 
             storage = get_storage(dogcats_dir)
@@ -380,6 +395,11 @@ def register(app: typer.Typer) -> None:
                     for i in issues
                     if i.metadata.get("manual") or i.metadata.get("no_agent")
                 ]
+
+            if has_comments:
+                issues = [i for i in issues if i.comments]
+            elif without_comments:
+                issues = [i for i in issues if not i.comments]
 
             # Apply date-based filtering for closed issues
             if closed_after or closed_before:

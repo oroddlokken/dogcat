@@ -990,6 +990,17 @@ mark it as manual and tell the user:
 
 Do NOT attempt to work on manual issues. Leave them for the user.
 
+## Comment-based filtering
+
+List-style commands (list, ready, blocked, pr, snoozed, search, stale,
+recently-closed, recently-added, etc.) accept --has-comments and
+--without-comments to filter by comment presence. The two flags are
+mutually exclusive and combine with other filters.
+
+  dcat list --has-comments         # only issues with at least one comment
+  dcat list --without-comments     # only issues with no comments
+  dcat ready --agent-only --has-comments
+
 ## Status Workflow
 
   draft -> open -> in_progress -> in_review -> closed

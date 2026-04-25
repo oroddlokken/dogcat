@@ -5,6 +5,7 @@
 ### Added
 
 - **`--manual` filter for listing commands** — inverse of `--agent-only`, shows only issues marked as manual. Available on `list`, `ready`, `blocked`, `in-progress`, `in-review`, `open`, `deferred`, `snoozed`, `stale`, `pr`, `recently-added`, `recently-closed`, and `search`. `--agent-only` also added to `search`, `pr`, `recently-added`, and `recently-closed` for parity. `--manual` and `--agent-only` are mutually exclusive (closes dogcat-1iqx)
+- **`--has-comments` / `--without-comments` filter for listing commands** — show only issues with (or without) at least one comment. Available on `list`, `ready`, `blocked`, `in-progress`, `in-review`, `open`, `deferred`, `snoozed`, `stale`, `pr`, `recently-added`, `recently-closed`, and `search`. The two flags are mutually exclusive and combine with other filters such as `--agent-only` (closes dogcat-4rip)
 
 ### Fixed
 

@@ -253,6 +253,36 @@ def check_agent_manual_exclusive(*, agent_only: bool, manual_only: bool) -> None
         )
 
 
+def check_comments_exclusive(*, has_comments: bool, without_comments: bool) -> None:
+    """Reject --has-comments combined with --without-comments."""
+    if has_comments and without_comments:
+        msg = "--has-comments and --without-comments are mutually exclusive"
+        raise typer.BadParameter(
+            msg,
+        )
+
+
+def apply_comment_filter(
+    issues: list[Any],
+    *,
+    has_comments: bool = False,
+    without_comments: bool = False,
+) -> list[Any]:
+    """Filter issues by presence/absence of comments.
+
+    Comments are hard-deleted from issue.comments, so 'has comments' is
+    just bool(issue.comments).
+    """
+    check_comments_exclusive(
+        has_comments=has_comments, without_comments=without_comments
+    )
+    if has_comments:
+        return [i for i in issues if i.comments]
+    if without_comments:
+        return [i for i in issues if not i.comments]
+    return issues
+
+
 def apply_common_filters(
     issues: list[Any],
     *,
@@ -265,6 +295,8 @@ def apply_common_filters(
     namespace: str | None = None,
     agent_only: bool = False,
     manual_only: bool = False,
+    has_comments: bool = False,
+    without_comments: bool = False,
     all_namespaces: bool = False,
     dogcats_dir: str | None = None,
     storage: Any = None,
@@ -278,6 +310,9 @@ def apply_common_filters(
     from dogcat.constants import parse_labels
 
     check_agent_manual_exclusive(agent_only=agent_only, manual_only=manual_only)
+    check_comments_exclusive(
+        has_comments=has_comments, without_comments=without_comments
+    )
 
     if issue_type:
         issues = [i for i in issues if i.issue_type.value == issue_type]
@@ -309,6 +344,10 @@ def apply_common_filters(
         issues = [
             i for i in issues if i.metadata.get("manual") or i.metadata.get("no_agent")
         ]
+    if has_comments:
+        issues = [i for i in issues if i.comments]
+    if without_comments:
+        issues = [i for i in issues if not i.comments]
 
     # Namespace filtering (skip if --all-namespaces)
     if not all_namespaces and dogcats_dir:

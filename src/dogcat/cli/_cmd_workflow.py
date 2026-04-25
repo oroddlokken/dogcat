@@ -26,6 +26,7 @@ from ._helpers import (
     _make_alias,
     apply_common_filters,
     check_agent_manual_exclusive,
+    check_comments_exclusive,
     get_default_operator,
     get_storage,
     parse_duration,
@@ -102,6 +103,16 @@ def register(app: typer.Typer) -> None:
             "--manual",
             help="Only show issues marked as manual",
         ),
+        has_comments: bool = typer.Option(
+            False,
+            "--has-comments",
+            help="Only show issues that have at least one comment",
+        ),
+        without_comments: bool = typer.Option(
+            False,
+            "--without-comments",
+            help="Only show issues that have no comments",
+        ),
         include_snoozed: bool = typer.Option(
             False,
             "--include-snoozed",
@@ -137,6 +148,8 @@ def register(app: typer.Typer) -> None:
                 all_namespaces=all_namespaces,
                 agent_only=agent_only,
                 manual_only=manual,
+                has_comments=has_comments,
+                without_comments=without_comments,
                 dogcats_dir=str(storage.dogcats_dir),
                 storage=storage,
             )
@@ -266,6 +279,16 @@ def register(app: typer.Typer) -> None:
             "--manual",
             help="Only show issues marked as manual",
         ),
+        has_comments: bool = typer.Option(
+            False,
+            "--has-comments",
+            help="Only show issues that have at least one comment",
+        ),
+        without_comments: bool = typer.Option(
+            False,
+            "--without-comments",
+            help="Only show issues that have no comments",
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
@@ -293,6 +316,8 @@ def register(app: typer.Typer) -> None:
                 all_namespaces=all_namespaces,
                 agent_only=agent_only,
                 manual_only=manual,
+                has_comments=has_comments,
+                without_comments=without_comments,
                 dogcats_dir=str(storage.dogcats_dir),
                 storage=storage,
             )
@@ -411,6 +436,16 @@ def register(app: typer.Typer) -> None:
             "--manual",
             help="Only show issues marked as manual",
         ),
+        has_comments: bool = typer.Option(
+            False,
+            "--has-comments",
+            help="Only show issues that have at least one comment",
+        ),
+        without_comments: bool = typer.Option(
+            False,
+            "--without-comments",
+            help="Only show issues that have no comments",
+        ),
         tree: bool = typer.Option(False, "--tree", help="Display as tree"),
         table: bool = typer.Option(False, "--table", help="Display in columns"),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
@@ -433,6 +468,8 @@ def register(app: typer.Typer) -> None:
                 all_namespaces=all_namespaces,
                 agent_only=agent_only,
                 manual_only=manual,
+                has_comments=has_comments,
+                without_comments=without_comments,
                 dogcats_dir=str(storage.dogcats_dir),
                 storage=storage,
             )
@@ -529,6 +566,16 @@ def register(app: typer.Typer) -> None:
             "--manual",
             help="Only show issues marked as manual",
         ),
+        has_comments: bool = typer.Option(
+            False,
+            "--has-comments",
+            help="Only show issues that have at least one comment",
+        ),
+        without_comments: bool = typer.Option(
+            False,
+            "--without-comments",
+            help="Only show issues that have no comments",
+        ),
         tree: bool = typer.Option(False, "--tree", help="Display as tree"),
         table: bool = typer.Option(False, "--table", help="Display in columns"),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
@@ -551,6 +598,8 @@ def register(app: typer.Typer) -> None:
                 all_namespaces=all_namespaces,
                 agent_only=agent_only,
                 manual_only=manual,
+                has_comments=has_comments,
+                without_comments=without_comments,
                 dogcats_dir=str(storage.dogcats_dir),
                 storage=storage,
             )
@@ -647,6 +696,16 @@ def register(app: typer.Typer) -> None:
             "--manual",
             help="Only show issues marked as manual",
         ),
+        has_comments: bool = typer.Option(
+            False,
+            "--has-comments",
+            help="Only show issues that have at least one comment",
+        ),
+        without_comments: bool = typer.Option(
+            False,
+            "--without-comments",
+            help="Only show issues that have no comments",
+        ),
         tree: bool = typer.Option(False, "--tree", help="Display as tree"),
         table: bool = typer.Option(False, "--table", help="Display in columns"),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
@@ -669,6 +728,8 @@ def register(app: typer.Typer) -> None:
                 all_namespaces=all_namespaces,
                 agent_only=agent_only,
                 manual_only=manual,
+                has_comments=has_comments,
+                without_comments=without_comments,
                 dogcats_dir=str(storage.dogcats_dir),
                 storage=storage,
             )
@@ -751,6 +812,8 @@ def register(app: typer.Typer) -> None:
         all_namespaces: bool,
         agent_only: bool,
         manual_only: bool,
+        has_comments: bool,
+        without_comments: bool,
         tree: bool,
         table: bool,
         json_output: bool,
@@ -775,6 +838,8 @@ def register(app: typer.Typer) -> None:
                 all_namespaces=all_namespaces,
                 agent_only=agent_only,
                 manual_only=manual_only,
+                has_comments=has_comments,
+                without_comments=without_comments,
                 dogcats_dir=str(storage.dogcats_dir),
                 storage=storage,
             )
@@ -871,6 +936,16 @@ def register(app: typer.Typer) -> None:
             "--manual",
             help="Only show issues marked as manual",
         ),
+        has_comments: bool = typer.Option(
+            False,
+            "--has-comments",
+            help="Only show issues that have at least one comment",
+        ),
+        without_comments: bool = typer.Option(
+            False,
+            "--without-comments",
+            help="Only show issues that have no comments",
+        ),
         tree: bool = typer.Option(False, "--tree", help="Display as tree"),
         table: bool = typer.Option(False, "--table", help="Display in columns"),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
@@ -893,6 +968,8 @@ def register(app: typer.Typer) -> None:
             all_namespaces=all_namespaces,
             agent_only=agent_only,
             manual_only=manual,
+            has_comments=has_comments,
+            without_comments=without_comments,
             tree=tree,
             table=table,
             json_output=json_output,
@@ -965,6 +1042,16 @@ def register(app: typer.Typer) -> None:
             "--manual",
             help="Only show issues marked as manual",
         ),
+        has_comments: bool = typer.Option(
+            False,
+            "--has-comments",
+            help="Only show issues that have at least one comment",
+        ),
+        without_comments: bool = typer.Option(
+            False,
+            "--without-comments",
+            help="Only show issues that have no comments",
+        ),
         tree: bool = typer.Option(False, "--tree", help="Display as tree"),
         table: bool = typer.Option(False, "--table", help="Display in columns"),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
@@ -987,6 +1074,8 @@ def register(app: typer.Typer) -> None:
             all_namespaces=all_namespaces,
             agent_only=agent_only,
             manual_only=manual,
+            has_comments=has_comments,
+            without_comments=without_comments,
             tree=tree,
             table=table,
             json_output=json_output,
@@ -1059,6 +1148,16 @@ def register(app: typer.Typer) -> None:
             "--manual",
             help="Only show issues marked as manual",
         ),
+        has_comments: bool = typer.Option(
+            False,
+            "--has-comments",
+            help="Only show issues that have at least one comment",
+        ),
+        without_comments: bool = typer.Option(
+            False,
+            "--without-comments",
+            help="Only show issues that have no comments",
+        ),
         tree: bool = typer.Option(False, "--tree", help="Display as tree"),
         table: bool = typer.Option(False, "--table", help="Display in columns"),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
@@ -1081,6 +1180,8 @@ def register(app: typer.Typer) -> None:
                 all_namespaces=all_namespaces,
                 agent_only=agent_only,
                 manual_only=manual,
+                has_comments=has_comments,
+                without_comments=without_comments,
                 dogcats_dir=str(storage.dogcats_dir),
                 storage=storage,
             )
@@ -1345,6 +1446,16 @@ def register(app: typer.Typer) -> None:
             "--manual",
             help="Only show issues marked as manual",
         ),
+        has_comments: bool = typer.Option(
+            False,
+            "--has-comments",
+            help="Only show issues that have at least one comment",
+        ),
+        without_comments: bool = typer.Option(
+            False,
+            "--without-comments",
+            help="Only show issues that have no comments",
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
@@ -1358,6 +1469,9 @@ def register(app: typer.Typer) -> None:
             from ._formatting import format_event, get_event_legend
 
             check_agent_manual_exclusive(agent_only=agent_only, manual_only=manual)
+            check_comments_exclusive(
+                has_comments=has_comments, without_comments=without_comments
+            )
 
             storage = get_storage(dogcats_dir)
             final_limit = limit_arg or limit or 10
@@ -1388,6 +1502,17 @@ def register(app: typer.Typer) -> None:
                     events = [e for e in events if not _is_manual(e.issue_id)]
                 else:
                     events = [e for e in events if _is_manual(e.issue_id)]
+
+            if has_comments or without_comments:
+
+                def _has_comments(event_issue_id: str) -> bool:
+                    issue_obj = storage.get(event_issue_id)
+                    return bool(issue_obj and issue_obj.comments)
+
+                if has_comments:
+                    events = [e for e in events if _has_comments(e.issue_id)]
+                else:
+                    events = [e for e in events if not _has_comments(e.issue_id)]
 
             events = events[:final_limit]
             events.reverse()  # Display oldest-first
@@ -1439,6 +1564,16 @@ def register(app: typer.Typer) -> None:
             "--manual",
             help="Only show issues marked as manual",
         ),
+        has_comments: bool = typer.Option(
+            False,
+            "--has-comments",
+            help="Only show issues that have at least one comment",
+        ),
+        without_comments: bool = typer.Option(
+            False,
+            "--without-comments",
+            help="Only show issues that have no comments",
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
@@ -1449,6 +1584,9 @@ def register(app: typer.Typer) -> None:
         """
         try:
             check_agent_manual_exclusive(agent_only=agent_only, manual_only=manual)
+            check_comments_exclusive(
+                has_comments=has_comments, without_comments=without_comments
+            )
 
             storage = get_storage(dogcats_dir)
             issues = [
@@ -1476,6 +1614,11 @@ def register(app: typer.Typer) -> None:
                     for i in issues
                     if i.metadata.get("manual") or i.metadata.get("no_agent")
                 ]
+
+            if has_comments:
+                issues = [i for i in issues if i.comments]
+            elif without_comments:
+                issues = [i for i in issues if not i.comments]
 
             final_limit = limit_arg or limit or 10
             # Sort descending to select the N most recent, then reverse for display
@@ -1531,6 +1674,16 @@ def register(app: typer.Typer) -> None:
             "--manual",
             help="Only show issues marked as manual",
         ),
+        has_comments: bool = typer.Option(
+            False,
+            "--has-comments",
+            help="Only show issues that have at least one comment",
+        ),
+        without_comments: bool = typer.Option(
+            False,
+            "--without-comments",
+            help="Only show issues that have no comments",
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
@@ -1541,6 +1694,8 @@ def register(app: typer.Typer) -> None:
             all_namespaces=all_namespaces,
             agent_only=agent_only,
             manual=manual,
+            has_comments=has_comments,
+            without_comments=without_comments,
             json_output=json_output,
             dogcats_dir=dogcats_dir,
         )
@@ -1580,6 +1735,16 @@ def register(app: typer.Typer) -> None:
             "--manual",
             help="Only show issues marked as manual",
         ),
+        has_comments: bool = typer.Option(
+            False,
+            "--has-comments",
+            help="Only show issues that have at least one comment",
+        ),
+        without_comments: bool = typer.Option(
+            False,
+            "--without-comments",
+            help="Only show issues that have no comments",
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
@@ -1590,6 +1755,8 @@ def register(app: typer.Typer) -> None:
             all_namespaces=all_namespaces,
             agent_only=agent_only,
             manual=manual,
+            has_comments=has_comments,
+            without_comments=without_comments,
             json_output=json_output,
             dogcats_dir=dogcats_dir,
         )
@@ -1611,12 +1778,25 @@ def register(app: typer.Typer) -> None:
             "--manual",
             help="Only show issues marked as manual",
         ),
+        has_comments: bool = typer.Option(
+            False,
+            "--has-comments",
+            help="Only show issues that have at least one comment",
+        ),
+        without_comments: bool = typer.Option(
+            False,
+            "--without-comments",
+            help="Only show issues that have no comments",
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Show in-progress and in-review issues together."""
         try:
             check_agent_manual_exclusive(agent_only=agent_only, manual_only=manual)
+            check_comments_exclusive(
+                has_comments=has_comments, without_comments=without_comments
+            )
 
             storage = get_storage(dogcats_dir)
             ip_issues = storage.list({"status": "in_progress"})
@@ -1646,6 +1826,12 @@ def register(app: typer.Typer) -> None:
                     for i in ir_issues
                     if i.metadata.get("manual") or i.metadata.get("no_agent")
                 ]
+            if has_comments:
+                ip_issues = [i for i in ip_issues if i.comments]
+                ir_issues = [i for i in ir_issues if i.comments]
+            elif without_comments:
+                ip_issues = [i for i in ip_issues if not i.comments]
+                ir_issues = [i for i in ir_issues if not i.comments]
             ip_issues.sort(key=lambda i: i.priority)
             ir_issues.sort(key=lambda i: i.priority)
 
@@ -1877,6 +2063,16 @@ def register(app: typer.Typer) -> None:
             "--manual",
             help="Only show issues marked as manual",
         ),
+        has_comments: bool = typer.Option(
+            False,
+            "--has-comments",
+            help="Only show issues that have at least one comment",
+        ),
+        without_comments: bool = typer.Option(
+            False,
+            "--without-comments",
+            help="Only show issues that have no comments",
+        ),
         tree: bool = typer.Option(False, "--tree", help="Display as tree"),
         table: bool = typer.Option(False, "--table", help="Display in columns"),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
@@ -1912,6 +2108,8 @@ def register(app: typer.Typer) -> None:
                 all_namespaces=all_namespaces,
                 agent_only=agent_only,
                 manual_only=manual,
+                has_comments=has_comments,
+                without_comments=without_comments,
                 dogcats_dir=str(storage.dogcats_dir),
                 storage=storage,
             )

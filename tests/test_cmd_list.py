@@ -396,6 +396,147 @@ class TestCLIList:
         assert result.exit_code != 0
         assert "mutually exclusive" in (result.stdout + result.stderr)
 
+    def test_list_has_comments(self, tmp_path: Path) -> None:
+        """Test list --has-comments shows only issues with comments."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # Create two issues; comment on one
+        result = runner.invoke(
+            app,
+            ["create", "With comment", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        commented = json.loads(result.stdout)
+        commented_full_id = f"{commented['namespace']}-{commented['id']}"
+        runner.invoke(
+            app,
+            ["create", "No comment", "--dogcats-dir", str(dogcats_dir)],
+        )
+        runner.invoke(
+            app,
+            [
+                "comment",
+                commented_full_id,
+                "add",
+                "--text",
+                "First note",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["list", "--has-comments", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "With comment" in result.stdout
+        assert "No comment" not in result.stdout
+
+    def test_list_without_comments(self, tmp_path: Path) -> None:
+        """Test list --without-comments hides issues with comments."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["create", "With comment", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        commented = json.loads(result.stdout)
+        commented_full_id = f"{commented['namespace']}-{commented['id']}"
+        runner.invoke(
+            app,
+            ["create", "No comment", "--dogcats-dir", str(dogcats_dir)],
+        )
+        runner.invoke(
+            app,
+            [
+                "comment",
+                commented_full_id,
+                "add",
+                "--text",
+                "First note",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["list", "--without-comments", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "No comment" in result.stdout
+        assert "With comment" not in result.stdout
+
+    def test_list_has_without_comments_mutex(self, tmp_path: Path) -> None:
+        """Test that --has-comments and --without-comments cannot be combined."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            [
+                "list",
+                "--has-comments",
+                "--without-comments",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code != 0
+        assert "mutually exclusive" in (result.stdout + result.stderr)
+
+    def test_list_has_comments_combined_with_agent_only(self, tmp_path: Path) -> None:
+        """Test --has-comments combines with --agent-only correctly."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # Two commented issues — one normal, one manual
+        for title, extra in (
+            ("Agent commented", []),
+            ("Manual commented", ["--manual"]),
+        ):
+            result = runner.invoke(
+                app,
+                ["create", title, "--json", *extra, "--dogcats-dir", str(dogcats_dir)],
+            )
+            data = json.loads(result.stdout)
+            full_id = f"{data['namespace']}-{data['id']}"
+            runner.invoke(
+                app,
+                [
+                    "comment",
+                    full_id,
+                    "add",
+                    "--text",
+                    "note",
+                    "--dogcats-dir",
+                    str(dogcats_dir),
+                ],
+            )
+
+        # Plus one un-commented issue
+        runner.invoke(
+            app,
+            ["create", "Agent silent", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "list",
+                "--has-comments",
+                "--agent-only",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Agent commented" in result.stdout
+        assert "Manual commented" not in result.stdout
+        assert "Agent silent" not in result.stdout
+
     def test_list_tree_indents_subtasks(self, tmp_path: Path) -> None:
         """Test list --tree indents subtasks under their parents."""
         dogcats_dir = tmp_path / ".dogcats"

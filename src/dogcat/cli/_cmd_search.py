@@ -106,6 +106,16 @@ def register(app: typer.Typer) -> None:
             "--manual",
             help="Only show issues marked as manual",
         ),
+        has_comments: bool = typer.Option(
+            False,
+            "--has-comments",
+            help="Only show issues that have at least one comment",
+        ),
+        without_comments: bool = typer.Option(
+            False,
+            "--without-comments",
+            help="Only show issues that have no comments",
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
@@ -148,6 +158,8 @@ def register(app: typer.Typer) -> None:
                 all_namespaces=all_namespaces,
                 agent_only=agent_only,
                 manual_only=manual,
+                has_comments=has_comments,
+                without_comments=without_comments,
                 dogcats_dir=str(storage.dogcats_dir),
                 storage=storage,
             )

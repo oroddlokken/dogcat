@@ -234,6 +234,62 @@ class TestCLIReady:
         assert result.exit_code != 0
         assert "mutually exclusive" in (result.stdout + result.stderr)
 
+    def test_ready_has_comments(self, tmp_path: Path) -> None:
+        """Test ready --has-comments filters issues without comments."""
+        import json as _json
+
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create1 = runner.invoke(
+            app,
+            ["create", "With comment", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        commented = _json.loads(create1.stdout)
+        commented_id = f"{commented['namespace']}-{commented['id']}"
+        runner.invoke(
+            app,
+            ["create", "No comment", "--dogcats-dir", str(dogcats_dir)],
+        )
+        runner.invoke(
+            app,
+            [
+                "comment",
+                commented_id,
+                "add",
+                "--text",
+                "note",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["ready", "--has-comments", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "With comment" in result.stdout
+        assert "No comment" not in result.stdout
+
+    def test_ready_has_without_comments_mutex(self, tmp_path: Path) -> None:
+        """Test --has-comments and --without-comments cannot be combined on ready."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            [
+                "ready",
+                "--has-comments",
+                "--without-comments",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code != 0
+        assert "mutually exclusive" in (result.stdout + result.stderr)
+
 
 class TestCLIBlocked:
     """Test blocked command."""
