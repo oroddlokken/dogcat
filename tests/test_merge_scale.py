@@ -11,7 +11,6 @@ from typing import Any
 
 from dogcat.merge_driver import merge_jsonl
 
-
 # ---------------------------------------------------------------------------
 # Test scenarios
 # ---------------------------------------------------------------------------
@@ -29,44 +28,50 @@ class TestMergeScale:
         # Create 100 issues on base (shared starting point)
         base: list[dict[str, Any]] = []
         for i in range(100):
-            base.append({
-                "record_type": "issue",
-                "namespace": "test",
-                "id": f"base{i:03d}",
-                "title": f"Base issue {i}",
-                "status": "open",
-                "priority": 2,
-                "issue_type": "task",
-                "updated_at": "2026-01-01T00:00:00+00:00",
-            })
+            base.append(
+                {
+                    "record_type": "issue",
+                    "namespace": "test",
+                    "id": f"base{i:03d}",
+                    "title": f"Base issue {i}",
+                    "status": "open",
+                    "priority": 2,
+                    "issue_type": "task",
+                    "updated_at": "2026-01-01T00:00:00+00:00",
+                }
+            )
 
         # Ours: add 100 more unique issues
         ours = base.copy()
         for i in range(100):
-            ours.append({
-                "record_type": "issue",
-                "namespace": "test",
-                "id": f"ours{i:03d}",
-                "title": f"Ours issue {i}",
-                "status": "open",
-                "priority": 2,
-                "issue_type": "task",
-                "updated_at": "2026-01-02T00:00:00+00:00",
-            })
+            ours.append(
+                {
+                    "record_type": "issue",
+                    "namespace": "test",
+                    "id": f"ours{i:03d}",
+                    "title": f"Ours issue {i}",
+                    "status": "open",
+                    "priority": 2,
+                    "issue_type": "task",
+                    "updated_at": "2026-01-02T00:00:00+00:00",
+                }
+            )
 
         # Theirs: add 100 different unique issues
         theirs = base.copy()
         for i in range(100):
-            theirs.append({
-                "record_type": "issue",
-                "namespace": "test",
-                "id": f"theirs{i:03d}",
-                "title": f"Theirs issue {i}",
-                "status": "open",
-                "priority": 2,
-                "issue_type": "task",
-                "updated_at": "2026-01-02T00:00:00+00:00",
-            })
+            theirs.append(
+                {
+                    "record_type": "issue",
+                    "namespace": "test",
+                    "id": f"theirs{i:03d}",
+                    "title": f"Theirs issue {i}",
+                    "status": "open",
+                    "priority": 2,
+                    "issue_type": "task",
+                    "updated_at": "2026-01-02T00:00:00+00:00",
+                }
+            )
 
         # Measure merge performance
         start = time.perf_counter()
@@ -90,33 +95,37 @@ class TestMergeScale:
         # Create 50 base issues
         base: list[dict[str, Any]] = []
         for i in range(50):
-            base.append({
-                "record_type": "issue",
-                "namespace": "test",
-                "id": f"shared{i:02d}",
-                "title": f"Shared {i}",
-                "status": "open",
-                "priority": 2,
-                "issue_type": "task",
-                "updated_at": "2026-01-01T00:00:00+00:00",
-            })
+            base.append(
+                {
+                    "record_type": "issue",
+                    "namespace": "test",
+                    "id": f"shared{i:02d}",
+                    "title": f"Shared {i}",
+                    "status": "open",
+                    "priority": 2,
+                    "issue_type": "task",
+                    "updated_at": "2026-01-01T00:00:00+00:00",
+                }
+            )
 
         # Ours: edit all 50 issues 5 times each with interleaved timestamps
         ours = base.copy()
         for issue_idx in range(50):
             for edit in range(1, 6):
                 # Ours edits happen on odd timestamps
-                timestamp = f"2026-01-02T{edit*2:02d}:00:00+00:00"
-                ours.append({
-                    "record_type": "issue",
-                    "namespace": "test",
-                    "id": f"shared{issue_idx:02d}",
-                    "title": f"Shared {issue_idx}",
-                    "status": f"ours_edit_{edit}",
-                    "priority": 2,
-                    "issue_type": "task",
-                    "updated_at": timestamp,
-                })
+                timestamp = f"2026-01-02T{edit * 2:02d}:00:00+00:00"
+                ours.append(
+                    {
+                        "record_type": "issue",
+                        "namespace": "test",
+                        "id": f"shared{issue_idx:02d}",
+                        "title": f"Shared {issue_idx}",
+                        "status": f"ours_edit_{edit}",
+                        "priority": 2,
+                        "issue_type": "task",
+                        "updated_at": timestamp,
+                    }
+                )
 
         # Theirs: edit same 50 issues 5 times each with different timestamps
         theirs = base.copy()
@@ -129,17 +138,19 @@ class TestMergeScale:
                 elif edit == 5:
                     timestamp = "2026-01-02T11:00:00+00:00"  # Later than ours 5
                 else:
-                    timestamp = f"2026-01-02T{edit*2+1:02d}:00:00+00:00"
-                theirs.append({
-                    "record_type": "issue",
-                    "namespace": "test",
-                    "id": f"shared{issue_idx:02d}",
-                    "title": f"Shared {issue_idx}",
-                    "status": f"theirs_edit_{edit}",
-                    "priority": 2,
-                    "issue_type": "task",
-                    "updated_at": timestamp,
-                })
+                    timestamp = f"2026-01-02T{edit * 2 + 1:02d}:00:00+00:00"
+                theirs.append(
+                    {
+                        "record_type": "issue",
+                        "namespace": "test",
+                        "id": f"shared{issue_idx:02d}",
+                        "title": f"Shared {issue_idx}",
+                        "status": f"theirs_edit_{edit}",
+                        "priority": 2,
+                        "issue_type": "task",
+                        "updated_at": timestamp,
+                    }
+                )
 
         # Merge
         start = time.perf_counter()
@@ -171,62 +182,72 @@ class TestMergeScale:
         # Create 50 base issues
         base: list[dict[str, Any]] = []
         for i in range(50):
-            base.append({
-                "record_type": "issue",
-                "namespace": "test",
-                "id": f"issue{i:02d}",
-                "title": f"Issue {i}",
-                "status": "open",
-                "priority": 2,
-                "issue_type": "task",
-                "updated_at": "2026-01-01T00:00:00+00:00",
-            })
+            base.append(
+                {
+                    "record_type": "issue",
+                    "namespace": "test",
+                    "id": f"issue{i:02d}",
+                    "title": f"Issue {i}",
+                    "status": "open",
+                    "priority": 2,
+                    "issue_type": "task",
+                    "updated_at": "2026-01-01T00:00:00+00:00",
+                }
+            )
 
         # Ours: add issues, deps, events
         ours = base.copy()
         # Add 50 deps
         for i in range(50):
-            ours.append({
-                "record_type": "dependency",
-                "issue_id": f"test-issue{i:02d}",
-                "depends_on_id": f"test-issue{(i+1)%50:02d}",
-                "type": "blocks",
-                "op": "add",
-                "created_at": "2026-01-02T00:00:00+00:00",
-            })
+            ours.append(
+                {
+                    "record_type": "dependency",
+                    "issue_id": f"test-issue{i:02d}",
+                    "depends_on_id": f"test-issue{(i + 1) % 50:02d}",
+                    "type": "blocks",
+                    "op": "add",
+                    "created_at": "2026-01-02T00:00:00+00:00",
+                }
+            )
         # Add 100 events (multiple per issue)
         for i in range(100):
-            ours.append({
-                "record_type": "event",
-                "event_type": "created",
-                "issue_id": f"test-issue{i%50:02d}",
-                "timestamp": f"2026-01-02T{(i//5)%24:02d}:00:00+00:00",
-                "by": "user-a",
-                "changes_signature": "1a2b3c",
-            })
+            ours.append(
+                {
+                    "record_type": "event",
+                    "event_type": "created",
+                    "issue_id": f"test-issue{i % 50:02d}",
+                    "timestamp": f"2026-01-02T{(i // 5) % 24:02d}:00:00+00:00",
+                    "by": "user-a",
+                    "changes_signature": "1a2b3c",
+                }
+            )
 
         # Theirs: add different deps, events
         theirs = base.copy()
         # Add 50 different deps (reversed order)
         for i in range(50):
-            theirs.append({
-                "record_type": "dependency",
-                "issue_id": f"test-issue{(i+1)%50:02d}",
-                "depends_on_id": f"test-issue{i:02d}",
-                "type": "related",
-                "op": "add",
-                "created_at": "2026-01-02T00:00:00+00:00",
-            })
+            theirs.append(
+                {
+                    "record_type": "dependency",
+                    "issue_id": f"test-issue{(i + 1) % 50:02d}",
+                    "depends_on_id": f"test-issue{i:02d}",
+                    "type": "related",
+                    "op": "add",
+                    "created_at": "2026-01-02T00:00:00+00:00",
+                }
+            )
         # Add 100 different events
         for i in range(100):
-            theirs.append({
-                "record_type": "event",
-                "event_type": "updated",
-                "issue_id": f"test-issue{(i+1)%50:02d}",
-                "timestamp": f"2026-01-02T{((i+12)//5)%24:02d}:00:00+00:00",
-                "by": "user-b",
-                "changes_signature": "4d5e6f",
-            })
+            theirs.append(
+                {
+                    "record_type": "event",
+                    "event_type": "updated",
+                    "issue_id": f"test-issue{(i + 1) % 50:02d}",
+                    "timestamp": f"2026-01-02T{((i + 12) // 5) % 24:02d}:00:00+00:00",
+                    "by": "user-b",
+                    "changes_signature": "4d5e6f",
+                }
+            )
 
         # Merge
         start = time.perf_counter()
@@ -256,16 +277,18 @@ class TestMergeScale:
         # Create a "compacted" base (snapshot form)
         base: list[dict[str, Any]] = []
         for i in range(100):
-            base.append({
-                "record_type": "issue",
-                "namespace": "test",
-                "id": f"issue{i:03d}",
-                "title": f"Issue {i}",
-                "status": "open",
-                "priority": 2,
-                "issue_type": "task",
-                "updated_at": "2026-01-01T12:00:00+00:00",
-            })
+            base.append(
+                {
+                    "record_type": "issue",
+                    "namespace": "test",
+                    "id": f"issue{i:03d}",
+                    "title": f"Issue {i}",
+                    "status": "open",
+                    "priority": 2,
+                    "issue_type": "task",
+                    "updated_at": "2026-01-01T12:00:00+00:00",
+                }
+            )
 
         # Ours: compacted file (just snapshot, no events)
         ours = base.copy()
@@ -274,28 +297,32 @@ class TestMergeScale:
         # (simulating someone working on feature branch with 100 raw mutations)
         theirs = base.copy()
         for i in range(100):
-            theirs.append({
-                "record_type": "issue",
-                "namespace": "test",
-                "id": f"issue{i:03d}",
-                "title": f"Issue {i} - edited on branch",
-                "status": "in_progress",
-                "priority": 1,
-                "issue_type": "task",
-                "updated_at": f"2026-01-02T{(i%24):02d}:00:00+00:00",
-            })
+            theirs.append(
+                {
+                    "record_type": "issue",
+                    "namespace": "test",
+                    "id": f"issue{i:03d}",
+                    "title": f"Issue {i} - edited on branch",
+                    "status": "in_progress",
+                    "priority": 1,
+                    "issue_type": "task",
+                    "updated_at": f"2026-01-02T{(i % 24):02d}:00:00+00:00",
+                }
+            )
         # Add some new issues on theirs
         for i in range(100, 150):
-            theirs.append({
-                "record_type": "issue",
-                "namespace": "test",
-                "id": f"issue{i:03d}",
-                "title": f"New issue {i}",
-                "status": "open",
-                "priority": 2,
-                "issue_type": "task",
-                "updated_at": "2026-01-02T12:00:00+00:00",
-            })
+            theirs.append(
+                {
+                    "record_type": "issue",
+                    "namespace": "test",
+                    "id": f"issue{i:03d}",
+                    "title": f"New issue {i}",
+                    "status": "open",
+                    "priority": 2,
+                    "issue_type": "task",
+                    "updated_at": "2026-01-02T12:00:00+00:00",
+                }
+            )
 
         # Merge
         start = time.perf_counter()

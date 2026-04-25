@@ -254,7 +254,8 @@ class TestMultipleMerges:
         issue_a = storage.get("test-a2")
         issue_b = storage.get("test-b2")
 
-        assert issue_a is not None and issue_b is not None
+        assert issue_a is not None
+        assert issue_b is not None
         # Verify dependency exists
         deps = storage.get_dependencies("test-b2")
         assert len(deps) > 0, "Dependency should exist"
@@ -279,9 +280,7 @@ class TestSquashMerge:
         )
 
         # Edit 2
-        _update_issue_on_branch(
-            repo, "feature", "test-sq1", {"priority": 1}, "Edit 2"
-        )
+        _update_issue_on_branch(repo, "feature", "test-sq1", {"priority": 1}, "Edit 2")
 
         # Edit 3
         _update_issue_on_branch(
@@ -320,7 +319,9 @@ class TestSquashMerge:
         assert issue.priority == ref_state["priority"]
         assert issue.description == ref_state["description"]
 
-    def test_squash_merge_creates_new_issue_and_closes_it(self, git_repo: GitRepo) -> None:
+    def test_squash_merge_creates_new_issue_and_closes_it(
+        self, git_repo: GitRepo
+    ) -> None:
         """Branch: create issue, add label, change status, close. Squash merge.
 
         Final state should have the issue closed.
