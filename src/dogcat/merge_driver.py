@@ -107,6 +107,7 @@ order. For each key (identity tuple) in the union of base, ours, and theirs:
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, cast
 
 import orjson
@@ -244,6 +245,36 @@ def _parse_jsonl(path: Path) -> list[dict[str, Any]]:
     return records
 
 
+_MIN_AWARE = datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _parse_iso_ts(value: str) -> datetime:
+    """Parse an ISO-8601 timestamp to a tz-aware UTC ``datetime``.
+
+    Plain lexicographic comparison of ISO strings is wrong across mixed
+    offsets (``2026-04-25T10:00:00+05:00`` < ``2026-04-25T08:00:00+00:00``
+    by string but earlier in absolute time), and ``Z`` vs ``+00:00`` for
+    the same instant compare unequal. We parse the ISO string, treat
+    naive timestamps as UTC, and normalize to UTC for comparison so the
+    LWW rule reflects absolute time. (dogcat-623e)
+
+    Returns ``_MIN_AWARE`` for unparseable / empty strings so older or
+    legacy records always lose any tie-break against a parseable peer.
+    """
+    if not value:
+        return _MIN_AWARE
+    try:
+        # Python 3.11 `fromisoformat` accepts trailing 'Z'; we still
+        # normalize manually for older streams that mix `Z` and `+00:00`.
+        text = value.replace("Z", "+00:00") if value.endswith("Z") else value
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return _MIN_AWARE
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def _issue_full_id(record: dict[str, Any]) -> str:
     """Extract the full issue ID from an issue record."""
     ns = record.get("namespace", "dc")
@@ -263,6 +294,23 @@ _PROPOSAL_STATUS_RANK: dict[str, int] = {
     "open": 0,
     "closed": 1,
     "tombstone": 2,
+}
+
+
+# Issue statuses ordered by finality. tombstone is final because a deletion
+# must never be reverted by a concurrent edit on a feature branch (see
+# dogcat-mro6). closed is "final-ish" — branches can still reopen, but a
+# concurrent edit that left the issue OPEN should not silently overwrite
+# a CLOSED record from the other side.
+_ISSUE_STATUS_RANK: dict[str, int] = {
+    "draft": 0,
+    "open": 1,
+    "in_progress": 1,
+    "in_review": 1,
+    "blocked": 1,
+    "deferred": 1,
+    "closed": 2,
+    "tombstone": 3,
 }
 
 
@@ -353,7 +401,11 @@ def merge_jsonl(
 
     Returns the merged list of records.
     """
-    # --- Issues: last-write-wins by updated_at ---
+    # --- Issues: status finality first, then updated_at ---
+    # Status finality (TOMBSTONE > CLOSED > active states > DRAFT) wins
+    # over updated_at so a concurrent edit on one branch cannot silently
+    # revert a tombstone or close from the other branch. Within the same
+    # rank, the record with the later updated_at wins. (dogcat-mro6)
     issues: dict[str, dict[str, Any]] = {}
     for record in [*ours_records, *theirs_records]:
         if classify_record(record) != "issue":
@@ -363,11 +415,15 @@ def merge_jsonl(
         if existing is None:
             issues[fid] = record
         else:
-            # Keep the one with the later updated_at
-            new_ts = record.get("updated_at", "")
-            old_ts = existing.get("updated_at", "")
-            if new_ts >= old_ts:
+            new_rank = _ISSUE_STATUS_RANK.get(record.get("status", "open"), 1)
+            old_rank = _ISSUE_STATUS_RANK.get(existing.get("status", "open"), 1)
+            if new_rank > old_rank:
                 issues[fid] = record
+            elif new_rank == old_rank:
+                new_ts = _parse_iso_ts(record.get("updated_at", ""))
+                old_ts = _parse_iso_ts(existing.get("updated_at", ""))
+                if new_ts >= old_ts:
+                    issues[fid] = record
 
     # --- Proposals: last-write-wins by status finality, then updated_at ---
     # Merge strategy: higher status finality always wins (TOMBSTONE > CLOSED > OPEN).
@@ -394,8 +450,12 @@ def merge_jsonl(
             if new_rank > old_rank:
                 proposals[fid] = record
             elif new_rank == old_rank:
-                new_ts = record.get("updated_at", record.get("created_at", ""))
-                old_ts = existing.get("updated_at", existing.get("created_at", ""))
+                new_ts = _parse_iso_ts(
+                    record.get("updated_at", record.get("created_at", ""))
+                )
+                old_ts = _parse_iso_ts(
+                    existing.get("updated_at", existing.get("created_at", ""))
+                )
                 if new_ts >= old_ts:
                     proposals[fid] = record
 
@@ -453,8 +513,11 @@ def merge_jsonl(
     result.extend(proposals.values())
     result.extend(merged_deps.values())
     result.extend(merged_links.values())
-    # Sort events by timestamp for consistent ordering
-    sorted_events = sorted(events.values(), key=lambda e: e.get("timestamp", ""))
+    # Sort events by absolute time (parsed) so cross-timezone records
+    # come out in the right order. (dogcat-623e)
+    sorted_events = sorted(
+        events.values(), key=lambda e: _parse_iso_ts(e.get("timestamp", ""))
+    )
     result.extend(sorted_events)
 
     return result

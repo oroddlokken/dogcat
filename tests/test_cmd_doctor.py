@@ -590,6 +590,34 @@ class TestDoctorPreCompactHook:
         data = json.loads(result.stdout)
         assert "claude_precompact" not in data["checks"]
 
+    def test_non_dict_settings_does_not_crash_doctor(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Doctor handles a non-dict settings.json (e.g. ``[]``) gracefully.
+
+        Regression for dogcat-2yho: a user file containing ``[]``,
+        ``null``, or a scalar used to crash doctor with AttributeError
+        — and doctor IS the recovery tool, so it must not crash.
+        """
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        # Non-dict — used to crash doctor.
+        (claude_dir / "settings.json").write_text("[]")
+
+        result = runner.invoke(
+            app,
+            ["doctor", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        # Must not crash; doctor reports the hook as missing.
+        data = json.loads(result.stdout)
+        assert data["checks"]["claude_precompact"]["passed"] is False
+
     def test_warns_when_hook_missing(
         self,
         tmp_path: Path,
@@ -1022,3 +1050,66 @@ class TestDoctorIdDistribution:
         )
         data = json.loads(result.stdout)
         assert data["checks"]["id_distribution"]["passed"] is True
+
+
+class TestDoctorPostMergeSkipReasons:
+    """``doctor --post-merge`` must surface a clear skip reason instead of silent pass.
+
+    Regression for dogcat-40t6: when not in a git repo, or when .dogcats
+    is outside the repo root, the concurrent-edit detector silently
+    no-op'd, so the user thought no concurrent edits were detected.
+    """
+
+    def test_post_merge_skip_outside_git_repo(self, tmp_path: Path) -> None:
+        """Outside any git repo, the skip reason is reported on stderr."""
+        dogcats_dir = tmp_path / ".dogcats"
+        # Initialize without a git repo wrapper.
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # Run doctor with --post-merge and --json from a path that isn't
+        # under a git repo. The CWD for tests is typically the dogcat
+        # repo, so use --dogcats-dir to point at our tmp_path; the git
+        # check operates on cwd -> repo_root, which finds dogcat. To
+        # make this deterministic, mock dogcat.git.repo_root.
+        from unittest.mock import patch
+
+        with patch("dogcat.git.repo_root", return_value=None):
+            result = runner.invoke(
+                app,
+                [
+                    "doctor",
+                    "--post-merge",
+                    "--json",
+                    "--dogcats-dir",
+                    str(dogcats_dir),
+                ],
+            )
+        data = json.loads(result.stdout)
+        assert data["post_merge_skipped"].startswith(
+            "post-merge skipped: not inside a git repository"
+        )
+
+    def test_post_merge_skip_external_dogcats(self, tmp_path: Path) -> None:
+        """When .dogcats is outside the repo root, surface a skip reason."""
+        dogcats_dir = tmp_path / "external" / ".dogcats"
+        dogcats_dir.parent.mkdir()
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        from unittest.mock import patch
+
+        # repo_root() returns a path that does not contain dogcats_dir.
+        unrelated_repo = tmp_path / "repo"
+        unrelated_repo.mkdir()
+        with patch("dogcat.git.repo_root", return_value=unrelated_repo.resolve()):
+            result = runner.invoke(
+                app,
+                [
+                    "doctor",
+                    "--post-merge",
+                    "--json",
+                    "--dogcats-dir",
+                    str(dogcats_dir),
+                ],
+            )
+        data = json.loads(result.stdout)
+        assert "outside the git repo" in data["post_merge_skipped"]

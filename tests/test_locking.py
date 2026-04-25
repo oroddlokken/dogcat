@@ -106,3 +106,32 @@ def test_invalid_env_var_falls_back_to_default(
     # Should not raise even though env value is bogus.
     with advisory_file_lock(lock_path):
         pass
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("inf", 30.0),
+        ("Infinity", 30.0),
+        ("-inf", 30.0),
+        ("nan", 30.0),
+        ("0", 30.0),
+        ("-1", 30.0),
+        ("60", 60.0),
+        ("0.5", 0.5),
+    ],
+)
+def test_resolve_timeout_clamps_non_finite_and_non_positive(
+    monkeypatch: pytest.MonkeyPatch, raw: str, expected: float
+) -> None:
+    """Non-finite / non-positive env values fall back to the default.
+
+    Regression for dogcat-1z5u: ``inf`` slipped past the ``> 0`` check
+    and disabled the stale-lock timeout. ``isfinite`` now blocks all
+    of ``inf``, ``-inf``, ``nan`` (and the textual aliases that
+    ``float`` accepts).
+    """
+    from dogcat.locking import _resolve_timeout
+
+    monkeypatch.setenv(LOCK_TIMEOUT_ENV_VAR, raw)
+    assert _resolve_timeout() == expected

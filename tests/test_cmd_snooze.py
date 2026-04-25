@@ -370,6 +370,46 @@ class TestParseDuration:
         expected_min = datetime.now().astimezone() + timedelta(days=998, hours=23)
         assert result > expected_min
 
+    def test_overflow_duration_rejected(self) -> None:
+        """A multi-trillion-day duration is rejected with a clear error.
+
+        Regression for dogcat-dfn9: ``999999999999d`` used to throw
+        OverflowError inside timedelta with a meaningless message.
+        """
+        import pytest
+
+        from dogcat.cli._helpers import parse_duration
+
+        with pytest.raises(ValueError, match="too far in the future"):
+            parse_duration("999999999999d")
+
+    def test_far_future_iso_date_caps_relative(self) -> None:
+        """Relative durations above the 100y cap are rejected."""
+        import pytest
+
+        from dogcat.cli._helpers import parse_duration
+
+        # 100 years is fine — verify the threshold.
+        parse_duration(f"{365 * 100}d")
+        with pytest.raises(ValueError, match="too far in the future"):
+            parse_duration(f"{365 * 100 + 1}d")
+
+    def test_iso_z_suffix_accepted(self) -> None:
+        """``2026-04-25T00:00:00Z`` parses correctly (regression for dogcat-3x9q).
+
+        ``datetime.fromisoformat`` only accepts uppercase ``Z``; the
+        previous implementation lowercased the input first, so the help
+        text claiming ISO8601 support was wrong for the most common
+        ``Z``-terminated form.
+        """
+        from dogcat.cli._helpers import parse_duration
+
+        result = parse_duration("2026-04-25T00:00:00Z")
+        assert result.year == 2026
+        assert result.month == 4
+        assert result.day == 25
+        assert result.tzinfo is not None
+
     def test_iso_with_timezone(self) -> None:
         """ISO8601 with explicit timezone offset preserves the offset."""
         from dogcat.cli._helpers import parse_duration

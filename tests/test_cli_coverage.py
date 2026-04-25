@@ -4056,3 +4056,33 @@ class TestSearchContextSnippets:
         assert "Design issue" in result.stdout
         assert "Design:" in result.stdout
         assert "quuxflop" in result.stdout
+
+
+class TestCommandModuleLoadIsolation:
+    """A broken _cmd_* import must not collapse the whole CLI.
+
+    Regression for dogcat-1ge7: previously every module was eagerly
+    imported and registered at the top of ``dogcat.cli``; one broken
+    transitive (rich/textual ABI mismatch, etc.) crashed every dcat
+    invocation — including the diagnostic ``dcat doctor`` command.
+    """
+
+    def test_register_isolates_module_failure(self) -> None:
+        """A failing module is logged and skipped; other modules survive."""
+        from unittest.mock import patch
+
+        from dogcat.cli import _register_command_module
+        from dogcat.cli import app as cli_app
+
+        before = len(cli_app.registered_commands)
+
+        with patch(
+            "importlib.import_module",
+            side_effect=ImportError("simulated broken transitive"),
+        ):
+            # Should not raise — failure is logged and swallowed.
+            _register_command_module("_cmd_synthetic_broken")
+
+        # Other commands remain registered.
+        after = len(cli_app.registered_commands)
+        assert after == before

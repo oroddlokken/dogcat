@@ -150,8 +150,8 @@ class TestMalformedLastLineTolerance:
         s = JSONLStorage(str(storage_path))
         assert len(s.list()) == 1
 
-    def test_corrupt_middle_line_still_raises(self, temp_workspace: Path) -> None:
-        """A corrupt line in the middle still raises ValueError."""
+    def test_corrupt_middle_line_skipped(self, temp_workspace: Path) -> None:
+        """A corrupt line in the middle is logged, skipped, and tracked."""
         storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
         storage_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -159,19 +159,23 @@ class TestMalformedLastLineTolerance:
         v2 = _valid_line("b", "B")
         storage_path.write_text(f"{v1}\nGARBAGE\n{v2}\n")
 
-        with pytest.raises(ValueError, match="Invalid JSONL record at line 2"):
-            JSONLStorage(str(storage_path))
+        s = JSONLStorage(str(storage_path))
+        assert sorted(i.id for i in s.list()) == ["a", "b"]
+        assert len(s._bad_lines) == 1
+        assert s._needs_compaction is True
 
-    def test_corrupt_second_to_last_line_raises(self, temp_workspace: Path) -> None:
-        """Only the very last line is tolerated — second-to-last must be valid."""
+    def test_corrupt_second_to_last_line_skipped(self, temp_workspace: Path) -> None:
+        """A corrupt second-to-last line is also skipped (not just very-last)."""
         storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
         storage_path.parent.mkdir(parents=True, exist_ok=True)
 
-        valid = _valid_line()
-        storage_path.write_text(f"{valid}\nGARBAGE\n{valid}\n")
+        v1 = _valid_line("a", "A")
+        v2 = _valid_line("b", "B")
+        storage_path.write_text(f"{v1}\nGARBAGE\n{v2}\n")
 
-        with pytest.raises(ValueError, match="Invalid JSONL record at line 2"):
-            JSONLStorage(str(storage_path))
+        s = JSONLStorage(str(storage_path))
+        assert sorted(i.id for i in s.list()) == ["a", "b"]
+        assert len(s._bad_lines) == 1
 
     def test_trailing_whitespace_lines_ignored(self, temp_workspace: Path) -> None:
         """Trailing empty/whitespace lines don't shift what counts as 'last'."""
@@ -198,7 +202,7 @@ class TestMalformedLastLineTolerance:
         with caplog.at_level(logging.WARNING, logger="dogcat.storage"):
             JSONLStorage(str(storage_path))
 
-        assert any("Skipping malformed last line" in msg for msg in caplog.messages)
+        assert any("Skipping malformed JSONL line" in msg for msg in caplog.messages)
 
     def test_operations_after_recovery_work(self, temp_workspace: Path) -> None:
         """After recovering from a corrupt last line, normal operations still work."""

@@ -9,7 +9,51 @@ from dogcat.cli._formatting import (
     get_legend,
 )
 from dogcat.event_log import EventRecord
-from dogcat.models import Issue, Status
+from dogcat.models import Issue, Status, sanitize_for_terminal
+
+
+class TestTerminalEscapeSanitization:
+    """Render-time defense: control bytes never reach the terminal raw."""
+
+    def test_sanitize_replaces_escape_with_visible_form(self) -> None:
+        r"""ESC (\\x1b) is replaced with a visible \\xNN escape."""
+        out = sanitize_for_terminal("\x1b[2Jevil")
+        assert "\x1b" not in out
+        assert "\\x1b" in out
+
+    def test_sanitize_preserves_tab_and_newline(self) -> None:
+        """Tab and newline pass through unchanged."""
+        out = sanitize_for_terminal("a\tb\nc")
+        assert out == "a\tb\nc"
+
+    def test_sanitize_handles_c1_controls(self) -> None:
+        r"""C1 control bytes (\\x80-\\x9f) are also escaped."""
+        out = sanitize_for_terminal("\x9bsneaky")
+        assert "\x9b" not in out
+        assert "\\x9b" in out
+
+    def test_format_issue_brief_strips_escape_in_title(self) -> None:
+        """A title with raw ESC bytes does not emit them through brief format."""
+        issue = Issue(id="abc1", namespace="dc", title="\x1b[2J\x1b[Hfake")
+        out = format_issue_brief(issue)
+        # Format output may contain ANSI colors from typer.style(), but the
+        # user-supplied title bytes (\x1b[2J / \x1b[H) must not be present.
+        assert "\x1b[2J" not in out
+        assert "\x1b[H" not in out
+        assert "\\x1b" in out
+
+    def test_format_issue_full_strips_escape_in_description(self) -> None:
+        """ESC bytes in the description don't reach the full-format output."""
+        issue = Issue(
+            id="abc2",
+            namespace="dc",
+            title="OK",
+            description="hi\x1b[2J\x1b[Hthere",
+        )
+        out = format_issue_full(issue)
+        assert "\x1b[2J" not in out
+        assert "\x1b[H" not in out
+        assert "\\x1b" in out
 
 
 class TestFormatIssueTableMarkupEscaping:

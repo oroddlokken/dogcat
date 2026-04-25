@@ -32,72 +32,67 @@ def _global_options(
         raise typer.Exit(0)
 
 
-from . import (  # noqa: E402
-    _cmd_admin,
-    _cmd_archive,
-    _cmd_cache,
-    _cmd_chart,
-    _cmd_close,
-    _cmd_comment,
-    _cmd_config,
-    _cmd_create,
-    _cmd_demo,
-    _cmd_dep,
-    _cmd_diff,
-    _cmd_docs,
-    _cmd_doctor,
-    _cmd_example_md,
-    _cmd_features,
-    _cmd_graph,
-    _cmd_history,
-    _cmd_inbox,
-    _cmd_init,
-    _cmd_label,
-    _cmd_propose,
-    _cmd_read,
-    _cmd_rename_namespace,
-    _cmd_reopen,
-    _cmd_search,
-    _cmd_stale,
-    _cmd_tui,
-    _cmd_update,
-    _cmd_web,
-    _cmd_workflow,
+# Register each ``_cmd_*`` module independently so a single broken
+# transitive (rich/textual ABI mismatch, watchdog wheel for the wrong
+# Python ABI, etc.) doesn't collapse the whole CLI — including the
+# diagnostic commands like ``dcat doctor`` users would reach for to
+# investigate. Failures are logged with the module name and the rest
+# of the CLI continues to work. (dogcat-1ge7)
+import importlib  # noqa: E402
+import logging  # noqa: E402
+
+_logger = logging.getLogger(__name__)
+
+_COMMAND_MODULES: tuple[str, ...] = (
+    "_cmd_admin",
+    "_cmd_archive",
+    "_cmd_cache",
+    "_cmd_chart",
+    "_cmd_close",
+    "_cmd_comment",
+    "_cmd_config",
+    "_cmd_create",
+    "_cmd_demo",
+    "_cmd_dep",
+    "_cmd_diff",
+    "_cmd_docs",
+    "_cmd_doctor",
+    "_cmd_example_md",
+    "_cmd_features",
+    "_cmd_graph",
+    "_cmd_history",
+    "_cmd_inbox",
+    "_cmd_init",
+    "_cmd_label",
+    "_cmd_propose",
+    "_cmd_read",
+    "_cmd_rename_namespace",
+    "_cmd_reopen",
+    "_cmd_search",
+    "_cmd_stale",
+    "_cmd_tui",
+    "_cmd_update",
+    "_cmd_web",
+    "_cmd_workflow",
 )
 
-for _mod in (
-    _cmd_admin,
-    _cmd_archive,
-    _cmd_cache,
-    _cmd_chart,
-    _cmd_close,
-    _cmd_comment,
-    _cmd_config,
-    _cmd_create,
-    _cmd_demo,
-    _cmd_dep,
-    _cmd_diff,
-    _cmd_doctor,
-    _cmd_docs,
-    _cmd_example_md,
-    _cmd_features,
-    _cmd_graph,
-    _cmd_history,
-    _cmd_inbox,
-    _cmd_init,
-    _cmd_label,
-    _cmd_propose,
-    _cmd_read,
-    _cmd_rename_namespace,
-    _cmd_reopen,
-    _cmd_search,
-    _cmd_stale,
-    _cmd_tui,
-    _cmd_update,
-    _cmd_web,
-    _cmd_workflow,
-):
-    _mod.register(app)
+
+def _register_command_module(name: str) -> None:
+    """Import and register one ``_cmd_<name>`` module — log + skip on failure."""
+    try:
+        mod = importlib.import_module(f".{name}", package=__name__)
+        mod.register(app)
+    except Exception as exc:  # noqa: BLE001
+        _logger.warning(
+            "Failed to load CLI command module %r: %s. "
+            "The rest of dcat will still work; rerun with -v for details.",
+            name,
+            exc,
+        )
+
+
+for _name in _COMMAND_MODULES:
+    _register_command_module(_name)
 
 
 def main() -> None:

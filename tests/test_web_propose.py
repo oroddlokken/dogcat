@@ -254,7 +254,10 @@ class TestSubmitProposal:
     def test_submit_multiple_proposals(
         self, client: TestClient, web_dogcats: Path
     ) -> None:
-        """Multiple proposals can be submitted."""
+        """Multiple proposals can be submitted (each mints a fresh nonce)."""
+        # CSRF tokens are now single-use (dogcat-2icd), so each POST must
+        # use the freshly-minted nonce returned in the previous response's
+        # cookie + form. _csrf() re-fetches one via GET / between posts.
         token = _csrf(client)
         client.post(
             "/",
@@ -265,6 +268,7 @@ class TestSubmitProposal:
                 "description": "",
             },
         )
+        token = _csrf(client)
         client.post(
             "/",
             data={
@@ -427,12 +431,49 @@ class TestSubmitProposal:
         # The hidden namespace input should be set to beta
         assert 'name="namespace" value="beta"' in resp.text
 
-    def test_get_with_submitted_shows_success(self, client: TestClient) -> None:
-        """GET /?submitted=true&title=X shows the success message."""
-        resp = client.get("/?submitted=true&title=My+proposal")
+    def test_get_with_submitted_shows_success(
+        self, client: TestClient, web_dogcats: Path
+    ) -> None:
+        """GET /?submitted=true with a real id shows the looked-up title.
+
+        After dogcat-khb5, the title is fetched from inbox storage by id
+        rather than reflected from the query string. We submit a real
+        proposal first and then redirect with its id.
+        """
+        token = _csrf(client)
+        client.post(
+            "/",
+            data={
+                "csrf_token": token,
+                "namespace": "testns",
+                "title": "My proposal",
+                "description": "",
+            },
+        )
+        inbox = InboxStorage(dogcats_dir=str(web_dogcats))
+        proposals = inbox.list()
+        full_id = proposals[0].full_id
+        # The submit response already redirected to /?submitted=true; for
+        # this test we issue an explicit GET with the real id.
+        resp = client.get(f"/?submitted=true&id={full_id}")
         assert resp.status_code == 200
         assert "Proposal submitted" in resp.text
         assert "My proposal" in resp.text
+
+    def test_get_with_submitted_ignores_attacker_title(
+        self, client: TestClient
+    ) -> None:
+        """A submitted=true with attacker-supplied title is NOT reflected.
+
+        Regression for dogcat-khb5: previously the success banner echoed
+        whatever ``title=`` value the URL carried, even with no real
+        proposal id. We now only render the banner when the id resolves
+        to a live inbox proposal.
+        """
+        resp = client.get("/?submitted=true&id=does-not-exist&title=phish-bait")
+        # No real proposal → no success banner, no reflected text.
+        assert "Proposal submitted" not in resp.text
+        assert "phish-bait" not in resp.text
 
     def test_get_with_namespace_param_selects_namespace(
         self, web_dogcats_multi_ns: Path
@@ -834,6 +875,242 @@ class TestCSRFPerSession:
             },
         )
         assert "Invalid form submission" in resp.text
+
+
+class TestCSRFSingleUseAndOriginGuard:
+    """Tokens are single-use and Origin / token shape is validated.
+
+    Regression for dogcat-2icd: previously a captured (cookie, form-token)
+    pair was replayable for the entire CSRF cookie lifetime (1h). Tokens
+    now expire after CSRF_NONCE_TTL_SECONDS *and* are consumed on first
+    successful POST.
+    """
+
+    def test_token_replay_rejected(self, client: TestClient) -> None:
+        """A second submit with the same token is rejected."""
+        token = _csrf(client)
+        first = client.post(
+            "/",
+            data={
+                "csrf_token": token,
+                "namespace": "testns",
+                "title": "First",
+                "description": "",
+            },
+        )
+        # First should redirect (303) on success.
+        assert first.status_code in (200, 303)
+        # Second submit with the same token must be rejected.
+        replay = client.post(
+            "/",
+            data={
+                "csrf_token": token,
+                "namespace": "testns",
+                "title": "Replay",
+                "description": "",
+            },
+        )
+        assert "Invalid form submission" in replay.text
+
+    def test_malformed_token_rejected_before_compare(self, web_dogcats: Path) -> None:
+        """A short / non-base64 cookie value is refused (shape check)."""
+        app = create_app(dogcats_dir=str(web_dogcats))
+        client = TestClient(app)
+        # Plant a tiny bogus cookie (not produced by token_urlsafe).
+        client.cookies.set("dcat_csrf", "x")
+        resp = client.post(
+            "/",
+            data={
+                "csrf_token": "x",
+                "namespace": "testns",
+                "title": "Forged",
+                "description": "",
+            },
+        )
+        assert "Invalid form submission" in resp.text
+
+    def test_foreign_origin_rejected(self, client: TestClient) -> None:
+        """A POST from a different Origin is rejected even with valid tokens."""
+        token = _csrf(client)
+        resp = client.post(
+            "/",
+            data={
+                "csrf_token": token,
+                "namespace": "testns",
+                "title": "Forged",
+                "description": "",
+            },
+            headers={"Origin": "https://evil.example.com"},
+        )
+        assert "Invalid form submission" in resp.text
+
+
+class TestOpenApiSchemaDisabled:
+    """The OpenAPI schema endpoint must be disabled too.
+
+    Regression for dogcat-6a5j: ``docs_url=None`` and ``redoc_url=None``
+    closed the human-readable docs but left ``/openapi.json`` open at
+    its default path, leaking the full route + form-field schema.
+    """
+
+    def test_openapi_json_returns_404(self, client: TestClient) -> None:
+        """GET /openapi.json must not expose the route schema."""
+        resp = client.get("/openapi.json")
+        assert resp.status_code == 404
+
+
+class TestNamespaceReflectionAmplification:
+    """An oversize namespace must not be reflected verbatim in the error.
+
+    Regression for dogcat-1tbd: the route normalizes via NFKC and then
+    renders the namespace back into the error template. A 5 MB namespace
+    forced ~10 MB of HTML and significant CPU on NFKC. The fix pre-caps
+    the namespace before normalization and substitutes a placeholder.
+    """
+
+    def test_oversize_namespace_does_not_balloon_response(
+        self, client: TestClient
+    ) -> None:
+        """A namespace far larger than MAX_NAMESPACE_LEN yields a small response."""
+        from dogcat.constants import MAX_NAMESPACE_LEN
+        from dogcat.web.propose import MAX_REQUEST_BODY_BYTES
+
+        # Stay under the body-size cap so we exercise the namespace
+        # reflection path, not the body-size middleware.
+        big_ns = "a" * min(MAX_NAMESPACE_LEN * 4 + 100, MAX_REQUEST_BODY_BYTES // 2)
+        token = _csrf(client)
+        resp = client.post(
+            "/",
+            data={
+                "csrf_token": token,
+                "namespace": big_ns,
+                "title": "ok",
+                "description": "",
+            },
+        )
+        # Response is a normal HTML error page, not an amplified copy of
+        # the input. Generous upper bound keeps the test resilient to
+        # template changes; the bug had len(resp.text) ~= 2 * len(big_ns).
+        assert resp.status_code == 200
+        assert len(resp.text) < 100_000
+        assert big_ns not in resp.text
+
+
+class TestBodySizeLimit:
+    """Reject requests with bodies larger than MAX_REQUEST_BODY_BYTES.
+
+    Regression for dogcat-5zjh: without the guard, python-multipart
+    buffers the entire body before any route field check runs, so a
+    multi-GB request OOMs the server.
+    """
+
+    def test_oversize_post_via_content_length_header_rejected(
+        self, client: TestClient
+    ) -> None:
+        """A POST with Content-Length above the cap is rejected with 413."""
+        from dogcat.web.propose import MAX_REQUEST_BODY_BYTES
+
+        # Lie about Content-Length: the server should reject before reading.
+        resp = client.post(
+            "/",
+            content=b"x",  # body is short, but the header claims 10 GB
+            headers={"Content-Length": str(10 * 1024 * 1024 * 1024)},
+        )
+        assert resp.status_code == 413
+        assert "Payload Too Large" in resp.text
+        # Sanity: cap is configured.
+        assert MAX_REQUEST_BODY_BYTES == 256 * 1024
+
+    def test_oversize_real_body_rejected(self, client: TestClient) -> None:
+        """A real body just over the cap is rejected with 413."""
+        from dogcat.web.propose import MAX_REQUEST_BODY_BYTES
+
+        big = b"a" * (MAX_REQUEST_BODY_BYTES + 1)
+        resp = client.post(
+            "/",
+            content=big,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        assert resp.status_code == 413
+
+    def test_normal_form_post_still_succeeds(self, client: TestClient) -> None:
+        """A small, valid form POST passes the body-size check."""
+        token = _csrf(client)
+        resp = client.post(
+            "/",
+            data={
+                "csrf_token": token,
+                "namespace": "testns",
+                "title": "Normal",
+                "description": "hello",
+            },
+        )
+        # 200 (form rendered with success) or 303 (redirect) — anything but 413.
+        assert resp.status_code != 413
+
+
+class TestPinnedNamespaceCap:
+    """pinned_namespaces growth is capped to MAX_PINNED_NAMESPACES.
+
+    Regression for dogcat-2icd: with --allow-creating-namespaces, an
+    attacker who replayed unique namespaces could grow this list without
+    bound, eventually inflating config.local.toml to disk pressure.
+    """
+
+    def test_persist_refuses_to_grow_past_cap(self, tmp_path: Path) -> None:
+        """_persist_pinned_namespace raises once the cap is reached."""
+        from dogcat.config import save_local_config
+        from dogcat.web.propose import MAX_PINNED_NAMESPACES
+        from dogcat.web.propose.routes import _persist_pinned_namespace
+
+        dogcats = tmp_path / ".dogcats"
+        dogcats.mkdir()
+        save_local_config(
+            str(dogcats),
+            {"pinned_namespaces": [f"ns{i}" for i in range(MAX_PINNED_NAMESPACES)]},
+        )
+
+        import pytest
+
+        with pytest.raises(ValueError, match="pinned_namespaces is full"):
+            _persist_pinned_namespace(str(dogcats), "extra")
+
+
+class TestPinnedNamespaceConcurrency:
+    """Concurrent _persist_pinned_namespace calls must not lose updates.
+
+    Regression for dogcat-436f: read-modify-write without a lock meant
+    two concurrent web POSTs could each read the old list, append their
+    own namespace, and last-writer-wins drop the other's update.
+    """
+
+    def test_two_threads_persist_distinct_namespaces(self, tmp_path: Path) -> None:
+        """Both threads' namespaces survive the concurrent writes."""
+        import threading
+
+        from dogcat.config import load_local_config
+        from dogcat.web.propose.routes import _persist_pinned_namespace
+
+        dogcats = tmp_path / ".dogcats"
+        dogcats.mkdir()
+
+        names = [f"ns_{i:03d}" for i in range(20)]
+        threads = [
+            threading.Thread(
+                target=_persist_pinned_namespace,
+                args=(str(dogcats), name),
+            )
+            for name in names
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        config = load_local_config(str(dogcats))
+        pinned = set(config.get("pinned_namespaces", []))
+        # Every concurrent submission's namespace must be present.
+        assert pinned >= set(names)
 
 
 class TestWebProposeInit:

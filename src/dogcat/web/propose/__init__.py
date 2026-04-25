@@ -44,6 +44,22 @@ class ProposeAppState:
     inbox: InboxStorage | None = None
 
 
+# Maximum size of the pinned-namespaces list. A namespace-creation form
+# bug or replay attack with --allow-creating-namespaces could otherwise
+# grow this list unbounded. (dogcat-2icd)
+MAX_PINNED_NAMESPACES = 100
+
+# Single-use CSRF nonce TTL. After this window, an issued nonce is
+# rejected even if not yet consumed. (dogcat-2icd)
+CSRF_NONCE_TTL_SECONDS = 600
+
+# Maximum POST body size (bytes) — the form needs only namespace + short
+# title + 50 KB description + the CSRF token, so 256 KiB is a generous
+# cap that still rejects multi-GB blow-ups before python-multipart
+# materializes the body in memory. (dogcat-5zjh)
+MAX_REQUEST_BODY_BYTES = 256 * 1024
+
+
 # CSRF cookie lifetime. Tokens older than this are rejected even if the
 # cookie still rides along — limits the window where a leaked token is
 # usable. Tokens are also rotated on every successful POST. The unit-named
@@ -93,6 +109,10 @@ def create_app(
         title="dogcat propose",
         docs_url=None,
         redoc_url=None,
+        # Disable the schema endpoint too — leaving it on at the
+        # default /openapi.json discloses the full route + form-field
+        # schema even when /docs and /redoc are disabled. (dogcat-6a5j)
+        openapi_url=None,
     )
 
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -127,6 +147,10 @@ def create_app(
     app.state.allow_creating_namespaces = state.allow_creating_namespaces
     app.state.templates = state.templates
     app.state.inbox = state.inbox
+    # Server-issued nonces, single-use within CSRF_NONCE_TTL_SECONDS.
+    # Maps token (str) → expiry timestamp (float). Submitted POST tokens
+    # must be present here, removed on consumption. (dogcat-2icd)
+    app.state.csrf_nonces = {}
 
     from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -138,7 +162,54 @@ def create_app(
             response.headers["Content-Security-Policy"] = WEB_CSP_HEADER
             return response
 
+    class BodySizeLimitMiddleware(BaseHTTPMiddleware):
+        """Reject requests with a body larger than MAX_REQUEST_BODY_BYTES.
+
+        Without this guard, python-multipart buffers the entire body
+        before our Form-bound route fields run, so a single 10 GB
+        request OOMs the server. Reject early via Content-Length and
+        also stream-cap to catch chunked bodies that omit the header.
+        (dogcat-5zjh)
+        """
+
+        async def dispatch(self, request: Request, call_next: Any) -> Response:
+            from fastapi.responses import PlainTextResponse
+
+            # Fast path: trust the Content-Length header when present.
+            content_length = request.headers.get("content-length")
+            if content_length:
+                try:
+                    if int(content_length) > MAX_REQUEST_BODY_BYTES:
+                        return PlainTextResponse("Payload Too Large", status_code=413)
+                except ValueError:
+                    return PlainTextResponse("Bad Request", status_code=400)
+
+            # Slow path for chunked bodies: wrap the receive callable so
+            # we can count bytes as they arrive and abort once we cross
+            # the limit, before the body is fully materialized.
+            received_bytes = 0
+            original_receive = request.receive
+
+            async def cap_receive() -> Any:
+                nonlocal received_bytes
+                msg = await original_receive()
+                if msg.get("type") == "http.request":
+                    body = msg.get("body", b"")
+                    received_bytes += len(body)
+                    if received_bytes > MAX_REQUEST_BODY_BYTES:
+                        return {"type": "http.disconnect"}
+                return msg
+
+            request._receive = cap_receive
+            response = await call_next(request)
+            if received_bytes > MAX_REQUEST_BODY_BYTES:
+                return PlainTextResponse("Payload Too Large", status_code=413)
+            return response
+
+    # Order matters: body-size guard runs before security headers so
+    # rejected requests still get the standard headers on their 413.
     app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(BodySizeLimitMiddleware)
 
     from starlette.staticfiles import StaticFiles
 

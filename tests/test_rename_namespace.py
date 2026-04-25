@@ -312,3 +312,88 @@ class TestRenameNamespaceCLI:
 
         assert result.exit_code == 0
         assert get_issue_prefix(str(dogcats_dir)) == "proj"
+
+
+class TestSaveReloadRace:
+    """Mutating ops must reload under the lock so concurrent appends survive.
+
+    Regression for dogcat-zu0c: change_namespace / rename_namespace /
+    prune_tombstones / remove_dependencies previously called
+    ``_save(_reload=False)`` after mutating *stale* in-memory state. A
+    concurrent process that appended between our last ``_load()`` and our
+    ``_save_locked()`` would have its record silently overwritten by the
+    rewrite. The fix re-loads under the lock before applying the mutation.
+    """
+
+    def test_change_namespace_preserves_concurrent_append(self, tmp_path: Path) -> None:
+        """A second-process append done before change_namespace's rewrite survives."""
+        storage_path = tmp_path / ".dogcats" / "issues.jsonl"
+        storage_path.parent.mkdir(parents=True, exist_ok=True)
+        s1 = JSONLStorage(str(storage_path), create_dir=True)
+        s1.create(Issue(id="abc1", title="Original", namespace="dc"))
+
+        # A second long-lived storage instance (simulating a web server)
+        # has not seen the next append yet.
+        s2 = JSONLStorage(str(storage_path))
+        # Concurrent process appends a brand-new record via s1.
+        s1.create(Issue(id="abc2", title="Concurrent", namespace="dc"))
+
+        # s2 still has stale in-memory state — under the old code,
+        # change_namespace would rewrite from stale state and clobber abc2.
+        s2.change_namespace("dc-abc1", "proj")
+
+        # Both records must be on disk.
+        s3 = JSONLStorage(str(storage_path))
+        ids = {i.full_id for i in s3.list()}
+        assert "proj-abc1" in ids, "renamed issue not present"
+        assert "dc-abc2" in ids, "concurrent append was lost"
+
+    def test_inbox_rename_namespace_preserves_concurrent_append(
+        self, tmp_path: Path
+    ) -> None:
+        """A concurrent inbox append done before rename_namespace survives."""
+        from dogcat.inbox import InboxStorage
+        from dogcat.models import Proposal
+
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir(parents=True)
+
+        i1 = InboxStorage(dogcats_dir=str(dogcats_dir))
+        i1.create(Proposal(id="aaaa", title="Original", namespace="old"))
+
+        # Long-lived inbox (e.g. web server) with stale state.
+        i2 = InboxStorage(dogcats_dir=str(dogcats_dir))
+
+        # Concurrent process appends a brand-new proposal.
+        i1.create(Proposal(id="bbbb", title="Concurrent", namespace="other"))
+
+        # Stale i2 renames "old" → "new"; under the bug this clobbered bbbb.
+        i2.rename_namespace("old", "new")
+
+        i3 = InboxStorage(dogcats_dir=str(dogcats_dir))
+        ids = {p.full_id for p in i3.list()}
+        assert "new-inbox-aaaa" in ids, "renamed proposal not present"
+        assert "other-inbox-bbbb" in ids, "concurrent proposal append was lost"
+
+    def test_prune_tombstones_preserves_concurrent_append(self, tmp_path: Path) -> None:
+        """A concurrent append done before prune_tombstones rewrite survives."""
+        from dogcat.models import Status
+
+        storage_path = tmp_path / ".dogcats" / "issues.jsonl"
+        storage_path.parent.mkdir(parents=True, exist_ok=True)
+        s1 = JSONLStorage(str(storage_path), create_dir=True)
+        s1.create(Issue(id="dead", title="Dead", namespace="dc"))
+        s1.update("dc-dead", {"status": Status.TOMBSTONE})
+
+        # Stale long-lived storage instance.
+        s2 = JSONLStorage(str(storage_path))
+
+        # Concurrent process adds a new live record.
+        s1.create(Issue(id="live", title="Alive", namespace="dc"))
+
+        s2.prune_tombstones()
+
+        s3 = JSONLStorage(str(storage_path))
+        ids = {i.full_id for i in s3.list()}
+        assert "dc-live" in ids, "concurrent append was lost during prune"
+        assert "dc-dead" not in ids, "tombstone was not pruned"

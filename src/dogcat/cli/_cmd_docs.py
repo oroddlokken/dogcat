@@ -704,16 +704,20 @@ def register(app: typer.Typer) -> None:
 
 ── Manual Issues ────────────────────────────────────────────────────────────
 
-  Some issues require user action and can't be handled by an AI agent
-  (e.g. deploying to prod, physical hardware tasks, subjective reviews).
-  Mark these with --manual:
+  `--manual` flags issues that need a human in the loop for some
+  step the agent can't drive headlessly — deploys, credentials,
+  hardware access, subjective sign-off, GUI keystrokes.
 
     dcat create "Deploy v2.1 to production" --manual
     dcat update <id> --manual       # mark existing issue as manual
     dcat update <id> --no-manual    # remove the manual flag
 
-  AI agents using --agent-only will skip manual issues when listing work.
-  You can also toggle the Manual checkbox in the TUI editor (dcat edit).
+  `--agent-only` excludes these from list/ready, so autonomous-batch
+  runs (no human available to consult) skip past them. In an
+  interactive session the agent still drives the ticket — analysis,
+  hypothesis, exact next action — and uses the user as hands for
+  the HITL steps. The Manual checkbox in the TUI editor (dcat edit)
+  toggles the same flag.
 
 ── Snooze ──────────────────────────────────────────────────────────────────
 
@@ -930,6 +934,7 @@ Allowed issue types, priorities, and statuses:
   dcat update <id> --remove-depends-on <id>  - Remove a dependency
   dcat update <id> --remove-blocks <id>      - Remove a blocks relationship
   dcat show <id>                             - View issue details
+  dcat random                                - Show one random issue (same filters)
   dcat search <query>                        - Search issues (supports --type filter)
   dcat close <id>                            - Mark issue as closed
   dcat reopen <id>                           - Reopen a closed issue
@@ -970,15 +975,20 @@ If unsure about scope, ask the user before creating the breakdown.
 
 ## Agent Integration
 
-Use --agent-only in list/ready to filter out manual issues:
-  dcat ready --agent-only   # Show only agent-workable issues
-  dcat list --agent-only    # Hide manual issues
+`--agent-only` filters in list/ready exclude issues marked `--manual`:
+  dcat ready --agent-only   # autonomous-workable
+  dcat list --agent-only    # autonomous-workable
 
-If an issue requires human intervention (e.g. deploying, credentials),
-mark it as manual and tell the user:
+Mark `--manual` when a step requires a human in the loop —
+credentials, deploys, hardware, visual confirmation, GUI keystrokes:
   dcat update <id> --manual
 
-Do NOT attempt to work on manual issues. Leave them for the user.
+`--manual` means HITL, not "agent skips". The filter exists so
+autonomous-batch runs (no human present to consult) move past these.
+When you are in session with a user, drive manual issues like any
+other: do the analysis, frame the hypothesis, hand the user one
+concrete action at a time, take their result, iterate. The human is
+your hands for steps you can't reach; the rest is still your job.
 
 ## Comment-based filtering
 

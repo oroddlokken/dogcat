@@ -214,3 +214,50 @@ def test_add_paths_empty_list_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(subprocess, "run", fake_run)
     assert git_helpers.add_paths([]) is True
     assert called == []
+
+
+class TestGitTimeout:
+    """git._run must time-bound subprocess calls.
+
+    Regression for dogcat-1uq7: a stalled NFS HOME / dead credential
+    helper / broken LFS smudge would wedge dcat indefinitely.
+    """
+
+    def test_run_passes_timeout_to_subprocess(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The default 10 s timeout is passed through to subprocess.run."""
+        captured: dict[str, object] = {}
+
+        def fake_run(*_args: Any, **kwargs: Any) -> object:
+            captured["timeout"] = kwargs.get("timeout")
+            return _completed(0, "main\n")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        git_helpers.current_branch()
+        assert captured["timeout"] == 10.0
+
+    def test_dcat_git_timeout_secs_env_override(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``DCAT_GIT_TIMEOUT_SECS`` overrides the default."""
+        captured: dict[str, object] = {}
+
+        def fake_run(*_args: Any, **kwargs: Any) -> object:
+            captured["timeout"] = kwargs.get("timeout")
+            return _completed(0, "main\n")
+
+        monkeypatch.setenv("DCAT_GIT_TIMEOUT_SECS", "42")
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        git_helpers.current_branch()
+        assert captured["timeout"] == 42.0
+
+    def test_run_returns_none_on_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When git hangs and TimeoutExpired raises, _run returns None."""
+
+        def fake_run(*args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+            raise subprocess.TimeoutExpired(cmd="git", timeout=10.0)
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        # current_branch returns None when _run returns None.
+        assert git_helpers.current_branch() is None

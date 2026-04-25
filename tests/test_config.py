@@ -130,6 +130,103 @@ class TestLoadSaveConfig:
 
         assert dogcats_dir.exists()
 
+    def test_string_in_list_typed_key_is_dropped(self, tmp_path: Path) -> None:
+        """A scalar string where a list-of-strings is required is dropped.
+
+        Regression for dogcat-4o1p: TOML scalar-where-list values used
+        to silently iterate per-character downstream, breaking
+        visibility filters and crashing rename-namespace.
+        """
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        # Write a config that uses a string for visible_namespaces.
+        (dogcats_dir / "config.toml").write_text(
+            'namespace = "p"\nvisible_namespaces = "frontend"\n'
+        )
+
+        config = load_config(str(dogcats_dir))
+        assert "visible_namespaces" not in config
+        assert config.get("namespace") == "p"
+
+    def test_int_in_string_typed_key_is_dropped(self, tmp_path: Path) -> None:
+        """An int where a string is required is dropped."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        (dogcats_dir / "config.toml").write_text("namespace = 42\n")
+
+        config = load_config(str(dogcats_dir))
+        assert "namespace" not in config
+
+    def test_list_of_non_strings_is_dropped(self, tmp_path: Path) -> None:
+        """``pinned_namespaces = [1, 2, 3]`` is dropped (must be strings)."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        (dogcats_dir / "config.toml").write_text(
+            'namespace = "p"\npinned_namespaces = [1, 2, 3]\n'
+        )
+
+        config = load_config(str(dogcats_dir))
+        assert "pinned_namespaces" not in config
+
+    def test_string_in_bool_typed_key_is_dropped(self, tmp_path: Path) -> None:
+        """``allow_creating_namespaces = "false"`` is dropped (must be bool).
+
+        Regression for dogcat-22t5: a string here was truthy under the
+        old ``bool(config.get(...))`` and silently flipped a security-
+        sensitive toggle to True.
+        """
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        (dogcats_dir / "config.toml").write_text(
+            'namespace = "p"\nallow_creating_namespaces = "false"\n'
+        )
+
+        config = load_config(str(dogcats_dir))
+        assert "allow_creating_namespaces" not in config
+
+    def test_real_bool_in_bool_typed_key_kept(self, tmp_path: Path) -> None:
+        """Genuine ``true`` / ``false`` survive the validator."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        (dogcats_dir / "config.toml").write_text(
+            'namespace = "p"\nallow_creating_namespaces = true\n'
+        )
+
+        config = load_config(str(dogcats_dir))
+        assert config["allow_creating_namespaces"] is True
+
+    def test_save_config_is_atomic(self, tmp_path: Path) -> None:
+        """A failed write does not truncate or corrupt the existing config.
+
+        Regression for dogcat-1s7e: ``save_config`` used to truncate
+        the file then write, so a kill / ENOSPC / power-loss mid-write
+        left an empty TOML — which ``_load_toml`` silently accepted as
+        ``{}``, dropping every previously-set value.
+        """
+        from unittest.mock import patch
+
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+
+        # Establish baseline state.
+        save_config(str(dogcats_dir), {"namespace": "original", "x": "y"})
+        config_path = dogcats_dir / CONFIG_FILENAME
+        original_bytes = config_path.read_bytes()
+
+        # Force the rename to fail mid-write.
+        with (
+            patch("os.replace", side_effect=OSError("disk full")),
+            pytest.raises(OSError, match="disk full"),
+        ):
+            save_config(str(dogcats_dir), {"namespace": "second"})
+
+        # The file on disk should match the pre-write state — not be
+        # truncated or empty.
+        assert config_path.read_bytes() == original_bytes
+        # No leftover .tmp files in the directory.
+        leftovers = [p.name for p in dogcats_dir.iterdir() if ".tmp" in p.name]
+        assert leftovers == []
+
     def test_load_empty_config_file(self, tmp_path: Path) -> None:
         """Loading empty config file returns empty dict."""
         dogcats_dir = tmp_path / ".dogcats"
@@ -661,6 +758,41 @@ class TestParseDogcatrc:
 
         result = parse_dogcatrc(rc_file)
         assert result == (project_dir / "subdir" / ".dogcats").resolve()
+
+    def test_unreadable_rc_raises_value_error(self, tmp_path: Path) -> None:
+        """An unreadable .dogcatrc raises ValueError, not PermissionError.
+
+        Regression for dogcat-2o1f: ``read_text`` on a chmod-0 file
+        raises PermissionError (an OSError, not a ValueError), which
+        the call site only caught as ValueError — so every dcat
+        invocation crashed with a raw traceback.
+        """
+        from unittest.mock import patch
+
+        rc_file = tmp_path / DOGCATRC_FILENAME
+        rc_file.write_text(".dogcats")
+        with (
+            patch.object(Path, "read_text", side_effect=PermissionError("denied")),
+            pytest.raises(ValueError, match="Failed to read"),
+        ):
+            parse_dogcatrc(rc_file)
+
+    def test_embedded_newline_uses_first_line_only(self, tmp_path: Path) -> None:
+        """Multi-line .dogcatrc uses the first non-blank line, not the whole text."""
+        target = tmp_path / ".dogcats"
+        rc_file = tmp_path / DOGCATRC_FILENAME
+        rc_file.write_text(f"{target}\n# stray comment line\n")
+
+        result = parse_dogcatrc(rc_file)
+        assert result == target
+
+    def test_nul_byte_rejected(self, tmp_path: Path) -> None:
+        """An rc file containing a NUL byte raises ValueError."""
+        rc_file = tmp_path / DOGCATRC_FILENAME
+        rc_file.write_text("/some/path\x00")
+
+        with pytest.raises(ValueError, match="NUL byte"):
+            parse_dogcatrc(rc_file)
 
 
 class TestRepoLocalConfig:

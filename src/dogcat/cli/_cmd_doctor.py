@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import orjson
 import typer
@@ -140,38 +140,67 @@ def register(app: typer.Typer) -> None:
 
         # Check 2: issues.jsonl exists and is valid JSON
         issues_file = dogcats_path / "issues.jsonl"
+        issues_bad_count = 0
         issues_valid = False
         if issues_file.exists():
             try:
                 with issues_file.open() as f:
                     for line in f:
-                        if line.strip():
-                            orjson.loads(line)
-                issues_valid = True
-            except (OSError, orjson.JSONDecodeError):
+                        stripped = line.strip()
+                        if not stripped:
+                            continue
+                        try:
+                            payload = orjson.loads(stripped)
+                        except orjson.JSONDecodeError:
+                            issues_bad_count += 1
+                            continue
+                        if not isinstance(payload, dict):
+                            issues_bad_count += 1
+                issues_valid = issues_bad_count == 0
+            except OSError:
                 pass
 
         report.add(
             "issues_jsonl",
             DoctorCheck(
                 description=f"{dogcats_dir}/issues.jsonl is valid JSON",
+                fail_description=(
+                    f"{dogcats_dir}/issues.jsonl is valid JSON "
+                    f"({issues_bad_count} malformed line(s))"
+                    if issues_bad_count
+                    else f"{dogcats_dir}/issues.jsonl is valid JSON"
+                ),
                 passed=issues_file.exists() and issues_valid,
-                fix="Restore from backup or run 'dcat init' to reset",
+                fix=(
+                    "Run 'dcat repair-jsonl' to copy malformed lines to a "
+                    ".bad sidecar and compact the file"
+                    if issues_bad_count
+                    else "Restore from backup or run 'dcat init' to reset"
+                ),
             ),
         )
 
         # Check 2-inbox: inbox.jsonl is valid JSON (if it exists)
         inbox_file = dogcats_path / "inbox.jsonl"
+        inbox_bad_count = 0
         inbox_valid = False
         inbox_exists = inbox_file.exists()
         if inbox_exists:
             try:
                 with inbox_file.open() as f:
                     for line in f:
-                        if line.strip():
-                            orjson.loads(line)
-                inbox_valid = True
-            except (OSError, orjson.JSONDecodeError):
+                        stripped = line.strip()
+                        if not stripped:
+                            continue
+                        try:
+                            payload = orjson.loads(stripped)
+                        except orjson.JSONDecodeError:
+                            inbox_bad_count += 1
+                            continue
+                        if not isinstance(payload, dict):
+                            inbox_bad_count += 1
+                inbox_valid = inbox_bad_count == 0
+            except OSError:
                 pass
 
         if inbox_exists:
@@ -179,8 +208,15 @@ def register(app: typer.Typer) -> None:
                 "inbox_jsonl",
                 DoctorCheck(
                     description=f"{dogcats_dir}/inbox.jsonl is valid JSON",
+                    fail_description=(
+                        f"{dogcats_dir}/inbox.jsonl is valid JSON "
+                        f"({inbox_bad_count} malformed line(s))"
+                    ),
                     passed=inbox_valid,
-                    fix="Review and fix malformed lines in inbox.jsonl",
+                    fix=(
+                        "Run 'dcat repair-jsonl' to copy malformed lines "
+                        "to a .bad sidecar and compact the file"
+                    ),
                 ),
             )
 
@@ -551,22 +587,38 @@ def register(app: typer.Typer) -> None:
 
         # Post-merge concurrent edit detection
         merge_warnings: list[dict[str, Any]] = []
+        post_merge_skip_reason: str | None = None
         if post_merge:
             import dogcat.git as git_helpers
 
             # storage_rel must be relative to the git repo root
             repo_root_path = git_helpers.repo_root()
-            if repo_root_path is not None:
+            if repo_root_path is None:
+                post_merge_skip_reason = (
+                    "post-merge skipped: not inside a git repository"
+                )
+            else:
                 try:
                     storage_rel = str(
                         dogcats_path.resolve().relative_to(repo_root_path)
                         / "issues.jsonl",
                     )
+                except ValueError:
+                    post_merge_skip_reason = (
+                        f"post-merge skipped: {dogcats_path} is outside the "
+                        f"git repo at {repo_root_path}; concurrent-edit "
+                        "detection requires .dogcats inside the tracked tree."
+                    )
+                else:
                     merge_warnings = detect_concurrent_edits(
                         storage_rel=storage_rel,
                     )
-                except ValueError:
-                    pass  # Path not relative to repo root
+
+        # Surface the skip reason loudly — the previous silent ``pass``
+        # made --post-merge appear to succeed cleanly even when no
+        # detection ran at all. (dogcat-40t6)
+        if post_merge_skip_reason and not is_json():
+            typer.echo(post_merge_skip_reason, err=True)
 
         # Output results
         if is_json():
@@ -588,6 +640,8 @@ def register(app: typer.Typer) -> None:
                 output_data["validation_details"] = all_validation
             if merge_warnings:
                 output_data["concurrent_edits"] = merge_warnings
+            if post_merge_skip_reason:
+                output_data["post_merge_skipped"] = post_merge_skip_reason
             if id_distribution:
                 output_data["id_distribution"] = id_distribution
             typer.echo(
@@ -731,12 +785,38 @@ def _check_precompact_hook(claude_dir: Path) -> str:
         if not settings_path.exists():
             continue
         try:
-            data = orjson.loads(settings_path.read_bytes())
+            data_raw = orjson.loads(settings_path.read_bytes())
         except (OSError, orjson.JSONDecodeError):
             continue
-        for group in data.get("hooks", {}).get("PreCompact", []):
-            for hook in group.get("hooks", []):
-                cmd = hook.get("command", "")
+        # Tolerate non-dict settings.json (``[]``, ``null``, scalar)
+        # — doctor IS the recovery tool, so it must not crash on a
+        # malformed user file. (dogcat-2yho)
+        if not isinstance(data_raw, dict):
+            continue
+        data: dict[str, Any] = cast("dict[str, Any]", data_raw)
+        hooks_obj_raw: Any = data.get("hooks", {})
+        if not isinstance(hooks_obj_raw, dict):
+            continue
+        hooks_obj: dict[str, Any] = cast("dict[str, Any]", hooks_obj_raw)
+        precompact_raw: Any = hooks_obj.get("PreCompact", [])
+        if not isinstance(precompact_raw, list):
+            continue
+        precompact: list[Any] = cast("list[Any]", precompact_raw)
+        for group_raw in precompact:
+            if not isinstance(group_raw, dict):
+                continue
+            group: dict[str, Any] = cast("dict[str, Any]", group_raw)
+            inner_raw: Any = group.get("hooks", []) or []
+            if not isinstance(inner_raw, list):
+                continue
+            for hook_raw in cast("list[Any]", inner_raw):
+                if not isinstance(hook_raw, dict):
+                    continue
+                hook: dict[str, Any] = cast("dict[str, Any]", hook_raw)
+                cmd_raw: Any = hook.get("command", "")
+                if not isinstance(cmd_raw, str):
+                    continue
+                cmd: str = cmd_raw
                 if "dcat prime" in cmd:
                     if "--replay" in cmd:
                         return "replay"
@@ -752,9 +832,14 @@ def _install_precompact_hook(claude_dir: Path) -> None:
     settings_path = local_path if local_path.exists() else project_path
 
     try:
-        data: dict[str, Any] = orjson.loads(settings_path.read_bytes())
+        data_raw = orjson.loads(settings_path.read_bytes())
     except (OSError, orjson.JSONDecodeError):
-        data = {}
+        data_raw = {}
+    # Replace a non-dict file with an empty dict so the install path
+    # produces a well-formed file. (dogcat-2yho)
+    data: dict[str, Any] = (
+        cast("dict[str, Any]", data_raw) if isinstance(data_raw, dict) else {}
+    )
 
     hooks: dict[str, Any] = data.setdefault("hooks", {})
     pre_compact: list[dict[str, Any]] = hooks.setdefault("PreCompact", [])
@@ -828,14 +913,34 @@ def _upgrade_precompact_hook(claude_dir: Path) -> None:
         if not settings_path.exists():
             continue
         try:
-            data: dict[str, Any] = orjson.loads(settings_path.read_bytes())
+            data_raw = orjson.loads(settings_path.read_bytes())
         except (OSError, orjson.JSONDecodeError):
             continue
+        if not isinstance(data_raw, dict):
+            continue
+        data: dict[str, Any] = cast("dict[str, Any]", data_raw)
+        hooks_obj_raw: Any = data.get("hooks", {})
+        if not isinstance(hooks_obj_raw, dict):
+            continue
+        hooks_obj: dict[str, Any] = cast("dict[str, Any]", hooks_obj_raw)
+        precompact_raw: Any = hooks_obj.get("PreCompact", [])
+        if not isinstance(precompact_raw, list):
+            continue
+        precompact: list[Any] = cast("list[Any]", precompact_raw)
         modified = False
-        for group in data.get("hooks", {}).get("PreCompact", []):
-            for hook in group.get("hooks", []):
-                cmd = hook.get("command", "")
-                if cmd.strip() == "dcat prime":
+        for group_raw in precompact:
+            if not isinstance(group_raw, dict):
+                continue
+            group: dict[str, Any] = cast("dict[str, Any]", group_raw)
+            inner_raw: Any = group.get("hooks", []) or []
+            if not isinstance(inner_raw, list):
+                continue
+            for hook_raw in cast("list[Any]", inner_raw):
+                if not isinstance(hook_raw, dict):
+                    continue
+                hook: dict[str, Any] = cast("dict[str, Any]", hook_raw)
+                cmd_raw: Any = hook.get("command", "")
+                if isinstance(cmd_raw, str) and cmd_raw.strip() == "dcat prime":
                     hook["command"] = PRECOMPACT_HOOK_COMMAND
                     modified = True
         if modified:

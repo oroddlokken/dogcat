@@ -20,6 +20,26 @@ class TestExactMatch:
         assert resolve_partial_id("zzz", {"dc-abc", "dc-def"}) is None
 
 
+class TestEmptyInput:
+    """Empty / whitespace-only partial IDs must not match anything."""
+
+    def test_empty_string_returns_none(self) -> None:
+        """Empty partial ID returns None even when ids contain a single match."""
+        assert resolve_partial_id("", {"dc-abc"}) is None
+
+    def test_empty_string_returns_none_with_multiple_ids(self) -> None:
+        """Empty partial ID never matches across many ids."""
+        assert resolve_partial_id("", {"dc-abc", "dc-def", "ns-abc"}) is None
+
+    def test_whitespace_returns_none(self) -> None:
+        """Whitespace-only partial ID is rejected."""
+        assert resolve_partial_id("   ", {"dc-abc"}) is None
+
+    def test_empty_string_works_for_proposals(self) -> None:
+        """Same guard applies to multi-segment proposal ids."""
+        assert resolve_partial_id("", {"dogcat-inbox-4kzj"}) is None
+
+
 class TestSuffixMatch:
     """Suffix / hash-segment match."""
 

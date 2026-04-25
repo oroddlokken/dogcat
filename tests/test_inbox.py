@@ -18,7 +18,7 @@ class TestProposalStatusEnum:
 
     def test_all_status_values_valid(self) -> None:
         """Test that all ProposalStatus values are valid strings."""
-        expected_values = {"open", "closed", "tombstone"}
+        expected_values = {"open", "closed", "tombstone", "unknown"}
         actual_values = {s.value for s in ProposalStatus}
         assert actual_values == expected_values
 
@@ -679,6 +679,39 @@ class TestCreateProposalFactory:
         assert proposal.source_repo == "/some/repo"
 
 
+class TestInboxInputCapEnforcement:
+    """validate_proposal caps are enforced at the inbox storage boundary."""
+
+    def test_oversized_title_rejected_on_create(self, tmp_path: object) -> None:
+        """A title above MAX_TITLE_LEN is rejected on InboxStorage.create()."""
+        from pathlib import Path
+
+        from dogcat.constants import MAX_TITLE_LEN
+        from dogcat.inbox import InboxStorage
+        from dogcat.models import Proposal
+
+        dogcats = Path(str(tmp_path)) / ".dogcats"
+        dogcats.mkdir()
+        s = InboxStorage(dogcats_dir=str(dogcats))
+        with pytest.raises(ValueError, match="title exceeds"):
+            s.create(
+                Proposal(id="aaaa", title="x" * (MAX_TITLE_LEN + 1), namespace="ns"),
+            )
+
+    def test_invalid_namespace_rejected_on_create(self, tmp_path: object) -> None:
+        """A control-byte namespace is rejected on InboxStorage.create()."""
+        from pathlib import Path
+
+        from dogcat.inbox import InboxStorage
+        from dogcat.models import Proposal
+
+        dogcats = Path(str(tmp_path)) / ".dogcats"
+        dogcats.mkdir()
+        s = InboxStorage(dogcats_dir=str(dogcats))
+        with pytest.raises(ValueError, match="namespace"):
+            s.create(Proposal(id="aaaa", title="OK", namespace="bad ns"))
+
+
 class TestInboxLoadStrictness:
     """Regression tests for dogcat-3jth: malformed mid-file lines must raise.
 
@@ -688,8 +721,8 @@ class TestInboxLoadStrictness:
     crash artifact), anything else raises so the user can recover from git.
     """
 
-    def test_malformed_mid_file_line_raises(self, tmp_path: object) -> None:
-        """A malformed line that is NOT the last raises ValueError on load."""
+    def test_malformed_mid_file_line_skipped(self, tmp_path: object) -> None:
+        """A malformed mid-file line is skipped and recorded for repair."""
         from pathlib import Path
 
         from dogcat.inbox import InboxStorage
@@ -709,8 +742,11 @@ class TestInboxLoadStrictness:
         )
         inbox_path.write_text(first + "\n" + "{not json\n" + second + "\n")
 
-        with pytest.raises(ValueError, match="Invalid JSONL record at line"):
-            InboxStorage(dogcats_dir=str(dogcats))
+        s = InboxStorage(dogcats_dir=str(dogcats))
+        ids = sorted(p.id for p in s.list())
+        assert ids == ["aaaa", "bbbb"]
+        assert len(s._bad_lines) == 1
+        assert s._needs_compaction is True
 
     def test_malformed_last_line_tolerated(self, tmp_path: object) -> None:
         """A malformed LAST line is tolerated (crash/disk-full artifact)."""
@@ -727,6 +763,57 @@ class TestInboxLoadStrictness:
             '"updated_at": "2026-04-25T12:00:00+00:00", "status": "open"}'
         )
         inbox_path.write_text(good + "\n" + "{half-written")
+
+        s = InboxStorage(dogcats_dir=str(dogcats))
+        assert len(s.list()) == 1
+        assert s._needs_compaction is True
+
+    @pytest.mark.parametrize(
+        "non_dict_payload", ["null", "42", "[]", '"string"', "true"]
+    )
+    def test_non_dict_mid_file_line_skipped(
+        self, tmp_path: object, non_dict_payload: str
+    ) -> None:
+        """A non-dict mid-file line is skipped and tracked for repair."""
+        from pathlib import Path
+
+        from dogcat.inbox import InboxStorage
+
+        dogcats = Path(str(tmp_path)) / ".dogcats"
+        dogcats.mkdir()
+        inbox_path = dogcats / "inbox.jsonl"
+        good = (
+            '{"record_type": "proposal", "id": "aaaa", "namespace": "test", '
+            '"title": "ok", "created_at": "2026-04-25T12:00:00+00:00", '
+            '"updated_at": "2026-04-25T12:00:00+00:00", "status": "open"}'
+        )
+        inbox_path.write_text(good + "\n" + non_dict_payload + "\n" + good + "\n")
+
+        s = InboxStorage(dogcats_dir=str(dogcats))
+        assert len(s.list()) == 1
+        assert len(s._bad_lines) == 1
+        assert s._needs_compaction is True
+
+    @pytest.mark.parametrize(
+        "non_dict_payload", ["null", "42", "[]", '"string"', "true"]
+    )
+    def test_non_dict_last_line_tolerated(
+        self, tmp_path: object, non_dict_payload: str
+    ) -> None:
+        """A non-dict last line is tolerated as crash artifact."""
+        from pathlib import Path
+
+        from dogcat.inbox import InboxStorage
+
+        dogcats = Path(str(tmp_path)) / ".dogcats"
+        dogcats.mkdir()
+        inbox_path = dogcats / "inbox.jsonl"
+        good = (
+            '{"record_type": "proposal", "id": "aaaa", "namespace": "test", '
+            '"title": "ok", "created_at": "2026-04-25T12:00:00+00:00", '
+            '"updated_at": "2026-04-25T12:00:00+00:00", "status": "open"}'
+        )
+        inbox_path.write_text(good + "\n" + non_dict_payload + "\n")
 
         s = InboxStorage(dogcats_dir=str(dogcats))
         assert len(s.list()) == 1

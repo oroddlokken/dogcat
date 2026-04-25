@@ -399,8 +399,8 @@ class TestAtomicWrites:
 class TestErrorHandling:
     """Test error handling."""
 
-    def test_corrupted_jsonl_middle_line_raises(self, temp_workspace: Path) -> None:
-        """Test that a corrupted non-last line raises error."""
+    def test_corrupted_jsonl_middle_line_skipped(self, temp_workspace: Path) -> None:
+        """A corrupt non-last line is logged, skipped, and tracked for repair."""
         storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
         storage_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -409,11 +409,16 @@ class TestErrorHandling:
 
         from dogcat.models import issue_to_dict
 
-        valid = orjson.dumps(issue_to_dict(Issue(id="ok", title="OK"))).decode()
-        storage_path.write_text(f"{valid}\ninvalid json line\n{valid}\n")
+        valid_a = orjson.dumps(issue_to_dict(Issue(id="aaa", title="A"))).decode()
+        valid_b = orjson.dumps(issue_to_dict(Issue(id="bbb", title="B"))).decode()
+        storage_path.write_text(f"{valid_a}\ninvalid json line\n{valid_b}\n")
 
-        with pytest.raises(ValueError, match="Invalid JSONL record at line 2"):
-            JSONLStorage(str(storage_path))
+        s = JSONLStorage(str(storage_path))
+        ids = sorted(i.id for i in s.list())
+        assert ids == ["aaa", "bbb"]
+        assert len(s._bad_lines) == 1
+        assert s._bad_lines[0][0] == 2  # 1-indexed line number
+        assert s._needs_compaction is True
 
     def test_corrupted_last_line_tolerated(self, temp_workspace: Path) -> None:
         """Test that a corrupted last line is tolerated (crash recovery)."""
@@ -452,6 +457,362 @@ class TestErrorHandling:
         # Should not raise
         issues = storage.list()
         assert len(issues) == 0
+
+    @pytest.mark.parametrize(
+        "non_dict_payload", ["null", "42", "[]", '"string"', "true"]
+    )
+    def test_non_dict_jsonl_middle_line_skipped(
+        self, temp_workspace: Path, non_dict_payload: str
+    ) -> None:
+        """A non-dict JSONL line in the middle is skipped, not raised."""
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage_path.parent.mkdir(parents=True, exist_ok=True)
+
+        import orjson
+
+        from dogcat.models import issue_to_dict
+
+        valid_a = orjson.dumps(issue_to_dict(Issue(id="aaa", title="A"))).decode()
+        valid_b = orjson.dumps(issue_to_dict(Issue(id="bbb", title="B"))).decode()
+        storage_path.write_text(f"{valid_a}\n{non_dict_payload}\n{valid_b}\n")
+
+        s = JSONLStorage(str(storage_path))
+        ids = sorted(i.id for i in s.list())
+        assert ids == ["aaa", "bbb"]
+        assert len(s._bad_lines) == 1
+        assert s._needs_compaction is True
+
+    @pytest.mark.parametrize(
+        "non_dict_payload", ["null", "42", "[]", '"string"', "true"]
+    )
+    def test_non_dict_jsonl_last_line_tolerated(
+        self, temp_workspace: Path, non_dict_payload: str
+    ) -> None:
+        """A non-dict last JSONL line is tolerated (crash-recovery branch)."""
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage_path.parent.mkdir(parents=True, exist_ok=True)
+
+        import orjson
+
+        from dogcat.models import issue_to_dict
+
+        valid = orjson.dumps(issue_to_dict(Issue(id="ok", title="OK"))).decode()
+        storage_path.write_text(f"{valid}\n{non_dict_payload}\n")
+
+        s = JSONLStorage(str(storage_path))
+        issues = s.list()
+        assert len(issues) == 1
+        assert issues[0].title == "OK"
+
+    @pytest.mark.parametrize(
+        "non_dict_payload", ["null", "42", "[]", '"string"', "true"]
+    )
+    def test_non_dict_jsonl_only_line_tolerated(
+        self, temp_workspace: Path, non_dict_payload: str
+    ) -> None:
+        """A single non-dict line (only line) is tolerated as last-line."""
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage_path.parent.mkdir(parents=True, exist_ok=True)
+        storage_path.write_text(f"{non_dict_payload}\n")
+
+        s = JSONLStorage(str(storage_path))
+        assert len(s.list()) == 0
+
+
+class TestCompactionTolerantOfBadLines:
+    """_save_locked must tolerate the same lines _load skipped.
+
+    Regression for dogcat-5tix: _load tolerated a corrupt last line and
+    set _needs_compaction=True, but the next mutation triggered _save →
+    _save_locked, which re-parsed the file and crashed on the same line
+    because the event-preservation block only caught (JSONDecodeError,
+    ValueError) — not AttributeError/TypeError on a non-dict.
+    """
+
+    def test_compaction_succeeds_with_non_dict_last_line(
+        self, temp_workspace: Path
+    ) -> None:
+        """A non-dict last line is skipped during compaction, not raised."""
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage_path.parent.mkdir(parents=True, exist_ok=True)
+
+        import orjson
+
+        from dogcat.models import issue_to_dict
+
+        valid = orjson.dumps(issue_to_dict(Issue(id="ok", title="OK"))).decode()
+        # Write a valid record then a non-dict last line; _load will
+        # tolerate it and mark _needs_compaction.
+        storage_path.write_text(f"{valid}\n42\n")
+
+        s = JSONLStorage(str(storage_path))
+        assert s._needs_compaction is True
+        # Trigger a mutation that goes through _save_locked. update()
+        # itself does an append, so call prune_tombstones which forces
+        # the rewrite path.
+        s.create(Issue(id="x", title="X"))
+        s.delete("dc-x")
+        s.prune_tombstones()
+        # The compacted file must not crash.
+        assert "\n42\n" not in storage_path.read_text()
+
+
+class TestUpdateTypeGuards:
+    """update() must reject wrong-typed values for each known field.
+
+    Regression for dogcat-3o3b: setattr-with-anything would silently
+    persist e.g. ``priority=True``, ``labels='bug'``, ``status=42``.
+    """
+
+    def test_priority_must_be_int(self, storage: JSONLStorage) -> None:
+        """Priority refuses bool / str / float."""
+        storage.create(Issue(id="x", title="X"))
+        for bad in [True, "high", 1.5, None]:
+            with pytest.raises(TypeError, match="priority"):
+                storage.update("dc-x", {"priority": bad})
+
+    def test_status_must_be_str_or_enum(self, storage: JSONLStorage) -> None:
+        """Status refuses int / None / list."""
+        storage.create(Issue(id="x", title="X"))
+        with pytest.raises(TypeError, match="status"):
+            storage.update("dc-x", {"status": 42})
+        with pytest.raises(TypeError, match="status"):
+            storage.update("dc-x", {"status": None})
+
+    def test_labels_must_be_list_of_strings(self, storage: JSONLStorage) -> None:
+        """Labels refuses a bare string (which would iterate as chars)."""
+        storage.create(Issue(id="x", title="X"))
+        with pytest.raises(TypeError, match="labels"):
+            storage.update("dc-x", {"labels": "bug"})
+        with pytest.raises(TypeError, match="labels"):
+            storage.update("dc-x", {"labels": [1, 2, 3]})
+
+    def test_metadata_must_be_dict(self, storage: JSONLStorage) -> None:
+        """Metadata refuses a string."""
+        storage.create(Issue(id="x", title="X"))
+        with pytest.raises(TypeError, match="metadata"):
+            storage.update("dc-x", {"metadata": "hello"})
+
+    def test_string_fields_refuse_non_string(self, storage: JSONLStorage) -> None:
+        """Description / owner / parent refuse non-string non-None values."""
+        storage.create(Issue(id="x", title="X"))
+        with pytest.raises(TypeError, match="description"):
+            storage.update("dc-x", {"description": 123})
+        with pytest.raises(TypeError, match="owner"):
+            storage.update("dc-x", {"owner": 42})
+
+
+class TestStatusFinalityGuards:
+    """Tombstone status is final — close/update/delete must not resurrect it.
+
+    Regression for dogcat-4g76: previously close() set status=closed on a
+    tombstoned issue (leaving deleted_at populated alongside closed_at),
+    update() permitted TOMBSTONE→OPEN with stale deleted_*, and a double
+    delete() overwrote the original deleted_at/deleted_reason.
+    """
+
+    def test_close_refuses_tombstoned_issue(self, storage: JSONLStorage) -> None:
+        """close() on a tombstoned issue raises rather than resurrecting it."""
+        from dogcat.models import Status
+
+        storage.create(Issue(id="x", title="X"))
+        storage.delete("dc-x", reason="gone")
+        with pytest.raises(ValueError, match="tombstoned"):
+            storage.close("dc-x")
+        # State unchanged
+        issue = storage.get("dc-x")
+        assert issue is not None
+        assert issue.status == Status.TOMBSTONE
+        assert issue.deleted_reason == "gone"
+        assert issue.closed_at is None
+
+    def test_update_refuses_status_change_from_tombstone(
+        self, storage: JSONLStorage
+    ) -> None:
+        """update(--status open) on a tombstone raises."""
+        storage.create(Issue(id="x", title="X"))
+        storage.delete("dc-x")
+        with pytest.raises(ValueError, match="tombstoned"):
+            storage.update("dc-x", {"status": "open"})
+
+    def test_update_refuses_status_change_via_enum(self, storage: JSONLStorage) -> None:
+        """Update accepts both string and enum forms — guard works for both."""
+        from dogcat.models import Status
+
+        storage.create(Issue(id="x", title="X"))
+        storage.delete("dc-x")
+        with pytest.raises(ValueError, match="tombstoned"):
+            storage.update("dc-x", {"status": Status.OPEN})
+
+    def test_delete_is_idempotent(self, storage: JSONLStorage) -> None:
+        """A second delete on a tombstoned issue does not overwrite forensics."""
+        storage.create(Issue(id="x", title="X"))
+        first = storage.delete("dc-x", reason="first reason", deleted_by="alice")
+        first_at = first.deleted_at
+
+        # Second delete with different reason / by should not modify state.
+        second = storage.delete("dc-x", reason="second reason", deleted_by="bob")
+        assert second.deleted_at == first_at
+        assert second.deleted_reason == "first reason"
+        assert second.deleted_by == "alice"
+
+
+class TestInputCapEnforcement:
+    """validate_issue caps + namespace rule are enforced at the storage boundary."""
+
+    def test_oversized_title_rejected_on_create(self, storage: JSONLStorage) -> None:
+        """A title above MAX_TITLE_LEN is rejected on create()."""
+        from dogcat.constants import MAX_TITLE_LEN
+
+        oversized = "x" * (MAX_TITLE_LEN + 1)
+        with pytest.raises(ValueError, match="title exceeds"):
+            storage.create(Issue(id="big", title=oversized))
+
+    def test_oversized_description_rejected_on_create(
+        self, storage: JSONLStorage
+    ) -> None:
+        """A description above MAX_DESC_LEN is rejected on create()."""
+        from dogcat.constants import MAX_DESC_LEN
+
+        oversized = "x" * (MAX_DESC_LEN + 1)
+        with pytest.raises(ValueError, match="description exceeds"):
+            storage.create(Issue(id="big", title="OK", description=oversized))
+
+    def test_invalid_namespace_rejected_on_create(self, storage: JSONLStorage) -> None:
+        """A namespace with spaces / control bytes is rejected on create()."""
+        with pytest.raises(ValueError, match="namespace"):
+            storage.create(Issue(id="x", title="OK", namespace="bad ns"))
+
+    def test_control_chars_stripped_from_title_on_create(
+        self, storage: JSONLStorage
+    ) -> None:
+        """Control bytes (e.g. terminal escapes) are stripped from the title."""
+        issue = storage.create(
+            Issue(id="x", title="\x1b[31mevil\x1b[0m"),
+        )
+        assert "\x1b" not in issue.title
+        assert "evil" in issue.title
+
+    def test_control_chars_stripped_from_description_on_create(
+        self, storage: JSONLStorage
+    ) -> None:
+        """Control bytes in the description are stripped during create()."""
+        issue = storage.create(
+            Issue(
+                id="d",
+                title="OK",
+                description="hi\x1b[2J\x1b[Hthere",
+            ),
+        )
+        assert "\x1b" not in (issue.description or "")
+        # ESC chars stripped but printable bracket sequences remain harmless.
+        assert "hi" in (issue.description or "")
+        assert "there" in (issue.description or "")
+
+    def test_empty_title_after_strip_rejected(self, storage: JSONLStorage) -> None:
+        """A title containing only control bytes is rejected (post-strip empty)."""
+        with pytest.raises(ValueError, match="empty after stripping"):
+            storage.create(Issue(id="x", title="\x1b\x00\x07"))
+
+    def test_oversized_title_rejected_on_update(self, storage: JSONLStorage) -> None:
+        """A too-long title fed via update() is rejected too."""
+        from dogcat.constants import MAX_TITLE_LEN
+
+        storage.create(Issue(id="ok", title="OK"))
+        with pytest.raises(ValueError, match="title exceeds"):
+            storage.update("ok", {"title": "x" * (MAX_TITLE_LEN + 1)})
+
+    def test_invalid_namespace_rejected_on_change_namespace(
+        self, storage: JSONLStorage
+    ) -> None:
+        """change_namespace() rejects an invalid target namespace."""
+        storage.create(Issue(id="ok", title="OK"))
+        with pytest.raises(ValueError, match="invalid"):
+            storage.change_namespace("ok", "bad ns")
+
+
+class TestAtomicRewritePreservesMode:
+    """Compaction must not silently demote 0644 → 0600.
+
+    Regression for dogcat-1cfd: tempfile.NamedTemporaryFile defaults to
+    0600, and Path.replace inherits the tmp's mode — so a shared
+    issues.jsonl became unreadable to other users after the first
+    compaction.
+    """
+
+    def test_compaction_preserves_0644(self, temp_workspace: Path) -> None:
+        """A 0644 issues.jsonl stays 0644 after a rewrite via _save."""
+        import stat
+
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage_path.parent.mkdir(parents=True, exist_ok=True)
+
+        s = JSONLStorage(str(storage_path), create_dir=True)
+        s.create(Issue(id="ok", title="OK"))
+        # Set explicit 0644 on the post-create file.
+        storage_path.chmod(0o644)
+
+        s._save()
+        post_mode = stat.S_IMODE(storage_path.stat().st_mode)
+        assert post_mode == 0o644
+
+    def test_compaction_preserves_0664(self, temp_workspace: Path) -> None:
+        """A 0664 (group-writable) file stays 0664 after a rewrite."""
+        import stat
+
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage_path.parent.mkdir(parents=True, exist_ok=True)
+
+        s = JSONLStorage(str(storage_path), create_dir=True)
+        s.create(Issue(id="ok", title="OK"))
+        storage_path.chmod(0o664)
+
+        s._save()
+        post_mode = stat.S_IMODE(storage_path.stat().st_mode)
+        assert post_mode == 0o664
+
+
+class TestIsDefaultBranchLocale:
+    """``_is_default_branch`` must work under non-English locales.
+
+    Regression for dogcat-4tl1: ``result.stderr.lower()`` substring
+    checked for ``"not a git repository"``, but git emits localized
+    strings under non-English LC_ALL, so the check failed and
+    auto-compaction was silently disabled.
+    """
+
+    def test_subprocess_invoked_with_c_locale(self, temp_workspace: Path) -> None:
+        """The ``git rev-parse`` call passes LC_ALL=C / LANG=C in env."""
+        from unittest.mock import patch
+
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage_path.parent.mkdir(parents=True, exist_ok=True)
+        s = JSONLStorage(str(storage_path))
+
+        captured: dict[str, dict[str, str]] = {}
+
+        def mock_run(*_args: object, **kwargs: object) -> object:
+            env = kwargs.get("env")
+            if isinstance(env, dict):
+                captured["env"] = env  # type: ignore[assignment]
+            from subprocess import CompletedProcess
+
+            # Pretend we're outside a git repo via the (localized) French
+            # error string. With LC_ALL=C this would be the English form;
+            # the test verifies that the call SETS the C locale, not what
+            # git returns.
+            return CompletedProcess(
+                args=[],
+                returncode=128,
+                stdout="",
+                stderr="ce n'est pas un dépôt git",
+            )
+
+        with patch("subprocess.run", side_effect=mock_run):
+            s._is_default_branch()
+
+        assert captured["env"]["LC_ALL"] == "C"
+        assert captured["env"]["LANG"] == "C"
 
 
 class TestLargeDataset:

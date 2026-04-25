@@ -1,10 +1,11 @@
 """Data models for Dogcat issues using dataclasses."""
 
 import logging
+import re as _re
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, TypedDict
+from typing import Any, TypedDict, TypeVar
 
 from typing_extensions import Self
 
@@ -69,6 +70,9 @@ class Status(str, Enum):
     DEFERRED = "deferred"
     CLOSED = "closed"
     TOMBSTONE = "tombstone"
+    # Sentinel used when a record from a newer dcat version contains a status
+    # this reader does not recognize; preserves forward-compat for _load().
+    UNKNOWN = "unknown"
 
 
 class IssueType(str, Enum):
@@ -81,6 +85,7 @@ class IssueType(str, Enum):
     CHORE = "chore"
     EPIC = "epic"
     QUESTION = "question"
+    UNKNOWN = "unknown"
 
 
 class DependencyType(str, Enum):
@@ -89,6 +94,30 @@ class DependencyType(str, Enum):
     BLOCKS = "blocks"
     PARENT_CHILD = "parent-child"
     RELATED = "related"
+    UNKNOWN = "unknown"
+
+
+_E = TypeVar("_E", bound=Enum)
+
+
+def _safe_enum(enum_cls: type[_E], raw_value: object, field_name: str) -> _E:
+    """Coerce ``raw_value`` to a member of ``enum_cls``, falling back to UNKNOWN.
+
+    Forward-compatibility hook: a record from a newer dcat version may carry
+    an enum value this reader does not recognize. Rather than aborting the
+    entire load (CLAUDE.md forbids hand-editing the JSONL), log a warning
+    and return the ``UNKNOWN`` sentinel so the rest of the file parses.
+    """
+    try:
+        return enum_cls(raw_value)
+    except ValueError:
+        _logger.warning(
+            "Unknown %s value %r — coerced to UNKNOWN sentinel "
+            "(record likely written by a newer dcat version)",
+            field_name,
+            raw_value,
+        )
+        return enum_cls["UNKNOWN"]
 
 
 class LinkType(str, Enum):
@@ -223,6 +252,7 @@ class ProposalStatus(str, Enum):
     OPEN = "open"
     CLOSED = "closed"
     TOMBSTONE = "tombstone"
+    UNKNOWN = "unknown"
 
 
 PROPOSAL_STATUS_EMOJIS: dict["ProposalStatus", str] = {
@@ -397,8 +427,88 @@ def validate_issue_type(issue_type: Any) -> None:
         raise TypeError(msg)
 
 
+# C0 controls (\x00-\x1f) minus \t/\n, plus DEL (\x7f) and C1 (\x80-\x9f).
+_control_char_pattern = _re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def strip_control_bytes(text: str | None) -> str | None:
+    r"""Strip C0/C1 control bytes from ``text`` (keep ``\\t`` and ``\\n``).
+
+    Defense against terminal-escape injection via title/description/etc.
+    Used by validate_issue/validate_proposal so the storage layer can never
+    persist a record carrying ``\\x1b[2J`` or other prompt-injection payloads.
+    Render-side has a complementary escape helper as defense-in-depth.
+    """
+    if text is None:
+        return None
+    return _control_char_pattern.sub("", text)
+
+
+def sanitize_for_terminal(text: str | None) -> str:
+    r"""Render-time escape: visualize control bytes that slipped through.
+
+    Defense-in-depth — even if a record predates the validate-time strip,
+    rendering it via this helper produces ``\\xNN`` placeholders instead of
+    executing the escape sequence.
+    """
+    if not text:
+        return text or ""
+    out: list[str] = []
+    for ch in text:
+        if ch in {"\t", "\n"}:
+            out.append(ch)
+            continue
+        cp = ord(ch)
+        if cp < 0x20 or cp == 0x7F or 0x80 <= cp <= 0x9F:
+            out.append(f"\\x{cp:02x}")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def _validate_text_caps(
+    *,
+    title: str | None,
+    description: str | None,
+    namespace: str,
+    label: str,
+) -> None:
+    """Apply MAX_TITLE_LEN / MAX_DESC_LEN / namespace-rule shared with the web form."""
+    from dogcat.constants import (
+        MAX_DESC_LEN,
+        MAX_NAMESPACE_LEN,
+        MAX_TITLE_LEN,
+        is_valid_namespace,
+    )
+
+    if title is not None and len(title) > MAX_TITLE_LEN:
+        msg = (
+            f"{label} title exceeds {MAX_TITLE_LEN}-character limit "
+            f"({len(title)} chars)"
+        )
+        raise ValueError(msg)
+    if description is not None and len(description) > MAX_DESC_LEN:
+        msg = (
+            f"{label} description exceeds {MAX_DESC_LEN}-character limit "
+            f"({len(description)} chars)"
+        )
+        raise ValueError(msg)
+    if not is_valid_namespace(namespace):
+        msg = (
+            f"{label} namespace {namespace!r} is invalid "
+            f"(must match [A-Za-z0-9_-]+, 1-{MAX_NAMESPACE_LEN} chars)"
+        )
+        raise ValueError(msg)
+
+
 def validate_issue(issue: Issue) -> None:
-    """Validate that an issue has all required fields and valid data."""
+    """Validate that an issue has all required fields and valid data.
+
+    Mutates the issue in place to strip terminal-escape control bytes from
+    string fields (title, description, notes, owner, labels, comment text).
+    Stripping happens at the storage boundary so no record can persist a
+    prompt-injection payload — see :func:`strip_control_bytes`.
+    """
     if not issue.title or not isinstance(
         issue.title,
         str,
@@ -410,9 +520,35 @@ def validate_issue(issue: Issue) -> None:
     validate_status(issue.status)
     validate_issue_type(issue.issue_type)
 
+    # Strip control bytes from every persisted string field (in-place).
+    issue.title = strip_control_bytes(issue.title) or ""
+    issue.description = strip_control_bytes(issue.description)
+    issue.notes = strip_control_bytes(issue.notes)
+    issue.owner = strip_control_bytes(issue.owner)
+    issue.closed_reason = strip_control_bytes(issue.closed_reason)
+    issue.deleted_reason = strip_control_bytes(issue.deleted_reason)
+    issue.labels = [strip_control_bytes(lb) or "" for lb in issue.labels]
+    for comment in issue.comments:
+        comment.text = strip_control_bytes(comment.text) or ""
+        comment.author = strip_control_bytes(comment.author) or ""
+
+    if not issue.title:
+        msg = "Issue title is empty after stripping control characters"
+        raise ValueError(msg)
+
+    _validate_text_caps(
+        title=issue.title,
+        description=issue.description,
+        namespace=issue.namespace,
+        label="Issue",
+    )
+
 
 def validate_proposal(proposal: Proposal) -> None:
-    """Validate that a proposal has all required fields and valid data."""
+    """Validate that a proposal has all required fields and valid data.
+
+    See :func:`validate_issue` — same control-byte stripping applies here.
+    """
     if not proposal.title or not isinstance(
         proposal.title,
         str,
@@ -426,6 +562,23 @@ def validate_proposal(proposal: Proposal) -> None:
             f"got {proposal.status}"
         )
         raise TypeError(msg)
+
+    proposal.title = strip_control_bytes(proposal.title) or ""
+    proposal.description = strip_control_bytes(proposal.description)
+    proposal.proposed_by = strip_control_bytes(proposal.proposed_by)
+    proposal.source_repo = strip_control_bytes(proposal.source_repo)
+    proposal.closed_reason = strip_control_bytes(proposal.closed_reason)
+
+    if not proposal.title:
+        msg = "Proposal title is empty after stripping control characters"
+        raise ValueError(msg)
+
+    _validate_text_caps(
+        title=proposal.title,
+        description=proposal.description,
+        namespace=proposal.namespace,
+        label="Proposal",
+    )
 
 
 def issue_to_dict(issue: Issue) -> dict[str, Any]:
@@ -578,9 +731,9 @@ def dict_to_issue(data: dict[str, Any]) -> Issue:
         title=data["title"],
         namespace=namespace,
         description=data.get("description"),
-        status=Status(raw_status),
+        status=_safe_enum(Status, raw_status, "status"),
         priority=data.get("priority", 2),  # Default priority defined in constants
-        issue_type=IssueType(raw_issue_type),
+        issue_type=_safe_enum(IssueType, raw_issue_type, "issue_type"),
         owner=data.get("owner"),
         parent=data.get("parent"),
         labels=data.get("labels", []),
@@ -598,7 +751,11 @@ def dict_to_issue(data: dict[str, Any]) -> Issue:
         deleted_at=deleted_at,
         deleted_by=data.get("deleted_by"),
         deleted_reason=raw_deleted_reason,
-        original_type=(IssueType(raw_original_type) if raw_original_type else None),
+        original_type=(
+            _safe_enum(IssueType, raw_original_type, "original_type")
+            if raw_original_type
+            else None
+        ),
         comments=comments,
         duplicate_of=data.get("duplicate_of"),
         snoozed_until=(
@@ -655,7 +812,7 @@ def dict_to_proposal(data: dict[str, Any]) -> Proposal:
         description=data.get("description"),
         proposed_by=data.get("proposed_by"),
         source_repo=data.get("source_repo"),
-        status=ProposalStatus(data.get("status", "open")),
+        status=_safe_enum(ProposalStatus, data.get("status", "open"), "status"),
         created_at=created_at,
         updated_at=updated_at,
         closed_at=closed_at,

@@ -431,35 +431,48 @@ def validate_inbox_jsonl(path: Path) -> list[dict[str, str]]:
 def _detect_cycles(
     graph: dict[str, set[str]],
 ) -> list[dict[str, str]]:
-    """Detect circular dependencies using DFS."""
+    """Detect circular dependencies using iterative DFS.
+
+    Iterative — recursive form blew Python's frame limit on a 1001-deep
+    chain (dogcat-1r7h). Uses explicit ``(node, neighbor_iter)`` frames.
+    """
     errors: list[dict[str, str]] = []
     visited: set[str] = set()
     in_stack: set[str] = set()
 
-    def _dfs(node: str, path: list[str]) -> None:
-        if node in in_stack:
-            cycle_start = path.index(node)
-            cycle = [*path[cycle_start:], node]
-            errors.append(
-                {
-                    "level": "error",
-                    "message": (f"Circular dependency detected: {' -> '.join(cycle)}"),
-                },
-            )
-            return
-        if node in visited:
-            return
-        visited.add(node)
-        in_stack.add(node)
-        path.append(node)
-        for neighbor in graph.get(node, set()):
-            _dfs(neighbor, path)
-        path.pop()
-        in_stack.discard(node)
-
-    for node in graph:
-        if node not in visited:
-            _dfs(node, [])
+    for root in graph:
+        if root in visited:
+            continue
+        path: list[str] = [root]
+        visited.add(root)
+        in_stack.add(root)
+        stack: list[tuple[str, Any]] = [(root, iter(graph.get(root, set())))]
+        while stack:
+            node, it = stack[-1]
+            try:
+                neighbor = next(it)
+            except StopIteration:
+                in_stack.discard(node)
+                if path and path[-1] == node:
+                    path.pop()
+                stack.pop()
+                continue
+            if neighbor in in_stack:
+                cycle_start = path.index(neighbor)
+                cycle = [*path[cycle_start:], neighbor]
+                errors.append(
+                    {
+                        "level": "error",
+                        "message": (
+                            f"Circular dependency detected: {' -> '.join(cycle)}"
+                        ),
+                    },
+                )
+            elif neighbor not in visited:
+                visited.add(neighbor)
+                in_stack.add(neighbor)
+                path.append(neighbor)
+                stack.append((neighbor, iter(graph.get(neighbor, set()))))
 
     return errors
 

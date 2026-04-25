@@ -14,8 +14,37 @@ repository). Callers shouldn't have to reinvent the missing-binary check.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
+
+
+def _c_locale_env() -> dict[str, str]:
+    """Return the current environment with LC_ALL=C, LANG=C overlaid.
+
+    Forces git to emit C-locale stdout/stderr so substring checks ("not
+    a git repository", "fatal: ...") match regardless of the user's
+    locale. (dogcat-4tl1)
+    """
+    return {**os.environ, "LC_ALL": "C", "LANG": "C"}
+
+
+# Default timeout (seconds) for every ``git`` subprocess. Without a
+# timeout, a stalled NFS ``$HOME``, a dead credential helper, or a
+# broken LFS smudge wedges every dcat invocation indefinitely. Override
+# via ``DCAT_GIT_TIMEOUT_SECS`` for slow networks. (dogcat-1uq7)
+_GIT_TIMEOUT_DEFAULT = 10.0
+
+
+def _git_timeout() -> float:
+    raw = os.environ.get("DCAT_GIT_TIMEOUT_SECS")
+    if not raw:
+        return _GIT_TIMEOUT_DEFAULT
+    try:
+        value = float(raw)
+    except ValueError:
+        return _GIT_TIMEOUT_DEFAULT
+    return value if value > 0 else _GIT_TIMEOUT_DEFAULT
 
 
 def _run(
@@ -29,8 +58,13 @@ def _run(
     ``capture_text=True`` decodes stdout/stderr as text. When False (used for
     ``git show`` of binary blobs) raw bytes are returned. We never set
     ``check=True`` — callers inspect the returncode themselves so they can
-    distinguish "no repo" from real failures.
+    distinguish "no repo" from real failures. The call is bounded by
+    :func:`_git_timeout` (default 10 s, overridable via
+    ``DCAT_GIT_TIMEOUT_SECS``); on TimeoutExpired we return None like a
+    missing binary so callers degrade gracefully. (dogcat-1uq7)
     """
+    env = _c_locale_env()
+    timeout = _git_timeout()
     try:
         if capture_text:
             return subprocess.run(
@@ -39,14 +73,18 @@ def _run(
                 text=True,
                 check=False,
                 cwd=str(cwd) if cwd else None,
+                env=env,
+                timeout=timeout,
             )
         return subprocess.run(
             ["git", *args],
             capture_output=True,
             check=False,
             cwd=str(cwd) if cwd else None,
+            env=env,
+            timeout=timeout,
         )
-    except (FileNotFoundError, OSError):
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
         return None
 
 

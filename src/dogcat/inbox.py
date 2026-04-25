@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, Any
+from typing import IO, TYPE_CHECKING, Any, cast
 
 import orjson
 
@@ -60,6 +60,8 @@ class InboxStorage:
 
         self._lock_path = self.dogcats_dir / LOCK_FILENAME
         self._needs_compaction = False
+        # Bad lines skipped during _load(); see JSONLStorage for the contract.
+        self._bad_lines: list[tuple[int, bytes, str]] = []
 
         # Initialize event log for inbox change tracking
         from dogcat.event_log import InboxEventLog
@@ -70,8 +72,13 @@ class InboxStorage:
             self._load()
 
     def _load(self) -> None:
-        """Load proposals from JSONL file into memory (last-write-wins)."""
+        """Load proposals from JSONL file into memory (last-write-wins).
+
+        Malformed lines (any position) are logged and skipped; see
+        :meth:`JSONLStorage._load` for the recovery contract.
+        """
         self._proposals.clear()
+        self._bad_lines = []
 
         try:
             with self.path.open("rb") as f:
@@ -89,32 +96,32 @@ class InboxStorage:
             if not line:
                 continue
 
-            is_last_line = line_idx == len(lines) - 1
             try:
-                data = orjson.loads(line)
+                raw_data = orjson.loads(line)
+                if not isinstance(raw_data, dict):
+                    msg = f"expected JSON object, got {type(raw_data).__name__}"
+                    raise TypeError(msg)  # noqa: TRY301
+                data = cast("dict[str, Any]", raw_data)
                 parsed_records.append(data)
                 if data.get("record_type") != "proposal":
                     continue
                 proposal = dict_to_proposal(data)
                 self._proposals[proposal.full_id] = proposal
-            except (orjson.JSONDecodeError, ValueError, KeyError) as e:
-                if is_last_line:
-                    # Tolerate a corrupt last line (crash/disk-full artifact)
-                    # the same way JSONLStorage does, so a half-written
-                    # record from an interrupted append doesn't prevent the
-                    # inbox from loading.
-                    logging.getLogger(__name__).warning(
-                        "Skipping malformed last line in %s: %s",
-                        self.path,
-                        e,
-                    )
-                    self._needs_compaction = True
-                else:
-                    msg = (
-                        f"Invalid JSONL record at line {line_idx + 1} in "
-                        f"{self.path}: {e}"
-                    )
-                    raise ValueError(msg) from e
+            except (
+                orjson.JSONDecodeError,
+                ValueError,
+                KeyError,
+                AttributeError,
+                TypeError,
+            ) as e:
+                logging.getLogger(__name__).warning(
+                    "Skipping malformed JSONL line %d in %s: %s",
+                    line_idx + 1,
+                    self.path,
+                    e,
+                )
+                self._bad_lines.append((line_idx + 1, raw_line, str(e)))
+                self._needs_compaction = True
 
         warn_if_records_from_newer_version(parsed_records, source=str(self.path))
 
@@ -124,6 +131,16 @@ class InboxStorage:
 
     def _save(self) -> None:
         """Compact: rewrite the entire file with only current state."""
+        with self._file_lock():
+            self._save_locked()
+
+    def _save_locked(self) -> None:
+        """Body of :meth:`_save` that assumes the file lock is already held.
+
+        Use this from inside an existing ``self._file_lock()`` context to
+        avoid re-entering the advisory lock (which would deadlock since
+        ``advisory_file_lock`` opens a fresh fd each time).
+        """
 
         def _write(tmp_file: IO[bytes]) -> int:
             count = 0
@@ -133,8 +150,7 @@ class InboxStorage:
                 count += 1
             return count
 
-        with self._file_lock():
-            atomic_rewrite_jsonl(self.path, self.dogcats_dir, _write)
+        atomic_rewrite_jsonl(self.path, self.dogcats_dir, _write)
 
     def _append(self, records: list[dict[str, Any]]) -> None:
         """Append records to the JSONL file without rewriting it."""
@@ -228,13 +244,13 @@ class InboxStorage:
         Raises:
             ValueError: If ID already exists or proposal is invalid.
         """
+        from dogcat.models import validate_proposal
+
         if proposal.full_id in self._proposals:
             msg = f"Proposal with ID {proposal.full_id} already exists"
             raise ValueError(msg)
 
-        if not proposal.title:
-            msg = "Proposal must have a non-empty title"
-            raise ValueError(msg)
+        validate_proposal(proposal)
 
         self._proposals[proposal.full_id] = proposal
         changes: dict[str, dict[str, Any]] = {
@@ -443,17 +459,21 @@ class InboxStorage:
         Returns:
             List of pruned proposal IDs.
         """
-        tombstone_ids = [
-            pid
-            for pid, proposal in self._proposals.items()
-            if proposal.status == ProposalStatus.TOMBSTONE
-        ]
+        with self._file_lock():
+            if self.path.exists():
+                self._load()
 
-        for pid in tombstone_ids:
-            del self._proposals[pid]
+            tombstone_ids = [
+                pid
+                for pid, proposal in self._proposals.items()
+                if proposal.status == ProposalStatus.TOMBSTONE
+            ]
 
-        if tombstone_ids:
-            self._save()
+            for pid in tombstone_ids:
+                del self._proposals[pid]
+
+            if tombstone_ids:
+                self._save_locked()
 
         return tombstone_ids
 
@@ -471,19 +491,25 @@ class InboxStorage:
         Returns:
             Number of proposals renamed.
         """
-        targets = [p for p in self._proposals.values() if p.namespace == old_namespace]
-        if not targets:
-            return 0
+        with self._file_lock():
+            if self.path.exists():
+                self._load()
 
-        now = datetime.now().astimezone()
-        for proposal in targets:
-            old_fid = proposal.full_id
-            proposal.namespace = new_namespace
-            proposal.updated_at = now
-            del self._proposals[old_fid]
-            self._proposals[proposal.full_id] = proposal
+            targets = [
+                p for p in self._proposals.values() if p.namespace == old_namespace
+            ]
+            if not targets:
+                return 0
 
-        self._save()
+            now = datetime.now().astimezone()
+            for proposal in targets:
+                old_fid = proposal.full_id
+                proposal.namespace = new_namespace
+                proposal.updated_at = now
+                del self._proposals[old_fid]
+                self._proposals[proposal.full_id] = proposal
+
+            self._save_locked()
         return len(targets)
 
     def count(self, *, status: ProposalStatus | None = None) -> int:

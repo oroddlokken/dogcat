@@ -289,12 +289,15 @@ def complete_export_formats(incomplete: str) -> list[tuple[str, str]]:
 
 def complete_durations(incomplete: str) -> list[tuple[str, str]]:
     """Complete common duration values for --older-than."""
+    # The ``m`` suffix means 30 days, not a calendar month, so the
+    # human-readable label says "~1 month (30d)" to match what
+    # ``parse_duration`` actually computes. (dogcat-dfn9)
     options = [
         ("7d", "1 week"),
         ("14d", "2 weeks"),
-        ("30d", "1 month"),
-        ("60d", "2 months"),
-        ("90d", "3 months"),
+        ("30d", "~1 month (30d)"),
+        ("60d", "~2 months (60d)"),
+        ("90d", "~3 months (90d)"),
     ]
     return [(v, h) for v, h in options if v.startswith(incomplete)]
 

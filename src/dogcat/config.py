@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -48,10 +48,31 @@ def parse_dogcatrc(rc_path: str | Path) -> Path:
         Resolved absolute Path to the .dogcats directory
 
     Raises:
-        ValueError: If the file is empty or contains only whitespace
+        ValueError: If the file is empty / unreadable / contains a
+            control byte or embedded newline. (dogcat-2o1f)
+            ``OSError`` from ``read_text`` is wrapped here so callers
+            don't need to catch both exception types — the rc file
+            being unreadable should surface as a clear "cannot read
+            .dogcatrc" message, not a raw PermissionError traceback.
     """
     rc_path = Path(rc_path)
-    content = rc_path.read_text().strip()
+    try:
+        text = rc_path.read_text()
+    except OSError as e:
+        msg = f"Failed to read {DOGCATRC_FILENAME} at {rc_path}: {e}"
+        raise ValueError(msg) from e
+    # Take the first physical line, ignoring blank trailing lines.
+    # ``splitlines()`` handles \n, \r, \r\n uniformly. ``\x00`` (NUL)
+    # is rejected explicitly because it can't appear in a valid path
+    # and would silently confuse the resolver.
+    if "\x00" in text:
+        msg = f"{DOGCATRC_FILENAME} at {rc_path} contains a NUL byte"
+        raise ValueError(msg)
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        msg = f"{DOGCATRC_FILENAME} file is empty: {rc_path}"
+        raise ValueError(msg)
+    content = lines[0].strip()
 
     if not content:
         msg = f"{DOGCATRC_FILENAME} file is empty: {rc_path}"
@@ -63,6 +84,99 @@ def parse_dogcatrc(rc_path: str | Path) -> Path:
         target = rc_path.parent / target
 
     return target.resolve()
+
+
+def get_rc_walkup_boundary(start: Path | None = None) -> Path | None:
+    """Return the directory above which .dogcatrc walk-up should stop.
+
+    On a multi-tenant or shared host, an attacker who can write
+    ``/tmp/.dogcatrc`` (or a sibling ancestor) could silently re-root
+    every dcat command running in that subtree. We bound the upward
+    walk to the current git toplevel by default. ``$HOME`` is the
+    fallback so a user outside any repo still keeps their writes within
+    their own home directory.
+
+    Set ``DCAT_RC_WALKUP_UNRESTRICTED=1`` to opt back into the legacy
+    "walk to filesystem root" behavior. (dogcat-4107)
+    """
+    import os
+    import subprocess
+
+    if os.environ.get("DCAT_RC_WALKUP_UNRESTRICTED"):
+        return None
+
+    cwd = start if start is not None else Path.cwd()
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(cwd), "rev-parse", "--show-toplevel"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            top = result.stdout.strip()
+            if top:
+                return Path(top).resolve()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    home = os.environ.get("HOME")
+    if home:
+        return Path(home).resolve()
+    return None
+
+
+def is_within(path: Path, boundary: Path) -> bool:
+    """Return True if ``path`` is at or below ``boundary``."""
+    try:
+        path.resolve().relative_to(boundary.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def warn_if_rc_target_foreign(rc_path: Path, target: Path) -> None:
+    """Warn (or refuse) when the rc target is unsafe.
+
+    - Logs a stderr warning when the target is outside the rc file's
+      ancestor chain (e.g. ``/tmp`` re-rooting your repo to ``$HOME``).
+    - Refuses the rc with a clear error when the rc file's owner and the
+      target's owner differ (cross-user re-root). Set
+      ``DCAT_UNSAFE_CROSS_USER=1`` to override (e.g. shared CI).
+    """
+    import os
+    import sys as _sys
+
+    rc_resolved = rc_path.resolve()
+    target_resolved = target.resolve()
+
+    # Out-of-tree warning.
+    rc_parent = rc_resolved.parent
+    if not is_within(target_resolved, rc_parent):
+        print(
+            f"warning: {DOGCATRC_FILENAME} at {rc_resolved} points to "
+            f"{target_resolved} which is outside the rc's directory; "
+            f"set DCAT_RC_WALKUP_UNRESTRICTED=1 to silence this warning.",
+            file=_sys.stderr,
+        )
+
+    if os.environ.get("DCAT_UNSAFE_CROSS_USER"):
+        return
+
+    # Cross-user ownership refusal (POSIX only).
+    try:
+        rc_uid = rc_resolved.stat().st_uid
+        target_uid = target_resolved.stat().st_uid
+    except OSError:
+        return
+    if rc_uid != target_uid:
+        msg = (
+            f"refusing to use {DOGCATRC_FILENAME} at {rc_resolved} "
+            f"(owned by uid={rc_uid}) — its target {target_resolved} "
+            f"is owned by a different uid={target_uid}. Set "
+            f"DCAT_UNSAFE_CROSS_USER=1 to override."
+        )
+        raise ValueError(msg)
 
 
 def get_config_path(dogcats_dir: str) -> Path:
@@ -89,6 +203,81 @@ def get_local_config_path(dogcats_dir: str) -> Path:
     return Path(dogcats_dir) / LOCAL_CONFIG_FILENAME
 
 
+# Keys whose value MUST be a list of strings. A scalar string here
+# would silently iterate per-character ("frontend" → {'f','r','o','n',
+# 't','e','d'}), which the rename-namespace path turns into a hard
+# crash and the visibility filter into a stealthy bug. (dogcat-4o1p)
+_LIST_OF_STR_CONFIG_KEYS = (
+    "visible_namespaces",
+    "hidden_namespaces",
+    "pinned_namespaces",
+)
+# Keys whose value MUST be a string.
+_STR_CONFIG_KEYS = ("namespace", "issue_prefix", "inbox_remote")
+# Keys whose value MUST be a bool. A string here ("false" / "no" /
+# "0") would be truthy under ``bool(...)`` and silently flip a
+# security-sensitive toggle. (dogcat-22t5)
+_BOOL_CONFIG_KEYS = ("allow_creating_namespaces", "git_tracking")
+
+
+def _validate_config_shape(payload: dict[str, Any], source: str) -> dict[str, Any]:
+    """Drop shape-violating values from a config dict, logging each drop.
+
+    Coercing here keeps callers (which previously did
+    ``list(config.get('pinned_namespaces', []))`` etc.) from silently
+    iterating a wrongly-typed scalar. (dogcat-4o1p)
+    """
+    cleaned: dict[str, Any] = dict(payload)
+    for key in _LIST_OF_STR_CONFIG_KEYS:
+        if key not in cleaned:
+            continue
+        raw: Any = cleaned[key]
+        if isinstance(raw, list):
+            items = cast("list[Any]", raw)
+            is_list_of_str = all(isinstance(i, str) for i in items)
+        else:
+            is_list_of_str = False
+        if not is_list_of_str:
+            repr_value: str = repr(cast("object", raw))
+            _logger.warning(
+                "%s: %s must be a list of strings (got %s); ignoring.",
+                source,
+                key,
+                repr_value,
+            )
+            cleaned.pop(key, None)
+    for key in _STR_CONFIG_KEYS:
+        if key not in cleaned:
+            continue
+        raw_str: Any = cleaned[key]
+        if not isinstance(raw_str, str):
+            repr_value = repr(cast("object", raw_str))
+            _logger.warning(
+                "%s: %s must be a string (got %s); ignoring.",
+                source,
+                key,
+                repr_value,
+            )
+            cleaned.pop(key, None)
+    for key in _BOOL_CONFIG_KEYS:
+        if key not in cleaned:
+            continue
+        raw_bool: Any = cleaned[key]
+        # ``bool`` is a subclass of int, so we accept both. Reject
+        # strings here so ``"false"`` / ``"no"`` / ``"0"`` cannot
+        # silently flip the toggle to True via ``bool(...)``.
+        if not isinstance(raw_bool, bool):
+            repr_value = repr(cast("object", raw_bool))
+            _logger.warning(
+                "%s: %s must be a boolean (got %s); ignoring.",
+                source,
+                key,
+                repr_value,
+            )
+            cleaned.pop(key, None)
+    return cleaned
+
+
 def _load_toml(path: Path) -> dict[str, Any]:
     """Load a single TOML file, returning empty dict on missing/invalid.
 
@@ -102,7 +291,7 @@ def _load_toml(path: Path) -> dict[str, Any]:
         return {}
     try:
         with path.open("rb") as f:
-            return tomllib.load(f)
+            payload = tomllib.load(f)
     except tomllib.TOMLDecodeError as e:
         _logger.warning(
             "Failed to parse %s: %s. Falling back to defaults — fix the "
@@ -114,6 +303,7 @@ def _load_toml(path: Path) -> dict[str, Any]:
     except OSError as e:
         _logger.warning("Failed to read %s: %s", path, e)
         return {}
+    return _validate_config_shape(payload, str(path))
 
 
 def check_toml_parseable(path: Path) -> str | None:
@@ -138,15 +328,23 @@ def check_toml_parseable(path: Path) -> str | None:
 def _find_rc_parent() -> Path | None:
     """Walk up from CWD to find a .dogcatrc file.
 
+    The walk is bounded by :func:`get_rc_walkup_boundary` (git toplevel
+    or ``$HOME``) so we don't trust an arbitrary ancestor like
+    ``/tmp/.dogcatrc`` planted by another user. (dogcat-4107)
+
     Returns:
         The parent directory containing .dogcatrc, or None if not found.
     """
     current = Path.cwd()
+    boundary = get_rc_walkup_boundary(current)
     while True:
         if (current / DOGCATRC_FILENAME).is_file():
             return current
         parent = current.parent
         if parent == current:
+            return None
+        if boundary is not None and current == boundary:
+            # Stop at the boundary; do not trust ancestors above it.
             return None
         current = parent
 
@@ -228,6 +426,41 @@ def load_local_config(dogcats_dir: str) -> dict[str, Any]:
     return _load_toml(get_local_config_path(dogcats_dir))
 
 
+def _atomic_write_toml(path: Path, payload: dict[str, Any]) -> None:
+    """Write TOML to ``path`` atomically (write-tmp + fsync + replace).
+
+    Without this, a kill / power-loss / ENOSPC mid-write leaves a
+    truncated config that ``_load_toml`` silently treats as ``{}`` —
+    every configured setting (namespace, visible_namespaces, etc.)
+    is lost without a signal. The pattern mirrors
+    ``_atomic_write_json`` in :mod:`dogcat.cli._cmd_doctor`. (dogcat-1s7e)
+    """
+    import os
+    import tempfile
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=path.name + ".",
+        suffix=".tmp",
+        dir=str(path.parent),
+    )
+    import contextlib
+
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            tomli_w.dump(payload, f)
+            f.flush()
+            os.fsync(f.fileno())
+        # ``os.replace`` is the atomic primitive on POSIX; the tests
+        # patch it directly, so we keep the call site intentional.
+        os.replace(tmp_name, path)  # noqa: PTH105
+    except BaseException:
+        with contextlib.suppress(OSError):
+            tmp_path.unlink()
+        raise
+
+
 def save_local_config(dogcats_dir: str, config: dict[str, Any]) -> None:
     """Save configuration to config.local.toml.
 
@@ -243,9 +476,7 @@ def save_local_config(dogcats_dir: str, config: dict[str, Any]) -> None:
         config_path = repo_local_path
     else:
         config_path = get_local_config_path(dogcats_dir)
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    with config_path.open("wb") as f:
-        tomli_w.dump(config, f)
+    _atomic_write_toml(config_path, config)
 
 
 def save_config(dogcats_dir: str, config: dict[str, Any]) -> None:
@@ -255,13 +486,7 @@ def save_config(dogcats_dir: str, config: dict[str, Any]) -> None:
         dogcats_dir: Path to .dogcats directory
         config: Configuration dictionary to save
     """
-    config_path = get_config_path(dogcats_dir)
-
-    # Ensure directory exists
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with config_path.open("wb") as f:
-        tomli_w.dump(config, f)
+    _atomic_write_toml(get_config_path(dogcats_dir), config)
 
 
 def _resolve_dogcats_path(dogcats_dir: str) -> str:

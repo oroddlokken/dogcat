@@ -229,14 +229,37 @@ class _BaseEventLog:
 
         events: list[EventRecord] = []
         with self.path.open("rb") as f:
-            for line in f:
-                line = line.strip()
+            for line_idx, raw_line in enumerate(f):
+                line = raw_line.strip()
                 if not line:
                     continue
-                data = orjson.loads(line)
-                if data.get("record_type") != "event":
+                # Mirror :meth:`JSONLStorage._load`'s tolerance: a single
+                # corrupt line must not crash ``dcat history`` /
+                # ``dcat workflow`` / etc. (dogcat-4s8b)
+                try:
+                    raw_data = orjson.loads(line)
+                    if not isinstance(raw_data, dict):
+                        continue
+                    from typing import cast
+
+                    data = cast("dict[str, Any]", raw_data)
+                    if data.get("record_type") != "event":
+                        continue
+                    record = _deserialize(data)
+                except (
+                    orjson.JSONDecodeError,
+                    ValueError,
+                    KeyError,
+                    AttributeError,
+                    TypeError,
+                ) as e:
+                    logging.getLogger(__name__).warning(
+                        "Skipping malformed line %d in %s: %s",
+                        line_idx + 1,
+                        self.path,
+                        e,
+                    )
                     continue
-                record = _deserialize(data)
                 if issue_id is not None and record.issue_id != issue_id:
                     continue
                 events.append(record)

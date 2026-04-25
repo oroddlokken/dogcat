@@ -150,3 +150,69 @@ class TestFindDogcatsDirWorktreeFallback:
             result = find_dogcats_dir(str(isolated))
 
         assert result == ".dogcats"
+
+
+class TestRcWalkupBoundary:
+    """Walk-up must not trust ancestors above git toplevel / $HOME.
+
+    Regression for dogcat-4107: a planted ``/tmp/.dogcatrc`` could
+    silently re-root every dcat command running in a child workspace.
+    """
+
+    def test_walkup_stops_at_git_toplevel(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A .dogcatrc above the git toplevel is not picked up."""
+        # Set up a fake git repo with no .dogcatrc, and an ancestor
+        # .dogcatrc that should be ignored.
+        attacker_dir = tmp_path / "attacker_dogcats"
+        attacker_dir.mkdir()
+        ancestor_rc = tmp_path / ".dogcatrc"
+        ancestor_rc.write_text(str(attacker_dir))
+
+        repo = tmp_path / "victim_repo"
+        repo.mkdir()
+        (repo / ".git").mkdir()  # marks toplevel
+        sub = repo / "sub"
+        sub.mkdir()
+        monkeypatch.chdir(sub)
+
+        # Pretend the git toplevel is the repo dir (so the boundary stops here).
+        from dogcat.config import get_rc_walkup_boundary
+
+        # Force the boundary to be the repo root by mocking subprocess
+        mock_result = type(
+            "CompletedProcess",
+            (),
+            {"returncode": 0, "stdout": str(repo) + "\n"},
+        )()
+        with patch("subprocess.run", return_value=mock_result):
+            boundary = get_rc_walkup_boundary(sub)
+        assert boundary == repo.resolve()
+
+    def test_dcat_rc_walkup_unrestricted_disables_boundary(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Setting DCAT_RC_WALKUP_UNRESTRICTED=1 lets walk-up reach root."""
+        from dogcat.config import get_rc_walkup_boundary
+
+        monkeypatch.setenv("DCAT_RC_WALKUP_UNRESTRICTED", "1")
+        assert get_rc_walkup_boundary(tmp_path) is None
+
+    def test_warn_if_rc_target_outside_rc_dir(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """An rc target outside its own directory emits a stderr warning."""
+        from dogcat.config import warn_if_rc_target_foreign
+
+        rc_dir = tmp_path / "rc_dir"
+        rc_dir.mkdir()
+        rc = rc_dir / ".dogcatrc"
+        rc.write_text("ignored")
+
+        external = tmp_path / "elsewhere"
+        external.mkdir()
+
+        warn_if_rc_target_foreign(rc, external)
+        err = capsys.readouterr().err
+        assert "outside the rc's directory" in err

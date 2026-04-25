@@ -676,3 +676,109 @@ def register(app: typer.Typer) -> None:
         except Exception as e:
             echo_error(str(e))
             raise typer.Exit(1) from e
+
+    @app.command(name="repair-jsonl")
+    def repair_jsonl(
+        dry_run: bool = typer.Option(
+            False,
+            "--dry-run",
+            "-n",
+            help="Report bad lines without writing the .bad sidecar or compacting",
+        ),
+        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+    ) -> None:
+        """Move malformed lines out of issues.jsonl / inbox.jsonl.
+
+        Loads each JSONL file, copies lines that fail to parse (or aren't
+        JSON objects) to a sibling ``<file>.bad`` sidecar, then compacts
+        the source file so it only contains valid records. Use
+        ``--dry-run`` to preview which lines would be relocated.
+        """
+        set_json(json_output)
+        try:
+            from pathlib import Path
+
+            from dogcat.inbox import InboxStorage
+            from dogcat.storage import JSONLStorage
+
+            dogcats_path = Path(dogcats_dir)
+
+            issues_path = dogcats_path / "issues.jsonl"
+            issues_bad: list[tuple[int, bytes, str]] = []
+            issues_storage: JSONLStorage | None = None
+            if issues_path.exists():
+                issues_storage = JSONLStorage(str(issues_path))
+                issues_bad = list(issues_storage._bad_lines)
+
+            inbox_path = dogcats_path / "inbox.jsonl"
+            inbox_bad: list[tuple[int, bytes, str]] = []
+            inbox_storage: InboxStorage | None = None
+            if inbox_path.exists():
+                inbox_storage = InboxStorage(dogcats_dir=str(dogcats_path))
+                inbox_bad = list(inbox_storage._bad_lines)
+
+            def _write_sidecar(target: Path, bad: list[tuple[int, bytes, str]]) -> Path:
+                sidecar = target.with_suffix(target.suffix + ".bad")
+                payload = b""
+                for lineno, raw_line, reason in bad:
+                    header = f"# line {lineno}: {reason}\n".encode()
+                    suffix = b"" if raw_line.endswith(b"\n") else b"\n"
+                    payload += header + raw_line + suffix
+                with sidecar.open("ab") as f:
+                    f.write(payload)
+                return sidecar
+
+            issues_sidecar: Path | None = None
+            inbox_sidecar: Path | None = None
+            if not dry_run:
+                if issues_bad and issues_storage is not None:
+                    issues_sidecar = _write_sidecar(issues_path, issues_bad)
+                    issues_storage._save()
+                if inbox_bad and inbox_storage is not None:
+                    inbox_sidecar = _write_sidecar(inbox_path, inbox_bad)
+                    inbox_storage._save()
+
+            if is_json():
+                output: dict[str, Any] = {
+                    "dry_run": dry_run,
+                    "issues": {
+                        "bad_lines": len(issues_bad),
+                        "lineno": [lineno for lineno, _, _ in issues_bad],
+                        "sidecar": str(issues_sidecar) if issues_sidecar else None,
+                    },
+                    "inbox": {
+                        "bad_lines": len(inbox_bad),
+                        "lineno": [lineno for lineno, _, _ in inbox_bad],
+                        "sidecar": str(inbox_sidecar) if inbox_sidecar else None,
+                    },
+                }
+                typer.echo(orjson.dumps(output).decode())
+            else:
+                if not issues_bad and not inbox_bad:
+                    typer.echo("No malformed JSONL lines found")
+                    return
+                if issues_bad:
+                    label = "Would move" if dry_run else "Moved"
+                    typer.echo(
+                        f"{label} {len(issues_bad)} bad line(s) from {issues_path}",
+                    )
+                    for lineno, _, reason in issues_bad:
+                        typer.echo(f"  line {lineno}: {reason}")
+                    if issues_sidecar:
+                        typer.echo(f"  -> {issues_sidecar}")
+                if inbox_bad:
+                    label = "Would move" if dry_run else "Moved"
+                    typer.echo(
+                        f"{label} {len(inbox_bad)} bad line(s) from {inbox_path}",
+                    )
+                    for lineno, _, reason in inbox_bad:
+                        typer.echo(f"  line {lineno}: {reason}")
+                    if inbox_sidecar:
+                        typer.echo(f"  -> {inbox_sidecar}")
+
+        except typer.Exit:
+            raise
+        except Exception as e:
+            echo_error(str(e))
+            raise typer.Exit(1) from e

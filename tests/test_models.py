@@ -35,6 +35,7 @@ class TestStatusEnum:
             "deferred",
             "closed",
             "tombstone",
+            "unknown",  # forward-compat sentinel
         }
         actual_values = {status.value for status in Status}
         assert actual_values == expected_values
@@ -58,6 +59,7 @@ class TestIssueTypeEnum:
             "chore",
             "epic",
             "question",
+            "unknown",  # forward-compat sentinel
         }
         actual_values = {issue_type.value for issue_type in IssueType}
         assert actual_values == expected_values
@@ -73,9 +75,154 @@ class TestDependencyTypeEnum:
 
     def test_all_dependency_type_values_valid(self) -> None:
         """Test that all DependencyType values are valid."""
-        expected_values = {"blocks", "parent-child", "related"}
+        expected_values = {"blocks", "parent-child", "related", "unknown"}
         actual_values = {dep_type.value for dep_type in DependencyType}
         assert actual_values == expected_values
+
+
+class TestForwardCompatEnumCoercion:
+    """A future enum value loads as UNKNOWN with a warning, not a crash."""
+
+    def test_unknown_status_coerces_to_unknown(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Unknown ``status`` becomes Status.UNKNOWN with a warning."""
+        import logging
+
+        from dogcat.models import dict_to_issue
+
+        record = {
+            "id": "x",
+            "title": "X",
+            "status": "snoozed",  # hypothetical future value
+            "issue_type": "task",
+            "created_at": "2026-04-25T12:00:00+00:00",
+            "updated_at": "2026-04-25T12:00:00+00:00",
+        }
+        with caplog.at_level(logging.WARNING, logger="dogcat.models"):
+            issue = dict_to_issue(record)
+        assert issue.status == Status.UNKNOWN
+        assert any("Unknown status" in m for m in caplog.messages)
+
+    def test_unknown_issue_type_coerces_to_unknown(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Unknown ``issue_type`` becomes IssueType.UNKNOWN with a warning."""
+        import logging
+
+        from dogcat.models import dict_to_issue
+
+        record = {
+            "id": "x",
+            "title": "X",
+            "status": "open",
+            "issue_type": "checkpoint",  # hypothetical future value
+            "created_at": "2026-04-25T12:00:00+00:00",
+            "updated_at": "2026-04-25T12:00:00+00:00",
+        }
+        with caplog.at_level(logging.WARNING, logger="dogcat.models"):
+            issue = dict_to_issue(record)
+        assert issue.issue_type == IssueType.UNKNOWN
+        assert any("Unknown issue_type" in m for m in caplog.messages)
+
+    def test_unknown_dependency_type_coerces_to_unknown(
+        self, caplog: pytest.LogCaptureFixture, tmp_path: object
+    ) -> None:
+        """Unknown DependencyType in dependency record loads as UNKNOWN."""
+        import logging
+        from pathlib import Path
+
+        import orjson
+
+        from dogcat.models import issue_to_dict
+        from dogcat.storage import JSONLStorage
+
+        dogcats = Path(str(tmp_path)) / ".dogcats"
+        dogcats.mkdir()
+        issues_path = dogcats / "issues.jsonl"
+
+        a = orjson.dumps(issue_to_dict(Issue(id="a", title="A"))).decode()
+        b = orjson.dumps(issue_to_dict(Issue(id="b", title="B"))).decode()
+        dep = orjson.dumps(
+            {
+                "record_type": "dependency",
+                "issue_id": "a",
+                "depends_on_id": "b",
+                "type": "tracks",  # hypothetical future value
+                "created_at": "2026-04-25T12:00:00+00:00",
+            }
+        ).decode()
+        issues_path.write_text(f"{a}\n{b}\n{dep}\n")
+
+        with caplog.at_level(logging.WARNING, logger="dogcat.models"):
+            s = JSONLStorage(str(issues_path))
+        assert len(s.list()) == 2
+        assert any("Unknown dependency.type" in m for m in caplog.messages)
+        assert s.all_dependencies[0].dep_type == DependencyType.UNKNOWN
+
+    def test_unknown_proposal_status_coerces_to_unknown(
+        self, caplog: pytest.LogCaptureFixture, tmp_path: object
+    ) -> None:
+        """Unknown ProposalStatus loads as ProposalStatus.UNKNOWN."""
+        import logging
+        from pathlib import Path
+
+        from dogcat.inbox import InboxStorage
+        from dogcat.models import ProposalStatus
+
+        dogcats = Path(str(tmp_path)) / ".dogcats"
+        dogcats.mkdir()
+        inbox_path = dogcats / "inbox.jsonl"
+
+        good = (
+            '{"record_type": "proposal", "id": "aaaa", "namespace": "test", '
+            '"title": "ok", "created_at": "2026-04-25T12:00:00+00:00", '
+            '"updated_at": "2026-04-25T12:00:00+00:00", "status": "open"}'
+        )
+        future = (
+            '{"record_type": "proposal", "id": "bbbb", "namespace": "test", '
+            '"title": "future", "created_at": "2026-04-25T12:00:01+00:00", '
+            '"updated_at": "2026-04-25T12:00:01+00:00", "status": "snoozed"}'
+        )
+        inbox_path.write_text(f"{good}\n{future}\n")
+
+        with caplog.at_level(logging.WARNING, logger="dogcat.models"):
+            s = InboxStorage(dogcats_dir=str(dogcats))
+        statuses = {p.id: p.status for p in s.list()}
+        assert statuses["bbbb"] == ProposalStatus.UNKNOWN
+        assert any("Unknown status" in m for m in caplog.messages)
+
+    def test_rest_of_file_loads_after_future_value(self, tmp_path: object) -> None:
+        """A record with a future enum value does not block subsequent records."""
+        from pathlib import Path
+
+        import orjson
+
+        from dogcat.models import issue_to_dict
+        from dogcat.storage import JSONLStorage
+
+        dogcats = Path(str(tmp_path)) / ".dogcats"
+        dogcats.mkdir()
+        issues_path = dogcats / "issues.jsonl"
+
+        future_record = orjson.dumps(
+            {
+                "record_type": "issue",
+                "id": "future",
+                "title": "Future",
+                "status": "snoozed",
+                "issue_type": "task",
+                "created_at": "2026-04-25T12:00:00+00:00",
+                "updated_at": "2026-04-25T12:00:00+00:00",
+            }
+        ).decode()
+        normal = orjson.dumps(issue_to_dict(Issue(id="ok", title="OK"))).decode()
+        issues_path.write_text(f"{future_record}\n{normal}\n")
+
+        s = JSONLStorage(str(issues_path))
+        ids = sorted(i.id for i in s.list())
+        assert ids == ["future", "ok"]
+        assert s.get("future").status == Status.UNKNOWN  # type: ignore[union-attr]
 
 
 class TestIssueMetadata:

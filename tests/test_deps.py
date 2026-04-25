@@ -479,3 +479,62 @@ class TestIntegrationDeps:
         # Now t-i2 should be ready
         ready = get_ready_work(storage_with_issues)
         assert "t-i2" in [i.full_id for i in ready]
+
+
+class TestDeepDependencyChain:
+    """Cycle detection / reachability must handle deep chains.
+
+    Regression for dogcat-1r7h: the recursive DFS hit Python's default
+    1000-frame limit on a 1001-deep chain and crashed every subsequent
+    dcat invocation. The iterative form scales to ~10k+ depth.
+    """
+
+    @staticmethod
+    def _build_deep_chain(storage: JSONLStorage, depth: int) -> None:
+        """Create ``depth`` issues with t-i{n} blocks t-i{n+1}."""
+        for i in range(depth):
+            storage.create(Issue(id=f"i{i}", namespace="t", title=f"Issue {i}"))
+        # Add deps via the underlying _dependencies list so we don't pay
+        # the cycle-prevention cost on every add_dependency call.
+        for i in range(depth - 1):
+            storage._dependencies.append(
+                Dependency(
+                    issue_id=f"t-i{i}",
+                    depends_on_id=f"t-i{i + 1}",
+                    dep_type=DependencyType.BLOCKS,
+                )
+            )
+        storage._rebuild_indexes()
+
+    def test_detect_cycles_handles_10000_deep_chain(
+        self, temp_dogcats_dir: Path
+    ) -> None:
+        """detect_cycles does not raise RecursionError on a 10k-deep chain."""
+        storage = JSONLStorage(str(temp_dogcats_dir / "issues.jsonl"))
+        self._build_deep_chain(storage, 10000)
+        cycles = detect_cycles(storage)
+        # Linear chain has no cycle.
+        assert cycles == []
+
+    def test_would_create_cycle_handles_10000_deep_chain(
+        self, temp_dogcats_dir: Path
+    ) -> None:
+        """would_create_cycle handles 10k-deep reachability."""
+        storage = JSONLStorage(str(temp_dogcats_dir / "issues.jsonl"))
+        self._build_deep_chain(storage, 10000)
+        # Adding t-i9999 -> t-i0 would close the chain into a cycle.
+        assert would_create_cycle(storage, "t-i9999", "t-i0") is True
+        # A side-edge between two non-related ids does not create a cycle.
+        storage.create(
+            Issue(id="other", namespace="t", title="Other"),
+        )
+        assert would_create_cycle(storage, "t-other", "t-i0") is False
+
+    def test_get_dependency_chain_handles_deep_chain(
+        self, temp_dogcats_dir: Path
+    ) -> None:
+        """get_dependency_chain walks a 5k-deep chain without recursion."""
+        storage = JSONLStorage(str(temp_dogcats_dir / "issues.jsonl"))
+        self._build_deep_chain(storage, 5000)
+        chain = get_dependency_chain(storage, "t-i0")
+        assert len(chain) == 5000

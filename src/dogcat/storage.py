@@ -7,7 +7,7 @@ import logging
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, Any
+from typing import IO, TYPE_CHECKING, Any, cast
 
 import orjson
 
@@ -90,6 +90,10 @@ class JSONLStorage:
 
         self._lock_path = self.dogcats_dir / LOCK_FILENAME
         self._needs_compaction = False  # Set when corrupt last line is skipped
+        # Bad lines skipped during _load() — preserved (with line number and
+        # reason) so doctor can surface a count and ``dcat admin repair-jsonl``
+        # can copy them to a sidecar file before compaction drops them.
+        self._bad_lines: list[tuple[int, bytes, str]] = []
 
         # Initialize event log for change tracking
         from dogcat.event_log import EventLog
@@ -108,13 +112,16 @@ class JSONLStorage:
         ``"op"`` field (``"add"`` or ``"remove"``); the default is ``"add"``
         for backwards compatibility with files written before append-only mode.
 
-        A malformed **last** line is tolerated (logged and skipped) because it
-        is the most common result of a crash or disk-full during ``_append()``.
-        Any other malformed line still raises ``ValueError``.
+        Malformed lines (any position) are logged as warnings and skipped so
+        the CLI keeps working after a crash, disk-full, or partial write.
+        Skipped lines are recorded on ``self._bad_lines`` so doctor can
+        surface the count and ``dcat admin repair-jsonl`` can preserve them
+        in a ``.bad`` sidecar before compaction drops them.
         """
         self._issues.clear()
         self._dependencies.clear()
         self._links.clear()
+        self._bad_lines = []
 
         # Use sets keyed by identity tuple for efficient add/remove replay
         dep_map: dict[tuple[str, str, str], Dependency] = {}
@@ -150,10 +157,13 @@ class JSONLStorage:
                 continue
 
             line_count += 1
-            is_last_line = line_idx == len(lines) - 1
 
             try:
-                data = orjson.loads(line)
+                raw_data = orjson.loads(line)
+                if not isinstance(raw_data, dict):
+                    msg = f"expected JSON object, got {type(raw_data).__name__}"
+                    raise TypeError(msg)  # noqa: TRY301
+                data = cast("dict[str, Any]", raw_data)
                 raw_v = data.get("dcat_version")
                 if isinstance(raw_v, str):
                     parsed_v = parse_version(raw_v)
@@ -171,18 +181,21 @@ class JSONLStorage:
                 else:
                     # Default: treat as an issue record (last-write-wins).
                     self._parse_issue_record(data)
-            except (orjson.JSONDecodeError, ValueError, KeyError) as e:
-                if is_last_line:
-                    # Tolerate a corrupt last line (crash/disk-full artifact)
-                    logging.getLogger(__name__).warning(
-                        "Skipping malformed last line in %s: %s",
-                        self.path,
-                        e,
-                    )
-                    self._needs_compaction = True
-                else:
-                    msg = f"Invalid JSONL record at line {line_idx + 1}: {e}"
-                    raise ValueError(msg) from e
+            except (
+                orjson.JSONDecodeError,
+                ValueError,
+                KeyError,
+                AttributeError,
+                TypeError,
+            ) as e:
+                logging.getLogger(__name__).warning(
+                    "Skipping malformed JSONL line %d in %s: %s",
+                    line_idx + 1,
+                    self.path,
+                    e,
+                )
+                self._bad_lines.append((line_idx + 1, raw_line, str(e)))
+                self._needs_compaction = True
 
         self._dependencies = list(dep_map.values())
         self._links = list(link_map.values())
@@ -244,10 +257,12 @@ class JSONLStorage:
         if op == "remove":
             dep_map.pop(key, None)
             return
+        from dogcat.models import _safe_enum
+
         dep_map[key] = Dependency(
             issue_id=data["issue_id"],
             depends_on_id=data["depends_on_id"],
-            dep_type=DependencyType(data["type"]),
+            dep_type=_safe_enum(DependencyType, data["type"], "dependency.type"),
             created_at=datetime.fromisoformat(data["created_at"]),
             created_by=data.get("created_by"),
         )
@@ -366,14 +381,27 @@ class JSONLStorage:
                         raw_line = raw_line.strip()
                         if not raw_line:
                             continue
+                        # Match _load's exception tolerance: a corrupt
+                        # last line that _load skipped (setting
+                        # _needs_compaction) must not crash the next
+                        # rewrite (dogcat-5tix). Catch the same exception
+                        # set + non-dict guard.
                         try:
-                            data = orjson.loads(raw_line)
-                        except (orjson.JSONDecodeError, ValueError) as e:
-                            # Surface malformed records during compaction so a
-                            # corrupt event isn't quietly dropped on rewrite.
-                            # The compacted file inherits the unparseable line
-                            # being skipped, so the warning is the user's only
-                            # signal to recover from git.
+                            raw_data = orjson.loads(raw_line)
+                            if not isinstance(raw_data, dict):
+                                msg = (
+                                    f"expected JSON object, got "
+                                    f"{type(raw_data).__name__}"
+                                )
+                                raise TypeError(msg)  # noqa: TRY301
+                            data = cast("dict[str, Any]", raw_data)
+                        except (
+                            orjson.JSONDecodeError,
+                            ValueError,
+                            KeyError,
+                            AttributeError,
+                            TypeError,
+                        ) as e:
                             logging.getLogger(__name__).warning(
                                 "Skipping malformed line %d in %s during "
                                 "compaction: %s",
@@ -450,15 +478,27 @@ class JSONLStorage:
         on ``develop``/``trunk``/etc. don't silently lose auto-compaction.
         """
         try:
+            # Force the C locale so stderr text matches the literal
+            # English match below. Under non-English LC_ALL git emits
+            # localized strings ("ce n'est pas un dépôt git", "Kein
+            # Git-Repository", etc.) and the substring check would fail,
+            # disabling auto-compaction silently. (dogcat-4tl1)
+            #
+            # Time-bound the call so a stalled HOME / credential helper
+            # / LFS smudge cannot wedge dcat indefinitely. (dogcat-1uq7)
+            from dogcat.git import _c_locale_env, _git_timeout
+
             result = subprocess.run(
                 ["git", "rev-parse", "--abbrev-ref", "HEAD"],
                 capture_output=True,
                 text=True,
                 check=False,
                 cwd=str(self.dogcats_dir),
+                env=_c_locale_env(),
+                timeout=_git_timeout(),
             )
-        except FileNotFoundError:
-            return True  # git not installed — safe to compact
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return True  # git not installed / hung — safe to compact
         if result.returncode == 0:
             branch = result.stdout.strip()
             return branch in self._known_default_branches()
@@ -494,6 +534,19 @@ class JSONLStorage:
 
         configured = git_helpers.get_config("init.defaultBranch", cwd=self.dogcats_dir)
         if configured:
+            # init.defaultBranch is per-repo and writable by any
+            # collaborator. If it points to a non-conventional name,
+            # log a one-line warning so the user notices before a
+            # noisy compaction lands on a feature branch. (dogcat-2wys)
+            if configured not in self._DEFAULT_BRANCHES:
+                logging.getLogger(__name__).warning(
+                    "init.defaultBranch=%r is not a conventional default "
+                    "(main/master); auto-compaction is enabled on this "
+                    "branch via the per-repo git config. Verify this is "
+                    "intentional — set the value in .dogcats/config.toml "
+                    "if you want it tracked in review.",
+                    configured,
+                )
             return self._DEFAULT_BRANCHES | {configured}
         return self._DEFAULT_BRANCHES
 
@@ -625,17 +678,13 @@ class JSONLStorage:
         Raises:
             ValueError: If ID already exists or issue is invalid
         """
-        from dogcat.models import validate_priority
+        from dogcat.models import validate_issue
 
         if issue.full_id in self._issues:
             msg = f"Issue with ID {issue.full_id} already exists"
             raise ValueError(msg)
 
-        if not issue.title:
-            msg = "Issue must have a non-empty title"
-            raise ValueError(msg)
-
-        validate_priority(issue.priority)
+        validate_issue(issue)
 
         self._issues[issue.full_id] = issue
         if issue.parent:
@@ -896,6 +945,107 @@ class JSONLStorage:
         },
     )
 
+    @staticmethod
+    def _coerce_update_value(key: str, value: Any) -> Any:
+        """Type-check + coerce a single ``update()`` field, raising on mismatch.
+
+        Defense against silent corruption from setattr-with-anything:
+        ``priority=True`` would pass ``isinstance(int)`` (bool is int);
+        ``labels='bug'`` would iterate as ``{'b','u','g'}`` and break
+        every label filter; ``status=42`` would store an int. (dogcat-3o3b)
+        """
+        from dogcat.models import (
+            IssueType,
+            Status,
+            validate_priority,
+        )
+
+        if key == "priority":
+            # bool is int subclass — exclude it explicitly so True/False
+            # don't slip through validate_priority.
+            if isinstance(value, bool) or not isinstance(value, int):
+                msg = (
+                    f"priority must be an int between 0 and 4, "
+                    f"got {type(value).__name__}: {value!r}"
+                )
+                raise TypeError(msg)
+            validate_priority(value)
+            return value
+        if key == "status":
+            if isinstance(value, str):
+                return Status(value)
+            if isinstance(value, Status):
+                return value
+            msg = f"status must be a Status enum or string, got {type(value).__name__}"
+            raise TypeError(msg)
+        if key == "issue_type":
+            if isinstance(value, str):
+                return IssueType(value)
+            if isinstance(value, IssueType):
+                return value
+            msg = (
+                f"issue_type must be an IssueType enum or string, "
+                f"got {type(value).__name__}"
+            )
+            raise TypeError(msg)
+        if key == "original_type":
+            if value is None:
+                return None
+            if isinstance(value, str):
+                return IssueType(value)
+            if isinstance(value, IssueType):
+                return value
+            msg = (
+                f"original_type must be an IssueType, str, or None, "
+                f"got {type(value).__name__}"
+            )
+            raise TypeError(msg)
+        if key == "labels":
+            if not isinstance(value, list):
+                type_name = type(value).__name__
+                msg = f"labels must be a list of strings, got {type_name}"
+                raise TypeError(msg)
+            items = cast("list[Any]", value)
+            if not all(isinstance(item, str) for item in items):
+                msg = "labels must be a list of strings, got non-string items"
+                raise TypeError(msg)
+            return cast("list[str]", value)
+        if key == "metadata":
+            if not isinstance(value, dict):
+                msg = f"metadata must be a dict, got {type(value).__name__}"
+                raise TypeError(msg)
+            return cast("dict[str, Any]", value)
+        if key == "comments":
+            if not isinstance(value, list):
+                msg = f"comments must be a list, got {type(value).__name__}"
+                raise TypeError(msg)
+            return cast("list[Any]", value)
+        # String-or-None fields (description, owner, parent, notes,
+        # closed_reason, deleted_reason, design, acceptance, external_ref,
+        # updated_by, closed_by, deleted_by).
+        string_or_none_fields = {
+            "title",
+            "description",
+            "owner",
+            "parent",
+            "notes",
+            "closed_reason",
+            "deleted_reason",
+            "design",
+            "acceptance",
+            "external_ref",
+            "updated_by",
+            "closed_by",
+            "deleted_by",
+        }
+        if key in string_or_none_fields:
+            if value is not None and not isinstance(value, str):
+                msg = f"{key} must be a str or None, got {type(value).__name__}"
+                raise TypeError(msg)
+            return value
+        # Datetime fields are allowed-through; the dataclass validates.
+        return value
+
     def update(self, issue_id: str, updates: dict[str, Any]) -> Issue:
         """Update an issue.
 
@@ -909,11 +1059,29 @@ class JSONLStorage:
         Raises:
             ValueError: If issue doesn't exist or updates contain disallowed fields
         """
-        from dogcat.models import IssueType, validate_priority
-
         resolved_id = self._resolve_or_raise(issue_id)
 
         issue = self._issues[resolved_id]
+
+        # Refuse to resurrect a tombstoned issue via update(). Without this
+        # guard, ``dcat update <id> --status open`` after ``dcat delete``
+        # flips a tombstone back to OPEN with deleted_* still populated.
+        # ``dcat reopen`` only handles CLOSED→OPEN, not TOMBSTONE→*. The
+        # right path for resurrecting a tombstone is a future explicit
+        # "undelete" command. (dogcat-4g76)
+        if issue.status == Status.TOMBSTONE and "status" in updates:
+            new_status = updates["status"]
+            if isinstance(new_status, str):
+                new_status_value = new_status
+            else:
+                new_status_value = getattr(new_status, "value", new_status)
+            if new_status_value != Status.TOMBSTONE.value:
+                msg = (
+                    f"Issue {issue.full_id} is tombstoned; "
+                    f"refusing to update status to {new_status_value!r}. "
+                    f"Tombstoned issues are immutable."
+                )
+                raise ValueError(msg)
 
         # Track old parent for index maintenance
         old_parent = issue.parent
@@ -926,18 +1094,16 @@ class JSONLStorage:
             dict(issue.metadata) if "metadata" in updates else None
         )
 
-        # Update fields — only UPDATABLE_FIELDS are allowed
+        # Update fields — only UPDATABLE_FIELDS are allowed.
+        # Each field is type-checked before setattr so update() cannot
+        # store a wrong-typed value and corrupt downstream code (e.g. a
+        # string ``labels`` would iterate as characters in filters; a
+        # bool ``priority`` would pass validate_priority because bool is
+        # an int subclass). (dogcat-3o3b)
         for key, value in updates.items():
             if key not in self.UPDATABLE_FIELDS:
                 continue
-            # Validate priority
-            if key == "priority":
-                validate_priority(value)
-            # Convert string values to proper enums
-            if key == "status" and isinstance(value, str):
-                value = Status(value)
-            elif key == "issue_type" and isinstance(value, str):
-                value = IssueType(value)
+            value = self._coerce_update_value(key, value)
             setattr(issue, key, value)
 
         # Handle status transition side effects
@@ -966,6 +1132,12 @@ class JSONLStorage:
 
         # Update timestamp
         issue.updated_at = datetime.now().astimezone()
+
+        # Re-validate after applying updates so length / namespace / control-char
+        # rules are enforced symmetrically with create() and the web form.
+        from dogcat.models import validate_issue
+
+        validate_issue(issue)
 
         new_values = {k: getattr(issue, k, None) for k in old_values}
         changes = self._tracked_changes(old_values, new_values)
@@ -1005,43 +1177,65 @@ class JSONLStorage:
         Raises:
             ValueError: If issue doesn't exist or new ID already taken.
         """
-        resolved_id = self._resolve_or_raise(issue_id)
+        from dogcat.constants import (
+            MAX_NAMESPACE_LEN,
+            is_valid_namespace,
+        )
 
-        issue = self._issues[resolved_id]
-        old_full_id = issue.full_id
-        new_full_id = f"{new_namespace}-{issue.id}"
-
-        if old_full_id == new_full_id:
-            return issue  # no-op
-
-        if new_full_id in self._issues:
-            msg = f"Issue with ID {new_full_id} already exists"
+        if not is_valid_namespace(new_namespace):
+            msg = (
+                f"Namespace {new_namespace!r} is invalid "
+                f"(must match [A-Za-z0-9_-]+, 1-{MAX_NAMESPACE_LEN} chars)"
+            )
             raise ValueError(msg)
 
-        # Update the issue itself
-        issue.namespace = new_namespace
-        issue.updated_at = datetime.now().astimezone()
-        if updated_by:
-            issue.updated_by = updated_by
+        # Acquire the lock first, then reload to capture any concurrent
+        # appends (a long-lived web/TUI process can hold a stale view that
+        # predates a competing CLI mutation). _save_locked re-uses the
+        # already-acquired lock.
+        with self._file_lock():
+            if self.path.exists():
+                self._load()
 
-        # Re-key in _issues dict
-        del self._issues[old_full_id]
-        self._issues[new_full_id] = issue
+            resolved_id = self._resolve_or_raise(issue_id)
 
-        # Collect all records to append
-        records: list[dict[str, Any]] = [self._issue_record(issue)]
+            issue = self._issues[resolved_id]
+            old_full_id = issue.full_id
+            new_full_id = f"{new_namespace}-{issue.id}"
 
-        # Cascade the rename through everything referencing old_full_id.
-        records.extend(self._cascade_id_rename(old_full_id, new_full_id))
+            if old_full_id == new_full_id:
+                return issue  # no-op
 
-        # Rebuild indexes since IDs changed
-        self._rebuild_indexes()
+            if new_full_id in self._issues:
+                msg = f"Issue with ID {new_full_id} already exists"
+                raise ValueError(msg)
 
-        # Namespace changes cannot be expressed as simple appends (the old
-        # full_id must vanish), so rewrite the entire file from current state.
-        self._save(_reload=False, _rename_event_ids={old_full_id: new_full_id})
+            # Update the issue itself
+            issue.namespace = new_namespace
+            issue.updated_at = datetime.now().astimezone()
+            if updated_by:
+                issue.updated_by = updated_by
 
-        # Emit event
+            # Re-key in _issues dict
+            del self._issues[old_full_id]
+            self._issues[new_full_id] = issue
+
+            # Cascade the rename through everything referencing old_full_id.
+            self._cascade_id_rename(old_full_id, new_full_id)
+
+            # Rebuild indexes since IDs changed
+            self._rebuild_indexes()
+
+            # Namespace changes cannot be expressed as simple appends (the
+            # old full_id must vanish), so rewrite the entire file from
+            # current state. Pass _reload=False because we already reloaded
+            # under this very lock.
+            self._save_locked(
+                _reload=False, _rename_event_ids={old_full_id: new_full_id}
+            )
+
+        # Emit event after releasing the lock so the event-append path
+        # (which also takes the lock) doesn't deadlock.
         self._emit_event(
             "updated",
             issue,
@@ -1074,63 +1268,71 @@ class JSONLStorage:
             ValueError: If old namespace has no issues, or any new ID
                 would collide with an existing issue.
         """
-        # Collect issues to rename
-        targets = [i for i in self._issues.values() if i.namespace == old_namespace]
-        if not targets:
-            msg = f"No issues found in namespace '{old_namespace}'"
-            raise ValueError(msg)
+        with self._file_lock():
+            if self.path.exists():
+                self._load()
 
-        # Pre-check for collisions
-        for issue in targets:
-            new_full_id = f"{new_namespace}-{issue.id}"
-            if new_full_id in self._issues and self._issues[new_full_id] is not issue:
-                msg = f"Issue with ID {new_full_id} already exists"
+            # Collect issues to rename
+            targets = [i for i in self._issues.values() if i.namespace == old_namespace]
+            if not targets:
+                msg = f"No issues found in namespace '{old_namespace}'"
                 raise ValueError(msg)
 
-        # Build old→new mapping for all affected IDs
-        id_map: dict[str, str] = {}
-        for issue in targets:
-            id_map[issue.full_id] = f"{new_namespace}-{issue.id}"
+            # Pre-check for collisions
+            for issue in targets:
+                new_full_id = f"{new_namespace}-{issue.id}"
+                if (
+                    new_full_id in self._issues
+                    and self._issues[new_full_id] is not issue
+                ):
+                    msg = f"Issue with ID {new_full_id} already exists"
+                    raise ValueError(msg)
 
-        now = datetime.now().astimezone()
+            # Build old→new mapping for all affected IDs
+            id_map: dict[str, str] = {}
+            for issue in targets:
+                id_map[issue.full_id] = f"{new_namespace}-{issue.id}"
 
-        # Update the issues themselves and re-key
-        for issue in targets:
-            old_fid = issue.full_id
-            issue.namespace = new_namespace
-            issue.updated_at = now
-            if updated_by:
-                issue.updated_by = updated_by
-            del self._issues[old_fid]
-            self._issues[issue.full_id] = issue
+            now = datetime.now().astimezone()
 
-        # Cascade to references in *all* issues
-        for other in self._issues.values():
-            if other.parent and other.parent in id_map:
-                other.parent = id_map[other.parent]
-                other.updated_at = now
-            if other.duplicate_of and other.duplicate_of in id_map:
-                other.duplicate_of = id_map[other.duplicate_of]
-                other.updated_at = now
+            # Update the issues themselves and re-key
+            for issue in targets:
+                old_fid = issue.full_id
+                issue.namespace = new_namespace
+                issue.updated_at = now
+                if updated_by:
+                    issue.updated_by = updated_by
+                del self._issues[old_fid]
+                self._issues[issue.full_id] = issue
 
-        # Cascade to dependencies
-        for dep in self._dependencies:
-            if dep.issue_id in id_map:
-                dep.issue_id = id_map[dep.issue_id]
-            if dep.depends_on_id in id_map:
-                dep.depends_on_id = id_map[dep.depends_on_id]
+            # Cascade to references in *all* issues
+            for other in self._issues.values():
+                if other.parent and other.parent in id_map:
+                    other.parent = id_map[other.parent]
+                    other.updated_at = now
+                if other.duplicate_of and other.duplicate_of in id_map:
+                    other.duplicate_of = id_map[other.duplicate_of]
+                    other.updated_at = now
 
-        # Cascade to links
-        for link in self._links:
-            if link.from_id in id_map:
-                link.from_id = id_map[link.from_id]
-            if link.to_id in id_map:
-                link.to_id = id_map[link.to_id]
+            # Cascade to dependencies
+            for dep in self._dependencies:
+                if dep.issue_id in id_map:
+                    dep.issue_id = id_map[dep.issue_id]
+                if dep.depends_on_id in id_map:
+                    dep.depends_on_id = id_map[dep.depends_on_id]
 
-        self._rebuild_indexes()
-        self._save(_reload=False, _rename_event_ids=id_map)
+            # Cascade to links
+            for link in self._links:
+                if link.from_id in id_map:
+                    link.from_id = id_map[link.from_id]
+                if link.to_id in id_map:
+                    link.to_id = id_map[link.to_id]
 
-        # Emit events
+            self._rebuild_indexes()
+            self._save_locked(_reload=False, _rename_event_ids=id_map)
+
+        # Emit events outside the lock — _emit_event acquires the lock to
+        # append, so doing it inside the with-block would deadlock.
         for issue in targets:
             self._emit_event(
                 "updated",
@@ -1163,6 +1365,19 @@ class JSONLStorage:
         resolved_id = self._resolve_or_raise(issue_id)
 
         issue = self._issues[resolved_id]
+        # Refuse to resurrect a tombstoned issue. Without this guard, a
+        # ``dcat delete`` followed by ``dcat close`` flips status back to
+        # CLOSED but leaves ``deleted_at`` set — see reopen(), which has
+        # always gated on Status.CLOSED. (dogcat-4g76)
+        if issue.status == Status.TOMBSTONE:
+            msg = (
+                f"Issue {issue.full_id} is tombstoned; "
+                f"cannot close a deleted issue. Use 'dcat reopen' first."
+            )
+            raise ValueError(msg)
+        if issue.status == Status.CLOSED:
+            return issue  # idempotent close
+
         old_status = issue.status.value
 
         now = datetime.now().astimezone()
@@ -1255,6 +1470,12 @@ class JSONLStorage:
         resolved_id = self._resolve_or_raise(issue_id)
 
         issue = self._issues[resolved_id]
+        # Idempotent delete: a second delete on a tombstone is a no-op so
+        # the original deleted_at / deleted_reason / deleted_by are not
+        # silently overwritten (forensic record loss). (dogcat-4g76)
+        if issue.status == Status.TOMBSTONE:
+            return issue
+
         old_status = issue.status.value
 
         now = datetime.now().astimezone()
@@ -1688,13 +1909,16 @@ class JSONLStorage:
             deps_to_remove: Dependencies to remove.
         """
         remove_set = {(d.issue_id, d.depends_on_id, d.dep_type) for d in deps_to_remove}
-        self._dependencies = [
-            d
-            for d in self._dependencies
-            if (d.issue_id, d.depends_on_id, d.dep_type) not in remove_set
-        ]
-        self._rebuild_indexes()
-        self._save(_reload=False)
+        with self._file_lock():
+            if self.path.exists():
+                self._load()
+            self._dependencies = [
+                d
+                for d in self._dependencies
+                if (d.issue_id, d.depends_on_id, d.dep_type) not in remove_set
+            ]
+            self._rebuild_indexes()
+            self._save_locked(_reload=False)
 
     def prune_tombstones(self) -> list[str]:
         """Permanently remove tombstoned issues and orphaned events from storage.
@@ -1702,34 +1926,38 @@ class JSONLStorage:
         Returns:
             List of pruned issue IDs
         """
-        tombstone_ids = [
-            issue_id
-            for issue_id, issue in self._issues.items()
-            if issue.status == Status.TOMBSTONE
-        ]
+        with self._file_lock():
+            if self.path.exists():
+                self._load()
 
-        for issue_id in tombstone_ids:
-            del self._issues[issue_id]
+            tombstone_ids = [
+                issue_id
+                for issue_id, issue in self._issues.items()
+                if issue.status == Status.TOMBSTONE
+            ]
 
-        # Collect IDs to prune: tombstones + any orphaned event references
-        prune_ids = set(tombstone_ids)
-        if self.path.exists():
-            with self.path.open("rb") as src:
-                for raw_line in src:
-                    raw_line = raw_line.strip()
-                    if not raw_line:
-                        continue
-                    try:
-                        data = orjson.loads(raw_line)
-                    except (orjson.JSONDecodeError, ValueError):
-                        continue
-                    if data.get("record_type") == "event":
-                        eid = data.get("issue_id", "")
-                        if eid and eid not in self._issues:
-                            prune_ids.add(eid)
+            for issue_id in tombstone_ids:
+                del self._issues[issue_id]
 
-        if prune_ids:
-            self._save(_reload=False, _prune_event_ids=prune_ids)
+            # Collect IDs to prune: tombstones + any orphaned event references
+            prune_ids = set(tombstone_ids)
+            if self.path.exists():
+                with self.path.open("rb") as src:
+                    for raw_line in src:
+                        raw_line = raw_line.strip()
+                        if not raw_line:
+                            continue
+                        try:
+                            data = orjson.loads(raw_line)
+                        except (orjson.JSONDecodeError, ValueError):
+                            continue
+                        if data.get("record_type") == "event":
+                            eid = data.get("issue_id", "")
+                            if eid and eid not in self._issues:
+                                prune_ids.add(eid)
+
+            if prune_ids:
+                self._save_locked(_reload=False, _prune_event_ids=prune_ids)
 
         return tombstone_ids
 

@@ -13,7 +13,7 @@ from dogcat.constants import (
     STATUS_SYMBOLS,
     TYPE_COLORS,
 )
-from dogcat.models import Status, is_manual_issue
+from dogcat.models import Status, is_manual_issue, sanitize_for_terminal
 
 if TYPE_CHECKING:
     from rich.table import Table
@@ -98,7 +98,7 @@ def format_proposal_brief(proposal: Proposal) -> str:
     symbol = typer.style("●", fg="bright_cyan")
     full_id = typer.style(proposal.full_id, fg="bright_cyan")
     label = typer.style("[inbox]", fg="bright_black")
-    return f"{symbol} {full_id}: {proposal.title} {label}"
+    return f"{symbol} {full_id}: {sanitize_for_terminal(proposal.title)} {label}"
 
 
 def format_issue_brief(
@@ -215,10 +215,11 @@ def format_issue_brief(
             f"[blocked by deferred: {ids}]",
             fg="bright_black",
         )
+    safe_title = sanitize_for_terminal(issue.title)
     if is_closed:
-        id_title = typer.style(f"{issue.full_id}: {issue.title}", fg="bright_black")
+        id_title = typer.style(f"{issue.full_id}: {safe_title}", fg="bright_black")
     else:
-        id_title = f"{issue.full_id}: {issue.title}"
+        id_title = f"{issue.full_id}: {safe_title}"
     base = f"{status_emoji} {priority_str} {id_title} {type_str}"
 
     suffixes = parent_str + labels_str + snoozed_str + manual_str
@@ -239,7 +240,7 @@ def format_issue_full(issue: Issue, parent_title: str | None = None) -> str:
     styled_status = typer.style(issue.status.value, fg=status_color)
     lines = [
         f"{key('ID:')} {issue.full_id}",
-        f"{key('Title:')} {issue.title}",
+        f"{key('Title:')} {sanitize_for_terminal(issue.title)}",
         "",
         f"{key('Status:')} {styled_status}",
         f"{key('Priority:')} {issue.priority}",
@@ -282,10 +283,12 @@ def format_issue_full(issue: Issue, parent_title: str | None = None) -> str:
         lines.append(closed_line)
 
     if issue.description:
-        lines.append(f"\n{key('Description:')}\n{issue.description}")
+        lines.append(
+            f"\n{key('Description:')}\n{sanitize_for_terminal(issue.description)}"
+        )
 
     if issue.notes:
-        lines.append(f"\n{key('Notes:')}\n{issue.notes}")
+        lines.append(f"\n{key('Notes:')}\n{sanitize_for_terminal(issue.notes)}")
 
     if issue.acceptance:
         lines.append(f"\n{key('Acceptance criteria:')}\n{issue.acceptance}")

@@ -20,18 +20,20 @@ def parse_datetime(date_str: str | None) -> datetime | None:
         date_str: ISO8601 datetime string or None
 
     Returns:
-        Parsed datetime or None
+        Parsed datetime or None when ``date_str`` is empty / missing.
+
+    Raises:
+        ValueError: If ``date_str`` is non-empty but unparseable.
+            (dogcat-4ue5: returning None silently coerced these to
+            "now" which broke ID-stability across re-imports.)
     """
     if not date_str:
         return None
 
-    try:
-        # Handle both with and without timezone
-        if date_str.endswith("Z"):
-            return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-        return datetime.fromisoformat(date_str)
-    except ValueError:
-        return None
+    # Handle both with and without timezone
+    if date_str.endswith("Z"):
+        return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+    return datetime.fromisoformat(date_str)
 
 
 def read_beads_jsonl(path: str) -> list[dict[str, Any]]:
@@ -95,11 +97,21 @@ def migrate_issue(beads_issue: dict[str, Any]) -> tuple[Issue, list[Dependency]]
     created_at_str = beads_issue.get("created_at")
     created_by = beads_issue.get("created_by")
     updated_at_str = beads_issue.get("updated_at")
+    updated_by = beads_issue.get("updated_by")
     closed_at_str = beads_issue.get("closed_at")
+    closed_by = beads_issue.get("closed_by")
+    closed_reason = beads_issue.get("closed_reason", beads_issue.get("close_reason"))
     deleted_at_str = beads_issue.get("deleted_at")
     deleted_by = beads_issue.get("deleted_by")
-    deleted_reason = beads_issue.get("delete_reason")
+    deleted_reason = beads_issue.get("deleted_reason", beads_issue.get("delete_reason"))
     labels = beads_issue.get("labels", [])
+    parent = beads_issue.get("parent")
+    external_ref = beads_issue.get("external_ref")
+    design = beads_issue.get("design")
+    acceptance = beads_issue.get("acceptance")
+    notes = beads_issue.get("notes")
+    metadata: dict[str, Any] = beads_issue.get("metadata", {}) or {}
+    raw_comments: list[dict[str, Any]] = beads_issue.get("comments", []) or []
 
     # Convert status
     try:
@@ -113,7 +125,25 @@ def migrate_issue(beads_issue: dict[str, Any]) -> tuple[Issue, list[Dependency]]
     except ValueError:
         issue_type = IssueType.TASK
 
-    # Create issue with parsed datetimes
+    # Translate beads comment dicts to Comment dataclasses.
+    from dogcat.models import Comment
+
+    comments: list[Comment] = []
+    for cd in raw_comments:
+        comment_created = parse_datetime(cd.get("created_at"))
+        comments.append(
+            Comment(
+                id=str(cd.get("id", "")),
+                issue_id=cd.get("issue_id", issue_id),
+                author=cd.get("author", "") or "",
+                text=cd.get("text", "") or "",
+                created_at=comment_created or datetime.now(tz=timezone.utc),  # type: ignore[arg-type]
+            )
+        )
+
+    # Create issue with parsed datetimes — every beads field maps 1:1
+    # by name. Without these the importer silently dropped 10 fields
+    # per issue. (dogcat-4ue5)
     issue = Issue(
         id=issue_id,
         title=title,
@@ -123,15 +153,25 @@ def migrate_issue(beads_issue: dict[str, Any]) -> tuple[Issue, list[Dependency]]
         priority=priority,
         issue_type=issue_type,
         owner=owner,
+        parent=parent,
         labels=labels,
+        external_ref=external_ref,
+        design=design,
+        acceptance=acceptance,
+        notes=notes,
+        closed_reason=closed_reason,
         created_at=parse_datetime(created_at_str) or datetime.now(tz=timezone.utc),  # type: ignore
         created_by=created_by,
         updated_at=parse_datetime(updated_at_str) or datetime.now(tz=timezone.utc),  # type: ignore
+        updated_by=updated_by,
         closed_at=parse_datetime(closed_at_str),
+        closed_by=closed_by,
         deleted_at=parse_datetime(deleted_at_str),
         deleted_by=deleted_by,
         deleted_reason=deleted_reason,
         original_type=issue_type if status == Status.TOMBSTONE else None,
+        comments=comments,
+        metadata=metadata,
     )
 
     # Extract dependencies

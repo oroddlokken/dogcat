@@ -147,13 +147,19 @@ def get_blocked_issues(storage: JSONLStorage) -> list[BlockedIssue]:
 
 
 def detect_cycles(storage: JSONLStorage) -> list[list[str]]:
-    """Detect circular dependencies using DFS.
+    """Detect circular dependencies using iterative DFS.
 
     Args:
         storage: The storage instance
 
     Returns:
         List of cycles (each cycle is a list of issue IDs)
+
+    Iterative implementation (regression for dogcat-1r7h): a recursive
+    DFS hit Python's default 1000-frame limit on a 1001-deep dependency
+    chain and crashed the entire CLI with RecursionError. The iterative
+    walk uses an explicit stack of ``(node, neighbor_iter)`` so depth
+    is bounded only by available memory.
     """
     dep_map = _build_dep_map(storage)
     all_issue_ids = [i.full_id for i in storage.list()]
@@ -163,17 +169,31 @@ def detect_cycles(storage: JSONLStorage) -> list[list[str]]:
     visited: set[str] = set()
     rec_stack: set[str] = set()
 
-    def dfs(node: str, path: list[str]) -> None:
-        """Depth-first search to detect cycles."""
-        visited.add(node)
-        rec_stack.add(node)
-        path.append(node)
-
-        for dep in dep_map.get(node, ()):
+    for root in all_issue_ids:
+        if root in visited:
+            continue
+        path: list[str] = [root]
+        visited.add(root)
+        rec_stack.add(root)
+        # Stack of (node, iterator over outgoing dependencies).
+        stack: list[tuple[str, Any]] = [(root, iter(dep_map.get(root, ())))]
+        while stack:
+            node, it = stack[-1]
+            try:
+                dep = next(it)
+            except StopIteration:
+                # Done with this node — pop frame.
+                rec_stack.discard(node)
+                if path and path[-1] == node:
+                    path.pop()
+                stack.pop()
+                continue
             neighbor = dep.depends_on_id
-
             if neighbor not in visited:
-                dfs(neighbor, path[:])
+                visited.add(neighbor)
+                rec_stack.add(neighbor)
+                path.append(neighbor)
+                stack.append((neighbor, iter(dep_map.get(neighbor, ()))))
             elif neighbor in rec_stack:
                 cycle_start = path.index(neighbor)
                 cycle = [*path[cycle_start:], neighbor]
@@ -181,12 +201,6 @@ def detect_cycles(storage: JSONLStorage) -> list[list[str]]:
                 if cycle_key not in seen_cycles:
                     seen_cycles.add(cycle_key)
                     cycles.append(cycle)
-
-        rec_stack.discard(node)
-
-    for issue_id in all_issue_ids:
-        if issue_id not in visited:
-            dfs(issue_id, [])
 
     return cycles
 
@@ -230,22 +244,22 @@ def would_create_cycle(
     if issue_id == depends_on_id:
         return True
 
-    # Check if depends_on_id can reach issue_id through existing dependencies.
+    # Iterative reachability: from depends_on_id, can we reach issue_id
+    # through existing dependencies? Walking 10000+ deep chains used to
+    # blow Python's recursion limit. (dogcat-1r7h)
     dep_map = _build_dep_map(storage)
-    visited: set[str] = set()
-
-    def can_reach(from_id: str, target_id: str) -> bool:
-        if from_id == target_id:
+    visited: set[str] = {depends_on_id}
+    stack: list[str] = [depends_on_id]
+    while stack:
+        node = stack.pop()
+        if node == issue_id:
             return True
-        if from_id in visited:
-            return False
-
-        visited.add(from_id)
-        return any(
-            can_reach(dep.depends_on_id, target_id) for dep in dep_map.get(from_id, ())
-        )
-
-    return can_reach(depends_on_id, issue_id)
+        for dep in dep_map.get(node, ()):
+            nxt = dep.depends_on_id
+            if nxt not in visited:
+                visited.add(nxt)
+                stack.append(nxt)
+    return False
 
 
 def get_dependency_chain(
@@ -253,7 +267,7 @@ def get_dependency_chain(
     issue_id: str,
     _visited: set[str] | None = None,
 ) -> list[str]:
-    """Get the dependency chain for an issue.
+    """Get the dependency chain for an issue (iterative DFS).
 
     Args:
         storage: The storage instance
@@ -262,18 +276,25 @@ def get_dependency_chain(
 
     Returns:
         List of issue IDs in the dependency chain
+
+    Iterative — see :func:`detect_cycles` for the depth-limit context
+    (dogcat-1r7h). The argument ``_visited`` is preserved for source
+    compatibility with callers that pre-populate the set.
     """
-    if _visited is None:
-        _visited = set()
-
-    if issue_id in _visited:
-        return []
-
-    _visited.add(issue_id)
-    chain = [issue_id]
-    deps = storage.get_dependencies(issue_id)
-
-    for dep in deps:
-        chain.extend(get_dependency_chain(storage, dep.depends_on_id, _visited))
-
-    return list(dict.fromkeys(chain))  # Remove duplicates while preserving order
+    visited: set[str] = _visited if _visited is not None else set()
+    chain: list[str] = []
+    stack: list[str] = [issue_id]
+    while stack:
+        node = stack.pop()
+        if node in visited:
+            continue
+        visited.add(node)
+        chain.append(node)
+        # Reverse so the order matches the recursive form (dep iteration).
+        deps = storage.get_dependencies(node)
+        stack.extend(
+            dep.depends_on_id
+            for dep in reversed(list(deps))
+            if dep.depends_on_id not in visited
+        )
+    return list(dict.fromkeys(chain))

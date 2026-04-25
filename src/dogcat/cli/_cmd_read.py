@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from datetime import timezone
 from typing import TYPE_CHECKING, Any
 
@@ -31,7 +32,6 @@ from ._formatting import (
 )
 from ._helpers import (
     _make_alias,
-    apply_common_filters,
     get_storage,
     load_open_inbox_proposals,
     load_remote_inbox_proposals,
@@ -153,6 +153,193 @@ def _collapse_deferred_subtrees(
     filtered = [i for i in issues if i.full_id not in all_deferred_descendants]
 
     return filtered, hidden_counts, deferred_blocker_map, preview_subtasks
+
+
+def _filter_issues_for_list(
+    storage: JSONLStorage,
+    *,
+    status: str | None,
+    priority: int | None,
+    issue_type: str | None,
+    label: str | None,
+    owner: str | None,
+    parent: str | None,
+    parent_arg: str | None,
+    no_parent: bool,
+    closed: bool,
+    open_issues: bool,
+    all_issues: bool,
+    closed_after: str | None,
+    closed_before: str | None,
+    namespace: str | None,
+    all_namespaces: bool,
+    agent_only: bool,
+    manual: bool,
+    has_comments: bool,
+    without_comments: bool,
+    include_snoozed: bool,
+) -> list[Issue]:
+    """Apply the same filter pipeline `dcat list` uses, sorted by priority then id.
+
+    Shared by `list` and `random` so both commands draw from the same candidate set.
+    """
+    from datetime import datetime as dt
+
+    from ._helpers import apply_common_filters
+
+    filters: dict[str, Any] = {}
+    if status:
+        filters["status"] = status
+    elif closed:
+        filters["status"] = "closed"
+    if priority is not None:
+        filters["priority"] = priority
+    if issue_type:
+        filters["type"] = issue_type
+    if label:
+        filters["label"] = parse_labels(label)
+    if owner:
+        filters["owner"] = owner
+
+    issues = storage.list(filters or None)
+
+    parent_filter = parent or parent_arg
+    if parent_filter:
+        resolved_parent = storage.resolve_id(parent_filter)
+        if resolved_parent is None:
+            echo_error(f"Issue {parent_filter} not found")
+            raise typer.Exit(1)
+        child_ids = {c.full_id for c in storage.get_children(resolved_parent)}
+        issues = [
+            i for i in issues if i.full_id == resolved_parent or i.full_id in child_ids
+        ]
+
+    if no_parent:
+        issues = [i for i in issues if i.parent is None]
+
+    actual_dogcats_dir = str(storage.dogcats_dir)
+    if not all_namespaces:
+        ns_filter = get_namespace_filter(actual_dogcats_dir, namespace)
+        if ns_filter is not None:
+            issues = [i for i in issues if ns_filter(i.namespace)]
+
+    closed_excluded_by_default = (
+        not status
+        and not closed
+        and not all_issues
+        and not (closed_after or closed_before)
+    )
+    if closed_excluded_by_default:
+        issues = [i for i in issues if i.status.value not in ("closed", "tombstone")]
+
+    if not include_snoozed and not all_issues:
+        now = dt.now().astimezone()
+        issues = [
+            i for i in issues if i.snoozed_until is None or i.snoozed_until <= now
+        ]
+
+    if open_issues:
+        issues = [i for i in issues if i.status.value in ("open", "in_progress")]
+
+    issues = apply_common_filters(
+        issues,
+        agent_only=agent_only,
+        manual_only=manual,
+        has_comments=has_comments,
+        without_comments=without_comments,
+    )
+
+    if closed_after or closed_before:
+        try:
+            filtered_issues: list[Issue] = []
+            for issue in issues:
+                if not issue.closed_at:
+                    continue
+                should_include = True
+                if closed_after:
+                    after_dt = dt.fromisoformat(closed_after)
+                    if after_dt.tzinfo is None:
+                        after_dt = after_dt.replace(tzinfo=timezone.utc)
+                    if issue.closed_at < after_dt:
+                        should_include = False
+                if closed_before and should_include:
+                    before_dt = dt.fromisoformat(closed_before)
+                    if before_dt.tzinfo is None:
+                        before_dt = before_dt.replace(tzinfo=timezone.utc)
+                    if issue.closed_at > before_dt:
+                        should_include = False
+                if should_include:
+                    filtered_issues.append(issue)
+            issues = filtered_issues
+        except ValueError as e:
+            echo_error(f"parsing date: {e}")
+            raise typer.Exit(1)
+
+    return sorted(issues, key=lambda i: (i.priority, i.id))
+
+
+def _render_issue_show(issue: Issue, storage: JSONLStorage) -> str:
+    """Render an issue exactly like `dcat show` does (text mode).
+
+    Shared so `random` displays its pick the same way.
+    """
+    parent_title = None
+    if issue.parent:
+        parent_issue = storage.get(issue.parent)
+        if parent_issue:
+            parent_title = parent_issue.title
+    output_lines = format_issue_full(issue, parent_title=parent_title).split("\n")
+
+    deps = storage.get_dependencies(issue.full_id)
+    if deps:
+        output_lines.append("\nDependencies:")
+        for dep in deps:
+            dep_issue = storage.get(dep.depends_on_id)
+            if dep_issue:
+                output_lines.append(f"  → {format_issue_brief(dep_issue)}")
+            else:
+                output_lines.append(f"  → {dep.depends_on_id}")
+
+    dependents = storage.get_dependents(issue.full_id)
+    if dependents:
+        output_lines.append("\nBlocks:")
+        for dep in dependents:
+            dep_issue = storage.get(dep.issue_id)
+            if dep_issue:
+                output_lines.append(f"  ← {format_issue_brief(dep_issue)}")
+            else:
+                output_lines.append(f"  ← {dep.issue_id}")
+
+    links = storage.get_links(issue.full_id)
+    incoming = storage.get_incoming_links(issue.full_id)
+    if links or incoming:
+        output_lines.append("\nLinks:")
+        if links:
+            for link in links:
+                output_lines.append(f"  → {link.to_id} ({link.link_type})")
+        if incoming:
+            for link in incoming:
+                output_lines.append(f"  ← {link.from_id} ({link.link_type})")
+
+    children = storage.get_children(issue.full_id)
+    if children:
+        from dogcat.deps import get_blocked_issues
+
+        blocked_issues = get_blocked_issues(storage)
+        blocked_by_map = {bi.issue_id: bi.blocking_ids for bi in blocked_issues}
+
+        output_lines.append("\nChildren:")
+        for child in children:
+            output_lines.append(
+                f"  ↳ {format_issue_brief(child, blocked_by_map=blocked_by_map)}",
+            )
+
+    if issue.metadata:
+        output_lines.append("\nMetadata:")
+        for key, value in issue.metadata.items():
+            output_lines.append(f"  {key}: {value}")
+
+    return "\n".join(output_lines)
 
 
 def register(app: typer.Typer) -> None:
@@ -312,124 +499,38 @@ def register(app: typer.Typer) -> None:
                 raise typer.Exit(1)
 
             storage = get_storage(dogcats_dir)
-
-            # Build filters
-            filters: dict[str, Any] = {}
-            if status:
-                filters["status"] = status
-            elif closed:
-                filters["status"] = "closed"
-            # Note: open_issues is handled after storage.list
-            # to filter multiple statuses
-
-            if priority is not None:
-                filters["priority"] = priority
-            if issue_type:
-                filters["type"] = issue_type
-            if label:
-                labels_filter = parse_labels(label)
-                filters["label"] = labels_filter
-            if owner:
-                filters["owner"] = owner
-
-            issues = storage.list(filters or None)
-
-            # Filter by parent issue (--parent option or positional argument)
-            parent_filter = parent or parent_arg
-            if parent_filter:
-                resolved_parent = storage.resolve_id(parent_filter)
-                if resolved_parent is None:
-                    echo_error(f"Issue {parent_filter} not found")
-                    raise typer.Exit(1)
-                child_ids = {c.full_id for c in storage.get_children(resolved_parent)}
-                issues = [
-                    i
-                    for i in issues
-                    if i.full_id == resolved_parent or i.full_id in child_ids
-                ]
-
-            # Filter to top-level issues only (--no-parent)
-            if no_parent:
-                issues = [i for i in issues if i.parent is None]
-
-            # Apply namespace filtering (skip if --all-namespaces)
             actual_dogcats_dir = str(storage.dogcats_dir)
-            if not all_namespaces:
-                ns_filter = get_namespace_filter(actual_dogcats_dir, namespace)
-                if ns_filter is not None:
-                    issues = [i for i in issues if ns_filter(i.namespace)]
 
-            # Exclude closed/tombstone issues by default (unless explicitly requested)
-            # Also include closed issues when date filters are used
+            issues = _filter_issues_for_list(
+                storage,
+                status=status,
+                priority=priority,
+                issue_type=issue_type,
+                label=label,
+                owner=owner,
+                parent=parent,
+                parent_arg=parent_arg,
+                no_parent=no_parent,
+                closed=closed,
+                open_issues=open_issues,
+                all_issues=all_issues,
+                closed_after=closed_after,
+                closed_before=closed_before,
+                namespace=namespace,
+                all_namespaces=all_namespaces,
+                agent_only=agent_only,
+                manual=manual,
+                has_comments=has_comments,
+                without_comments=without_comments,
+                include_snoozed=include_snoozed,
+            )
+
             closed_excluded_by_default = (
                 not status
                 and not closed
                 and not all_issues
                 and not (closed_after or closed_before)
             )
-            if closed_excluded_by_default:
-                issues = [
-                    i for i in issues if i.status.value not in ("closed", "tombstone")
-                ]
-
-            # Exclude snoozed issues by default (unless --include-snoozed or --all)
-            if not include_snoozed and not all_issues:
-                from datetime import datetime as dt
-
-                now = dt.now().astimezone()
-                issues = [
-                    i
-                    for i in issues
-                    if i.snoozed_until is None or i.snoozed_until <= now
-                ]
-
-            # Handle --open filter for multiple statuses
-            if open_issues:
-                issues = [
-                    i for i in issues if i.status.value in ("open", "in_progress")
-                ]
-
-            issues = apply_common_filters(
-                issues,
-                agent_only=agent_only,
-                manual_only=manual,
-                has_comments=has_comments,
-                without_comments=without_comments,
-            )
-
-            # Apply date-based filtering for closed issues
-            if closed_after or closed_before:
-                try:
-                    from datetime import datetime as dt
-
-                    filtered_issues: list[Issue] = []
-                    for issue in issues:
-                        if issue.closed_at:
-                            should_include = True
-
-                            if closed_after:
-                                after_dt = dt.fromisoformat(closed_after)
-                                # Make timezone-naive dates UTC-aware for comparison
-                                if after_dt.tzinfo is None:
-                                    after_dt = after_dt.replace(tzinfo=timezone.utc)
-                                if issue.closed_at < after_dt:
-                                    should_include = False
-
-                            if closed_before and should_include:
-                                before_dt = dt.fromisoformat(closed_before)
-                                # Make timezone-naive dates UTC-aware for comparison
-                                if before_dt.tzinfo is None:
-                                    before_dt = before_dt.replace(tzinfo=timezone.utc)
-                                if issue.closed_at > before_dt:
-                                    should_include = False
-
-                            if should_include:
-                                filtered_issues.append(issue)
-
-                    issues = filtered_issues
-                except ValueError as e:
-                    echo_error(f"parsing date: {e}")
-                    raise typer.Exit(1)
 
             # In tree mode, re-include closed parents of visible children
             # so the hierarchy is preserved (closed parents show with ✓ icon)
@@ -617,78 +718,182 @@ def register(app: typer.Typer) -> None:
 
                 typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
             else:
-                parent_title = None
-                if issue.parent:
-                    parent_issue = storage.get(issue.parent)
-                    if parent_issue:
-                        parent_title = parent_issue.title
-                output_lines = format_issue_full(
-                    issue,
-                    parent_title=parent_title,
-                ).split(
-                    "\n",
+                typer.echo(_render_issue_show(issue, storage))
+
+        except typer.Exit:
+            raise
+        except Exception as e:
+            echo_error(str(e))
+            raise typer.Exit(1)
+
+    @app.command("random")
+    def random_issue(
+        parent_arg: str | None = typer.Argument(
+            None,
+            help="Parent issue ID (shorthand for --parent)",
+            autocompletion=complete_issue_ids,
+        ),
+        status: str | None = typer.Option(
+            None,
+            "--status",
+            "-s",
+            help="Filter by status",
+            autocompletion=complete_statuses,
+        ),
+        priority: int | None = typer.Option(
+            None,
+            "--priority",
+            "-p",
+            help="Filter by priority",
+            autocompletion=complete_priorities,
+        ),
+        issue_type: str | None = typer.Option(
+            None,
+            "--type",
+            "-t",
+            help="Filter by type",
+            autocompletion=complete_types,
+        ),
+        label: str | None = typer.Option(
+            None,
+            "--label",
+            "-l",
+            help="Filter by label (comma or space separated)",
+            autocompletion=complete_labels,
+        ),
+        owner: str | None = typer.Option(
+            None,
+            "--owner",
+            "-o",
+            help="Filter by owner",
+            autocompletion=complete_owners,
+        ),
+        parent: str | None = typer.Option(
+            None,
+            "--parent",
+            help="Filter by parent issue ID",
+            autocompletion=complete_issue_ids,
+        ),
+        no_parent: bool = typer.Option(
+            False,
+            "--no-parent",
+            help="Pick only from top-level issues (no parent)",
+        ),
+        closed: bool = typer.Option(
+            False, "--closed", help="Pick only from closed issues"
+        ),
+        open_issues: bool = typer.Option(
+            False,
+            "--open",
+            help="Pick only from open/in-progress issues",
+        ),
+        all_issues: bool = typer.Option(
+            False,
+            "--all",
+            help="Include archived and deleted issues",
+        ),
+        closed_after: str | None = typer.Option(
+            None,
+            "--closed-after",
+            help="Issues closed after date (ISO8601)",
+            autocompletion=complete_dates,
+        ),
+        closed_before: str | None = typer.Option(
+            None,
+            "--closed-before",
+            help="Issues closed before date (ISO8601)",
+            autocompletion=complete_dates,
+        ),
+        namespace: str | None = typer.Option(
+            None,
+            "--namespace",
+            help="Filter by namespace",
+            autocompletion=complete_namespaces,
+        ),
+        all_namespaces: bool = typer.Option(
+            False,
+            "--all-namespaces",
+            "--all-ns",
+            "-A",
+            help="Include issues from all namespaces",
+        ),
+        agent_only: bool = typer.Option(
+            False,
+            "--agent-only",
+            help="Only consider issues available for agents",
+        ),
+        manual: bool = typer.Option(
+            False,
+            "--manual",
+            help="Only consider issues marked as manual",
+        ),
+        has_comments: bool = typer.Option(
+            False,
+            "--has-comments",
+            help="Only consider issues that have at least one comment",
+        ),
+        without_comments: bool = typer.Option(
+            False,
+            "--without-comments",
+            help="Only consider issues that have no comments",
+        ),
+        include_snoozed: bool = typer.Option(
+            False,
+            "--include-snoozed",
+            help="Include snoozed issues in the candidate set",
+        ),
+        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+    ) -> None:
+        """Pick one random issue from the same candidate set as `dcat list`."""
+        set_json(json_output)
+        try:
+            if has_comments and without_comments:
+                echo_error(
+                    "--has-comments and --without-comments are mutually exclusive"
                 )
+                raise typer.Exit(1)
 
-                # Add dependencies
-                deps = storage.get_dependencies(issue_id)
-                if deps:
-                    output_lines.append("\nDependencies:")
-                    for dep in deps:
-                        dep_issue = storage.get(dep.depends_on_id)
-                        if dep_issue:
-                            brief = format_issue_brief(dep_issue)
-                            output_lines.append(f"  → {brief}")
-                        else:
-                            output_lines.append(f"  → {dep.depends_on_id}")
+            storage = get_storage(dogcats_dir)
+            issues = _filter_issues_for_list(
+                storage,
+                status=status,
+                priority=priority,
+                issue_type=issue_type,
+                label=label,
+                owner=owner,
+                parent=parent,
+                parent_arg=parent_arg,
+                no_parent=no_parent,
+                closed=closed,
+                open_issues=open_issues,
+                all_issues=all_issues,
+                closed_after=closed_after,
+                closed_before=closed_before,
+                namespace=namespace,
+                all_namespaces=all_namespaces,
+                agent_only=agent_only,
+                manual=manual,
+                has_comments=has_comments,
+                without_comments=without_comments,
+                include_snoozed=include_snoozed,
+            )
 
-                # Add blocks (issues that depend on this one)
-                dependents = storage.get_dependents(issue_id)
-                if dependents:
-                    output_lines.append("\nBlocks:")
-                    for dep in dependents:
-                        dep_issue = storage.get(dep.issue_id)
-                        if dep_issue:
-                            brief = format_issue_brief(dep_issue)
-                            output_lines.append(f"  ← {brief}")
-                        else:
-                            output_lines.append(f"  ← {dep.issue_id}")
+            if not issues:
+                if is_json():
+                    typer.echo("null")
+                else:
+                    typer.echo("No issues found")
+                raise typer.Exit(1)
 
-                # Add links
-                links = storage.get_links(issue_id)
-                incoming = storage.get_incoming_links(issue_id)
-                if links or incoming:
-                    output_lines.append("\nLinks:")
-                    if links:
-                        for link in links:
-                            output_lines.append(f"  → {link.to_id} ({link.link_type})")
-                    if incoming:
-                        for link in incoming:
-                            output_lines.append(
-                                f"  ← {link.from_id} ({link.link_type})",
-                            )
+            picked = random.choice(issues)
 
-                # Add children
-                children = storage.get_children(issue_id)
-                if children:
-                    from dogcat.deps import get_blocked_issues
+            if is_json():
+                from dogcat.models import issue_to_dict
 
-                    blocked_issues = get_blocked_issues(storage)
-                    blocked_by_map = {
-                        bi.issue_id: bi.blocking_ids for bi in blocked_issues
-                    }
-
-                    output_lines.append("\nChildren:")
-                    for child in children:
-                        brief = format_issue_brief(child, blocked_by_map=blocked_by_map)
-                        output_lines.append(f"  ↳ {brief}")
-
-                # Add metadata if present
-                if issue.metadata:
-                    output_lines.append("\nMetadata:")
-                    for key, value in issue.metadata.items():
-                        output_lines.append(f"  {key}: {value}")
-
-                typer.echo("\n".join(output_lines))
+                typer.echo(orjson.dumps(issue_to_dict(picked)).decode())
+            else:
+                typer.echo(_render_issue_show(picked, storage))
 
         except typer.Exit:
             raise

@@ -50,9 +50,73 @@ class TestParseDatetime:
         assert result is None
 
     def test_parse_invalid_datetime(self) -> None:
-        """Test parsing invalid datetime."""
-        result = parse_datetime("not-a-datetime")
-        assert result is None
+        """An unparseable non-empty timestamp now raises (dogcat-4ue5).
+
+        Previously parse_datetime returned None on bad input, which the
+        caller silently coerced to ``datetime.now()`` — re-importing the
+        same record produced different IDs and broke ID stability.
+        """
+        with pytest.raises(ValueError, match="Invalid isoformat"):
+            parse_datetime("not-a-datetime")
+
+
+class TestMigrateAllFields:
+    """Every beads field maps 1:1 by name (regression for dogcat-4ue5)."""
+
+    def test_all_fields_propagate(self) -> None:
+        """Every documented beads field round-trips through migrate_issue.
+
+        Covers parent, external_ref, design, acceptance, notes,
+        closed_by, updated_by, comments, closed_reason, metadata —
+        each was silently dropped before dogcat-4ue5.
+        """
+        from dogcat.migrate import migrate_issue
+
+        beads = {
+            "id": "abcd",
+            "namespace": "proj",
+            "title": "Full record",
+            "description": "desc",
+            "status": "open",
+            "priority": 1,
+            "issue_type": "bug",
+            "owner": "alice",
+            "parent": "proj-parent",
+            "labels": ["urgent", "needs-review"],
+            "external_ref": "JIRA-12",
+            "design": "design notes",
+            "acceptance": "AC1, AC2",
+            "notes": "notes body",
+            "closed_reason": "fixed",
+            "closed_by": "bob",
+            "updated_by": "carol",
+            "metadata": {"manual": True, "custom_key": "v"},
+            "comments": [
+                {
+                    "id": "c1",
+                    "issue_id": "proj-abcd",
+                    "author": "alice",
+                    "text": "hello",
+                    "created_at": "2026-04-25T10:00:00+00:00",
+                }
+            ],
+            "created_at": "2026-04-25T09:00:00+00:00",
+            "updated_at": "2026-04-25T10:00:00+00:00",
+            "closed_at": "2026-04-25T11:00:00+00:00",
+        }
+        issue, _deps = migrate_issue(beads)
+        assert issue.parent == "proj-parent"
+        assert issue.external_ref == "JIRA-12"
+        assert issue.design == "design notes"
+        assert issue.acceptance == "AC1, AC2"
+        assert issue.notes == "notes body"
+        assert issue.closed_reason == "fixed"
+        assert issue.closed_by == "bob"
+        assert issue.updated_by == "carol"
+        assert issue.metadata == {"manual": True, "custom_key": "v"}
+        assert len(issue.comments) == 1
+        assert issue.comments[0].text == "hello"
+        assert issue.comments[0].author == "alice"
 
 
 class TestReadBeadsJsonl:

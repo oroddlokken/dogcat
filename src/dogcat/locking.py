@@ -22,7 +22,15 @@ _RETRY_INTERVAL_SECS = 0.05
 
 
 def _resolve_timeout() -> float:
-    """Pick the lock timeout, honoring an env override when set."""
+    """Pick the lock timeout, honoring an env override when set.
+
+    Non-finite values (``inf``, ``-inf``, ``nan``) and non-positive
+    values fall back to :data:`DEFAULT_LOCK_TIMEOUT_SECS`. Without the
+    isfinite guard, ``inf`` slipped past the ``> 0`` check and the
+    stale-lock-holder remediation was silently disabled. (dogcat-1z5u)
+    """
+    import math
+
     raw = os.environ.get(LOCK_TIMEOUT_ENV_VAR)
     if not raw:
         return DEFAULT_LOCK_TIMEOUT_SECS
@@ -30,7 +38,9 @@ def _resolve_timeout() -> float:
         value = float(raw)
     except ValueError:
         return DEFAULT_LOCK_TIMEOUT_SECS
-    return value if value > 0 else DEFAULT_LOCK_TIMEOUT_SECS
+    if not math.isfinite(value) or value <= 0:
+        return DEFAULT_LOCK_TIMEOUT_SECS
+    return value
 
 
 @contextmanager

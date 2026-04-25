@@ -221,6 +221,49 @@ class TestEventLogAppendAndRead:
         lines = event_log.path.read_bytes().strip().split(b"\n")
         assert len(lines) == 5
 
+    def test_read_skips_invalid_json_line(self, event_log: EventLog) -> None:
+        """An invalid-JSON line in the middle is logged and skipped, not raised.
+
+        Regression for dogcat-4s8b: read() used to bubble JSONDecodeError
+        out to ``dcat history`` etc.
+        """
+        valid_record = EventRecord(
+            event_type="created",
+            issue_id="dc-aaa1",
+            timestamp="2026-02-10T10:00:00+01:00",
+        )
+        event_log.append(valid_record)
+        with event_log.path.open("ab") as f:
+            f.write(b"not json\n")
+        event_log.append(
+            EventRecord(
+                event_type="updated",
+                issue_id="dc-bbb2",
+                timestamp="2026-02-10T11:00:00+01:00",
+            )
+        )
+
+        events = event_log.read()
+        ids = {ev.issue_id for ev in events}
+        assert ids == {"dc-aaa1", "dc-bbb2"}
+
+    def test_read_skips_non_dict_line(self, event_log: EventLog) -> None:
+        """A line that decodes to a scalar / null is skipped, not raised."""
+        event_log.append(
+            EventRecord(
+                event_type="created",
+                issue_id="dc-aaa1",
+                timestamp="2026-02-10T10:00:00+01:00",
+            )
+        )
+        with event_log.path.open("ab") as f:
+            f.write(b"42\n")
+            f.write(b"null\n")
+            f.write(b'"string"\n')
+
+        events = event_log.read()
+        assert {ev.issue_id for ev in events} == {"dc-aaa1"}
+
     def test_file_lock_open_failure_raises_runtimeerror(
         self, event_log: EventLog
     ) -> None:

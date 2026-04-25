@@ -42,6 +42,9 @@ def resolve_partial_id(
     Raises:
         ValueError: If ``partial_id`` matches more than one id.
     """
+    if not partial_id or not partial_id.strip():
+        return None
+
     id_set = ids if isinstance(ids, set) else set(ids)
 
     if partial_id in id_set:

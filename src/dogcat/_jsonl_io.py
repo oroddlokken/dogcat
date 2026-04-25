@@ -14,6 +14,7 @@ Locking is left to callers: each store has its own
 
 from __future__ import annotations
 
+import contextlib
 import os
 import tempfile
 from pathlib import Path
@@ -34,6 +35,18 @@ def atomic_rewrite_jsonl(
     and returns the number of lines written. After fsync, the tempfile is
     renamed onto ``target``. On any failure the tempfile is unlinked.
     """
+    # Capture the existing mode of ``target`` BEFORE we write, so the
+    # tempfile rename doesn't silently demote a 0644-shared file to
+    # 0600 (NamedTemporaryFile's default mode). Without this, a shared
+    # .dogcats becomes inaccessible to everyone except the writer
+    # after the first compaction. (dogcat-1cfd)
+    target_mode: int | None = None
+    try:
+        if target.exists():
+            target_mode = target.stat().st_mode & 0o7777
+    except OSError:
+        target_mode = None
+
     with tempfile.NamedTemporaryFile(
         mode="wb",
         dir=dogcats_dir,
@@ -49,6 +62,12 @@ def atomic_rewrite_jsonl(
             tmp_path.unlink(missing_ok=True)
             msg = f"Failed to write to temporary file: {e}"
             raise RuntimeError(msg) from e
+
+    if target_mode is not None:
+        # Best-effort — proceed with the rename even if the chmod
+        # fails; the alternative is failing the whole save.
+        with contextlib.suppress(OSError):
+            tmp_path.chmod(target_mode)
 
     try:
         tmp_path.replace(target)

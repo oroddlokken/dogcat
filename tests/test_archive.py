@@ -796,3 +796,79 @@ class TestArchiveInbox:
         )
         assert "Open proposal" in result.stdout
         assert "Closed proposal" not in result.stdout
+
+
+class TestArchiveLockingRace:
+    """Archive must hold the storage lock so concurrent appends are not lost."""
+
+    def test_archive_holds_storage_lock_during_rewrite(self, tmp_path: Path) -> None:
+        """Archive acquires storage._file_lock before reading and rewrite.
+
+        Regression for the data-loss race described in dogcat-3ogg: archive
+        used to read+rewrite without holding the file lock, so a concurrent
+        ``dcat new`` append landing between the read and the atomic-replace
+        was clobbered. We verify the fix by tracking lock acquisitions and
+        asserting the archive holds the lock across the read+replace window.
+        """
+        from unittest.mock import patch
+
+        dogcats_dir = tmp_path / ".dogcats"
+        init_repo(dogcats_dir)
+
+        a_id = create_issue(dogcats_dir, "Alpha task")
+        create_issue(dogcats_dir, "Beta task")
+        close_issue(dogcats_dir, a_id)
+
+        events: list[str] = []
+        storage_path = dogcats_dir / "issues.jsonl"
+
+        from dogcat.storage import JSONLStorage
+
+        original_lock = JSONLStorage._file_lock
+
+        def tracking_lock(self: JSONLStorage):
+            from contextlib import contextmanager
+
+            inner = original_lock(self)
+
+            @contextmanager
+            def _track():
+                events.append("lock_acquired")
+                with inner:
+                    yield
+                events.append("lock_released")
+
+            return _track()
+
+        original_replace = Path.replace
+
+        def tracking_replace(self_path: Path, target: Path) -> Path:
+            if target == storage_path:
+                events.append("replace_storage")
+            return original_replace(self_path, target)
+
+        with (
+            patch.object(JSONLStorage, "_file_lock", tracking_lock),
+            patch.object(Path, "replace", tracking_replace),
+        ):
+            result = runner.invoke(
+                app,
+                ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)],
+            )
+
+        assert result.exit_code == 0, result.stdout
+        # The replace_storage event must occur between a lock_acquired and
+        # the matching lock_released (i.e. inside an active lock window).
+        depth = 0
+        replace_inside_lock = False
+        for ev in events:
+            if ev == "lock_acquired":
+                depth += 1
+            elif ev == "lock_released":
+                depth -= 1
+            elif ev == "replace_storage" and depth > 0:
+                replace_inside_lock = True
+        assert replace_inside_lock, (
+            "Archive's atomic-replace fired outside the storage lock — "
+            "a concurrent append could be silently clobbered"
+        )

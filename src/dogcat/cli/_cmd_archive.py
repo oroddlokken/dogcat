@@ -56,7 +56,9 @@ def _archive_inbox(
 
     closed_ids = {p.full_id for p in closed}
 
-    # Split inbox.jsonl lines into archived vs remaining
+    # Split inbox.jsonl lines into archived vs remaining.
+    # Hold the inbox file lock across read+rewrite so a concurrent
+    # ``dcat propose`` append cannot race the atomic-replace and lose data.
     inbox_path = inbox.get_file_path()
     if not inbox_path.exists():
         return 0
@@ -64,74 +66,75 @@ def _archive_inbox(
     archived_lines: list[bytes] = []
     remaining_lines: list[bytes] = []
 
-    for raw_line in inbox_path.read_bytes().splitlines(keepends=True):
-        stripped = raw_line.strip()
-        if not stripped:
-            continue
-        try:
-            data = orjson.loads(stripped)
-        except orjson.JSONDecodeError:
-            remaining_lines.append(raw_line)
-            continue
-
-        ns = data.get("namespace", "dc")
-        pid = data.get("id", "")
-        full_id = f"{ns}-inbox-{pid}"
-
-        if full_id in closed_ids:
-            archived_lines.append(raw_line)
-        else:
-            remaining_lines.append(raw_line)
-
-    if not archived_lines:
-        return 0
-
     archive_filename = f"inbox-closed-{timestamp}.jsonl"
     archive_path = archive_dir / archive_filename
 
-    # Write archived lines atomically
-    with tempfile.NamedTemporaryFile(
-        mode="wb",
-        dir=archive_dir,
-        delete=False,
-        suffix=".jsonl",
-    ) as tmp_file:
-        tmp_path = Path(tmp_file.name)
+    with inbox._file_lock():
+        for raw_line in inbox_path.read_bytes().splitlines(keepends=True):
+            stripped = raw_line.strip()
+            if not stripped:
+                continue
+            try:
+                data = orjson.loads(stripped)
+            except orjson.JSONDecodeError:
+                remaining_lines.append(raw_line)
+                continue
+
+            ns = data.get("namespace", "dc")
+            pid = data.get("id", "")
+            full_id = f"{ns}-inbox-{pid}"
+
+            if full_id in closed_ids:
+                archived_lines.append(raw_line)
+            else:
+                remaining_lines.append(raw_line)
+
+        if not archived_lines:
+            return 0
+
+        # Write archived lines atomically
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=archive_dir,
+            delete=False,
+            suffix=".jsonl",
+        ) as tmp_file:
+            tmp_path = Path(tmp_file.name)
+            try:
+                for line in archived_lines:
+                    tmp_file.write(line if line.endswith(b"\n") else line + b"\n")
+                tmp_file.flush()
+            except Exception:
+                tmp_path.unlink(missing_ok=True)
+                return 0
+
         try:
-            for line in archived_lines:
-                tmp_file.write(line if line.endswith(b"\n") else line + b"\n")
-            tmp_file.flush()
-        except Exception:
+            tmp_path.replace(archive_path)
+        except OSError:
             tmp_path.unlink(missing_ok=True)
             return 0
 
-    try:
-        tmp_path.replace(archive_path)
-    except OSError:
-        tmp_path.unlink(missing_ok=True)
-        return 0
+        # Rewrite inbox.jsonl with remaining lines
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=str(inbox_path.parent),
+            delete=False,
+            suffix=".jsonl",
+        ) as tmp_file:
+            tmp_main = Path(tmp_file.name)
+            try:
+                for line in remaining_lines:
+                    tmp_file.write(line if line.endswith(b"\n") else line + b"\n")
+                tmp_file.flush()
+            except Exception:
+                tmp_main.unlink(missing_ok=True)
+                return 0
 
-    # Rewrite inbox.jsonl with remaining lines
-    with tempfile.NamedTemporaryFile(
-        mode="wb",
-        dir=str(inbox_path.parent),
-        delete=False,
-        suffix=".jsonl",
-    ) as tmp_file:
-        tmp_main = Path(tmp_file.name)
         try:
-            for line in remaining_lines:
-                tmp_file.write(line if line.endswith(b"\n") else line + b"\n")
-            tmp_file.flush()
-        except Exception:
+            tmp_main.replace(inbox_path)
+        except OSError:
             tmp_main.unlink(missing_ok=True)
             return 0
-
-    try:
-        tmp_main.replace(inbox_path)
-    except OSError:
-        tmp_main.unlink(missing_ok=True)
-        return 0
 
     return len(closed)
 
@@ -380,116 +383,126 @@ def register(app: typer.Typer) -> None:
 
             # Split raw JSONL lines into archive vs keep buckets to preserve
             # the full append-only event history for both sets of issues.
+            # Hold the storage file lock for the entire read/partition/rewrite
+            # window so a concurrent ``dcat new`` cannot append between our
+            # read and our atomic-replace (which would silently overwrite the
+            # new record). The lock is the same advisory flock that
+            # _save()/_append() use; archive must order with them.
             archived_lines: list[bytes] = []
             remaining_lines: list[bytes] = []
             archived_dep_count = 0
             archived_link_count = 0
 
-            with storage.path.open("rb") as f:
-                for raw_line in f:
-                    stripped = raw_line.strip()
-                    if not stripped:
-                        continue
+            with storage._file_lock():
+                with storage.path.open("rb") as f:
+                    for raw_line in f:
+                        stripped = raw_line.strip()
+                        if not stripped:
+                            continue
+
+                        try:
+                            data = orjson.loads(stripped)
+                        except orjson.JSONDecodeError:
+                            remaining_lines.append(raw_line)
+                            continue
+
+                        rtype = classify_record(data)
+                        if rtype == "link":
+                            if (
+                                data["from_id"] in archivable_ids
+                                and data["to_id"] in archivable_ids
+                            ):
+                                archived_lines.append(raw_line)
+                                archived_link_count += 1
+                            else:
+                                remaining_lines.append(raw_line)
+                        elif rtype == "dependency":
+                            if (
+                                data["issue_id"] in archivable_ids
+                                and data["depends_on_id"] in archivable_ids
+                            ):
+                                archived_lines.append(raw_line)
+                                archived_dep_count += 1
+                            else:
+                                remaining_lines.append(raw_line)
+                        elif rtype == "event":
+                            # Event record — follow issue_id
+                            if data.get("issue_id") in archivable_ids:
+                                archived_lines.append(raw_line)
+                            else:
+                                remaining_lines.append(raw_line)
+                        else:
+                            # Issue record — resolve full_id from raw dict
+                            if "namespace" in data:
+                                full_id = f"{data['namespace']}-{data['id']}"
+                            elif "-" in str(data.get("id", "")):
+                                full_id = data["id"]
+                            else:
+                                full_id = f"dc-{data['id']}"
+
+                            if full_id in archivable_ids:
+                                archived_lines.append(raw_line)
+                            else:
+                                remaining_lines.append(raw_line)
+
+                # Write archived lines to archive file atomically.
+                with tempfile.NamedTemporaryFile(
+                    mode="wb",
+                    dir=archive_dir,
+                    delete=False,
+                    suffix=".jsonl",
+                ) as tmp_file:
+                    tmp_path = Path(tmp_file.name)
 
                     try:
-                        data = orjson.loads(stripped)
-                    except orjson.JSONDecodeError:
-                        remaining_lines.append(raw_line)
-                        continue
+                        for line in archived_lines:
+                            tmp_file.write(
+                                line if line.endswith(b"\n") else line + b"\n"
+                            )
+                        tmp_file.flush()
+                    except typer.Exit:
+                        raise
+                    except Exception as e:
+                        tmp_path.unlink(missing_ok=True)
+                        msg = f"Failed to write archive file: {e}"
+                        raise RuntimeError(msg) from e
 
-                    rtype = classify_record(data)
-                    if rtype == "link":
-                        if (
-                            data["from_id"] in archivable_ids
-                            and data["to_id"] in archivable_ids
-                        ):
-                            archived_lines.append(raw_line)
-                            archived_link_count += 1
-                        else:
-                            remaining_lines.append(raw_line)
-                    elif rtype == "dependency":
-                        if (
-                            data["issue_id"] in archivable_ids
-                            and data["depends_on_id"] in archivable_ids
-                        ):
-                            archived_lines.append(raw_line)
-                            archived_dep_count += 1
-                        else:
-                            remaining_lines.append(raw_line)
-                    elif rtype == "event":
-                        # Event record — follow issue_id
-                        if data.get("issue_id") in archivable_ids:
-                            archived_lines.append(raw_line)
-                        else:
-                            remaining_lines.append(raw_line)
-                    else:
-                        # Issue record — resolve full_id from raw dict
-                        if "namespace" in data:
-                            full_id = f"{data['namespace']}-{data['id']}"
-                        elif "-" in str(data.get("id", "")):
-                            full_id = data["id"]
-                        else:
-                            full_id = f"dc-{data['id']}"
-
-                        if full_id in archivable_ids:
-                            archived_lines.append(raw_line)
-                        else:
-                            remaining_lines.append(raw_line)
-
-            # Write archived lines to archive file atomically
-            with tempfile.NamedTemporaryFile(
-                mode="wb",
-                dir=archive_dir,
-                delete=False,
-                suffix=".jsonl",
-            ) as tmp_file:
-                tmp_path = Path(tmp_file.name)
-
+                # Atomic rename to final archive path
                 try:
-                    for line in archived_lines:
-                        tmp_file.write(line if line.endswith(b"\n") else line + b"\n")
-                    tmp_file.flush()
-                except typer.Exit:
-                    raise
-                except Exception as e:
+                    tmp_path.replace(archive_path)
+                except OSError as e:
                     tmp_path.unlink(missing_ok=True)
-                    msg = f"Failed to write archive file: {e}"
+                    msg = f"Failed to create archive file: {e}"
                     raise RuntimeError(msg) from e
 
-            # Atomic rename to final archive path
-            try:
-                tmp_path.replace(archive_path)
-            except OSError as e:
-                tmp_path.unlink(missing_ok=True)
-                msg = f"Failed to create archive file: {e}"
-                raise RuntimeError(msg) from e
+                # Rewrite main file with only remaining lines (preserving history)
+                with tempfile.NamedTemporaryFile(
+                    mode="wb",
+                    dir=storage.dogcats_dir,
+                    delete=False,
+                    suffix=".jsonl",
+                ) as tmp_file:
+                    tmp_main_path = Path(tmp_file.name)
 
-            # Rewrite main file with only remaining lines (preserving history)
-            with tempfile.NamedTemporaryFile(
-                mode="wb",
-                dir=storage.dogcats_dir,
-                delete=False,
-                suffix=".jsonl",
-            ) as tmp_file:
-                tmp_main_path = Path(tmp_file.name)
+                    try:
+                        for line in remaining_lines:
+                            tmp_file.write(
+                                line if line.endswith(b"\n") else line + b"\n"
+                            )
+                        tmp_file.flush()
+                    except typer.Exit:
+                        raise
+                    except Exception as e:
+                        tmp_main_path.unlink(missing_ok=True)
+                        msg = f"Failed to rewrite storage file: {e}"
+                        raise RuntimeError(msg) from e
 
                 try:
-                    for line in remaining_lines:
-                        tmp_file.write(line if line.endswith(b"\n") else line + b"\n")
-                    tmp_file.flush()
-                except typer.Exit:
-                    raise
-                except Exception as e:
+                    tmp_main_path.replace(storage.path)
+                except OSError as e:
                     tmp_main_path.unlink(missing_ok=True)
-                    msg = f"Failed to rewrite storage file: {e}"
+                    msg = f"Failed to write storage file: {e}"
                     raise RuntimeError(msg) from e
-
-            try:
-                tmp_main_path.replace(storage.path)
-            except OSError as e:
-                tmp_main_path.unlink(missing_ok=True)
-                msg = f"Failed to write storage file: {e}"
-                raise RuntimeError(msg) from e
 
             # Update in-memory state
             storage.remove_archived(archivable_ids, len(remaining_lines))

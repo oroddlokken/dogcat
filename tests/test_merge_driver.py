@@ -231,6 +231,182 @@ class TestMergeJSONL:
         assert len(proposals) == 1
         assert proposals[0]["status"] == "tombstone"
 
+    def test_issue_tombstone_wins_over_later_open_edit(self) -> None:
+        """Tombstone is not overwritten by a later open-status edit.
+
+        Regression for dogcat-mro6: branch A deletes the issue, branch B
+        edits it (later updated_at) without seeing the delete; the merge
+        used to keep the open record and silently lose the tombstone.
+        """
+        base = [
+            _issue_record(
+                id="x",
+                title="Original",
+                status="open",
+                updated_at="2026-04-25T10:00:00+00:00",
+            )
+        ]
+        ours = [
+            _issue_record(
+                id="x",
+                title="Deleted",
+                status="tombstone",
+                updated_at="2026-04-25T10:00:00+00:00",
+            )
+        ]
+        # Concurrent agent on a feature branch updates with notes,
+        # leaving the issue OPEN with a *later* updated_at.
+        theirs = [
+            _issue_record(
+                id="x",
+                title="Original",
+                status="open",
+                notes="more details",
+                updated_at="2026-04-25T10:01:00+00:00",
+            )
+        ]
+
+        result = merge_jsonl(base, ours, theirs)
+        issues = [r for r in result if r.get("record_type") == "issue"]
+        assert len(issues) == 1
+        assert issues[0]["status"] == "tombstone", (
+            "Tombstone must not be reverted by a later open-status edit"
+        )
+
+    def test_issue_closed_wins_over_later_open_edit(self) -> None:
+        """Issue: closed on one branch beats a later open edit on the other."""
+        base: list[dict[str, Any]] = []
+        ours = [
+            _issue_record(
+                id="x",
+                title="t",
+                status="closed",
+                updated_at="2026-04-25T10:00:00+00:00",
+            )
+        ]
+        theirs = [
+            _issue_record(
+                id="x",
+                title="t",
+                status="open",
+                updated_at="2026-04-25T10:01:00+00:00",
+            )
+        ]
+
+        result = merge_jsonl(base, ours, theirs)
+        issues = [r for r in result if r.get("record_type") == "issue"]
+        assert len(issues) == 1
+        assert issues[0]["status"] == "closed"
+
+    def test_issue_same_status_falls_back_to_updated_at(self) -> None:
+        """Same status: the record with the later updated_at still wins."""
+        base: list[dict[str, Any]] = []
+        ours = [
+            _issue_record(
+                id="x",
+                title="Earlier",
+                status="open",
+                updated_at="2026-04-25T10:00:00+00:00",
+            )
+        ]
+        theirs = [
+            _issue_record(
+                id="x",
+                title="Later",
+                status="open",
+                updated_at="2026-04-25T10:01:00+00:00",
+            )
+        ]
+        result = merge_jsonl(base, ours, theirs)
+        issues = [r for r in result if r.get("record_type") == "issue"]
+        assert len(issues) == 1
+        assert issues[0]["title"] == "Later"
+
+    def test_issue_cross_timezone_picks_absolute_later(self) -> None:
+        """Updated_at is compared as absolute time, not lexicographically.
+
+        Regression for dogcat-623e: '+05:00' compares lex-greater than
+        '+00:00' even though the +05:00 record may be earlier in absolute
+        time. Verify we pick the record that's truly later.
+        """
+        base: list[dict[str, Any]] = []
+        # Tokyo wallclock (+09): 19:00 -> UTC 10:00
+        # UTC: 11:00 (one hour LATER in absolute time)
+        # Lexicographically '2026-04-25T19:00:00+09:00' > '2026-04-25T11:00:00+00:00'
+        ours = [
+            _issue_record(
+                id="x",
+                title="Tokyo",
+                status="open",
+                updated_at="2026-04-25T19:00:00+09:00",
+            )
+        ]
+        theirs = [
+            _issue_record(
+                id="x",
+                title="UTC-later",
+                status="open",
+                updated_at="2026-04-25T11:00:00+00:00",
+            )
+        ]
+        result = merge_jsonl(base, ours, theirs)
+        issues = [r for r in result if r.get("record_type") == "issue"]
+        assert len(issues) == 1
+        # The UTC record is one hour later in absolute time, so it wins.
+        assert issues[0]["title"] == "UTC-later"
+
+    def test_issue_z_vs_offset_zero_treated_equal(self) -> None:
+        """``2026-...Z`` and ``2026-...+00:00`` denote the same instant."""
+        base: list[dict[str, Any]] = []
+        ours = [
+            _issue_record(
+                id="x",
+                title="Z form",
+                status="open",
+                updated_at="2026-04-25T10:00:00Z",
+            )
+        ]
+        # Same instant, different formatting; theirs is iterated last so
+        # on tie it wins.
+        theirs = [
+            _issue_record(
+                id="x",
+                title="Offset form",
+                status="open",
+                updated_at="2026-04-25T10:00:00+00:00",
+            )
+        ]
+        result = merge_jsonl(base, ours, theirs)
+        issues = [r for r in result if r.get("record_type") == "issue"]
+        assert len(issues) == 1
+        # Tied timestamps: theirs (iterated last) wins under the deterministic rule.
+        assert issues[0]["title"] == "Offset form"
+
+    def test_issue_pdt_vs_utc_picks_absolute_later(self) -> None:
+        """PDT (-07) vs UTC: pick the absolute-later record."""
+        base: list[dict[str, Any]] = []
+        # PDT 03:00 = UTC 10:00; UTC 09:00 = absolute-earlier
+        ours = [
+            _issue_record(
+                id="x",
+                title="PDT-later",
+                status="open",
+                updated_at="2026-04-25T03:00:00-07:00",
+            )
+        ]
+        theirs = [
+            _issue_record(
+                id="x",
+                title="UTC-earlier",
+                status="open",
+                updated_at="2026-04-25T09:00:00+00:00",
+            )
+        ]
+        result = merge_jsonl(base, ours, theirs)
+        issues = [r for r in result if r.get("record_type") == "issue"]
+        assert len(issues) == 1
+        assert issues[0]["title"] == "PDT-later"
+
     def test_same_proposal_same_status_later_created_at_wins(self) -> None:
         """Same proposal, same status: later created_at wins."""
         base: list[dict[str, Any]] = []

@@ -261,13 +261,25 @@ def find_dogcats_dir(start_dir: str | None = None) -> str:
     main git worktree root (via ``git rev-parse --git-common-dir``) so that
     linked worktrees transparently share the main tree's .dogcats directory.
 
+    The walk is bounded by :func:`dogcat.config.get_rc_walkup_boundary`
+    (git toplevel by default, or ``$HOME``) to prevent a planted
+    ``/tmp/.dogcatrc`` from silently re-rooting commands. Set
+    ``DCAT_RC_WALKUP_UNRESTRICTED=1`` to fall back to legacy behavior.
+    (dogcat-4107)
+
     Args:
         start_dir: Directory to start searching from (default: current directory)
 
     Returns:
         Path to .dogcats directory, or ".dogcats" if not found
     """
+    from dogcat.config import (
+        get_rc_walkup_boundary,
+        warn_if_rc_target_foreign,
+    )
+
     current = Path.cwd() if start_dir is None else Path(start_dir).resolve()
+    boundary = get_rc_walkup_boundary(current)
 
     while True:
         # Check for .dogcatrc first
@@ -275,6 +287,7 @@ def find_dogcats_dir(start_dir: str | None = None) -> str:
         if rc_candidate.is_file():
             try:
                 target = parse_dogcatrc(rc_candidate)
+                warn_if_rc_target_foreign(rc_candidate, target)
             except ValueError as e:
                 typer.echo(f"Error: {e}", err=True)
                 raise SystemExit(1) from e
@@ -295,6 +308,9 @@ def find_dogcats_dir(start_dir: str | None = None) -> str:
         parent = current.parent
         if parent == current:
             # Reached filesystem root — try git worktree fallback
+            return _find_dogcats_via_worktree() or ".dogcats"
+        if boundary is not None and current == boundary:
+            # Stop at the boundary; do not trust ancestors above it.
             return _find_dogcats_via_worktree() or ".dogcats"
         current = parent
 
@@ -481,32 +497,62 @@ def parse_duration(value: str) -> datetime:
     import re
     from datetime import timedelta
 
-    raw = value.strip().lower()
-
-    # Try relative duration first: e.g. 7d, 2w, 1m
-    match = re.fullmatch(r"(\d+)([dwm])", raw)
+    stripped = value.strip()
+    # Relative regex matches case-insensitively (7d / 7D both work),
+    # but ISO parsing must use the original-case string because
+    # ``datetime.fromisoformat`` only accepts uppercase ``Z``. Without
+    # this, ``dcat snooze 2026-04-25T00:00:00Z`` was rejected.
+    # (dogcat-3x9q)
+    match = re.fullmatch(r"(\d+)([dwmDWM])", stripped)
     if match:
         amount = int(match.group(1))
-        unit = match.group(2)
+        unit = match.group(2).lower()
         if unit == "d":
-            delta = timedelta(days=amount)
+            days = amount
         elif unit == "w":
-            delta = timedelta(weeks=amount)
-        elif unit == "m":
-            delta = timedelta(days=amount * 30)
-        else:
-            msg = f"Unknown duration unit: {unit}"
+            days = amount * 7
+        else:  # unit == "m"
+            days = amount * 30
+        # Cap snooze duration at ~100 years (dogcat-dfn9): a typo
+        # like 999999999999d would otherwise OverflowError inside
+        # timedelta, and a far-future snooze permanently orphans the
+        # issue from list views.
+        max_days = 365 * 100
+        if days > max_days:
+            msg = (
+                f"Duration too far in the future ({amount}{unit} > "
+                f"{max_days}d / 100y). Use a shorter span or "
+                f"`dcat update <id> --status deferred` instead."
+            )
             raise ValueError(msg)
-        return datetime.now().astimezone() + delta
+        return datetime.now().astimezone() + timedelta(days=days)
 
-    # Try ISO8601 date/datetime
+    # Try ISO8601 date/datetime — accept trailing ``Z`` as +00:00.
+    iso = stripped[:-1] + "+00:00" if stripped.endswith("Z") else stripped
     try:
-        dt = datetime.fromisoformat(raw)
+        dt = datetime.fromisoformat(iso)
     except ValueError:
         pass
     else:
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=datetime.now().astimezone().tzinfo)
+            # Use the local zoneinfo (DST-aware) rather than the fixed
+            # offset of ``datetime.now()``: a snooze a few months out
+            # would otherwise stamp the wrong offset across a DST
+            # transition. (dogcat-3x9q)
+            try:
+                from zoneinfo import ZoneInfo
+
+                local_tz_name = (
+                    datetime.now().astimezone().tzname()  # e.g. "CEST"
+                )
+                # tzname() values like "CEST" are unparseable by
+                # ZoneInfo. Fall back to the system tz on error.
+                local_tz = ZoneInfo(local_tz_name) if local_tz_name else None
+            except (ImportError, Exception):  # noqa: BLE001
+                local_tz = None
+            if local_tz is None:
+                local_tz = datetime.now().astimezone().tzinfo
+            dt = dt.replace(tzinfo=local_tz)
         return dt
 
     msg = (
