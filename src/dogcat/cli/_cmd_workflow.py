@@ -5,7 +5,7 @@ from __future__ import annotations
 import orjson
 import typer
 
-from dogcat.config import extract_prefix, get_issue_prefix, get_namespace_filter
+from dogcat.config import extract_prefix, get_namespace_filter
 
 from ._completions import (
     complete_issue_ids,
@@ -29,6 +29,7 @@ from ._helpers import (
     check_comments_exclusive,
     get_default_operator,
     get_storage,
+    load_open_inbox_proposals,
     parse_duration,
 )
 from ._json_state import echo_error, is_json_output
@@ -192,26 +193,15 @@ def register(app: typer.Typer) -> None:
         all_namespaces: bool,
     ) -> None:
         """Show open inbox proposals in ready output."""
-        try:
-            from dogcat.inbox import InboxStorage
-
-            inbox = InboxStorage(dogcats_dir=dogcats_dir)
-            proposals = [p for p in inbox.list() if not p.is_closed()]
-
-            if not all_namespaces:
-                ns_filter = get_namespace_filter(dogcats_dir, namespace)
-                if ns_filter is not None:
-                    proposals = [p for p in proposals if ns_filter(p.namespace)]
-                else:
-                    primary = get_issue_prefix(dogcats_dir)
-                    proposals = [p for p in proposals if p.namespace == primary]
-
-            if proposals:
-                typer.echo(f"\nInbox ({len(proposals)}):")
-                for proposal in proposals:
-                    typer.echo(format_proposal_brief(proposal))
-        except (ValueError, RuntimeError):
-            pass  # No inbox file — silently skip
+        proposals = load_open_inbox_proposals(
+            dogcats_dir,
+            namespace,
+            all_namespaces=all_namespaces,
+        )
+        if proposals:
+            typer.echo(f"\nInbox ({len(proposals)}):")
+            for proposal in proposals:
+                typer.echo(format_proposal_brief(proposal))
 
     @app.command()
     def blocked(

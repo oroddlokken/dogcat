@@ -4,9 +4,35 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, TypedDict
+
+from typing_extensions import Self
 
 from dogcat._version import version as _dcat_version
+
+
+class IssueMetadata(TypedDict, total=False):
+    """Documented shape of :attr:`Issue.metadata`.
+
+    Known keys are ``manual`` and ``no_agent`` (both treated as boolean flags
+    that exclude an issue from automated workflows). The dict permits other
+    arbitrary keys for forward compatibility — TypedDict cannot enforce
+    "extra keys allowed", so the field annotation stays ``dict[str, Any]``
+    and this TypedDict serves as a documented schema reference.
+    """
+
+    manual: bool
+    no_agent: bool
+
+
+def is_manual_issue(metadata: dict[str, Any]) -> bool:
+    """Return True if ``metadata`` marks the issue as manual / no-agent.
+
+    Centralizes the ``metadata.get("manual") or metadata.get("no_agent")``
+    idiom used in 10+ call sites; either flag has the same effect.
+    """
+    return bool(metadata.get("manual") or metadata.get("no_agent"))
+
 
 _logger = logging.getLogger(__name__)
 _KNOWN_RECORD_TYPES = frozenset(
@@ -46,6 +72,26 @@ class DependencyType(str, Enum):
     BLOCKS = "blocks"
     PARENT_CHILD = "parent-child"
     RELATED = "related"
+
+
+class LinkType(str, Enum):
+    """Built-in link types between issues.
+
+    The :class:`Link` ``link_type`` field accepts either a :class:`LinkType`
+    member (recommended for known relations) or a free-form string for custom,
+    user-defined relations. Use :func:`link_type_value` to convert either form
+    to a string for serialization.
+    """
+
+    RELATES_TO = "relates_to"
+    DUPLICATES = "duplicates"
+    BLOCKS = "blocks"
+    DEPENDS_ON = "depends_on"
+
+
+def link_type_value(value: "LinkType | str") -> str:
+    """Return the string form of a built-in :class:`LinkType` or custom string."""
+    return value.value if isinstance(value, LinkType) else value
 
 
 ISSUE_STATUS_EMOJIS: dict[Status, str] = {
@@ -88,7 +134,10 @@ class Link:
 
     from_id: str
     to_id: str
-    link_type: str = "relates_to"  # relates_to, duplicates, blocks, depends_on, etc.
+    # Accept either the LinkType enum (preferred for built-in relations) or a
+    # plain string (custom user-defined relations). Serialization uses the
+    # string form via ``link_type_value()``.
+    link_type: "LinkType | str" = LinkType.RELATES_TO
     created_at: datetime = field(default_factory=lambda: datetime.now().astimezone())
     created_by: str | None = None
 
@@ -202,6 +251,112 @@ class Proposal:
     def get_status_emoji(self) -> str:
         """Get an emoji representation of the status."""
         return PROPOSAL_STATUS_EMOJIS.get(self.status, _UNKNOWN_STATUS_EMOJI)
+
+
+# Sentinel for "field not set" on UpdateRequest. ``None`` is not used because
+# clearing a field (e.g. removing a parent or unsnoozing) requires explicitly
+# passing ``None`` as the new value.
+class _UnsetType:
+    """Sentinel type so unset fields are distinguishable from explicit ``None``."""
+
+    _instance: "_UnsetType | None" = None
+
+    def __new__(cls) -> Self:
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance  # type: ignore[return-value]
+
+    def __repr__(self) -> str:
+        return "UNSET"
+
+    def __bool__(self) -> bool:
+        return False
+
+
+UNSET: Any = _UnsetType()
+
+
+@dataclass
+class FilterSpec:
+    """Typed filter parameters for :meth:`JSONLStorage.list`.
+
+    The legacy untyped ``dict[str, Any]`` shape is still accepted by
+    ``list()`` for backwards compatibility (it converts via :meth:`from_dict`),
+    but new callers should construct a ``FilterSpec`` so unknown keys and
+    type mismatches are caught at construction.
+    """
+
+    status: "Status | str | None" = None
+    priority: int | None = None
+    issue_type: str | None = None  # mapped from legacy 'type' key
+    label: "list[str] | str | None" = None
+    owner: str | None = None
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> "FilterSpec":
+        """Build a FilterSpec from the legacy dict shape (rejects unknown keys)."""
+        # Translate legacy 'type' alias to 'issue_type' so the dataclass field
+        # name matches the Issue field for clarity.
+        legacy_aliases = {"type": "issue_type"}
+        normalized: dict[str, Any] = {}
+        known = {"status", "priority", "issue_type", "label", "owner"}
+        for key, value in raw.items():
+            mapped = legacy_aliases.get(key, key)
+            if mapped not in known:
+                msg = (
+                    f"Unknown filter key {key!r}. Valid keys: "
+                    f"status, priority, type, label, owner"
+                )
+                raise ValueError(msg)
+            normalized[mapped] = value
+        return cls(**normalized)
+
+
+@dataclass
+class UpdateRequest:
+    """Typed bag of optional field updates for :meth:`JSONLStorage.update`.
+
+    Each field defaults to :data:`UNSET`; only fields that are explicitly
+    assigned propagate via :meth:`to_dict`. ``None`` is a *meaningful* value
+    for fields that support clearing (``parent``, ``snoozed_until``,
+    ``duplicate_of``), so the ``UNSET`` sentinel is required to distinguish
+    "leave alone" from "clear".
+
+    Field names mirror :data:`JSONLStorage.UPDATABLE_FIELDS`; passing an
+    unknown field is impossible because the dataclass schema rejects it.
+    """
+
+    title: Any = UNSET
+    description: Any = UNSET
+    status: Any = UNSET
+    priority: Any = UNSET
+    issue_type: Any = UNSET
+    owner: Any = UNSET
+    parent: Any = UNSET
+    labels: Any = UNSET
+    external_ref: Any = UNSET
+    design: Any = UNSET
+    acceptance: Any = UNSET
+    notes: Any = UNSET
+    closed_reason: Any = UNSET
+    updated_by: Any = UNSET
+    snoozed_until: Any = UNSET
+    duplicate_of: Any = UNSET
+    metadata: Any = UNSET
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a dict containing only fields that were explicitly set."""
+        from dataclasses import fields as _fields
+
+        return {
+            f.name: getattr(self, f.name)
+            for f in _fields(self)
+            if getattr(self, f.name) is not UNSET
+        }
+
+    def is_empty(self) -> bool:
+        """Return True when no field has been assigned a value."""
+        return not self.to_dict()
 
 
 def validate_priority(priority: Any) -> None:

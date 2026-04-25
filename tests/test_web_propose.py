@@ -447,9 +447,43 @@ class TestAppFactory:
 
     def test_default_port_constant(self) -> None:
         """The default port constant is set."""
-        from dogcat.cli._cmd_web import DEFAULT_PORT
+        from dogcat.constants import WEB_DEFAULT_HOST, WEB_DEFAULT_PORT
 
-        assert DEFAULT_PORT == 48042
+        assert WEB_DEFAULT_PORT == 48042
+        assert WEB_DEFAULT_HOST == "127.0.0.1"
+
+    def test_port_env_var_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """DCAT_WEB_PORT env var overrides the default."""
+        from dogcat.cli._cmd_web import _env_default_port
+        from dogcat.constants import WEB_PORT_ENV_VAR
+
+        monkeypatch.setenv(WEB_PORT_ENV_VAR, "55555")
+        assert _env_default_port() == 55555
+
+    def test_port_env_var_unset_falls_back(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without the env var, the compiled default applies."""
+        from dogcat.cli._cmd_web import _env_default_port
+        from dogcat.constants import WEB_DEFAULT_PORT, WEB_PORT_ENV_VAR
+
+        monkeypatch.delenv(WEB_PORT_ENV_VAR, raising=False)
+        assert _env_default_port() == WEB_DEFAULT_PORT
+
+    def test_port_env_var_invalid_falls_back(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """A non-integer env value warns and falls back to the default."""
+        from dogcat.cli._cmd_web import _env_default_port
+        from dogcat.constants import WEB_DEFAULT_PORT, WEB_PORT_ENV_VAR
+
+        monkeypatch.setenv(WEB_PORT_ENV_VAR, "not-a-port")
+        assert _env_default_port() == WEB_DEFAULT_PORT
+        captured = capsys.readouterr()
+        assert "not-a-port" in captured.err
+        assert WEB_PORT_ENV_VAR in captured.err
 
     def test_allow_creating_namespaces_default(self, web_dogcats: Path) -> None:
         """By default allow_creating_namespaces is False."""

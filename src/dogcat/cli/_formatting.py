@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import typer
 
@@ -16,6 +16,8 @@ from dogcat.constants import (
 from dogcat.models import Status
 
 if TYPE_CHECKING:
+    from rich.table import Table
+
     from dogcat.event_log import EventRecord
     from dogcat.models import Issue, Proposal
 
@@ -430,6 +432,168 @@ def format_issue_tree(
     return "\n".join(lines)
 
 
+# Static column configuration for the issue table. Each entry is
+# (header, kwargs-for-Table.add_column). Conditional columns (Ext Ref,
+# Blocked By) are appended in `_build_issue_table`.
+_ISSUE_TABLE_BASE_COLUMNS: tuple[tuple[str, dict[str, Any]], ...] = (
+    ("", {"width": 2, "no_wrap": True}),  # Status emoji
+    ("ID", {"no_wrap": True}),
+    ("Parent", {"no_wrap": True}),
+    ("Type", {"no_wrap": True}),
+    ("Pri", {"width": 3, "no_wrap": True}),
+    ("Title", {"overflow": "fold"}),  # Wrap long titles
+    ("Labels", {"no_wrap": False}),
+)
+# Status values where the open-blocker symbol must NOT replace the natural emoji.
+_BLOCKED_DISPLAY_EXEMPT = {Status.IN_REVIEW, Status.DEFERRED, Status.CLOSED}
+
+
+def _build_issue_table(*, has_ext_ref: bool, has_blocked: bool) -> Table:
+    """Create the Rich table shell with the right set of columns."""
+    from rich import box
+    from rich.table import Table
+
+    table = Table(
+        show_header=True,
+        header_style="bold",
+        box=box.ROUNDED,
+        pad_edge=False,
+        show_edge=False,
+    )
+    for header, kwargs in _ISSUE_TABLE_BASE_COLUMNS:
+        table.add_column(header, **kwargs)
+    if has_ext_ref:
+        table.add_column("Ext Ref", no_wrap=True)
+    if has_blocked:
+        table.add_column("Blocked By", no_wrap=False)
+    return table
+
+
+def _row_status(
+    issue: Issue, blocked_ids: set[str] | None, *, dimmed: bool
+) -> tuple[str, str]:
+    """Pick the status emoji and color for an issue row."""
+    if (
+        blocked_ids
+        and issue.full_id in blocked_ids
+        and issue.status not in _BLOCKED_DISPLAY_EXEMPT
+    ):
+        emoji, status_color = "■", STATUS_COLORS.get("blocked", "white")
+    else:
+        emoji = issue.get_status_emoji()
+        status_color = STATUS_COLORS.get(issue.status.value, "white")
+    if dimmed:
+        status_color = "bright_black"
+    return emoji, status_color
+
+
+def _hidden_subtask_suffix(
+    issue: Issue,
+    hidden_counts: dict[str, int] | None,
+    preview_subtasks: dict[str, list[Issue]] | None,
+) -> str:
+    """Suffix shown on deferred parents that have hidden descendants."""
+    has_previews = preview_subtasks is not None and issue.full_id in preview_subtasks
+    if has_previews or not hidden_counts or issue.full_id not in hidden_counts:
+        return ""
+    return f" [yellow]\\[{hidden_counts[issue.full_id]} hidden subtasks][/]"
+
+
+def _blocked_by_cell(
+    issue: Issue,
+    blocked_by_map: dict[str, list[str]] | None,
+    deferred_blocker_map: dict[str, list[str]] | None,
+) -> str:
+    """Render the contents of the 'Blocked By' column for one issue."""
+    blockers = (
+        ", ".join(blocked_by_map[issue.full_id])
+        if blocked_by_map and issue.full_id in blocked_by_map
+        else ""
+    )
+    deferred_suffix = (
+        f"[bright_black]{', '.join(deferred_blocker_map[issue.full_id])} (deferred)[/]"
+        if deferred_blocker_map and issue.full_id in deferred_blocker_map
+        else ""
+    )
+    if blockers and deferred_suffix:
+        return f"[red]{blockers}[/] {deferred_suffix}"
+    if blockers:
+        return f"[red]{blockers}[/]"
+    return deferred_suffix
+
+
+def _add_issue_row(
+    table: Table,
+    issue: Issue,
+    *,
+    dimmed: bool = False,
+    blocked_ids: set[str] | None = None,
+    blocked_by_map: dict[str, list[str]] | None = None,
+    hidden_counts: dict[str, int] | None = None,
+    deferred_blocker_map: dict[str, list[str]] | None = None,
+    preview_subtasks: dict[str, list[Issue]] | None = None,
+    has_ext_ref: bool = False,
+    has_blocked: bool = False,
+) -> None:
+    """Add a single issue as a row to the table."""
+    from rich.markup import escape
+
+    emoji, status_color = _row_status(issue, blocked_ids, dimmed=dimmed)
+    priority_color = (
+        "bright_black"
+        if dimmed
+        else f"bold {PRIORITY_COLORS.get(issue.priority, 'white')}"
+    )
+    issue_type = issue.issue_type.value
+    type_color = "bright_black" if dimmed else TYPE_COLORS.get(issue_type, "white")
+
+    parent_id = ""
+    if issue.parent:
+        parent_id = (
+            issue.parent.split("-", 1)[-1] if "-" in issue.parent else issue.parent
+        )
+
+    labels_str = ", ".join(escape(lbl) for lbl in issue.labels) if issue.labels else ""
+    manual_str = (
+        " [yellow]\\[manual][/]"
+        if issue.metadata.get("manual") or issue.metadata.get("no_agent")
+        else ""
+    )
+    hidden_suffix = _hidden_subtask_suffix(issue, hidden_counts, preview_subtasks)
+
+    title_text = escape(issue.title)
+    if dimmed:
+        title_text = f"[bright_black]{title_text}[/]"
+
+    row: list[str] = [
+        f"[{status_color}]{emoji}[/]",
+        f"[bright_black]{issue.id}[/]" if dimmed else issue.id,
+        f"[bright_black]{parent_id}[/]" if dimmed else parent_id,
+        f"[{type_color}]{issue_type}[/]",
+        f"[{priority_color}]{issue.priority}[/]",
+        f"{title_text}{manual_str}{hidden_suffix}",
+        f"[cyan]{labels_str}[/]" if labels_str else "",
+    ]
+    if has_ext_ref:
+        ref = escape(issue.external_ref) if issue.external_ref else ""
+        row.append(f"[bright_black]{ref}[/]" if ref else "")
+    if has_blocked:
+        row.append(_blocked_by_cell(issue, blocked_by_map, deferred_blocker_map))
+    table.add_row(*row)
+
+
+def _add_summary_row(
+    table: Table, remaining: int, *, has_ext_ref: bool, has_blocked: bool
+) -> None:
+    """Add a summary row counting hidden subtasks beyond the previews shown."""
+    num_cols_before_title = 5  # emoji, ID, Parent, Type, Pri
+    num_cols_after_title = 1 + int(has_ext_ref) + int(has_blocked)  # Labels + extras
+    row = [""] * num_cols_before_title
+    row.append(f"[yellow]\\[...and {remaining} more hidden subtasks][/]")
+    row.extend([""] * num_cols_after_title)
+    table.add_row(*row)
+
+
 def format_issue_table(
     issues: list[Issue],
     blocked_ids: set[str] | None = None,
@@ -453,149 +617,48 @@ def format_issue_table(
     """
     from io import StringIO
 
-    from rich import box
     from rich.console import Console
-    from rich.markup import escape
-    from rich.table import Table
 
     if not issues:
         return ""
 
-    # Only add optional columns when relevant data exists
     has_ext_ref = any(issue.external_ref for issue in issues)
-    has_blocked = blocked_ids and any(issue.full_id in blocked_ids for issue in issues)
-
-    # Create Rich table with column dividers
-    table = Table(
-        show_header=True,
-        header_style="bold",
-        box=box.ROUNDED,
-        pad_edge=False,
-        show_edge=False,
+    has_blocked = bool(
+        blocked_ids and any(issue.full_id in blocked_ids for issue in issues),
     )
 
-    # Add columns - title column wraps instead of truncating
-    table.add_column("", width=2, no_wrap=True)  # Status emoji
-    table.add_column("ID", no_wrap=True)
-    table.add_column("Parent", no_wrap=True)
-    table.add_column("Type", no_wrap=True)
-    table.add_column("Pri", width=3, no_wrap=True)
-    table.add_column("Title", overflow="fold")  # Wrap long titles
-    table.add_column("Labels", no_wrap=False)
-    if has_ext_ref:
-        table.add_column("Ext Ref", no_wrap=True)
-    if has_blocked:
-        table.add_column("Blocked By", no_wrap=False)
+    table = _build_issue_table(has_ext_ref=has_ext_ref, has_blocked=has_blocked)
 
-    def _add_issue_row(issue: Issue, *, dimmed: bool = False) -> None:
-        """Add a single issue as a row to the table."""
-        # Use blocked symbol if issue has open dependencies, but let advanced
-        # statuses (in_review, deferred, closed) take precedence
-        _exempt = {Status.IN_REVIEW, Status.DEFERRED, Status.CLOSED}
-        if blocked_ids and issue.full_id in blocked_ids and issue.status not in _exempt:
-            emoji = "■"
-            status_color = STATUS_COLORS.get("blocked", "white")
-        else:
-            emoji = issue.get_status_emoji()
-            status_color = STATUS_COLORS.get(issue.status.value, "white")
-        priority_color = f"bold {PRIORITY_COLORS.get(issue.priority, 'white')}"
-        issue_type = issue.issue_type.value
-        type_color = TYPE_COLORS.get(issue_type, "white")
-
-        if dimmed:
-            status_color = "bright_black"
-            priority_color = "bright_black"
-            type_color = "bright_black"
-
-        # Extract just the ID part from parent if it has a prefix
-        parent_id = ""
-        if issue.parent:
-            parent_id = (
-                issue.parent.split("-", 1)[-1] if "-" in issue.parent else issue.parent
-            )
-
-        labels_str = (
-            ", ".join(escape(lbl) for lbl in issue.labels) if issue.labels else ""
-        )
-        manual_str = (
-            " [yellow]\\[manual][/]"
-            if issue.metadata.get("manual") or issue.metadata.get("no_agent")
-            else ""
+    def _add(issue: Issue, *, dimmed: bool = False) -> None:
+        _add_issue_row(
+            table,
+            issue,
+            dimmed=dimmed,
+            blocked_ids=blocked_ids,
+            blocked_by_map=blocked_by_map,
+            hidden_counts=hidden_counts,
+            deferred_blocker_map=deferred_blocker_map,
+            preview_subtasks=preview_subtasks,
+            has_ext_ref=has_ext_ref,
+            has_blocked=has_blocked,
         )
 
-        # Add hidden subtask count suffix to title for deferred parents
-        # (only when there are no preview subtasks to show)
-        hidden_suffix = ""
-        has_previews = (
-            preview_subtasks is not None and issue.full_id in preview_subtasks
-        )
-        if not has_previews and hidden_counts and issue.full_id in hidden_counts:
-            count = hidden_counts[issue.full_id]
-            hidden_suffix = f" [yellow]\\[{count} hidden subtasks][/]"
-
-        title_text = escape(issue.title)
-        if dimmed:
-            title_text = f"[bright_black]{title_text}[/]"
-
-        row = [
-            f"[{status_color}]{emoji}[/]",
-            f"[bright_black]{issue.id}[/]" if dimmed else issue.id,
-            f"[bright_black]{parent_id}[/]" if dimmed else parent_id,
-            f"[{type_color}]{issue_type}[/]",
-            f"[{priority_color}]{issue.priority}[/]",
-            f"{title_text}{manual_str}{hidden_suffix}",
-            f"[cyan]{labels_str}[/]" if labels_str else "",
-        ]
-        if has_ext_ref:
-            ref = escape(issue.external_ref) if issue.external_ref else ""
-            row.append(f"[bright_black]{ref}[/]" if ref else "")
-        if has_blocked:
-            blockers = ""
-            if blocked_by_map and issue.full_id in blocked_by_map:
-                blockers = ", ".join(blocked_by_map[issue.full_id])
-            # Also include deferred blockers
-            deferred_suffix = ""
-            if deferred_blocker_map and issue.full_id in deferred_blocker_map:
-                deferred_ids = ", ".join(deferred_blocker_map[issue.full_id])
-                deferred_suffix = f"[bright_black]{deferred_ids} (deferred)[/]"
-            if blockers and deferred_suffix:
-                row.append(f"[red]{blockers}[/] {deferred_suffix}")
-            elif blockers:
-                row.append(f"[red]{blockers}[/]")
-            elif deferred_suffix:
-                row.append(deferred_suffix)
-            else:
-                row.append("")
-        table.add_row(*row)
-
-    def _add_summary_row(remaining: int) -> None:
-        """Add a summary row for remaining hidden subtasks."""
-        # Build a row with the summary text in the Title column
-        num_cols_before_title = 5  # emoji, ID, Parent, Type, Pri
-        num_cols_after_title = 1  # Labels
-        if has_ext_ref:
-            num_cols_after_title += 1
-        if has_blocked:
-            num_cols_after_title += 1
-        row = [""] * num_cols_before_title
-        row.append(f"[yellow]\\[...and {remaining} more hidden subtasks][/]")
-        row.extend([""] * num_cols_after_title)
-        table.add_row(*row)
-
-    # Add rows
     for issue in issues:
-        _add_issue_row(issue)
-        # Add preview subtask rows for deferred parents
+        _add(issue)
         if preview_subtasks and issue.full_id in preview_subtasks:
             previews = preview_subtasks[issue.full_id]
             for preview in previews:
-                _add_issue_row(preview, dimmed=True)
+                _add(preview, dimmed=True)
             total = hidden_counts.get(issue.full_id, 0) if hidden_counts else 0
             remaining = total - len(previews)
             if remaining > 0:
-                _add_summary_row(remaining)
+                _add_summary_row(
+                    table,
+                    remaining,
+                    has_ext_ref=has_ext_ref,
+                    has_blocked=has_blocked,
+                )
 
-    # Render to string
     string_io = StringIO()
     console = Console(file=string_io, force_terminal=True, width=None)
     console.print(table)

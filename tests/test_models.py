@@ -78,6 +78,138 @@ class TestDependencyTypeEnum:
         assert actual_values == expected_values
 
 
+class TestIssueMetadata:
+    """Test the documented IssueMetadata TypedDict and ``is_manual_issue`` helper."""
+
+    def test_is_manual_issue_true_for_manual_flag(self) -> None:
+        """``manual=True`` marks an issue as manual."""
+        from dogcat.models import is_manual_issue
+
+        assert is_manual_issue({"manual": True})
+
+    def test_is_manual_issue_true_for_no_agent_flag(self) -> None:
+        """The legacy ``no_agent=True`` flag also counts as manual."""
+        from dogcat.models import is_manual_issue
+
+        assert is_manual_issue({"no_agent": True})
+
+    def test_is_manual_issue_false_for_empty_or_other_keys(self) -> None:
+        """Without manual/no_agent the issue is agent-workable."""
+        from dogcat.models import is_manual_issue
+
+        assert not is_manual_issue({})
+        assert not is_manual_issue({"manual": False, "other": "x"})
+        assert not is_manual_issue({"priority_override": 0})
+
+
+class TestFilterSpec:
+    """Test FilterSpec construction and ``from_dict`` validation."""
+
+    def test_filter_spec_defaults_to_no_filtering(self) -> None:
+        """A blank FilterSpec leaves every field None."""
+        from dogcat.models import FilterSpec
+
+        spec = FilterSpec()
+        assert spec.status is None
+        assert spec.priority is None
+        assert spec.issue_type is None
+        assert spec.label is None
+        assert spec.owner is None
+
+    def test_from_dict_translates_legacy_type_alias(self) -> None:
+        """``{'type': ...}`` maps to the ``issue_type`` field."""
+        from dogcat.models import FilterSpec
+
+        spec = FilterSpec.from_dict({"type": "bug"})
+        assert spec.issue_type == "bug"
+
+    def test_from_dict_rejects_unknown_keys(self) -> None:
+        """Misspelled or unknown filter keys raise at construction time."""
+        from dogcat.models import FilterSpec
+
+        with pytest.raises(ValueError, match="Unknown filter key"):
+            FilterSpec.from_dict({"piority": 1})
+
+    def test_storage_list_accepts_filter_spec(self, tmp_path: object) -> None:
+        """``JSONLStorage.list(FilterSpec(...))`` filters identically."""
+        from pathlib import Path
+
+        from dogcat.models import FilterSpec, Issue, Status
+        from dogcat.storage import JSONLStorage
+
+        sp = Path(str(tmp_path)) / ".dogcats" / "issues.jsonl"
+        s = JSONLStorage(str(sp), create_dir=True)
+        s.create(Issue(id="o", title="open"))
+        s.create(Issue(id="c", title="closed", status=Status.CLOSED))
+        open_only = s.list(FilterSpec(status="open"))
+        assert {i.id for i in open_only} == {"o"}
+
+
+class TestUpdateRequest:
+    """Test UpdateRequest dataclass behavior."""
+
+    def test_unset_fields_excluded_from_to_dict(self) -> None:
+        """Fields left unset don't appear in the resulting dict."""
+        from dogcat.models import UpdateRequest
+
+        req = UpdateRequest()
+        req.title = "Hello"
+        assert req.to_dict() == {"title": "Hello"}
+
+    def test_explicit_none_is_kept_for_clearable_fields(self) -> None:
+        """Setting parent/snoozed_until to None preserves the clear-intent."""
+        from dogcat.models import UpdateRequest
+
+        req = UpdateRequest()
+        req.parent = None
+        req.snoozed_until = None
+        assert req.to_dict() == {"parent": None, "snoozed_until": None}
+
+    def test_is_empty_when_no_fields_set(self) -> None:
+        """``is_empty()`` returns True iff no field has been assigned."""
+        from dogcat.models import UpdateRequest
+
+        assert UpdateRequest().is_empty()
+
+    def test_is_empty_false_after_assignment(self) -> None:
+        """Once any field is assigned, ``is_empty()`` returns False."""
+        from dogcat.models import UpdateRequest
+
+        req = UpdateRequest()
+        req.notes = "hi"
+        assert not req.is_empty()
+
+
+class TestLinkTypeEnum:
+    """Test LinkType enumeration and ``link_type_value`` helper."""
+
+    def test_known_link_types(self) -> None:
+        """Built-in link types cover the documented set."""
+        from dogcat.models import LinkType
+
+        expected = {"relates_to", "duplicates", "blocks", "depends_on"}
+        assert {lt.value for lt in LinkType} == expected
+
+    def test_link_type_value_from_enum(self) -> None:
+        """``link_type_value`` returns the string form of an enum member."""
+        from dogcat.models import LinkType, link_type_value
+
+        assert link_type_value(LinkType.RELATES_TO) == "relates_to"
+
+    def test_link_type_value_from_string(self) -> None:
+        """``link_type_value`` passes plain strings through (custom types)."""
+        from dogcat.models import link_type_value
+
+        assert link_type_value("custom_relation") == "custom_relation"
+
+    def test_link_default_uses_enum(self) -> None:
+        """``Link.link_type`` defaults to the ``RELATES_TO`` enum member."""
+        from dogcat.models import Link, LinkType
+
+        link = Link(from_id="a", to_id="b")
+        assert link.link_type is LinkType.RELATES_TO
+
+
 class TestCommentModel:
     """Test Comment dataclass."""
 

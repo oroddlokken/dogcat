@@ -22,6 +22,7 @@ from dogcat.constants import (
     STATUS_SHORTHANDS,
     TYPE_SHORTHANDS,
 )
+from dogcat.models import is_manual_issue
 from dogcat.storage import JSONLStorage
 
 if TYPE_CHECKING:
@@ -335,15 +336,9 @@ def apply_common_filters(
     if no_parent:
         issues = [i for i in issues if i.parent is None]
     if agent_only:
-        issues = [
-            i
-            for i in issues
-            if not (i.metadata.get("manual") or i.metadata.get("no_agent"))
-        ]
+        issues = [i for i in issues if not is_manual_issue(i.metadata)]
     if manual_only:
-        issues = [
-            i for i in issues if i.metadata.get("manual") or i.metadata.get("no_agent")
-        ]
+        issues = [i for i in issues if is_manual_issue(i.metadata)]
     if has_comments:
         issues = [i for i in issues if i.comments]
     if without_comments:
@@ -531,3 +526,35 @@ def _parse_args_for_create(
         raise ValueError(msg)
 
     return title, priority_sh, type_sh, status_sh
+
+
+def load_open_inbox_proposals(
+    dogcats_dir: str,
+    namespace: str | None,
+    *,
+    all_namespaces: bool,
+) -> list[Any]:
+    """Load open (non-closed) inbox proposals from ``dogcats_dir``.
+
+    Filters by namespace using the same precedence as issue listings:
+    explicit ``namespace`` > config visibility > primary namespace.
+    Returns an empty list if the inbox file is missing or unreadable so
+    callers can call this unconditionally inside list-style commands.
+    """
+    from dogcat.config import get_issue_prefix, get_namespace_filter
+    from dogcat.inbox import InboxStorage
+
+    try:
+        inbox = InboxStorage(dogcats_dir=dogcats_dir)
+    except (ValueError, RuntimeError):
+        return []
+
+    proposals: list[Any] = [p for p in inbox.list() if not p.is_closed()]
+    if all_namespaces:
+        return proposals
+
+    ns_filter = get_namespace_filter(dogcats_dir, namespace)
+    if ns_filter is not None:
+        return [p for p in proposals if ns_filter(p.namespace)]
+    primary = get_issue_prefix(dogcats_dir)
+    return [p for p in proposals if p.namespace == primary]

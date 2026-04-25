@@ -79,16 +79,26 @@ def diff_metadata(
     return changes
 
 
-class EventLog:
-    """Append-only event log stored alongside issues in .dogcats/issues.jsonl."""
+class _BaseEventLog:
+    """Append-only event log keyed by a JSONL file inside ``.dogcats/``.
+
+    Concrete subclasses set :attr:`filename` to either ``issues.jsonl`` or
+    ``inbox.jsonl``. The lock file is shared (`.issues.lock`) so concurrent
+    writes across both logs serialize correctly.
+    """
+
+    filename: str = ""
 
     def __init__(self, dogcats_dir: str | Path) -> None:
+        if not self.filename:
+            msg = "Subclasses must set 'filename'"
+            raise TypeError(msg)
         self.dogcats_dir = Path(dogcats_dir)
-        self.path = self.dogcats_dir / "issues.jsonl"
+        self.path = self.dogcats_dir / self.filename
         self._lock_path = self.dogcats_dir / ".issues.lock"
 
     def append(self, event: EventRecord) -> None:
-        """Append a single event record to issues.jsonl."""
+        """Append a single event record to the underlying JSONL file."""
         data = _serialize(event)
         with self._file_lock(), self.path.open("ab") as f:
             f.write(orjson.dumps(data))
@@ -104,11 +114,8 @@ class EventLog:
         """Read events in reverse chronological order (newest first).
 
         Args:
-            issue_id: Filter to events for this issue ID.
+            issue_id: Filter to events for this ID (issue or proposal).
             limit: Maximum number of events to return.
-
-        Returns:
-            List of EventRecord, newest first.
         """
         if not self.path.exists():
             return []
@@ -127,7 +134,6 @@ class EventLog:
                     continue
                 events.append(record)
 
-        # Reverse for newest-first
         events.reverse()
 
         if limit is not None:
@@ -140,62 +146,13 @@ class EventLog:
         return advisory_file_lock(self._lock_path)
 
 
-class InboxEventLog:
-    """Append-only event log stored alongside proposals in .dogcats/inbox.jsonl."""
+class EventLog(_BaseEventLog):
+    """Append-only event log stored alongside issues in ``issues.jsonl``."""
 
-    def __init__(self, dogcats_dir: str | Path) -> None:
-        self.dogcats_dir = Path(dogcats_dir)
-        self.path = self.dogcats_dir / "inbox.jsonl"
-        self._lock_path = self.dogcats_dir / ".issues.lock"
+    filename = "issues.jsonl"
 
-    def append(self, event: EventRecord) -> None:
-        """Append a single event record to inbox.jsonl."""
-        data = _serialize(event)
-        with self._file_lock(), self.path.open("ab") as f:
-            f.write(orjson.dumps(data))
-            f.write(b"\n")
-            f.flush()
 
-    def read(
-        self,
-        *,
-        issue_id: str | None = None,
-        limit: int | None = None,
-    ) -> list[EventRecord]:
-        """Read inbox events in reverse chronological order (newest first).
+class InboxEventLog(_BaseEventLog):
+    """Append-only event log stored alongside proposals in ``inbox.jsonl``."""
 
-        Args:
-            issue_id: Filter to events for this proposal ID.
-            limit: Maximum number of events to return.
-
-        Returns:
-            List of EventRecord, newest first.
-        """
-        if not self.path.exists():
-            return []
-
-        events: list[EventRecord] = []
-        with self.path.open("rb") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                data = orjson.loads(line)
-                if data.get("record_type") != "event":
-                    continue
-                record = _deserialize(data)
-                if issue_id is not None and record.issue_id != issue_id:
-                    continue
-                events.append(record)
-
-        # Reverse for newest-first
-        events.reverse()
-
-        if limit is not None:
-            events = events[:limit]
-
-        return events
-
-    def _file_lock(self) -> AbstractContextManager[None]:
-        """Create an advisory file lock context manager."""
-        return advisory_file_lock(self._lock_path)
+    filename = "inbox.jsonl"

@@ -206,3 +206,10 @@ STATUS_SYMBOLS: dict[str, str] = {
     "closed": "\u2713",  # ✓
     "tombstone": "\u2620",  # ☠
 }
+
+# Web server defaults. Overridable via DCAT_WEB_HOST / DCAT_WEB_PORT env vars
+# (CLI flags still win).
+WEB_DEFAULT_HOST = "127.0.0.1"
+WEB_DEFAULT_PORT = 48042
+WEB_HOST_ENV_VAR = "DCAT_WEB_HOST"
+WEB_PORT_ENV_VAR = "DCAT_WEB_PORT"

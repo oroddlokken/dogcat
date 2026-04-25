@@ -6,6 +6,7 @@
 
 - **`--manual` filter for listing commands** — inverse of `--agent-only`, shows only issues marked as manual. Available on `list`, `ready`, `blocked`, `in-progress`, `in-review`, `open`, `deferred`, `snoozed`, `stale`, `pr`, `recently-added`, `recently-closed`, and `search`. `--agent-only` also added to `search`, `pr`, `recently-added`, and `recently-closed` for parity. `--manual` and `--agent-only` are mutually exclusive (closes dogcat-1iqx)
 - **`--has-comments` / `--without-comments` filter for listing commands** — show only issues with (or without) at least one comment. Available on `list`, `ready`, `blocked`, `in-progress`, `in-review`, `open`, `deferred`, `snoozed`, `stale`, `pr`, `recently-added`, `recently-closed`, and `search`. The two flags are mutually exclusive and combine with other filters such as `--agent-only` (closes dogcat-4rip)
+- **`DCAT_WEB_HOST` / `DCAT_WEB_PORT` env vars for `dcat web`** — host and port defaults can now be overridden via environment for deployments that don't want to pass CLI flags. CLI flags still take precedence; constants live in `constants.py` (closes dogcat-ev39)
 
 ### Changed
 
@@ -14,6 +15,15 @@
 - **`stream.py` change tracking uses a typed `FieldChange` dataclass** — `StreamEvent.changes` is now `dict[str, FieldChange]` instead of `dict[str, dict[str, Any]]`, replacing implicit `"old"`/`"new"` dict keys with explicit `.old`/`.new` attributes. `to_dict()` still emits the legacy `{"old": ..., "new": ...}` shape for JSON output (closes dogcat-60zp)
 - **Renamed CLI command functions to drop `_cmd`/`_command` suffixes** — `new_issue_cmd` → `new_issue`, `remove_cmd` → `remove`, `diff_cmd` → `diff`, `link_command` → `link`, matching the dominant convention across the rest of the CLI (closes dogcat-1zj4)
 - **Narrowed broad `except Exception` blocks in storage and TUI** — `storage.py` write/event-log/inbox-load/config-load handlers now catch the specific exception classes that can actually be raised (`OSError`, `orjson.JSONEncodeError`, `RuntimeError`, `ValueError`); `tui/dashboard.py` catches `NoMatches` for `query_one` and `(IndexError, AttributeError)` for `OptionList.get_option_at_index`. Real bugs no longer hide behind blanket handlers (closes dogcat-1e6m)
+- **`storage.list()` accepts a typed `FilterSpec` dataclass** — replaces the implicit `dict[str, Any]` filter argument with explicit fields (status, priority, type, label, owner, ...) for IDE autocomplete and key validation. Legacy dict input is still accepted via `FilterSpec.from_dict()` for back-compat (closes dogcat-29gk)
+- **`dcat update` builds a typed `UpdateRequest` instead of a dict accumulator** — `_cmd_update.py` now constructs an `UpdateRequest` dataclass whose fields match `UPDATABLE_FIELDS`, catching unknown keys and wrong value types at construction time before they reach `storage.update()` (closes dogcat-mt3c)
+- **`Link.link_type` accepts a `LinkType` enum** — built-in relations (`relates_to`, `duplicates`, `blocks`, …) are now an enum, matching the existing `DependencyType` pattern. Custom user-defined relation strings still work via a `LinkType | str` union (closes dogcat-1jl8)
+- **Typed `Issue.metadata`** — replaced `dict[str, Any]` with a typed alternative so strict pyright no longer treats every metadata access as `Any` (closes dogcat-1rzm)
+- **`EventLog` and `InboxEventLog` share a `_BaseEventLog`** — the ~120 lines of duplicated append/read/file-lock logic are now in one parameterized base class; the two subclasses differ only by file path (closes dogcat-2ngk)
+- **`storage.py` split into focused modules** — extracted compaction logic into `_compaction.py` and index management into `_indexes.py`, shrinking the storage module's surface area (closes dogcat-6djm)
+- **`format_issue_table()` simplified** — nested closures (`_add_issue_row`, `_add_summary_row`) extracted to module-level helpers so the function reads top-to-bottom without 4+ levels of indentation (closes dogcat-1fgr)
+- **Shared `load_open_inbox_proposals()` helper in `_helpers.py`** — `_cmd_read.py`, `_cmd_workflow.py`, and `_cmd_admin.py` previously each had their own try/except + `InboxStorage` init + namespace filter block; they now call one helper (closes dogcat-oqvz)
+- **TUI dashboard uses O(1) dict lookup for selected-row → full_id** — `_full_id_by_label_plain` is built once during `_load_issues()`, replacing three linear scans of `_issues` per keystroke/selection in `dashboard.py` (closes dogcat-5ib0)
 
 ### Fixed
 
@@ -31,6 +41,8 @@
 - **Removed unused `httpx` dev dependency** — `httpx` was declared in `pyproject.toml` but never imported (FastAPI's `TestClient` ships with FastAPI itself), so dropping it shrinks the dev install (closes dogcat-3x7x)
 - **Removed duplicate `pytest-xdist` declaration in `pyproject.toml`** — the dev group had both `pytest-xdist[psutil]` and `pytest-xdist==3.8.0`; kept only the `[psutil]` extra entry (closes dogcat-54je)
 - **Added tests for `storage.update()` status transition edge cases** — covers CLOSED→OPEN→CLOSED round-trip, closing without `closed_by`, CLOSED→BLOCKED→CLOSED, and bulk status updates, closing the gap that allowed the dogcat-36bt regression (closes dogcat-3frh)
+- **Added adversarial tests for `parse_conflicted_jsonl()`** — covers malformed JSON inside conflict markers, nested/repeated conflict markers, conflicts with only dependency/link records (no issues), and dependency records with typos in `issue_id` (closes dogcat-4ket)
+- **Added tests for `storage.delete()` cascading cleanup** — verifies that deleting an issue with incoming and outgoing dependencies removes all of them, that links referencing it on either side are dropped, and that the cleanup persists across a reload from disk (closes dogcat-5wux)
 - **Added edge-case tests for `parse_duration()`** — covers `'0d'` zero duration, decimal amounts (rejected), empty string (rejected), large `'999d'` durations, ISO8601 with timezone offsets, and past dates (closes dogcat-2enu)
 - **Removed unused `--full` parameter from `dcat show`** — the option was a hidden no-op suppressed with `# noqa: ARG001`; the obsolete acceptance test was removed too (closes dogcat-29lw)
 - **Extracted `advisory_file_lock()` to a shared `dogcat/locking.py`** — `storage`, `inbox`, and `event_log` previously had three near-identical fcntl lock implementations; they now share one context manager (closes dogcat-3bqe)

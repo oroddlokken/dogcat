@@ -355,3 +355,126 @@ class TestParseConflictedJsonl:
             "malformed JSONL" in r.message and "ours" in r.message
             for r in caplog.records
         )
+
+    def test_malformed_in_all_three_sections(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """diff3-style conflict with garbage in ours, base, AND theirs sections."""
+        import logging
+
+        from dogcat.merge_driver import parse_conflicted_jsonl
+
+        raw = (
+            b"<<<<<<< HEAD\n"
+            b"{not-json-ours}\n"
+            b"||||||| base\n"
+            b"<<not-json-base>>\n"
+            b"=======\n"
+            b"=)not-json-theirs\n"
+            b">>>>>>> branch\n"
+        )
+        with caplog.at_level(logging.WARNING, logger="dogcat.merge_driver"):
+            base, ours, theirs = parse_conflicted_jsonl(raw)
+        assert (base, ours, theirs) == ([], [], [])
+        # Each warning expands its second %s arg (section name) into the
+        # rendered message, so we just look for the section name in the text.
+        rendered = " ".join(r.getMessage() for r in caplog.records)
+        for section in ("ours", "base", "theirs"):
+            assert section in rendered
+
+    def test_repeated_conflict_blocks(self) -> None:
+        """Two separate conflict regions in the same file both resolve."""
+        from dogcat.merge_driver import parse_conflicted_jsonl
+
+        a1 = orjson.dumps({"record_type": "issue", "id": "a1", "namespace": "t"})
+        b1 = orjson.dumps({"record_type": "issue", "id": "b1", "namespace": "t"})
+        a2 = orjson.dumps({"record_type": "issue", "id": "a2", "namespace": "t"})
+        b2 = orjson.dumps({"record_type": "issue", "id": "b2", "namespace": "t"})
+
+        raw = (
+            b"<<<<<<< HEAD\n" + a1 + b"\n=======\n" + b1 + b"\n>>>>>>> branch\n"
+            b"<<<<<<< HEAD\n" + a2 + b"\n=======\n" + b2 + b"\n>>>>>>> branch\n"
+        )
+        _, ours, theirs = parse_conflicted_jsonl(raw)
+        assert {r["id"] for r in ours} == {"a1", "a2"}
+        assert {r["id"] for r in theirs} == {"b1", "b2"}
+
+    def test_conflict_with_only_dependency_records(self) -> None:
+        """Conflict containing only dependency records (no issue records) parses."""
+        from dogcat.merge_driver import parse_conflicted_jsonl
+
+        dep_a = orjson.dumps(
+            {
+                "record_type": "dependency",
+                "issue_id": "t-a",
+                "depends_on_id": "t-b",
+                "type": "blocks",
+                "created_at": "2026-01-01T00:00:00",
+            }
+        )
+        dep_b = orjson.dumps(
+            {
+                "record_type": "dependency",
+                "issue_id": "t-c",
+                "depends_on_id": "t-d",
+                "type": "blocks",
+                "created_at": "2026-01-02T00:00:00",
+            }
+        )
+        raw = b"<<<<<<< HEAD\n" + dep_a + b"\n=======\n" + dep_b + b"\n>>>>>>> branch\n"
+        _, ours, theirs = parse_conflicted_jsonl(raw)
+        assert ours[0]["issue_id"] == "t-a"
+        assert theirs[0]["issue_id"] == "t-c"
+
+    def test_conflict_with_only_link_records(self) -> None:
+        """Conflict containing only link records (no issue records) parses."""
+        from dogcat.merge_driver import parse_conflicted_jsonl
+
+        link_a = orjson.dumps(
+            {
+                "record_type": "link",
+                "from_id": "t-a",
+                "to_id": "t-b",
+                "link_type": "relates_to",
+                "created_at": "2026-01-01T00:00:00",
+            }
+        )
+        link_b = orjson.dumps(
+            {
+                "record_type": "link",
+                "from_id": "t-c",
+                "to_id": "t-d",
+                "link_type": "duplicates",
+                "created_at": "2026-01-02T00:00:00",
+            }
+        )
+        raw = (
+            b"<<<<<<< HEAD\n" + link_a + b"\n=======\n" + link_b + b"\n>>>>>>> branch\n"
+        )
+        _, ours, theirs = parse_conflicted_jsonl(raw)
+        assert ours[0]["from_id"] == "t-a"
+        assert theirs[0]["from_id"] == "t-c"
+
+    def test_dependency_with_unknown_issue_ids_still_parses(self) -> None:
+        """Parser doesn't validate references — typo'd issue_ids still parse.
+
+        Reference integrity is a separate validation pass; the parser's job
+        is to faithfully extract records so downstream code can decide what
+        to do.
+        """
+        from dogcat.merge_driver import parse_conflicted_jsonl
+
+        dep = orjson.dumps(
+            {
+                "record_type": "dependency",
+                "issue_id": "t-typo-aaa",
+                "depends_on_id": "t-also-typo-bbb",
+                "type": "blocks",
+                "created_at": "2026-01-01T00:00:00",
+            }
+        )
+        good = orjson.dumps({"record_type": "issue", "id": "ok", "namespace": "t"})
+        raw = b"<<<<<<< HEAD\n" + dep + b"\n=======\n" + good + b"\n>>>>>>> branch\n"
+        _, ours, theirs = parse_conflicted_jsonl(raw)
+        assert ours[0]["issue_id"] == "t-typo-aaa"
+        assert theirs[0]["id"] == "ok"

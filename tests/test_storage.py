@@ -1400,6 +1400,83 @@ class TestRemoveDependencies:
         assert len(storage.all_dependencies) == 1
 
 
+class TestDeleteCascadingCleanup:
+    """delete() must remove dependencies and links touching the issue."""
+
+    def test_delete_removes_incoming_and_outgoing_deps(
+        self, storage: JSONLStorage
+    ) -> None:
+        """All deps where the deleted issue is either side are removed."""
+        storage.create(Issue(id="a", namespace="t", title="A"))
+        storage.create(Issue(id="b", namespace="t", title="B"))
+        storage.create(Issue(id="c", namespace="t", title="C"))
+        storage.add_dependency("t-b", "t-a", "blocks")  # b depends on a (incoming)
+        storage.add_dependency("t-a", "t-c", "blocks")  # a depends on c (outgoing)
+
+        storage.delete("t-a")
+
+        # Both deps touching t-a should be gone in-memory
+        assert storage.all_dependencies == []
+
+    def test_delete_removes_both_link_directions(self, storage: JSONLStorage) -> None:
+        """Links where the deleted issue appears as either endpoint are removed."""
+        storage.create(Issue(id="a", namespace="t", title="A"))
+        storage.create(Issue(id="b", namespace="t", title="B"))
+        storage.create(Issue(id="c", namespace="t", title="C"))
+        storage.add_link("t-a", "t-b")  # a -> b (outgoing)
+        storage.add_link("t-c", "t-a")  # c -> a (incoming)
+
+        storage.delete("t-a")
+
+        assert storage.all_links == []
+
+    def test_delete_cleanup_persists_through_reload(self, temp_workspace: Path) -> None:
+        """After delete + reload, removed deps and links are gone from disk."""
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+        storage.create(Issue(id="a", namespace="t", title="A"))
+        storage.create(Issue(id="b", namespace="t", title="B"))
+        storage.create(Issue(id="c", namespace="t", title="C"))
+        storage.add_dependency("t-b", "t-a", "blocks")
+        storage.add_dependency("t-a", "t-c", "blocks")
+        storage.add_link("t-a", "t-b")
+        storage.add_link("t-c", "t-a")
+
+        storage.delete("t-a", reason="Duplicate")
+
+        # Fresh reload from disk replays the append-only log
+        reloaded = JSONLStorage(str(storage_path))
+        assert reloaded.all_dependencies == []
+        assert reloaded.all_links == []
+        # Untouched issues survive
+        assert reloaded.get("t-b") is not None
+        assert reloaded.get("t-c") is not None
+        # Tombstone is preserved
+        tombstone = reloaded.get("t-a")
+        assert tombstone is not None
+        assert tombstone.is_tombstone()
+
+    def test_delete_leaves_unrelated_deps_and_links_intact(
+        self, storage: JSONLStorage
+    ) -> None:
+        """Deleting one issue doesn't touch deps/links between other issues."""
+        storage.create(Issue(id="a", namespace="t", title="A"))
+        storage.create(Issue(id="b", namespace="t", title="B"))
+        storage.create(Issue(id="c", namespace="t", title="C"))
+        storage.create(Issue(id="d", namespace="t", title="D"))
+        storage.add_dependency("t-c", "t-d", "blocks")
+        storage.add_link("t-c", "t-d")
+        storage.add_dependency("t-a", "t-b", "blocks")  # touches deleted
+
+        storage.delete("t-a")
+
+        # The c<->d relations remain untouched
+        assert len(storage.all_dependencies) == 1
+        assert storage.all_dependencies[0].issue_id == "t-c"
+        assert len(storage.all_links) == 1
+        assert storage.all_links[0].from_id == "t-c"
+
+
 class TestFileLock:
     """Test _file_lock() for concurrent write safety."""
 

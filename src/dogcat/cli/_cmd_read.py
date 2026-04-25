@@ -29,7 +29,7 @@ from ._formatting import (
     format_proposal_brief,
     get_legend,
 )
-from ._helpers import _make_alias, get_storage
+from ._helpers import _make_alias, get_storage, load_open_inbox_proposals
 from ._json_state import echo_error, is_json_output
 
 if TYPE_CHECKING:
@@ -574,27 +574,15 @@ def register(app: typer.Typer) -> None:
         all_namespaces: bool,
     ) -> None:
         """Show open inbox proposals as a section in list output."""
-        try:
-            from dogcat.inbox import InboxStorage
-
-            inbox = InboxStorage(dogcats_dir=dogcats_dir)
-            proposals = [p for p in inbox.list() if not p.is_closed()]
-
-            # Apply namespace filtering
-            if not all_namespaces:
-                ns_filter = get_namespace_filter(dogcats_dir, namespace)
-                if ns_filter is not None:
-                    proposals = [p for p in proposals if ns_filter(p.namespace)]
-                else:
-                    primary = get_issue_prefix(dogcats_dir)
-                    proposals = [p for p in proposals if p.namespace == primary]
-
-            if proposals:
-                typer.echo(f"\nInbox ({len(proposals)}):")
-                for proposal in proposals:
-                    typer.echo(format_proposal_brief(proposal))
-        except (ValueError, RuntimeError):
-            pass  # No inbox file — silently skip
+        proposals = load_open_inbox_proposals(
+            dogcats_dir,
+            namespace,
+            all_namespaces=all_namespaces,
+        )
+        if proposals:
+            typer.echo(f"\nInbox ({len(proposals)}):")
+            for proposal in proposals:
+                typer.echo(format_proposal_brief(proposal))
 
         # Remote inbox proposals
         try:

@@ -245,6 +245,11 @@ class DogcatTUI(App[None]):
         hierarchy = build_hierarchy(issues)
         self._issues = []
         self._build_tree(hierarchy, parent_id=None, depth=0)
+        # Dict for O(1) selected-label -> full_id resolution. Keyed by the
+        # plain text of the label since rich.text.Text isn't hashable.
+        self._full_id_by_label_plain: dict[str, str] = {
+            label.plain: full_id for label, full_id in self._issues
+        }
 
         option_list = self.query_one("#issue-list", OptionList)
         option_list.clear_options()
@@ -280,10 +285,12 @@ class DogcatTUI(App[None]):
             ).prompt
         except (IndexError, AttributeError):
             return None
-        for label, full_id in self._issues:
-            if label == selected_text:
-                return full_id
-        return None
+        return self._resolve_full_id_from_prompt(selected_text)
+
+    def _resolve_full_id_from_prompt(self, prompt: object) -> str | None:
+        """O(1) resolve an OptionList prompt back to its full_id."""
+        plain = prompt.plain if isinstance(prompt, Text) else str(prompt)
+        return self._full_id_by_label_plain.get(plain)
 
     def _on_editor_done(self, result: Issue | None) -> None:
         """Restore the dashboard after the editor screen is dismissed."""
@@ -330,43 +337,40 @@ class DogcatTUI(App[None]):
         """In split mode, show the highlighted issue in the detail panel."""
         if not self._split_mode:
             return
-        selected_text = event.option.prompt
-        for label, full_id in self._issues:
-            if label == selected_text:
-                await self._show_issue_in_panel(full_id)
-                return
+        full_id = self._resolve_full_id_from_prompt(event.option.prompt)
+        if full_id is not None:
+            await self._show_issue_in_panel(full_id)
 
     async def on_option_list_option_selected(
         self,
         event: OptionList.OptionSelected,
     ) -> None:
         """Show issue detail when Enter is pressed on an item."""
-        selected_text = event.option.prompt
-        for label, full_id in self._issues:
-            if label == selected_text:
-                self._last_selected_id = full_id
-                issue = self._storage.get(full_id)
-                if issue is None:
-                    return
+        full_id = self._resolve_full_id_from_prompt(event.option.prompt)
+        if full_id is None:
+            return
+        self._last_selected_id = full_id
+        issue = self._storage.get(full_id)
+        if issue is None:
+            return
 
-                if self._split_mode:
-                    # In split mode, focus the detail panel
-                    from dogcat.tui.detail_panel import IssueDetailPanel
+        if self._split_mode:
+            # In split mode, focus the detail panel
+            from dogcat.tui.detail_panel import IssueDetailPanel
 
-                    try:
-                        panel = self.query_one("#detail-panel", IssueDetailPanel)
-                        panel.focus()
-                    except NoMatches:
-                        pass
-                else:
-                    # Narrow mode: push modal editor
-                    from dogcat.tui.editor import IssueEditorScreen
+            try:
+                panel = self.query_one("#detail-panel", IssueDetailPanel)
+                panel.focus()
+            except NoMatches:
+                pass
+        else:
+            # Narrow mode: push modal editor
+            from dogcat.tui.editor import IssueEditorScreen
 
-                    await self.push_screen(
-                        IssueEditorScreen(issue, self._storage, view_mode=True),
-                        callback=self._on_editor_done,
-                    )
-                return
+            await self.push_screen(
+                IssueEditorScreen(issue, self._storage, view_mode=True),
+                callback=self._on_editor_done,
+            )
 
     async def on_issue_detail_panel_saved(self, event: Any) -> None:
         """Handle save from the inline detail panel."""

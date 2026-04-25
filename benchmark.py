@@ -31,7 +31,7 @@ from dogcat.models import (
 from dogcat.storage import JSONLStorage
 
 # Number of issues to benchmark
-ISSUE_COUNTS = [500, 1000, 2000, 5000, 10000, 25000]
+ISSUE_COUNTS = [500, 1000, 2000, 5000, 10000, 25000, 50000, 100000]
 
 # Number of times to run each benchmark for averaging
 ITERATIONS = 3

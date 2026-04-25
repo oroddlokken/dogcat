@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
+import os
+
 import typer
+
+from dogcat.constants import (
+    WEB_DEFAULT_HOST,
+    WEB_DEFAULT_PORT,
+    WEB_HOST_ENV_VAR,
+    WEB_PORT_ENV_VAR,
+)
 
 from ._helpers import SortedGroup
 
@@ -13,7 +22,20 @@ web_app = typer.Typer(
     cls=SortedGroup,
 )
 
-DEFAULT_PORT = 48042
+
+def _env_default_port() -> int:
+    raw = os.environ.get(WEB_PORT_ENV_VAR)
+    if not raw:
+        return WEB_DEFAULT_PORT
+    try:
+        return int(raw)
+    except ValueError:
+        typer.echo(
+            f"Warning: {WEB_PORT_ENV_VAR}={raw!r} is not an integer; "
+            f"falling back to {WEB_DEFAULT_PORT}",
+            err=True,
+        )
+        return WEB_DEFAULT_PORT
 
 
 def register(app: typer.Typer) -> None:
@@ -22,8 +44,14 @@ def register(app: typer.Typer) -> None:
 
     @web_app.command("propose")
     def propose(
-        host: str = typer.Option("127.0.0.1", help="Host to bind to"),
-        port: int = typer.Option(DEFAULT_PORT, help="Port to listen on"),
+        host: str = typer.Option(
+            os.environ.get(WEB_HOST_ENV_VAR) or WEB_DEFAULT_HOST,
+            help=f"Host to bind to (env: {WEB_HOST_ENV_VAR})",
+        ),
+        port: int = typer.Option(
+            _env_default_port(),
+            help=f"Port to listen on (env: {WEB_PORT_ENV_VAR})",
+        ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
         namespace: str = typer.Option(
             None, help="Override namespace (auto-detected by default)"

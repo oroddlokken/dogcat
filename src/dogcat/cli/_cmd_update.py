@@ -8,6 +8,7 @@ import orjson
 import typer
 
 from dogcat.constants import parse_labels
+from dogcat.models import UpdateRequest
 
 from ._completions import (
     complete_issue_ids,
@@ -219,55 +220,58 @@ def register(app: typer.Typer) -> None:
 
             storage = get_storage(dogcats_dir)
 
-            # Build updates dict (shared across all issues)
-            updates: dict[str, Any] = {}
+            # Build a typed UpdateRequest instead of an untyped dict so unknown
+            # field names are rejected at construction time.
+            request = UpdateRequest()
             if title is not None:
-                updates["title"] = title
+                request.title = title
             if status is not None:
-                updates["status"] = status
+                request.status = status
             if priority is not None:
-                updates["priority"] = priority
+                request.priority = priority
             if issue_type is not None:
-                updates["issue_type"] = issue_type
+                request.issue_type = issue_type
             if description is not None:
-                updates["description"] = description
+                request.description = description
             if owner is not None:
-                updates["owner"] = owner
+                request.owner = owner
             if acceptance is not None:
-                updates["acceptance"] = acceptance
+                request.acceptance = acceptance
             if notes is not None:
-                updates["notes"] = notes
+                request.notes = notes
             if design is not None:
-                updates["design"] = design
+                request.design = design
             if external_ref is not None:
-                updates["external_ref"] = external_ref
+                request.external_ref = external_ref
             if duplicate_of is not None:
                 if duplicate_of == "":
-                    updates["duplicate_of"] = None
+                    request.duplicate_of = None
                 else:
                     resolved_dup = storage.resolve_id(duplicate_of)
                     if resolved_dup is None:
                         echo_error(f"Issue {duplicate_of} not found")
                         raise typer.Exit(1)
-                    updates["duplicate_of"] = resolved_dup
+                    request.duplicate_of = resolved_dup
             if parent is not None:
                 if parent == "":
-                    updates["parent"] = None
+                    request.parent = None
                 else:
                     resolved_parent = storage.resolve_id(parent)
                     if resolved_parent is None:
                         echo_error(f"Parent issue {parent} not found")
                         raise typer.Exit(1)
-                    updates["parent"] = resolved_parent
+                    request.parent = resolved_parent
             if labels is not None:
-                updates["labels"] = parse_labels(labels)
+                request.labels = parse_labels(labels)
             if snooze_until is not None:
-                updates["snoozed_until"] = parse_duration(snooze_until)
+                request.snoozed_until = parse_duration(snooze_until)
             if unsnooze:
-                updates["snoozed_until"] = None
+                request.snoozed_until = None
+
+            updates = request.to_dict()
 
             if (
-                not updates
+                request.is_empty()
                 and manual is None
                 and not namespace
                 and not depends_on

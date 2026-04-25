@@ -9,22 +9,27 @@ import subprocess
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import orjson
 
+from dogcat._compaction import should_compact
+from dogcat._indexes import rebuild_indexes
 from dogcat._version import version as _dcat_version
 from dogcat.constants import TRACKED_FIELDS
 from dogcat.locking import advisory_file_lock
 from dogcat.models import (
     Dependency,
     DependencyType,
+    FilterSpec,
     Issue,
     Link,
+    LinkType,
     Status,
     classify_record,
     dict_to_issue,
     issue_to_dict,
+    link_type_value,
 )
 
 if TYPE_CHECKING:
@@ -33,11 +38,6 @@ if TYPE_CHECKING:
 
 class JSONLStorage:
     """Manages atomic JSONL storage for issues."""
-
-    # Compact when appended lines exceed this fraction of the base file size.
-    _COMPACTION_RATIO = 0.5
-    # Minimum base size before ratio-based compaction kicks in.
-    _COMPACTION_MIN_BASE = 20
 
     def __init__(
         self,
@@ -200,25 +200,20 @@ class JSONLStorage:
         self._rebuild_indexes()
 
     def _rebuild_indexes(self) -> None:
-        """Rebuild dependency and link indexes from the source lists."""
-        self._deps_by_issue = {}
-        self._deps_by_depends_on = {}
-        for dep in self._dependencies:
-            self._deps_by_issue.setdefault(dep.issue_id, []).append(dep)
-            self._deps_by_depends_on.setdefault(dep.depends_on_id, []).append(dep)
+        """Rebuild dependency, link, and parent indexes from the source lists.
 
-        self._links_by_from = {}
-        self._links_by_to = {}
-        for link in self._links:
-            self._links_by_from.setdefault(link.from_id, []).append(link)
-            self._links_by_to.setdefault(link.to_id, []).append(link)
-
-        self._children_by_parent = {}
-        for issue in self._issues.values():
-            if issue.parent:
-                self._children_by_parent.setdefault(issue.parent, []).append(
-                    issue.full_id,
-                )
+        The actual computation lives in :func:`dogcat._indexes.rebuild_indexes`;
+        this method is just a thin adapter that copies the resulting maps onto
+        ``self`` so existing attribute-style access keeps working.
+        """
+        indexes = rebuild_indexes(
+            self._issues.values(), self._dependencies, self._links
+        )
+        self._deps_by_issue = indexes.deps_by_issue
+        self._deps_by_depends_on = indexes.deps_by_depends_on
+        self._links_by_from = indexes.links_by_from
+        self._links_by_to = indexes.links_by_to
+        self._children_by_parent = indexes.children_by_parent
 
     def _file_lock(self) -> AbstractContextManager[None]:
         """Acquire an advisory file lock for exclusive writes."""
@@ -412,8 +407,7 @@ class JSONLStorage:
         merge conflicts when multiple branches compact independently.
         """
         if (
-            self._base_lines >= self._COMPACTION_MIN_BASE
-            and self._appended_lines > self._base_lines * self._COMPACTION_RATIO
+            should_compact(self._base_lines, self._appended_lines)
             and self._is_default_branch()
         ):
             self._save()
@@ -607,46 +601,52 @@ class JSONLStorage:
             return self._issues.get(resolved_id)
         return None
 
-    def list(self, filters: dict[str, Any] | None = None) -> list[Issue]:
+    def list(
+        self,
+        filters: FilterSpec | dict[str, Any] | None = None,
+    ) -> list[Issue]:
         """List all issues, optionally filtered.
 
         Args:
-            filters: Optional filters (status, priority, type, label, owner)
+            filters: Either a :class:`FilterSpec` (typed, preferred) or a
+                legacy dict with ``status``/``priority``/``type``/``label``/
+                ``owner`` keys. ``None`` returns all issues.
 
         Returns:
             List of matching issues
         """
         issues = list(self._issues.values())
 
-        if not filters:
+        if filters is None:
             return issues
 
-        # Apply filters
-        if "status" in filters:
-            status_filter = filters["status"]
-            if isinstance(status_filter, str):
-                status_filter = Status(status_filter)
+        spec = (
+            filters
+            if isinstance(filters, FilterSpec)
+            else FilterSpec.from_dict(filters)
+        )
+
+        if spec.status is not None:
+            status_filter = (
+                spec.status if isinstance(spec.status, Status) else Status(spec.status)
+            )
             issues = [i for i in issues if i.status == status_filter]
 
-        if "priority" in filters:
-            priority = filters["priority"]
-            issues = [i for i in issues if i.priority == priority]
+        if spec.priority is not None:
+            issues = [i for i in issues if i.priority == spec.priority]
 
-        if "type" in filters:
-            issue_type = filters["type"]
-            issues = [i for i in issues if i.issue_type.value == issue_type]
+        if spec.issue_type is not None:
+            issues = [i for i in issues if i.issue_type.value == spec.issue_type]
 
-        if "label" in filters:
-            label_filter = filters["label"]
-            if isinstance(label_filter, list):
-                label_set: set[str] = set(cast("list[str]", label_filter))
+        if spec.label is not None:
+            if isinstance(spec.label, list):
+                label_set: set[str] = set(spec.label)
                 issues = [i for i in issues if label_set & set(i.labels)]
             else:
-                issues = [i for i in issues if label_filter in i.labels]
+                issues = [i for i in issues if spec.label in i.labels]
 
-        if "owner" in filters:
-            owner = filters["owner"]
-            issues = [i for i in issues if i.owner == owner]
+        if spec.owner is not None:
+            issues = [i for i in issues if i.owner == spec.owner]
 
         return issues
 
@@ -1301,7 +1301,7 @@ class JSONLStorage:
         self,
         from_id: str,
         to_id: str,
-        link_type: str = "relates_to",
+        link_type: LinkType | str = LinkType.RELATES_TO,
         created_by: str | None = None,
     ) -> Link:
         """Add a link between issues.
@@ -1329,8 +1329,12 @@ class JSONLStorage:
             raise ValueError(msg)
 
         # Check if link already exists (O(1) index lookup)
+        link_type_str = link_type_value(link_type)
         for link in self._links_by_from.get(resolved_from_id, []):
-            if link.to_id == resolved_to_id and link.link_type == link_type:
+            if (
+                link.to_id == resolved_to_id
+                and link_type_value(link.link_type) == link_type_str
+            ):
                 return link
 
         link = Link(
