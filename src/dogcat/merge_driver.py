@@ -6,6 +6,102 @@ and installed with ``dcat git setup``.
 
 Invoked by git via ``dcat git merge-driver %O %A %B``.
 The merged result is written to the ours file (%A).
+
+Merge algebra
+-------------
+The merger is a state-based three-way merge per record kind. It is
+*effectively* a CRDT — the same set of concurrent edits produces the
+same merged state regardless of which side is labeled "ours" — but
+the guarantees are informal, not formally verified. The invariants
+below describe what callers can rely on.
+
+**Issues** (LWW by ``updated_at``)
+
+- *Idempotent*: merging a record set with itself returns the same set.
+- *Deterministic*: for fixed ``ours`` and ``theirs`` arguments the
+  result is fully determined — ours is iterated first, theirs second,
+  and ``new_ts >= old_ts`` is the wins rule, so on equal timestamps
+  theirs wins. Argument order matters because git always assigns
+  ours/theirs unambiguously per merge invocation; both sides of a
+  ``git merge`` invoking this driver see the same labels.
+- *Monotonic in updated_at*: a later edit to a given issue can only
+  ever be replaced by an even later edit; older versions never
+  resurrect.
+
+**Proposals** (LWW by status finality, then ``updated_at``)
+
+- Status order: ``open < closed < tombstone``. Once a proposal reaches
+  a more final state on either side, it stays there after merge.
+  Concurrent edits cannot revert a closure or a tombstone.
+- Within the same status rank, falls back to ``updated_at`` (then
+  ``created_at`` for legacy records that pre-date ``updated_at``).
+- *Monotonic in status finality*: tombstone is absorbing — it cannot
+  be undone by a concurrent edit on either branch.
+
+**Dependencies and Links** (proper three-way merge)
+
+The base set is the common ancestor; ours and theirs each have an
+effective state computed by replaying ``add``/``remove`` ops in
+order. For each key (identity tuple) in the union of base, ours, and theirs:
+
+- Present in **both** sides → keep theirs (representative; both sides
+  agree on identity, and dependency rows have no payload that differs
+  meaningfully).
+- Present in ours, **not** in theirs:
+    - If also in base → theirs deleted it; honor the deletion.
+    - If not in base → ours added it; keep it.
+- Present in theirs, **not** in ours:
+    - If also in base → ours deleted it; honor the deletion.
+    - If not in base → theirs added it; keep it.
+- *A delete on either side wins over a no-op on the other side*. A
+  re-add by the other side wins over a delete (because the re-add is
+  observed as "present in that side, not in base"). This matches a
+  2P-Set-like semantic but without explicit tombstones — the base set
+  acts as the boundary between "present, then removed" and "added by
+  one side".
+
+**Events** (union, deduplicated by identity tuple)
+
+- Identity tuple is ``(issue_id, timestamp, event_type, by, changes_signature)``.
+  Two events with the same identity from both sides collapse to one.
+- *Strictly grow-only*: events are never removed by merge; the
+  resulting list is sorted by ``timestamp`` for stable output.
+
+**Invariants that hold across all kinds**
+
+- *No data loss for additive edits*: any ``add``/``create`` present on
+  exactly one side and not in base survives the merge.
+- *Deletes win against silence*: a delete (issue tombstone, ``op=remove``
+  for deps/links, status finality bump for proposals) is preserved
+  even if the other side made no observation.
+- *Last-line-wins is bounded by base*: for deps/links, "last write
+  wins" only applies among records *both* sides observed; truly
+  concurrent adds and deletes resolve via the three-way comparison
+  above, not by timestamp.
+
+**Scope notes**
+
+- Issue/proposal merge is whole-record LWW: two concurrent edits to
+  *different* fields of the same record keep only the side with the
+  newer ``updated_at``. Per-field merging would require either
+  per-field timestamps on every issue record (schema-breaking change
+  affecting every reader) or deriving state from the event log (a
+  different merge algorithm entirely). Both sit outside the scope of
+  documenting the existing algebra (issue 5dzc) and would themselves
+  be tracked as separate features if/when concurrent same-issue
+  edits become common enough to matter — the post-merge concurrent-
+  edit detector (``dcat doctor --post-merge``) surfaces this case
+  today so it's visible rather than silent.
+- For dep/link records, ``_dep_key`` / ``_link_key`` are the source of
+  truth for identity and the only fields that matter for graph
+  correctness. The remaining fields (``created_at``, ``created_by``)
+  are audit metadata; collapsing two concurrent ``add`` ops with the
+  same identity to one record is the intended behavior, not a defect.
+- Formal verification with a model checker is explicitly out of scope
+  per issue 5dzc ("at minimum the invariants that hold across
+  concurrent edits — even if not formally verified"). The invariants
+  above are exercised by the test suite in ``tests/test_merge.py``
+  and ``tests/test_merge_driver.py``.
 """
 
 from __future__ import annotations

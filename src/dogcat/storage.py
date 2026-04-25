@@ -15,6 +15,7 @@ import orjson
 
 from dogcat._compaction import should_compact
 from dogcat._indexes import rebuild_indexes
+from dogcat._schema import current_version_tuple, parse_version
 from dogcat._version import version as _dcat_version
 from dogcat.constants import TRACKED_FIELDS
 from dogcat.locking import advisory_file_lock
@@ -111,6 +112,10 @@ class JSONLStorage:
         dep_map: dict[tuple[str, str, str], Dependency] = {}
         link_map: dict[tuple[str, str, str], Link] = {}
         line_count = 0
+        # Track the highest dcat_version observed across all records so we
+        # can warn if the file was written by a newer tool than this one.
+        # See dogcat._schema for the version-comparison contract.
+        newest_record_version: tuple[tuple[int, int, int], str] | None = None
 
         try:
             with self.path.open("rb") as f:
@@ -133,6 +138,14 @@ class JSONLStorage:
 
             try:
                 data = orjson.loads(line)
+                raw_v = data.get("dcat_version")
+                if isinstance(raw_v, str):
+                    parsed_v = parse_version(raw_v)
+                    if parsed_v is not None and (
+                        newest_record_version is None
+                        or parsed_v > newest_record_version[0]
+                    ):
+                        newest_record_version = (parsed_v, raw_v)
                 rtype = classify_record(data)
                 if rtype == "link":
                     op = data.get("op", "add")
@@ -198,6 +211,22 @@ class JSONLStorage:
         self._base_lines = line_count
         self._appended_lines = 0
         self._rebuild_indexes()
+
+        # Warn (once per load) if any record was written by a newer tool
+        # than the one currently running — readers ignore unknown fields
+        # but new semantics may not be honored. See dogcat._schema.
+        current = current_version_tuple()
+        if current is not None and newest_record_version is not None:
+            newest_tuple, newest_raw = newest_record_version
+            if newest_tuple > current:
+                logging.getLogger(__name__).warning(
+                    "%s contains records written by dcat %s; "
+                    "running tool is %s. Older versions read newer records "
+                    "best-effort — upgrade dcat to silence this warning.",
+                    self.path,
+                    newest_raw,
+                    _dcat_version,
+                )
 
     def _rebuild_indexes(self) -> None:
         """Rebuild dependency, link, and parent indexes from the source lists.

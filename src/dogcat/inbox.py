@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 import orjson
 
+from dogcat._schema import warn_if_records_from_newer_version
 from dogcat.constants import TRACKED_PROPOSAL_FIELDS
 from dogcat.locking import advisory_file_lock
 from dogcat.models import (
@@ -78,6 +79,7 @@ class InboxStorage:
         while lines and not lines[-1].strip():
             lines.pop()
 
+        parsed_records: list[dict[str, Any]] = []
         for line_idx, raw_line in enumerate(lines):
             line = raw_line.strip()
             if not line:
@@ -85,6 +87,7 @@ class InboxStorage:
 
             try:
                 data = orjson.loads(line)
+                parsed_records.append(data)
                 if data.get("record_type") != "proposal":
                     continue
                 proposal = dict_to_proposal(data)
@@ -97,6 +100,8 @@ class InboxStorage:
                     e,
                 )
                 self._needs_compaction = True
+
+        warn_if_records_from_newer_version(parsed_records, source=str(self.path))
 
     def _file_lock(self) -> AbstractContextManager[None]:
         """Acquire an advisory file lock for exclusive writes."""

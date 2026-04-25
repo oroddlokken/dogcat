@@ -1,5 +1,6 @@
 """Tests for ID generation module."""
 
+import math
 from datetime import datetime, timezone
 
 import pytest
@@ -7,12 +8,68 @@ import pytest
 from dogcat.idgen import (
     IDGenerator,
     _base36_encode,
+    address_space,
+    collision_probability,
+    cumulative_collision_probability,
     generate_comment_id,
     generate_dependency_id,
     generate_hash_id,
     generate_issue_id,
     get_id_length_for_count,
 )
+
+
+class TestCollisionMath:
+    """Test the collision-probability helpers backing dcat doctor."""
+
+    def test_address_space_grows_36x_per_char(self) -> None:
+        """Address space follows N = 36**L exactly."""
+        assert address_space(4) == 36**4
+        assert address_space(5) == 36**5
+        assert address_space(6) == 36**6
+        assert address_space(7) == 36**7
+
+    def test_collision_probability_matches_k_over_n(self) -> None:
+        """Per-generation probability is k / N for k << N."""
+        # k=500 in N=36**4 ≈ 0.0298%
+        assert math.isclose(collision_probability(500, 4), 500 / (36**4))
+        assert math.isclose(collision_probability(1500, 5), 1500 / (36**5))
+
+    def test_collision_probability_clamped_at_one(self) -> None:
+        """If k exceeds N the probability saturates to 1.0."""
+        assert collision_probability(10**9, 3) == 1.0
+
+    def test_collision_probability_zero_for_empty_inputs(self) -> None:
+        """Zero or negative inputs return a probability of 0.0."""
+        assert collision_probability(0, 4) == 0.0
+        assert collision_probability(100, 0) == 0.0
+        assert collision_probability(-1, 4) == 0.0
+
+    def test_cumulative_increases_with_count(self) -> None:
+        """Cumulative birthday-paradox probability is monotonically increasing."""
+        p_500 = cumulative_collision_probability(500, 4)
+        p_1000 = cumulative_collision_probability(1000, 4)
+        p_1500 = cumulative_collision_probability(1500, 4)
+        assert 0 < p_500 < p_1000 < p_1500 < 1
+
+    def test_cumulative_under_target_at_thresholds(self) -> None:
+        """Each ID-length band stays under its empirical safety margin.
+
+        The bands are documented in the idgen module docstring and these
+        bounds are the contract callers can rely on.
+        """
+        # 500 issues at L=4 -> ~7.17%
+        assert cumulative_collision_probability(500, 4) < 0.10
+        # 1500 issues at L=5 -> ~1.85%
+        assert cumulative_collision_probability(1500, 5) < 0.05
+        # 5000 issues at L=6 -> ~0.572%
+        assert cumulative_collision_probability(5000, 6) < 0.01
+
+    def test_cumulative_zero_for_empty_inputs(self) -> None:
+        """Edge cases mirror collision_probability."""
+        assert cumulative_collision_probability(0, 4) == 0.0
+        assert cumulative_collision_probability(1, 4) == 0.0
+        assert cumulative_collision_probability(100, 0) == 0.0
 
 
 class TestProgressiveIdLength:

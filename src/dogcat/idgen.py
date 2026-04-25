@@ -1,6 +1,63 @@
-"""Hash-based ID generation for issues, dependencies, and comments."""
+"""Hash-based ID generation for issues, dependencies, and comments.
+
+Collision math
+--------------
+IDs are base36 strings (alphabet ``0-9a-z``), so the address space for
+length L is ``N = 36^L``:
+
+==========  ============================
+Length L    Address space N = 36^L
+==========  ============================
+4           1,679,616
+5           60,466,176
+6           2,176,782,336
+7           78,364,164,096
+==========  ============================
+
+Per-generation collision probability (chance a freshly generated hash
+collides with one of the ``k`` existing IDs of the same length) is
+approximated by:
+
+    p_step(k, L) ≈ k / N         (exact for uniform sampling, k << N)
+
+Cumulative birthday-paradox probability that *any* collision has been
+hit during the lifetime of a database with ``k`` IDs (i.e. that at
+least one ``IDGenerator`` call has retried with a nonce) is:
+
+    p_all(k, L) ≈ 1 - exp(-k**2 / (2N))
+
+These figures matter only for *retry rate*, not correctness: every
+collision is detected against ``existing_ids`` and resolved by
+:meth:`IDGenerator.generate_id` using a nonce or, if exhausted, by
+falling back to ``length + 2``. A user-visible failure requires
+:data:`max_retries` (100) consecutive retries to all collide, which
+has probability ``p_step^100`` — vanishingly small at any sane
+``k``.
+
+The thresholds in :data:`ID_LENGTH_THRESHOLDS` were chosen to keep
+``p_all`` below a few percent at each band's upper bound:
+
+==========  =======  ===========  =========================
+Boundary    L        p_step(%)    p_all (cumulative, %)
+==========  =======  ===========  =========================
+k ≤ 500     4        ≤ 0.0298%    ≤ 7.17%
+k ≤ 1500    5        ≤ 0.00248%   ≤ 1.85%
+k ≤ 5000    6        ≤ 0.000230%  ≤ 0.572%
+k > 5000    7        decreases    decreases
+==========  =======  ===========  =========================
+
+The thresholds are *empirical* but bounded: each transition tightens
+``p_all`` by roughly an order of magnitude. Re-tuning is safe as long
+as both bands' ``p_all`` at the boundary stay below a target (e.g.
+``p_all < 5%``). The opt-in ``dcat doctor --check-id-distribution``
+check reports the live ``p_step`` and ``p_all`` for the current
+database so drift can be observed before it becomes painful.
+"""
+
+from __future__ import annotations
 
 import hashlib
+import math
 import uuid
 from datetime import datetime
 
@@ -16,6 +73,9 @@ def get_id_length_for_count(issue_count: int) -> int:
     - 6 characters for 1501-5000 issues
     - 7 characters beyond that
 
+    See the module docstring for the birthday-paradox math behind these
+    thresholds.
+
     Args:
         issue_count: Current number of issues in the database.
 
@@ -26,6 +86,58 @@ def get_id_length_for_count(issue_count: int) -> int:
         if issue_count <= max_count:
             return length
     return ID_LENGTH_MAX
+
+
+def address_space(length: int) -> int:
+    """Return the size of the base36 address space for IDs of given length.
+
+    Args:
+        length: ID length (number of base36 characters).
+
+    Returns:
+        ``36 ** length``.
+    """
+    return 36**length
+
+
+def collision_probability(issue_count: int, length: int) -> float:
+    """Per-generation collision probability for a new hash.
+
+    Approximates the chance that a freshly generated base36 hash of the
+    given ``length`` collides with one of the ``issue_count`` existing
+    IDs. Exact for uniform sampling when ``issue_count << 36 ** length``.
+
+    Args:
+        issue_count: Number of IDs already in the database.
+        length: ID length (base36 characters).
+
+    Returns:
+        Probability in ``[0.0, 1.0]``.
+    """
+    if length <= 0 or issue_count <= 0:
+        return 0.0
+    return min(1.0, issue_count / address_space(length))
+
+
+def cumulative_collision_probability(issue_count: int, length: int) -> float:
+    """Birthday-paradox: probability that *any* collision occurred so far.
+
+    Approximates the chance that during the lifetime of a database with
+    ``issue_count`` IDs of the given ``length``, at least one
+    ``IDGenerator.generate_id`` call retried because of a hash
+    collision.
+
+    Args:
+        issue_count: Number of IDs already in the database.
+        length: ID length (base36 characters).
+
+    Returns:
+        Probability in ``[0.0, 1.0]``.
+    """
+    if length <= 0 or issue_count <= 1:
+        return 0.0
+    n = address_space(length)
+    return 1.0 - math.exp(-(issue_count**2) / (2 * n))
 
 
 def _base36_encode(data: bytes) -> str:

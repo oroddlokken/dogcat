@@ -13,7 +13,11 @@
                 <a href="/">dogcat <span>propose</span></a>
             </h1>
 
-            <div id="form-status" class="msg-region" role="status" aria-live="polite" aria-atomic="true">
+            <div id="form-status"
+                 class="msg-region"
+                 role="status"
+                 aria-live="polite"
+                 aria-atomic="true">
                 {% if submitted %}
                     <div class="msg msg--ok">
                         Proposal submitted: <strong>{{ proposal_id }}</strong> {{ proposal_title }}
@@ -22,7 +26,10 @@
                 {% if error %}<div class="msg msg--err" role="alert">{{ error }}</div>{% endif %}
             </div>
 
-            <form method="post" action="/" id="propose-form" aria-labelledby="page-title">
+            <form method="post"
+                  action="/"
+                  id="propose-form"
+                  aria-labelledby="page-title">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <input type="hidden" id="namespace" name="namespace" value="{{ namespace }}">
                 <div class="row field">

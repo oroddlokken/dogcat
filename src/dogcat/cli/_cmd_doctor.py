@@ -16,6 +16,11 @@ from dogcat.config import (
     migrate_config_keys,
     save_config,
 )
+from dogcat.idgen import (
+    collision_probability,
+    cumulative_collision_probability,
+    get_id_length_for_count,
+)
 
 from ._helpers import find_dogcats_dir, get_storage, is_gitignored
 from ._json_state import is_json_output
@@ -34,6 +39,14 @@ def register(app: typer.Typer) -> None:
             "--post-merge",
             help="Detect same-issue concurrent edits from the latest merge",
         ),
+        check_id_distribution: bool = typer.Option(
+            False,
+            "--check-id-distribution",
+            help=(
+                "Report ID-collision probability per namespace"
+                " (informational; warns if cumulative probability is high)"
+            ),
+        ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Diagnose dogcat installation, data integrity, and configuration.
@@ -41,6 +54,8 @@ def register(app: typer.Typer) -> None:
         Performs health checks on the installation, validates JSONL data
         integrity (fields, references, cycles), and suggests fixes.
         Use --post-merge to detect concurrent edits after a git merge.
+        Use --check-id-distribution to inspect collision probability for
+        the active ID-length thresholds.
         Exit code 0 = all OK, 1 = issues found.
         """
         import shutil
@@ -306,6 +321,29 @@ def register(app: typer.Typer) -> None:
         if not checks["issue_ids"]["passed"]:
             all_passed = False
 
+        # Check 6b: ID distribution / collision probability (opt-in)
+        id_distribution: list[dict[str, Any]] = []
+        if check_id_distribution and issues_file.exists() and issues_valid:
+            id_distribution = _collect_id_distribution(dogcats_dir)
+            warn_threshold = 0.05  # 5% cumulative collision probability
+            warn = any(row["p_cumulative"] >= warn_threshold for row in id_distribution)
+            checks["id_distribution"] = {
+                "description": (
+                    "ID collision probability is below "
+                    f"{warn_threshold * 100:.0f}% in every namespace"
+                ),
+                "fail_description": (
+                    "Cumulative ID collision probability is high in at least"
+                    " one namespace — consider raising ID_LENGTH_THRESHOLDS"
+                ),
+                "passed": not warn,
+                "optional": True,
+                "note": (
+                    "Each retry resolves transparently via nonce, so this is"
+                    " informational. Numbers below."
+                ),
+            }
+
         # Check 7: Dependency integrity (via storage API)
         deps_ok = True
         dangling_deps: list[Any] = []
@@ -434,6 +472,8 @@ def register(app: typer.Typer) -> None:
                 output_data["validation_details"] = all_validation
             if merge_warnings:
                 output_data["concurrent_edits"] = merge_warnings
+            if id_distribution:
+                output_data["id_distribution"] = id_distribution
             typer.echo(
                 orjson.dumps(output_data, option=orjson.OPT_INDENT_2).decode(),
             )
@@ -466,6 +506,22 @@ def register(app: typer.Typer) -> None:
                     typer.echo(typer.style(f"  Note: {check['note']}", fg="yellow"))
                 typer.echo()
 
+            # ID distribution table
+            if id_distribution:
+                typer.echo("ID distribution:")
+                typer.echo(
+                    f"  {'namespace':<14} {'count':>6} {'L':>2}  "
+                    f"{'p_step':>10} {'p_all':>10}",
+                )
+                for row in id_distribution:
+                    typer.echo(
+                        f"  {row['namespace']:<14} {row['count']:>6} "
+                        f"{row['length']:>2}  "
+                        f"{row['p_step'] * 100:>9.4f}% "
+                        f"{row['p_cumulative'] * 100:>9.4f}%",
+                    )
+                typer.echo()
+
             # Post-merge concurrent edit warnings
             if merge_warnings:
                 typer.echo(
@@ -492,6 +548,46 @@ def register(app: typer.Typer) -> None:
                 )
 
         raise typer.Exit(0 if all_passed else 1)
+
+
+def _collect_id_distribution(dogcats_dir: str) -> list[dict[str, Any]]:
+    """Compute per-namespace ID-collision statistics for the current database.
+
+    Returns a list of rows ``{namespace, count, length, p_step,
+    p_cumulative}`` sorted by namespace name. ``length`` is the ID
+    length the generator would currently use for a database of that
+    size (per ``ID_LENGTH_THRESHOLDS``); ``p_step`` is the
+    per-generation collision probability for the next ID, and
+    ``p_cumulative`` is the birthday-paradox probability that any
+    collision has already occurred.
+    """
+    from dogcat.storage import JSONLStorage
+
+    try:
+        storage = JSONLStorage(path=str(Path(dogcats_dir) / "issues.jsonl"))
+    except (OSError, ValueError, RuntimeError):
+        return []
+
+    counts: dict[str, int] = {}
+    for issue in storage.list():
+        if issue.is_tombstone():
+            continue
+        counts[issue.namespace] = counts.get(issue.namespace, 0) + 1
+
+    rows: list[dict[str, Any]] = []
+    for namespace in sorted(counts):
+        count = counts[namespace]
+        length = get_id_length_for_count(count)
+        rows.append(
+            {
+                "namespace": namespace,
+                "count": count,
+                "length": length,
+                "p_step": collision_probability(count, length),
+                "p_cumulative": cumulative_collision_probability(count, length),
+            }
+        )
+    return rows
 
 
 def _find_claude_dir() -> Path | None:

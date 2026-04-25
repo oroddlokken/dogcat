@@ -751,3 +751,96 @@ class TestDoctorLocalConfigGitignore:
         data = json.loads(result.stdout)
         check = data["checks"]["local_config_gitignored"]
         assert check["passed"] is True
+
+
+class TestDoctorIdDistribution:
+    """Test the opt-in --check-id-distribution flag."""
+
+    def test_flag_omitted_by_default(self, tmp_path: Path) -> None:
+        """Without the flag, no id_distribution check or table is reported."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app, ["doctor", "--json", "--dogcats-dir", str(dogcats_dir)]
+        )
+        data = json.loads(result.stdout)
+        assert "id_distribution" not in data
+        assert "id_distribution" not in data["checks"]
+
+    def test_flag_emits_distribution_table(self, tmp_path: Path) -> None:
+        """With the flag, the distribution table is rendered in human output."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        runner.invoke(
+            app,
+            ["create", "Test", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "doctor",
+                "--check-id-distribution",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert "ID distribution:" in result.stdout
+        assert "p_step" in result.stdout
+        assert "p_all" in result.stdout
+
+    def test_flag_emits_distribution_json(self, tmp_path: Path) -> None:
+        """With the flag, JSON output exposes the id_distribution rows."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        runner.invoke(
+            app,
+            ["create", "Test", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "doctor",
+                "--check-id-distribution",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        data = json.loads(result.stdout)
+        assert "id_distribution" in data
+        rows: list[dict[str, object]] = data["id_distribution"]
+        assert isinstance(rows, list)
+        assert rows, "expected at least one namespace row"
+        row = rows[0]
+        assert {"namespace", "count", "length", "p_step", "p_cumulative"} <= set(row)
+        assert isinstance(row["count"], int)
+        assert row["count"] >= 1
+        assert isinstance(row["p_step"], float)
+        assert 0.0 <= row["p_step"] <= 1.0
+        assert isinstance(row["p_cumulative"], float)
+        assert 0.0 <= row["p_cumulative"] <= 1.0
+
+    def test_check_passes_for_small_database(self, tmp_path: Path) -> None:
+        """A tiny database is well below the 5% cumulative threshold."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        runner.invoke(
+            app,
+            ["create", "Test", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "doctor",
+                "--check-id-distribution",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        data = json.loads(result.stdout)
+        assert data["checks"]["id_distribution"]["passed"] is True
