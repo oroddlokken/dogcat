@@ -55,6 +55,28 @@ def _deserialize(data: dict[str, Any]) -> EventRecord:
     )
 
 
+def diff_metadata(
+    old: dict[str, Any] | None,
+    new: dict[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
+    """Diff two metadata dicts into per-key change entries.
+
+    Keys are emitted as ``metadata.<key>`` so they slot alongside top-level
+    field changes in event records and dcat diff output. A missing key is
+    treated as ``None`` — e.g. setting ``manual=True`` on an issue without
+    prior metadata yields ``{"metadata.manual": {"old": None, "new": True}}``.
+    """
+    old = old or {}
+    new = new or {}
+    changes: dict[str, dict[str, Any]] = {}
+    for key in set(old) | set(new):
+        old_v = old.get(key)
+        new_v = new.get(key)
+        if old_v != new_v:
+            changes[f"metadata.{key}"] = {"old": old_v, "new": new_v}
+    return changes
+
+
 class EventLog:
     """Append-only event log stored alongside issues in .dogcats/issues.jsonl."""
 

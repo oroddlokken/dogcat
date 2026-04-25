@@ -242,3 +242,70 @@ class TestEventsSurviveCompaction:
         events = event_log.read()
         assert len(events) == 1
         assert events[0].event_type == "created"
+
+
+class TestMetadataChangesEmitEvent:
+    """Tests that flips of metadata flags (manual, no_agent, ...) are tracked."""
+
+    def test_setting_manual_emits_event(
+        self,
+        storage: JSONLStorage,
+        event_log: EventLog,
+    ) -> None:
+        """Setting metadata.manual emits a metadata.manual change."""
+        issue = _make_issue()
+        storage.create(issue)
+
+        storage.update("dc-test1", {"metadata": {"manual": True}})
+
+        events = event_log.read()
+        assert events[0].event_type == "updated"
+        assert events[0].changes["metadata.manual"] == {"old": None, "new": True}
+
+    def test_clearing_manual_emits_event(
+        self,
+        storage: JSONLStorage,
+        event_log: EventLog,
+    ) -> None:
+        """Clearing metadata.manual emits a metadata.manual change."""
+        issue = _make_issue(metadata={"manual": True})
+        storage.create(issue)
+
+        storage.update("dc-test1", {"metadata": {}})
+
+        events = event_log.read()
+        assert events[0].event_type == "updated"
+        assert events[0].changes["metadata.manual"] == {"old": True, "new": None}
+
+    def test_metadata_only_change_still_emits_event(
+        self,
+        storage: JSONLStorage,
+        event_log: EventLog,
+    ) -> None:
+        """A metadata-only update with no other field changes must still log."""
+        issue = _make_issue()
+        storage.create(issue)
+
+        storage.update("dc-test1", {"metadata": {"manual": True}})
+
+        events = event_log.read()
+        # create + update
+        assert len(events) == 2
+        assert events[0].event_type == "updated"
+
+    def test_unchanged_metadata_emits_no_event(
+        self,
+        storage: JSONLStorage,
+        event_log: EventLog,
+    ) -> None:
+        """Re-asserting the same metadata is a no-op for the event log."""
+        issue = _make_issue(metadata={"manual": True})
+        storage.create(issue)
+
+        # Same metadata dict — no actual change
+        storage.update("dc-test1", {"metadata": {"manual": True}})
+
+        events = event_log.read()
+        # Only the create event
+        assert len(events) == 1
+        assert events[0].event_type == "created"

@@ -68,8 +68,14 @@ def register(app: typer.Typer) -> None:
                     raise typer.Exit(1)
 
                 if label_name not in issue.labels:
-                    issue.labels.append(label_name)
-                    updates: dict[str, Any] = {"labels": issue.labels}
+                    # Build a fresh list rather than mutating issue.labels in
+                    # place — storage.update() snapshots old state via getattr
+                    # on the same Issue object, so an in-place mutation would
+                    # leave old and new pointing at the same already-changed
+                    # list and suppress the event.
+                    updates: dict[str, Any] = {
+                        "labels": [*issue.labels, label_name],
+                    }
                     if by:
                         updates["updated_by"] = by
                     storage.update(issue_id, updates)
@@ -88,8 +94,9 @@ def register(app: typer.Typer) -> None:
                     raise typer.Exit(1)
 
                 if label_name in issue.labels:
-                    issue.labels.remove(label_name)
-                    updates: dict[str, Any] = {"labels": issue.labels}
+                    updates: dict[str, Any] = {
+                        "labels": [lbl for lbl in issue.labels if lbl != label_name],
+                    }
                     if by:
                         updates["updated_by"] = by
                     storage.update(issue_id, updates)

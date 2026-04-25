@@ -145,6 +145,83 @@ class TestDiff:
         assert "Updated" in result.stdout
         assert "status" in result.stdout
 
+    def test_diff_shows_manual_flip_on(self, git_workspace: Path) -> None:
+        """Flipping --manual on shows up in diff as metadata.manual change."""
+        dogcats_dir = git_workspace / ".dogcats"
+        issue_id = _create_issue(dogcats_dir, "Flip to manual")
+
+        subprocess.run(
+            ["git", "-C", str(git_workspace), "add", ".dogcats/"],
+            check=True,
+            capture_output=True,
+            env=_GIT_TEST_ENV,
+        )
+        subprocess.run(
+            ["git", "-C", str(git_workspace), "commit", "-m", "add issue"],
+            check=True,
+            capture_output=True,
+            env=_GIT_TEST_ENV,
+        )
+
+        runner.invoke(
+            app,
+            ["update", issue_id, "--manual", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["diff", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert any(
+            "metadata.manual" in ev["changes"]
+            and ev["changes"]["metadata.manual"]["new"] is True
+            for ev in data
+        )
+
+    def test_diff_shows_manual_flip_off(self, git_workspace: Path) -> None:
+        """Flipping --no-manual back off shows up in diff."""
+        dogcats_dir = git_workspace / ".dogcats"
+        issue_id = _create_issue(dogcats_dir, "Flip off")
+
+        # Mark manual and commit, so it's the baseline at HEAD
+        runner.invoke(
+            app,
+            ["update", issue_id, "--manual", "--dogcats-dir", str(dogcats_dir)],
+        )
+        subprocess.run(
+            ["git", "-C", str(git_workspace), "add", ".dogcats/"],
+            check=True,
+            capture_output=True,
+            env=_GIT_TEST_ENV,
+        )
+        subprocess.run(
+            ["git", "-C", str(git_workspace), "commit", "-m", "add manual"],
+            check=True,
+            capture_output=True,
+            env=_GIT_TEST_ENV,
+        )
+
+        # Now flip off
+        runner.invoke(
+            app,
+            ["update", issue_id, "--no-manual", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["diff", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert any(
+            "metadata.manual" in ev["changes"]
+            and ev["changes"]["metadata.manual"]["old"] is True
+            and ev["changes"]["metadata.manual"]["new"] is None
+            for ev in data
+        )
+
     def test_diff_shows_closed_issue(self, git_workspace: Path) -> None:
         """Test diff shows closed issue."""
         dogcats_dir = git_workspace / ".dogcats"

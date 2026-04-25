@@ -6,6 +6,11 @@
 
 - **`--manual` filter for listing commands** — inverse of `--agent-only`, shows only issues marked as manual. Available on `list`, `ready`, `blocked`, `in-progress`, `in-review`, `open`, `deferred`, `snoozed`, `stale`, `pr`, `recently-added`, `recently-closed`, and `search`. `--agent-only` also added to `search`, `pr`, `recently-added`, and `recently-closed` for parity. `--manual` and `--agent-only` are mutually exclusive (closes dogcat-1iqx)
 
+### Fixed
+
+- **Metadata field changes are now tracked in `dcat diff` and `dcat history`** — toggling `--manual`/`--no-manual` (and any other `metadata.*` flag, e.g. `no_agent`) previously left no record in the audit log or diff output because `metadata` was not in `TRACKED_FIELDS`. Storage now diffs the metadata dict key-by-key on update and emits per-key changes as `metadata.<key>` entries; `dcat diff` does the same comparison against the git baseline (closes dogcat-4ze1)
+- **`dcat label add`/`remove` now emit history events** — the commands mutated `issue.labels` in place before calling `storage.update()`, so the old/new comparison saw the same already-mutated list reference and suppressed the event. Both subcommands now build a fresh list and pass that to `storage.update()`, producing a proper `labels: [...] -> [...]` event in `dcat history` and `dcat diff` (closes dogcat-ogb1)
+
 ### Development
 
 - **Upgraded GitHub Actions to Node.js 24** — bumped `actions/checkout` from v4 to v5 and `astral-sh/setup-uv` from v4 to v7 (both native Node 24), and added `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24` env var for `softprops/action-gh-release@v2` which has no Node 24 release yet (closes dogcat-1e2t)

@@ -719,6 +719,9 @@ class JSONLStorage:
         old_values: dict[str, Any] = {
             k: getattr(issue, k, None) for k in updates if k in TRACKED_FIELDS
         }
+        old_metadata: dict[str, Any] | None = (
+            dict(issue.metadata) if "metadata" in updates else None
+        )
 
         # Update fields — only UPDATABLE_FIELDS are allowed
         for key, value in updates.items():
@@ -766,6 +769,10 @@ class JSONLStorage:
         # Emit update event
         new_values = {k: getattr(issue, k, None) for k in old_values}
         changes = self._tracked_changes(old_values, new_values)
+        if old_metadata is not None:
+            from dogcat.event_log import diff_metadata
+
+            changes.update(diff_metadata(old_metadata, issue.metadata))
         by = updates.get("updated_by") or issue.updated_by
         event_type = "updated"
         if "status" in changes and changes["status"]["new"] == "closed":

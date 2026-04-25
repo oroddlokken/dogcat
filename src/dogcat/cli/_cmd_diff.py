@@ -183,7 +183,7 @@ def register(app: typer.Typer) -> None:
         Use --unstaged to compare the working tree against the index.
         """
         try:
-            from dogcat.event_log import EventRecord, _serialize
+            from dogcat.event_log import EventRecord, _serialize, diff_metadata
 
             is_json_output(json_output)  # sync local flag for echo_error
             if staged and unstaged:
@@ -229,6 +229,7 @@ def register(app: typer.Typer) -> None:
                                 "old": None,
                                 "new": _field_value(value),
                             }
+                    changes.update(diff_metadata(None, new_state.get("metadata")))
                     status = _field_value(new_state.get("status"))
                     if status == "closed":
                         event_type = "closed"
@@ -258,6 +259,12 @@ def register(app: typer.Typer) -> None:
                                 "old": old_val,
                                 "new": new_val,
                             }
+                    changes.update(
+                        diff_metadata(
+                            old_state.get("metadata"),
+                            new_state.get("metadata"),
+                        ),
+                    )
                     if changes:
                         event_type = "updated"
                         if "status" in changes and changes["status"]["new"] == "closed":

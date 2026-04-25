@@ -78,6 +78,85 @@ class TestCLILabel:
         assert result.exit_code == 0
         assert "Removed label" in result.stdout
 
+    def test_label_add_emits_event(self, tmp_path: Path) -> None:
+        """`dcat label add` should record a labels change in dcat history."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        create_result = runner.invoke(
+            app,
+            ["create", "Track me", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+
+        runner.invoke(
+            app,
+            [
+                "label",
+                issue_id,
+                "add",
+                "--label",
+                "urgent",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["history", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        events = json.loads(result.stdout)
+        label_changes = [ev for ev in events if "labels" in ev.get("changes", {})]
+        assert label_changes, f"expected a labels event, got {events}"
+        assert label_changes[0]["changes"]["labels"]["new"] == ["urgent"]
+
+    def test_label_remove_emits_event(self, tmp_path: Path) -> None:
+        """`dcat label remove` should record a labels change in dcat history."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        create_result = runner.invoke(
+            app,
+            [
+                "create",
+                "Track me",
+                "--labels",
+                "urgent",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+
+        runner.invoke(
+            app,
+            [
+                "label",
+                issue_id,
+                "remove",
+                "--label",
+                "urgent",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["history", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        events = json.loads(result.stdout)
+        # Find the update event (not the create)
+        update_changes = [
+            ev["changes"]
+            for ev in events
+            if ev["event_type"] == "updated" and "labels" in ev.get("changes", {})
+        ]
+        assert update_changes, f"expected a labels update event, got {events}"
+        assert update_changes[0]["labels"]["old"] == ["urgent"]
+        assert update_changes[0]["labels"]["new"] == []
+
     def test_label_list(self, tmp_path: Path) -> None:
         """Test listing labels."""
         dogcats_dir = tmp_path / ".dogcats"
