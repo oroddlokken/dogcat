@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
-
 import orjson
 import typer
 
@@ -22,14 +20,12 @@ from ._completions import (
 )
 from ._helpers import (
     _parse_priority_value,
+    apply_to_each,
     get_default_operator,
     get_storage,
     parse_duration,
 )
-from ._json_state import echo_error, is_json_output
-
-if TYPE_CHECKING:
-    from dogcat.storage import JSONLStorage
+from ._json_state import echo_error, is_json, set_json
 
 
 def register(app: typer.Typer) -> None:
@@ -182,6 +178,7 @@ def register(app: typer.Typer) -> None:
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Update one or more issues."""
+        set_json(json_output)
         try:
             # Merge --body into --description (hidden alias)
             if body is not None:
@@ -287,26 +284,78 @@ def register(app: typer.Typer) -> None:
                 updated_by if updated_by is not None else get_default_operator()
             )
 
-            has_errors = False
-            for issue_id in issue_ids:
-                has_errors = (
-                    _update_one(
-                        storage,
-                        issue_id,
-                        updates,
-                        manual=manual,
-                        namespace=namespace,
-                        depends_on=depends_on,
-                        blocks=blocks,
-                        remove_depends_on=remove_depends_on,
-                        remove_blocks=remove_blocks,
-                        updated_by=final_updated_by,
-                        json_output=json_output,
-                    )
-                    or has_errors
-                )
+            def _update(issue_id: str) -> None:
+                # Handle manual flag per-issue (needs current metadata)
+                issue_updates = dict(updates)
+                if manual is not None:
+                    current = storage.get(issue_id)
+                    if current is None:
+                        msg = f"Issue {issue_id} not found"
+                        raise ValueError(msg)
+                    new_metadata = dict(current.metadata) if current.metadata else {}
+                    if manual:
+                        new_metadata["manual"] = True
+                        new_metadata.pop("no_agent", None)
+                    else:
+                        new_metadata.pop("manual", None)
+                        new_metadata.pop("no_agent", None)
+                    issue_updates["metadata"] = new_metadata
 
-            if has_errors:
+                if issue_updates:
+                    issue_updates["updated_by"] = final_updated_by
+                    issue = storage.update(issue_id, issue_updates)
+                else:
+                    issue = storage.get(issue_id)
+                    if issue is None:
+                        msg = f"Issue {issue_id} not found"
+                        raise ValueError(msg)
+
+                if namespace is not None:
+                    issue = storage.change_namespace(
+                        issue.full_id,
+                        namespace,
+                        updated_by=final_updated_by,
+                    )
+
+                if depends_on:
+                    storage.add_dependency(
+                        issue_id, depends_on, "blocks", created_by=final_updated_by
+                    )
+                if blocks:
+                    storage.add_dependency(
+                        blocks, issue.full_id, "blocks", created_by=final_updated_by
+                    )
+
+                if remove_depends_on:
+                    resolved_target = storage.resolve_id(remove_depends_on)
+                    if resolved_target is None:
+                        msg = f"Issue {remove_depends_on} not found"
+                        raise ValueError(msg)
+                    deps = storage.get_dependencies(issue.full_id)
+                    if not any(d.depends_on_id == resolved_target for d in deps):
+                        msg = f"{issue.full_id} does not depend on {resolved_target}"
+                        raise ValueError(msg)
+                    storage.remove_dependency(issue.full_id, resolved_target)
+
+                if remove_blocks:
+                    resolved_target = storage.resolve_id(remove_blocks)
+                    if resolved_target is None:
+                        msg = f"Issue {remove_blocks} not found"
+                        raise ValueError(msg)
+                    deps = storage.get_dependencies(resolved_target)
+                    if not any(d.depends_on_id == issue.full_id for d in deps):
+                        msg = f"{issue.full_id} does not block {resolved_target}"
+                        raise ValueError(msg)
+                    storage.remove_dependency(resolved_target, issue.full_id)
+
+                if is_json():
+                    from dogcat.models import issue_to_dict
+
+                    typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
+                else:
+                    typer.echo(f"✓ Updated {issue.full_id}: {issue.title}")
+
+            if apply_to_each(issue_ids, _update, verb="updating"):
                 raise typer.Exit(1)
 
         except typer.Exit:
@@ -314,102 +363,3 @@ def register(app: typer.Typer) -> None:
         except Exception as e:
             echo_error(str(e))
             raise typer.Exit(1)
-
-    def _update_one(
-        storage: JSONLStorage,
-        issue_id: str,
-        updates: dict[str, Any],
-        *,
-        manual: bool | None,
-        namespace: str | None,
-        depends_on: str | None,
-        blocks: str | None,
-        remove_depends_on: str | None,
-        remove_blocks: str | None,
-        updated_by: str | None,
-        json_output: bool,
-    ) -> bool:
-        """Update a single issue. Returns True if an error occurred."""
-        try:
-            # Handle manual flag per-issue (needs current metadata)
-            issue_updates = dict(updates)
-            if manual is not None:
-                current = storage.get(issue_id)
-                if current is None:
-                    echo_error(f"Issue {issue_id} not found")
-                    return True
-                new_metadata = dict(current.metadata) if current.metadata else {}
-                if manual:
-                    new_metadata["manual"] = True
-                    new_metadata.pop("no_agent", None)
-                else:
-                    new_metadata.pop("manual", None)
-                    new_metadata.pop("no_agent", None)
-                issue_updates["metadata"] = new_metadata
-
-            if issue_updates:
-                issue_updates["updated_by"] = updated_by
-                issue = storage.update(issue_id, issue_updates)
-            else:
-                issue = storage.get(issue_id)
-                if issue is None:
-                    echo_error(f"Issue {issue_id} not found")
-                    return True
-
-            # Change namespace if specified
-            if namespace is not None:
-                issue = storage.change_namespace(
-                    issue.full_id,
-                    namespace,
-                    updated_by=updated_by,
-                )
-
-            # Add dependencies if specified
-            if depends_on:
-                storage.add_dependency(
-                    issue_id,
-                    depends_on,
-                    "blocks",
-                    created_by=updated_by,
-                )
-            if blocks:
-                storage.add_dependency(
-                    blocks,
-                    issue.full_id,
-                    "blocks",
-                    created_by=updated_by,
-                )
-
-            # Remove dependencies if specified
-            if remove_depends_on:
-                resolved_target = storage.resolve_id(remove_depends_on)
-                if resolved_target is None:
-                    echo_error(f"Issue {remove_depends_on} not found")
-                    return True
-                deps = storage.get_dependencies(issue.full_id)
-                if not any(d.depends_on_id == resolved_target for d in deps):
-                    echo_error(f"{issue.full_id} does not depend on {resolved_target}")
-                    return True
-                storage.remove_dependency(issue.full_id, resolved_target)
-
-            if remove_blocks:
-                resolved_target = storage.resolve_id(remove_blocks)
-                if resolved_target is None:
-                    echo_error(f"Issue {remove_blocks} not found")
-                    return True
-                deps = storage.get_dependencies(resolved_target)
-                if not any(d.depends_on_id == issue.full_id for d in deps):
-                    echo_error(f"{issue.full_id} does not block {resolved_target}")
-                    return True
-                storage.remove_dependency(resolved_target, issue.full_id)
-
-            if is_json_output(json_output):
-                from dogcat.models import issue_to_dict
-
-                typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
-            else:
-                typer.echo(f"✓ Updated {issue.full_id}: {issue.title}")
-        except (ValueError, Exception) as e:
-            echo_error(f"updating {issue_id}: {e}")
-            return True
-        return False

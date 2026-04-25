@@ -9,7 +9,7 @@ import typer
 
 from ._completions import complete_namespaces
 from ._helpers import find_dogcats_dir, get_default_operator
-from ._json_state import echo_error, is_json_output
+from ._json_state import echo_error, is_json, set_json
 
 
 def _resolve_target_dogcats(to: str) -> str:
@@ -79,7 +79,7 @@ def register(app: typer.Typer) -> None:
         from dogcat.inbox import InboxStorage
         from dogcat.models import Proposal
 
-        is_json_output(json_output)
+        set_json(json_output)
 
         proposed_by = by if by is not None else get_default_operator()
 
@@ -141,7 +141,7 @@ def register(app: typer.Typer) -> None:
             echo_error(str(e))
             raise typer.Exit(1) from None
 
-        if is_json_output(json_output):
+        if is_json():
             from dogcat.models import proposal_to_dict
 
             typer.echo(orjson.dumps(proposal_to_dict(proposal)).decode())

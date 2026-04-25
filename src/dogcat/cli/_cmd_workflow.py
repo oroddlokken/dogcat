@@ -6,6 +6,7 @@ import orjson
 import typer
 
 from dogcat.config import extract_prefix, get_namespace_filter
+from dogcat.models import is_manual_issue
 
 from ._completions import (
     complete_issue_ids,
@@ -31,8 +32,9 @@ from ._helpers import (
     get_storage,
     load_open_inbox_proposals,
     parse_duration,
+    with_ns_shim,
 )
-from ._json_state import echo_error, is_json_output
+from ._json_state import echo_error, is_json, set_json
 
 
 def register(app: typer.Typer) -> None:
@@ -130,6 +132,7 @@ def register(app: typer.Typer) -> None:
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Show issues ready to work (no blocking dependencies)."""
+        set_json(json_output)
         try:
             from dogcat.deps import get_ready_work
 
@@ -158,7 +161,7 @@ def register(app: typer.Typer) -> None:
             if final_limit:
                 ready_issues = ready_issues[:final_limit]
 
-            if is_json_output(json_output):
+            if is_json():
                 from dogcat.models import issue_to_dict
 
                 output = [issue_to_dict(issue) for issue in ready_issues]
@@ -176,7 +179,7 @@ def register(app: typer.Typer) -> None:
                         typer.echo(format_issue_brief(issue))
 
             # Append inbox proposals if requested
-            if include_inbox and not is_json_output(json_output):
+            if include_inbox and not is_json():
                 _show_inbox_in_ready(
                     str(storage.dogcats_dir), namespace, all_namespaces
                 )
@@ -283,6 +286,7 @@ def register(app: typer.Typer) -> None:
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Show all blocked issues."""
+        set_json(json_output)
         try:
             from dogcat.deps import get_blocked_issues
 
@@ -319,7 +323,7 @@ def register(app: typer.Typer) -> None:
             if final_limit:
                 blocked_issues = blocked_issues[:final_limit]
 
-            if is_json_output(json_output):
+            if is_json():
                 output = [
                     {
                         "issue_id": bi.issue_id,
@@ -442,6 +446,7 @@ def register(app: typer.Typer) -> None:
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Show issues currently in progress."""
+        set_json(json_output)
         try:
             final_limit = limit_arg or limit
             storage = get_storage(dogcats_dir)
@@ -467,7 +472,7 @@ def register(app: typer.Typer) -> None:
             if final_limit:
                 issues = issues[:final_limit]
 
-            if is_json_output(json_output):
+            if is_json():
                 from dogcat.models import issue_to_dict
 
                 output = [issue_to_dict(issue) for issue in issues]
@@ -572,6 +577,7 @@ def register(app: typer.Typer) -> None:
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Show all open issues."""
+        set_json(json_output)
         try:
             final_limit = limit_arg or limit
             storage = get_storage(dogcats_dir)
@@ -597,7 +603,7 @@ def register(app: typer.Typer) -> None:
             if final_limit:
                 issues = issues[:final_limit]
 
-            if is_json_output(json_output):
+            if is_json():
                 from dogcat.models import issue_to_dict
 
                 output = [issue_to_dict(issue) for issue in issues]
@@ -702,6 +708,7 @@ def register(app: typer.Typer) -> None:
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Show issues currently in review."""
+        set_json(json_output)
         try:
             final_limit = limit_arg or limit
             storage = get_storage(dogcats_dir)
@@ -727,7 +734,7 @@ def register(app: typer.Typer) -> None:
             if final_limit:
                 issues = issues[:final_limit]
 
-            if is_json_output(json_output):
+            if is_json():
                 from dogcat.models import issue_to_dict
 
                 output = [issue_to_dict(issue) for issue in issues]
@@ -759,6 +766,7 @@ def register(app: typer.Typer) -> None:
         dogcats_dir: str,
     ) -> None:
         """Set an issue's status."""
+        set_json(json_output)
         try:
             storage = get_storage(dogcats_dir)
             final_operator = (
@@ -769,7 +777,7 @@ def register(app: typer.Typer) -> None:
                 {"status": status, "updated_by": final_operator},
             )
 
-            if is_json_output(json_output):
+            if is_json():
                 from dogcat.models import issue_to_dict
 
                 typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
@@ -806,7 +814,6 @@ def register(app: typer.Typer) -> None:
         without_comments: bool,
         tree: bool,
         table: bool,
-        json_output: bool,
         dogcats_dir: str,
     ) -> None:
         """List issues filtered by a single status."""
@@ -837,7 +844,7 @@ def register(app: typer.Typer) -> None:
             if final_limit:
                 issues = issues[:final_limit]
 
-            if is_json_output(json_output):
+            if is_json():
                 from dogcat.models import issue_to_dict
 
                 output = [issue_to_dict(issue) for issue in issues]
@@ -942,6 +949,7 @@ def register(app: typer.Typer) -> None:
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """List issues with in-review status."""
+        set_json(json_output)
         _list_by_status(
             status="in_review",
             heading="In Review",
@@ -962,7 +970,6 @@ def register(app: typer.Typer) -> None:
             without_comments=without_comments,
             tree=tree,
             table=table,
-            json_output=json_output,
             dogcats_dir=dogcats_dir,
         )
 
@@ -1048,6 +1055,7 @@ def register(app: typer.Typer) -> None:
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """List issues with in-progress status."""
+        set_json(json_output)
         _list_by_status(
             status="in_progress",
             heading="In Progress",
@@ -1068,7 +1076,6 @@ def register(app: typer.Typer) -> None:
             without_comments=without_comments,
             tree=tree,
             table=table,
-            json_output=json_output,
             dogcats_dir=dogcats_dir,
         )
 
@@ -1154,6 +1161,7 @@ def register(app: typer.Typer) -> None:
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Show issues currently deferred."""
+        set_json(json_output)
         try:
             final_limit = limit_arg or limit
             storage = get_storage(dogcats_dir)
@@ -1179,7 +1187,7 @@ def register(app: typer.Typer) -> None:
             if final_limit:
                 issues = issues[:final_limit]
 
-            if is_json_output(json_output):
+            if is_json():
                 from dogcat.models import issue_to_dict
 
                 output = [issue_to_dict(issue) for issue in issues]
@@ -1203,6 +1211,7 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(1)
 
     @app.command(name="defer", hidden=True)
+    @with_ns_shim
     def defer_shortcut(
         issue_id: str = typer.Argument(
             ...,
@@ -1214,18 +1223,6 @@ def register(app: typer.Typer) -> None:
             None,
             "--by",
             help="Who is making this change",
-        ),
-        all_namespaces: bool = typer.Option(  # noqa: ARG001
-            False,
-            "--all-namespaces",
-            "--all-ns",
-            "-A",
-            hidden=True,
-        ),
-        namespace: str | None = typer.Option(  # noqa: ARG001
-            None,
-            "--namespace",
-            hidden=True,
         ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
@@ -1301,6 +1298,7 @@ def register(app: typer.Typer) -> None:
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Show issues marked as manual."""
+        set_json(json_output)
         try:
             final_limit = limit_arg or limit
             storage = get_storage(dogcats_dir)
@@ -1308,7 +1306,7 @@ def register(app: typer.Typer) -> None:
             issues = [
                 i
                 for i in issues
-                if (i.metadata.get("manual") or i.metadata.get("no_agent"))
+                if is_manual_issue(i.metadata)
                 and i.status.value not in ("closed", "tombstone")
             ]
             issues = apply_common_filters(
@@ -1328,7 +1326,7 @@ def register(app: typer.Typer) -> None:
             if final_limit:
                 issues = issues[:final_limit]
 
-            if is_json_output(json_output):
+            if is_json():
                 from dogcat.models import issue_to_dict
 
                 output = [issue_to_dict(issue) for issue in issues]
@@ -1352,6 +1350,7 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(1)
 
     @app.command(name="mark-manual", hidden=True)
+    @with_ns_shim
     def mark_manual_shortcut(
         issue_id: str = typer.Argument(
             ...,
@@ -1364,23 +1363,11 @@ def register(app: typer.Typer) -> None:
             "--by",
             help="Who is making this change",
         ),
-        all_namespaces: bool = typer.Option(  # noqa: ARG001
-            False,
-            "--all-namespaces",
-            "--all-ns",
-            "-A",
-            hidden=True,
-        ),
-        namespace: str | None = typer.Option(  # noqa: ARG001
-            None,
-            "--namespace",
-            hidden=True,
-        ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Mark an issue as manual (not for agents)."""
         try:
-            is_json_output(json_output)  # sync local flag for echo_error
+            set_json(json_output)
             storage = get_storage(dogcats_dir)
             final_operator = (
                 operator if operator is not None else get_default_operator()
@@ -1397,7 +1384,7 @@ def register(app: typer.Typer) -> None:
                 {"metadata": new_metadata, "operator": final_operator},
             )
 
-            if is_json_output(json_output):
+            if is_json():
                 from dogcat.models import issue_to_dict
 
                 typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
@@ -1453,6 +1440,7 @@ def register(app: typer.Typer) -> None:
 
         Displays the last N closed issues in chronological order.
         """
+        set_json(json_output)
         try:
             from dogcat.event_log import EventLog, _serialize
 
@@ -1483,10 +1471,7 @@ def register(app: typer.Typer) -> None:
                     issue_obj = storage.get(event_issue_id)
                     if issue_obj is None:
                         return False
-                    return bool(
-                        issue_obj.metadata.get("manual")
-                        or issue_obj.metadata.get("no_agent"),
-                    )
+                    return is_manual_issue(issue_obj.metadata)
 
                 if agent_only:
                     events = [e for e in events if not _is_manual(e.issue_id)]
@@ -1514,7 +1499,7 @@ def register(app: typer.Typer) -> None:
                     if issue_obj:
                         event.title = issue_obj.title
 
-            if is_json_output(json_output):
+            if is_json():
                 output = [_serialize(e) for e in events]
                 typer.echo(orjson.dumps(output).decode())
             elif not events:
@@ -1572,12 +1557,8 @@ def register(app: typer.Typer) -> None:
         Displays the last N issues sorted by created_at date,
         with the oldest of the recent issues at the top.
         """
+        set_json(json_output)
         try:
-            check_agent_manual_exclusive(agent_only=agent_only, manual_only=manual)
-            check_comments_exclusive(
-                has_comments=has_comments, without_comments=without_comments
-            )
-
             storage = get_storage(dogcats_dir)
             issues = [
                 i
@@ -1585,30 +1566,16 @@ def register(app: typer.Typer) -> None:
                 if i.status.value not in ("closed", "tombstone")
             ]
 
-            # Apply namespace filter (skip if --all-namespaces)
-            if not all_namespaces:
-                actual_dogcats_dir = str(storage.dogcats_dir)
-                ns_filter = get_namespace_filter(actual_dogcats_dir)
-                if ns_filter is not None:
-                    issues = [i for i in issues if ns_filter(i.namespace)]
-
-            if agent_only:
-                issues = [
-                    i
-                    for i in issues
-                    if not (i.metadata.get("manual") or i.metadata.get("no_agent"))
-                ]
-            elif manual:
-                issues = [
-                    i
-                    for i in issues
-                    if i.metadata.get("manual") or i.metadata.get("no_agent")
-                ]
-
-            if has_comments:
-                issues = [i for i in issues if i.comments]
-            elif without_comments:
-                issues = [i for i in issues if not i.comments]
+            issues = apply_common_filters(
+                issues,
+                agent_only=agent_only,
+                manual_only=manual,
+                has_comments=has_comments,
+                without_comments=without_comments,
+                all_namespaces=all_namespaces,
+                dogcats_dir=str(storage.dogcats_dir),
+                storage=storage,
+            )
 
             final_limit = limit_arg or limit or 10
             # Sort descending to select the N most recent, then reverse for display
@@ -1618,7 +1585,7 @@ def register(app: typer.Typer) -> None:
             recent = issues[:final_limit]
             recent.reverse()
 
-            if is_json_output(json_output):
+            if is_json():
                 from dogcat.models import issue_to_dict
 
                 output = [issue_to_dict(issue) for issue in recent]
@@ -1782,50 +1749,32 @@ def register(app: typer.Typer) -> None:
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Show in-progress and in-review issues together."""
+        set_json(json_output)
         try:
-            check_agent_manual_exclusive(agent_only=agent_only, manual_only=manual)
-            check_comments_exclusive(
-                has_comments=has_comments, without_comments=without_comments
+            storage = get_storage(dogcats_dir)
+            ip_issues = apply_common_filters(
+                storage.list({"status": "in_progress"}),
+                no_parent=no_parent,
+                agent_only=agent_only,
+                manual_only=manual,
+                has_comments=has_comments,
+                without_comments=without_comments,
+                storage=storage,
+            )
+            ir_issues = apply_common_filters(
+                storage.list({"status": "in_review"}),
+                no_parent=no_parent,
+                agent_only=agent_only,
+                manual_only=manual,
+                has_comments=has_comments,
+                without_comments=without_comments,
+                storage=storage,
             )
 
-            storage = get_storage(dogcats_dir)
-            ip_issues = storage.list({"status": "in_progress"})
-            ir_issues = storage.list({"status": "in_review"})
-            if no_parent:
-                ip_issues = [i for i in ip_issues if i.parent is None]
-                ir_issues = [i for i in ir_issues if i.parent is None]
-            if agent_only:
-                ip_issues = [
-                    i
-                    for i in ip_issues
-                    if not (i.metadata.get("manual") or i.metadata.get("no_agent"))
-                ]
-                ir_issues = [
-                    i
-                    for i in ir_issues
-                    if not (i.metadata.get("manual") or i.metadata.get("no_agent"))
-                ]
-            elif manual:
-                ip_issues = [
-                    i
-                    for i in ip_issues
-                    if i.metadata.get("manual") or i.metadata.get("no_agent")
-                ]
-                ir_issues = [
-                    i
-                    for i in ir_issues
-                    if i.metadata.get("manual") or i.metadata.get("no_agent")
-                ]
-            if has_comments:
-                ip_issues = [i for i in ip_issues if i.comments]
-                ir_issues = [i for i in ir_issues if i.comments]
-            elif without_comments:
-                ip_issues = [i for i in ip_issues if not i.comments]
-                ir_issues = [i for i in ir_issues if not i.comments]
             ip_issues.sort(key=lambda i: i.priority)
             ir_issues.sort(key=lambda i: i.priority)
 
-            if is_json_output(json_output):
+            if is_json():
                 from dogcat.models import issue_to_dict
 
                 output = {
@@ -1868,6 +1817,7 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(1)
 
     @app.command()
+    @with_ns_shim
     def snooze(
         issue_id: str = typer.Argument(
             ...,
@@ -1885,21 +1835,10 @@ def register(app: typer.Typer) -> None:
             "--by",
             help="Who is making this change",
         ),
-        all_namespaces: bool = typer.Option(  # noqa: ARG001
-            False,
-            "--all-namespaces",
-            "--all-ns",
-            "-A",
-            hidden=True,
-        ),
-        namespace: str | None = typer.Option(  # noqa: ARG001
-            None,
-            "--namespace",
-            hidden=True,
-        ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Snooze an issue for a duration (hide from list/ready)."""
+        set_json(json_output)
         try:
             snooze_until = parse_duration(duration)
             storage = get_storage(dogcats_dir)
@@ -1911,7 +1850,7 @@ def register(app: typer.Typer) -> None:
                 {"snoozed_until": snooze_until, "updated_by": final_operator},
             )
 
-            if is_json_output(json_output):
+            if is_json():
                 from dogcat.models import issue_to_dict
 
                 typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
@@ -1929,6 +1868,7 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(1)
 
     @app.command()
+    @with_ns_shim
     def unsnooze(
         issue_id: str = typer.Argument(
             ...,
@@ -1941,21 +1881,10 @@ def register(app: typer.Typer) -> None:
             "--by",
             help="Who is making this change",
         ),
-        all_namespaces: bool = typer.Option(  # noqa: ARG001
-            False,
-            "--all-namespaces",
-            "--all-ns",
-            "-A",
-            hidden=True,
-        ),
-        namespace: str | None = typer.Option(  # noqa: ARG001
-            None,
-            "--namespace",
-            hidden=True,
-        ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Remove snooze from an issue (make it visible again)."""
+        set_json(json_output)
         try:
             storage = get_storage(dogcats_dir)
             existing = storage.get(storage.resolve_id(issue_id) or issue_id)
@@ -1974,7 +1903,7 @@ def register(app: typer.Typer) -> None:
                 {"snoozed_until": None, "updated_by": final_operator},
             )
 
-            if is_json_output(json_output):
+            if is_json():
                 from dogcat.models import issue_to_dict
 
                 typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
@@ -2069,6 +1998,7 @@ def register(app: typer.Typer) -> None:
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Show currently snoozed issues."""
+        set_json(json_output)
         try:
             from datetime import datetime as dt
 
@@ -2107,7 +2037,7 @@ def register(app: typer.Typer) -> None:
             if final_limit:
                 issues = issues[:final_limit]
 
-            if is_json_output(json_output):
+            if is_json():
                 from dogcat.models import issue_to_dict
 
                 output = [issue_to_dict(issue) for issue in issues]

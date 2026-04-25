@@ -17,7 +17,7 @@ from ._completions import (
 )
 from ._formatting import format_issue_brief
 from ._helpers import apply_common_filters, get_storage
-from ._json_state import echo_error, is_json_output
+from ._json_state import echo_error, is_json, set_json
 
 if TYPE_CHECKING:
     from dogcat.models import Issue
@@ -213,6 +213,7 @@ def register(app: typer.Typer) -> None:
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Show dependency graph as an ASCII diagram."""
+        set_json(json_output)
         try:
             from dogcat.models import Status, issue_to_dict
 
@@ -282,7 +283,7 @@ def register(app: typer.Typer) -> None:
 
             graph_issues = [i for i in filtered if i.full_id in has_relationship]
 
-            if is_json_output(json_output):
+            if is_json():
                 nodes = [issue_to_dict(i) for i in graph_issues]
                 edges: list[dict[str, str]] = []
                 seen_edges: set[tuple[str, str, str]] = set()

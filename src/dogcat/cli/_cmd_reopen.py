@@ -2,49 +2,19 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import orjson
 import typer
 
 from ._completions import complete_closed_issue_ids
-from ._helpers import get_default_operator, get_storage
-from ._json_state import echo_error, is_json_output
-
-if TYPE_CHECKING:
-    from dogcat.storage import JSONLStorage
+from ._helpers import apply_to_each, get_default_operator, get_storage, with_ns_shim
+from ._json_state import is_json, set_json
 
 
 def register(app: typer.Typer) -> None:
     """Register reopen command."""
 
-    def _reopen_one(
-        storage: JSONLStorage,
-        issue_id: str,
-        reason: str | None,
-        reopened_by: str | None,
-        json_output: bool,
-    ) -> bool:
-        """Reopen a single issue. Returns True if an error occurred."""
-        try:
-            issue = storage.reopen(
-                issue_id,
-                reason=reason,
-                reopened_by=reopened_by,
-            )
-
-            if is_json_output(json_output):
-                from dogcat.models import issue_to_dict
-
-                typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
-            else:
-                typer.echo(f"✓ Reopened {issue.full_id}: {issue.title}")
-        except (ValueError, Exception) as e:
-            echo_error(f"reopening {issue_id}: {e}")
-            return True
-        return False
-
     @app.command()
+    @with_ns_shim
     def reopen(
         issue_ids: list[str] = typer.Argument(  # noqa: B008
             ...,
@@ -63,38 +33,25 @@ def register(app: typer.Typer) -> None:
             "--by",
             help="Who is reopening this",
         ),
-        all_namespaces: bool = typer.Option(  # noqa: ARG001
-            False,
-            "--all-namespaces",
-            "--all-ns",
-            "-A",
-            hidden=True,
-        ),
-        namespace: str | None = typer.Option(  # noqa: ARG001
-            None,
-            "--namespace",
-            hidden=True,
-        ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Reopen one or more closed issues."""
+        set_json(json_output)
         storage = get_storage(dogcats_dir)
         final_reopened_by = (
             reopened_by if reopened_by is not None else get_default_operator()
         )
-        has_errors = False
 
-        for issue_id in issue_ids:
-            has_errors = (
-                _reopen_one(
-                    storage,
-                    issue_id,
-                    reason,
-                    final_reopened_by,
-                    json_output,
-                )
-                or has_errors
+        def _reopen(issue_id: str) -> None:
+            issue = storage.reopen(
+                issue_id, reason=reason, reopened_by=final_reopened_by
             )
+            if is_json():
+                from dogcat.models import issue_to_dict
 
-        if has_errors:
+                typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
+            else:
+                typer.echo(f"✓ Reopened {issue.full_id}: {issue.title}")
+
+        if apply_to_each(issue_ids, _reopen, verb="reopening"):
             raise typer.Exit(1)

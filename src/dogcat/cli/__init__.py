@@ -23,9 +23,10 @@ def _global_options(
         help="Output as JSON for all commands",
     ),
 ) -> None:
-    from ._json_state import set_json_flag
+    from ._json_state import reset_json, set_json
 
-    set_json_flag(json_output)
+    reset_json()
+    set_json(json_output)
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
         raise typer.Exit(0)

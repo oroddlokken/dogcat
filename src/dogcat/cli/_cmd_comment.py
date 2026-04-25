@@ -6,14 +6,15 @@ import orjson
 import typer
 
 from ._completions import complete_comment_actions, complete_issue_ids
-from ._helpers import get_default_operator, get_storage
-from ._json_state import echo_error, is_json_output
+from ._helpers import get_default_operator, get_storage, with_ns_shim
+from ._json_state import echo_error, is_json, set_json
 
 
 def register(app: typer.Typer) -> None:
     """Register comment commands."""
 
     @app.command()
+    @with_ns_shim
     def comment(
         issue_id: str = typer.Argument(
             ...,
@@ -34,18 +35,6 @@ def register(app: typer.Typer) -> None:
         ),
         author: str = typer.Option(None, "--by", help="Comment author name"),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        all_namespaces: bool = typer.Option(  # noqa: ARG001
-            False,
-            "--all-namespaces",
-            "--all-ns",
-            "-A",
-            hidden=True,
-        ),
-        namespace: str | None = typer.Option(  # noqa: ARG001
-            None,
-            "--namespace",
-            hidden=True,
-        ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Manage issue comments.
@@ -55,6 +44,7 @@ def register(app: typer.Typer) -> None:
         - list: List all comments for an issue
         - delete: Delete a comment
         """
+        set_json(json_output)
         try:
             from dogcat.models import Comment
 
@@ -84,7 +74,7 @@ def register(app: typer.Typer) -> None:
                 issue.comments.append(new_comment)
                 storage.update(issue_id, {"comments": issue.comments})
 
-                if is_json_output(json_output):
+                if is_json():
                     from dogcat.models import issue_to_dict
 
                     typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
@@ -92,7 +82,7 @@ def register(app: typer.Typer) -> None:
                     typer.echo(f"✓ Added comment {new_comment_id}")
 
             elif action == "list":
-                if is_json_output(json_output):
+                if is_json():
                     output = [
                         {
                             "id": c.id,

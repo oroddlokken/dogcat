@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from rich.text import Text
 
 from dogcat.constants import PRIORITY_COLORS, STATUS_COLORS, TYPE_COLORS
-from dogcat.models import Status
+from dogcat.models import Status, is_manual_issue
 
 if TYPE_CHECKING:
     from dogcat.models import Issue
@@ -112,6 +112,6 @@ def make_issue_label(
     label.append(f" [{issue.issue_type.value}]", style=type_color)
     if issue.labels:
         label.append(f" [{', '.join(issue.labels)}]", style="cyan")
-    if issue.metadata.get("manual") or issue.metadata.get("no_agent"):
+    if is_manual_issue(issue.metadata):
         label.append(" [manual]", style="yellow")
     return label

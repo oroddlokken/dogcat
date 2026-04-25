@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import logging
-import os
-import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import IO, TYPE_CHECKING, Any
 
 import orjson
 
+from dogcat._diff import tracked_changes
+from dogcat._id_resolve import resolve_partial_id
+from dogcat._jsonl_io import append_jsonl_payload, atomic_rewrite_jsonl
 from dogcat._schema import warn_if_records_from_newer_version
 from dogcat.constants import TRACKED_PROPOSAL_FIELDS
 from dogcat.locking import advisory_file_lock
@@ -109,32 +110,17 @@ class InboxStorage:
 
     def _save(self) -> None:
         """Compact: rewrite the entire file with only current state."""
-        with self._file_lock():
-            with tempfile.NamedTemporaryFile(
-                mode="wb",
-                dir=self.dogcats_dir,
-                delete=False,
-                suffix=".jsonl",
-            ) as tmp_file:
-                tmp_path = Path(tmp_file.name)
-                try:
-                    for proposal in self._proposals.values():
-                        data = proposal_to_dict(proposal)
-                        tmp_file.write(orjson.dumps(data))
-                        tmp_file.write(b"\n")
-                    tmp_file.flush()
-                    os.fsync(tmp_file.fileno())
-                except Exception as e:
-                    tmp_path.unlink(missing_ok=True)
-                    msg = f"Failed to write to temporary file: {e}"
-                    raise RuntimeError(msg) from e
 
-            try:
-                tmp_path.replace(self.path)
-            except OSError as e:
-                tmp_path.unlink(missing_ok=True)
-                msg = f"Failed to write inbox file: {e}"
-                raise RuntimeError(msg) from e
+        def _write(tmp_file: IO[bytes]) -> int:
+            count = 0
+            for proposal in self._proposals.values():
+                tmp_file.write(orjson.dumps(proposal_to_dict(proposal)))
+                tmp_file.write(b"\n")
+                count += 1
+            return count
+
+        with self._file_lock():
+            atomic_rewrite_jsonl(self.path, self.dogcats_dir, _write)
 
     def _append(self, records: list[dict[str, Any]]) -> None:
         """Append records to the JSONL file without rewriting it."""
@@ -145,20 +131,7 @@ class InboxStorage:
         payload = b"".join(orjson.dumps(r) + b"\n" for r in records)
 
         with self._file_lock():
-            try:
-                if self.path.exists() and self.path.stat().st_size > 0:
-                    with self.path.open("rb") as check:
-                        check.seek(-1, 2)
-                        if check.read(1) != b"\n":
-                            payload = b"\n" + payload
-
-                with self.path.open("ab") as f:
-                    f.write(payload)
-                    f.flush()
-                    os.fsync(f.fileno())
-            except OSError as e:
-                msg = f"Failed to append to inbox file: {e}"
-                raise RuntimeError(msg) from e
+            append_jsonl_payload(self.path, payload)
 
     @staticmethod
     def _proposal_record(proposal: Proposal) -> dict[str, Any]:
@@ -175,27 +148,14 @@ class InboxStorage:
         by: str | None = None,
     ) -> None:
         """Emit an event to the inbox event log (best-effort)."""
-        from dogcat.event_log import EventRecord
-
-        if not changes:
-            return
-
-        event = EventRecord(
-            event_type=event_type,
-            issue_id=proposal.full_id,
-            timestamp=proposal.updated_at.isoformat(),
+        self._event_log.emit(
+            event_type,
+            proposal.full_id,
+            proposal.updated_at.isoformat(),
+            proposal.title,
+            changes,
             by=by,
-            title=proposal.title,
-            changes=changes,
         )
-        try:
-            self._event_log.append(event)
-        except Exception:
-            logging.getLogger(__name__).debug(
-                "Failed to write event for %s",
-                proposal.full_id,
-                exc_info=True,
-            )
 
     @staticmethod
     def _tracked_changes(
@@ -203,17 +163,7 @@ class InboxStorage:
         new_values: dict[str, Any],
     ) -> dict[str, dict[str, Any]]:
         """Compute tracked field changes between old and new proposal values."""
-        changes: dict[str, dict[str, Any]] = {}
-        for field_name in TRACKED_PROPOSAL_FIELDS:
-            old: Any = old_values.get(field_name)
-            new: Any = new_values.get(field_name)
-            if hasattr(old, "value"):
-                old = old.value
-            if hasattr(new, "value"):
-                new = new.value
-            if old != new:
-                changes[field_name] = {"old": old, "new": new}
-        return changes
+        return tracked_changes(old_values, new_values, TRACKED_PROPOSAL_FIELDS)
 
     def create(self, proposal: Proposal) -> Proposal:
         """Create a new proposal.
@@ -269,28 +219,7 @@ class InboxStorage:
         Raises:
             ValueError: If partial ID matches multiple proposals (ambiguous).
         """
-        if partial_id in self._proposals:
-            return partial_id
-
-        matches = [
-            pid
-            for pid in self._proposals
-            if pid.endswith(partial_id) or pid.rsplit("-", 1)[-1] == partial_id
-        ]
-
-        if len(matches) == 1:
-            return matches[0]
-
-        if len(matches) > 1:
-            msg = (
-                f"Ambiguous partial ID '{partial_id}' "
-                f"matches {len(matches)} proposals: "
-                f"{', '.join(sorted(matches)[:5])}"
-                + (f" and {len(matches) - 5} more" if len(matches) > 5 else "")
-            )
-            raise ValueError(msg)
-
-        return None
+        return resolve_partial_id(partial_id, self._proposals, kind="proposals")
 
     def get(self, proposal_id: str) -> Proposal | None:
         """Get a proposal by ID.

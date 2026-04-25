@@ -16,7 +16,7 @@ from dogcat.config import (
 
 from ._completions import complete_config_keys, complete_config_values
 from ._helpers import SortedGroup, find_dogcats_dir, is_gitignored
-from ._json_state import echo_error, is_json_output
+from ._json_state import echo_error, is_json, set_json
 
 # Sub-app for 'dcat config' subcommands
 config_app = typer.Typer(
@@ -174,14 +174,14 @@ def register(app: typer.Typer) -> None:
         """Get a configuration value."""
         import orjson
 
-        is_json_output(json_output)  # sync local flag for echo_error
+        set_json(json_output)
         dogcats_dir = find_dogcats_dir()
         config = load_config(dogcats_dir)
         if key not in config:
             echo_error(f"Key '{key}' not found in config")
             raise typer.Exit(1)
         val = config[key]
-        if is_json_output(json_output):
+        if is_json():
             typer.echo(orjson.dumps({key: val}).decode())
         elif isinstance(val, list):
             typer.echo(", ".join(str(i) for i in val))  # type: ignore[reportUnknownArgumentType, reportUnknownVariableType]
@@ -193,11 +193,12 @@ def register(app: typer.Typer) -> None:
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     ) -> None:
         """List all configuration values."""
+        set_json(json_output)
         import orjson
 
         dogcats_dir = find_dogcats_dir()
         config = load_config(dogcats_dir)
-        if is_json_output(json_output):
+        if is_json():
             typer.echo(orjson.dumps(config, option=orjson.OPT_INDENT_2).decode())
         else:
             if not config:
@@ -216,9 +217,10 @@ def register(app: typer.Typer) -> None:
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     ) -> None:
         """List all available configuration keys and their descriptions."""
+        set_json(json_output)
         import orjson
 
-        if is_json_output(json_output):
+        if is_json():
             typer.echo(orjson.dumps(_KNOWN_KEYS, option=orjson.OPT_INDENT_2).decode())
             return
 

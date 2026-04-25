@@ -39,6 +39,54 @@ _ARG_HELP_SHORTHAND = (
 )
 
 
+def with_ns_shim(func: Callable[..., Any]) -> Callable[..., Any]:
+    """Decorate a Typer command with hidden --namespace / --all-namespaces options.
+
+    Why: these flags are owned by the global Typer callback, but Typer parses
+    options at the level they appear on the command line. Without per-command
+    shim params, ``dcat close ISSUE --namespace ns`` errors out because
+    ``close`` doesn't declare them. The shim accepts and discards the values;
+    the actual filter is applied by ``get_namespace_filter()`` reading the
+    process state set by the global callback.
+    """
+    sig = inspect.signature(func)
+    shim_params = [
+        inspect.Parameter(
+            "all_namespaces",
+            inspect.Parameter.KEYWORD_ONLY,
+            default=typer.Option(
+                False,
+                "--all-namespaces",
+                "--all-ns",
+                "-A",
+                hidden=True,
+            ),
+            annotation="bool",
+        ),
+        inspect.Parameter(
+            "namespace",
+            inspect.Parameter.KEYWORD_ONLY,
+            default=typer.Option(None, "--namespace", hidden=True),
+            annotation="str | None",
+        ),
+    ]
+    new_params = list(sig.parameters.values()) + shim_params
+
+    @functools.wraps(func)
+    def wrapper(**kwargs: Any) -> Any:
+        kwargs.pop("all_namespaces", None)
+        kwargs.pop("namespace", None)
+        return func(**kwargs)
+
+    wrapper.__signature__ = sig.replace(parameters=new_params)  # type: ignore[attr-defined]
+    wrapper.__annotations__ = {
+        **func.__annotations__,
+        "all_namespaces": "bool",
+        "namespace": "str | None",
+    }
+    return wrapper
+
+
 def _make_alias(
     source_fn: Callable[..., Any],
     *,
@@ -89,6 +137,30 @@ def _make_alias(
         if name not in exclude_params
     }
     return wrapper
+
+
+def apply_to_each(
+    ids: list[str],
+    op: Callable[[str], None],
+    *,
+    verb: str,
+) -> bool:
+    """Apply ``op`` to each id, recording errors with a verb prefix.
+
+    Returns True if any iteration raised. Each error is reported via
+    :func:`echo_error` as ``"{verb} {id}: {exc}"``. The caller typically
+    raises ``typer.Exit(1)`` when this returns True.
+    """
+    from ._json_state import echo_error
+
+    has_errors = False
+    for id_ in ids:
+        try:
+            op(id_)
+        except Exception as e:  # noqa: BLE001, PERF203
+            echo_error(f"{verb} {id_}: {e}")
+            has_errors = True
+    return has_errors
 
 
 class SortedGroup(TyperGroup):
@@ -220,6 +292,17 @@ def _find_dogcats_via_worktree() -> str | None:
         pass
 
     return None
+
+
+def resolve_dogcats_dir(dogcats_dir: str) -> str:
+    """Return ``dogcats_dir`` if it exists, otherwise walk up to find one.
+
+    Thin wrapper around :func:`find_dogcats_dir` for callers that have a
+    pre-resolved candidate dir and only want to walk up when it's missing.
+    """
+    if Path(dogcats_dir).is_dir():
+        return dogcats_dir
+    return find_dogcats_dir()
 
 
 def get_storage(
@@ -558,3 +641,58 @@ def load_open_inbox_proposals(
         return [p for p in proposals if ns_filter(p.namespace)]
     primary = get_issue_prefix(dogcats_dir)
     return [p for p in proposals if p.namespace == primary]
+
+
+def load_remote_inbox_proposals(
+    dogcats_dir: str,
+    namespace: str | None,
+    *,
+    all_namespaces: bool,
+    show_all: bool = False,
+) -> tuple[list[Any], str | None]:
+    """Load proposals from the remote inbox configured in ``inbox_remote``.
+
+    Returns ``(proposals, remote_path)``. When no remote is configured or
+    the remote dir is missing/unreadable, returns ``([], None)``. Filters
+    closed/tombstone unless ``show_all`` is True.
+    """
+    from pathlib import Path
+
+    from dogcat.config import get_issue_prefix, load_config
+    from dogcat.inbox import InboxStorage
+    from dogcat.models import ProposalStatus
+
+    try:
+        config = load_config(dogcats_dir)
+    except (ValueError, RuntimeError):
+        return [], None
+    remote_path = config.get("inbox_remote")
+    if not remote_path:
+        return [], None
+
+    remote_dogcats = Path(remote_path).expanduser()
+    if remote_dogcats.name != ".dogcats":
+        candidate = remote_dogcats / ".dogcats"
+        if candidate.is_dir():
+            remote_dogcats = candidate
+    if not remote_dogcats.is_dir():
+        return [], remote_path
+
+    ns_filter_value = (
+        None if all_namespaces else (namespace or get_issue_prefix(dogcats_dir))
+    )
+    try:
+        remote_inbox = InboxStorage(dogcats_dir=str(remote_dogcats))
+        proposals: list[Any] = remote_inbox.list(
+            include_tombstones=show_all,
+            namespace=ns_filter_value,
+        )
+    except (ValueError, RuntimeError):
+        return [], remote_path
+    if not show_all:
+        proposals = [
+            p
+            for p in proposals
+            if p.status not in (ProposalStatus.CLOSED, ProposalStatus.TOMBSTONE)
+        ]
+    return proposals, remote_path

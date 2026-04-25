@@ -17,7 +17,7 @@ from ._completions import (
 )
 from ._formatting import format_issue_brief
 from ._helpers import apply_common_filters, get_storage
-from ._json_state import echo_error, is_json_output
+from ._json_state import echo_error, is_json, set_json
 
 
 def _extract_snippet(text: str, pattern: re.Pattern[str], context: int = 40) -> str:
@@ -130,6 +130,7 @@ def register(app: typer.Typer) -> None:
             dcat search "bug" --type bug     # Find bug issues mentioning bug
             dcat search "API" -c             # Case-sensitive search
         """
+        set_json(json_output)
         from dogcat.models import Issue
 
         try:
@@ -197,7 +198,7 @@ def register(app: typer.Typer) -> None:
             # Sort by priority
             matches = sorted(matches, key=lambda m: (m[0].priority, m[0].id))
 
-            if is_json_output(json_output):
+            if is_json():
                 from dogcat.models import issue_to_dict
 
                 output = [issue_to_dict(issue) for issue, _ in matches]

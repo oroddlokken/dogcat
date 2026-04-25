@@ -29,7 +29,7 @@ from dogcat.constants import (
     TYPE_OPTIONS,
     parse_labels,
 )
-from dogcat.models import DependencyType
+from dogcat.models import DependencyType, is_manual_issue
 from dogcat.tui.shared import SHARED_CSS, make_issue_label
 
 if TYPE_CHECKING:
@@ -352,10 +352,7 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
                 )
                 yield Checkbox(
                     "Manual",
-                    value=bool(
-                        self._issue.metadata.get("manual")
-                        or self._issue.metadata.get("no_agent"),
-                    ),
+                    value=is_manual_issue(self._issue.metadata),
                     id="manual-input",
                     disabled=ro,
                 )
@@ -800,9 +797,7 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
             updates["design"] = new_design
 
         manual_val = self.query_one("#manual-input", Checkbox).value
-        was_manual = bool(
-            self._issue.metadata.get("manual") or self._issue.metadata.get("no_agent"),
-        )
+        was_manual = is_manual_issue(self._issue.metadata)
         if manual_val != was_manual:
             new_metadata = dict(self._issue.metadata) if self._issue.metadata else {}
             if manual_val:

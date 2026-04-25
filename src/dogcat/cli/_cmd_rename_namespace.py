@@ -14,7 +14,7 @@ from dogcat.config import (
 
 from ._completions import complete_namespaces
 from ._helpers import get_storage
-from ._json_state import echo_error, is_json_output
+from ._json_state import echo_error, is_json, set_json
 
 
 def register(app: typer.Typer) -> None:
@@ -37,7 +37,7 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Rename a namespace, updating all issues and references."""
         try:
-            is_json_output(json_output)  # sync local flag for echo_error
+            set_json(json_output)
 
             if old_namespace == new_namespace:
                 echo_error("Old and new namespace are the same")
@@ -93,7 +93,7 @@ def register(app: typer.Typer) -> None:
             if config_changed:
                 save_config(actual_dir, config)
 
-            if is_json_output(json_output):
+            if is_json():
                 result = {
                     "old_namespace": old_namespace,
                     "new_namespace": new_namespace,

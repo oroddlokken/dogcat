@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 import orjson
 import typer
 
-from dogcat.config import get_issue_prefix, get_namespace_filter, load_config
+from dogcat.config import get_namespace_filter, load_config
 from dogcat.constants import MAX_PREVIEW_SUBTASKS, parse_labels
 
 from ._completions import (
@@ -29,8 +29,15 @@ from ._formatting import (
     format_proposal_brief,
     get_legend,
 )
-from ._helpers import _make_alias, get_storage, load_open_inbox_proposals
-from ._json_state import echo_error, is_json_output
+from ._helpers import (
+    _make_alias,
+    apply_common_filters,
+    get_storage,
+    load_open_inbox_proposals,
+    load_remote_inbox_proposals,
+    with_ns_shim,
+)
+from ._json_state import echo_error, is_json, set_json
 
 if TYPE_CHECKING:
     from dogcat.models import Issue
@@ -290,13 +297,13 @@ def register(app: typer.Typer) -> None:
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """List issues with optional filters."""
+        set_json(json_output)
         try:
-            # Validate mutually exclusive options early
+            # --tree/--table check stays inline — apply_common_filters doesn't
+            # know about output format. The agent/manual + comments checks are
+            # owned by apply_common_filters and run there.
             if tree and table:
                 echo_error("--tree and --table are mutually exclusive")
-                raise typer.Exit(1)
-            if agent_only and manual:
-                echo_error("--agent-only and --manual are mutually exclusive")
                 raise typer.Exit(1)
             if has_comments and without_comments:
                 echo_error(
@@ -382,24 +389,13 @@ def register(app: typer.Typer) -> None:
                     i for i in issues if i.status.value in ("open", "in_progress")
                 ]
 
-            # Filter out manual issues if requested
-            if agent_only:
-                issues = [
-                    i
-                    for i in issues
-                    if not (i.metadata.get("manual") or i.metadata.get("no_agent"))
-                ]
-            elif manual:
-                issues = [
-                    i
-                    for i in issues
-                    if i.metadata.get("manual") or i.metadata.get("no_agent")
-                ]
-
-            if has_comments:
-                issues = [i for i in issues if i.comments]
-            elif without_comments:
-                issues = [i for i in issues if not i.comments]
+            issues = apply_common_filters(
+                issues,
+                agent_only=agent_only,
+                manual_only=manual,
+                has_comments=has_comments,
+                without_comments=without_comments,
+            )
 
             # Apply date-based filtering for closed issues
             if closed_after or closed_before:
@@ -460,7 +456,7 @@ def register(app: typer.Typer) -> None:
             # Sort by priority (lower number = higher priority)
             issues = sorted(issues, key=lambda i: (i.priority, i.id))
 
-            if is_json_output(json_output):
+            if is_json():
                 if limit:
                     issues = issues[:limit]
                 from dogcat.models import issue_to_dict
@@ -585,74 +581,30 @@ def register(app: typer.Typer) -> None:
                 typer.echo(format_proposal_brief(proposal))
 
         # Remote inbox proposals
-        try:
-            from pathlib import Path
-
-            from dogcat.inbox import InboxStorage as _InboxStorage
-
-            config = load_config(dogcats_dir)
-            remote_path = config.get("inbox_remote")
-            if not remote_path:
-                return
-
-            remote_dogcats = Path(remote_path).expanduser()
-            if remote_dogcats.name != ".dogcats":
-                candidate = remote_dogcats / ".dogcats"
-                if candidate.is_dir():
-                    remote_dogcats = candidate
-            if not remote_dogcats.is_dir():
-                return
-
-            current_ns = get_issue_prefix(dogcats_dir)
-            remote_inbox = _InboxStorage(dogcats_dir=str(remote_dogcats))
-            remote_proposals = [
-                p
-                for p in remote_inbox.list(
-                    include_tombstones=False,
-                    namespace=current_ns,
-                )
-                if not p.is_closed()
-            ]
-
-            if not all_namespaces and namespace:
-                remote_proposals = [
-                    p for p in remote_proposals if p.namespace == namespace
-                ]
-
-            if remote_proposals:
-                typer.echo(f"\nRemote Inbox ({len(remote_proposals)}) [{remote_path}]:")
-                for proposal in remote_proposals:
-                    typer.echo(format_proposal_brief(proposal))
-        except (ValueError, RuntimeError):
-            pass  # Remote inbox not available — silently skip
+        remote_proposals, remote_path = load_remote_inbox_proposals(
+            dogcats_dir, namespace, all_namespaces=all_namespaces
+        )
+        if not all_namespaces and namespace:
+            remote_proposals = [p for p in remote_proposals if p.namespace == namespace]
+        if remote_proposals and remote_path:
+            typer.echo(f"\nRemote Inbox ({len(remote_proposals)}) [{remote_path}]:")
+            for proposal in remote_proposals:
+                typer.echo(format_proposal_brief(proposal))
 
     @app.command()
+    @with_ns_shim
     def show(
         issue_id: str = typer.Argument(
             ...,
             help="Issue ID",
             autocompletion=complete_issue_ids,
         ),
-        all_namespaces: bool = typer.Option(  # noqa: ARG001
-            False,
-            "--all-namespaces",
-            "--all-ns",
-            "-A",
-            help="Complete from all namespaces",
-            hidden=True,
-        ),
-        namespace: str | None = typer.Option(  # noqa: ARG001
-            None,
-            "--namespace",
-            help="Complete from namespace",
-            hidden=True,
-        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Show details of a specific issue."""
         try:
-            is_json_output(json_output)  # sync local flag for echo_error
+            set_json(json_output)
             storage = get_storage(dogcats_dir)
             issue = storage.get(issue_id)
 
@@ -660,7 +612,7 @@ def register(app: typer.Typer) -> None:
                 echo_error(f"Issue {issue_id} not found")
                 raise typer.Exit(1)
 
-            if is_json_output(json_output):
+            if is_json():
                 from dogcat.models import issue_to_dict
 
                 typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
@@ -745,25 +697,12 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(1)
 
     @app.command()
+    @with_ns_shim
     def edit(
         issue_id: str | None = typer.Argument(
             None,
             help="Issue ID (opens picker if omitted)",
             autocompletion=complete_issue_ids,
-        ),
-        all_namespaces: bool = typer.Option(  # noqa: ARG001
-            False,
-            "--all-namespaces",
-            "--all-ns",
-            "-A",
-            help="Complete from all namespaces",
-            hidden=True,
-        ),
-        namespace: str | None = typer.Option(  # noqa: ARG001
-            None,
-            "--namespace",
-            help="Complete from namespace",
-            hidden=True,
         ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
@@ -799,23 +738,12 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(1)
 
     @app.command(name="e", hidden=True)
+    @with_ns_shim
     def edit_alias(
         issue_id: str | None = typer.Argument(
             None,
             help="Issue ID (opens picker if omitted)",
             autocompletion=complete_issue_ids,
-        ),
-        all_namespaces: bool = typer.Option(  # noqa: ARG001
-            False,
-            "--all-namespaces",
-            "--all-ns",
-            "-A",
-            hidden=True,
-        ),
-        namespace: str | None = typer.Option(  # noqa: ARG001
-            None,
-            "--namespace",
-            hidden=True,
         ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:

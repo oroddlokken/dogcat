@@ -29,7 +29,7 @@ from ._completions import (
     complete_types,
 )
 from ._helpers import apply_common_filters, get_storage
-from ._json_state import echo_error, is_json_output
+from ._json_state import echo_error, is_json, set_json
 
 # Ordered keys for each grouping dimension
 _STATUS_ORDER = [v for _, v in STATUS_OPTIONS]
@@ -218,6 +218,7 @@ def register(app: typer.Typer) -> None:
             dcat chart --by label     # label/tag only
             dcat chart --all          # include closed issues
         """
+        set_json(json_output)
         try:
             categories = _ALL_BY_VALUES if by is None or by == "all" else (by,)
 
@@ -251,7 +252,7 @@ def register(app: typer.Typer) -> None:
 
             total = len(issues)
 
-            if is_json_output(json_output):
+            if is_json():
                 results: dict[str, dict[str, int]] = {}
                 for cat in categories:
                     counts, order, _, _, _ = _chart_data(cat, issues)

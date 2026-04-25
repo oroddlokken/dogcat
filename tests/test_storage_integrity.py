@@ -46,7 +46,7 @@ class TestFsyncInCompaction:
             fsync_fds.append(fd)
             original_fsync(fd)
 
-        with patch("dogcat.storage.os.fsync", side_effect=tracking_fsync):
+        with patch("dogcat._jsonl_io.os.fsync", side_effect=tracking_fsync):
             storage._save()
 
         assert len(fsync_fds) >= 1, "os.fsync should be called during _save()"
@@ -83,7 +83,7 @@ class TestFsyncInAppend:
             fsync_called = True
             original_fsync(fd)
 
-        with patch("dogcat.storage.os.fsync", side_effect=tracking_fsync):
+        with patch("dogcat._jsonl_io.os.fsync", side_effect=tracking_fsync):
             storage.create(Issue(id="new", title="New"))
 
         assert fsync_called

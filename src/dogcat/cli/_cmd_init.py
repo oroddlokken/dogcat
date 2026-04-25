@@ -11,7 +11,7 @@ from dogcat.config import load_shared_config, save_config, set_issue_prefix
 from dogcat.constants import DOGCATRC_FILENAME
 
 from ._helpers import get_storage
-from ._json_state import echo_error, is_json_output
+from ._json_state import echo_error, is_json, set_json
 
 
 def _ensure_gitignore_entry(entry: str, *, quiet: bool = False) -> None:
@@ -85,6 +85,7 @@ def register(app: typer.Typer) -> None:
         Use --use-existing-folder to link to an existing .dogcats directory
         without reinitializing it. Only creates the .dogcatrc file.
         """
+        set_json(json_output)
         if use_existing is not None and external_dir is not None:
             echo_error("--dir and --use-existing-folder are mutually exclusive")
             raise SystemExit(1)
@@ -167,7 +168,7 @@ def register(app: typer.Typer) -> None:
 
             _ensure_gitignore_entry(".dogcats/", quiet=False)
 
-        if is_json_output(json_output):
+        if is_json():
             output = {
                 "status": "initialized",
                 "namespace": namespace,

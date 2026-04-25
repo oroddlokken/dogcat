@@ -13,7 +13,7 @@ from dogcat.constants import (
     STATUS_SYMBOLS,
     TYPE_COLORS,
 )
-from dogcat.models import Status
+from dogcat.models import Status, is_manual_issue
 
 if TYPE_CHECKING:
     from rich.table import Table
@@ -191,7 +191,7 @@ def format_issue_brief(
                 f"[snoozed until {until_date}]", fg=snoozed_color
             )
     manual_str = ""
-    if issue.metadata.get("manual") or issue.metadata.get("no_agent"):
+    if is_manual_issue(issue.metadata):
         manual_color = "bright_black" if is_closed else "yellow"
         manual_str = " " + typer.style("[manual]", fg=manual_color)
     blocked_by_str = ""
@@ -554,11 +554,7 @@ def _add_issue_row(
         )
 
     labels_str = ", ".join(escape(lbl) for lbl in issue.labels) if issue.labels else ""
-    manual_str = (
-        " [yellow]\\[manual][/]"
-        if issue.metadata.get("manual") or issue.metadata.get("no_agent")
-        else ""
-    )
+    manual_str = " [yellow]\\[manual][/]" if is_manual_issue(issue.metadata) else ""
     hidden_suffix = _hidden_subtask_suffix(issue, hidden_counts, preview_subtasks)
 
     title_text = escape(issue.title)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -104,6 +105,38 @@ class _BaseEventLog:
             f.write(orjson.dumps(data))
             f.write(b"\n")
             f.flush()
+
+    def emit(
+        self,
+        event_type: str,
+        full_id: str,
+        timestamp: str,
+        title: str | None,
+        changes: dict[str, dict[str, Any]],
+        by: str | None = None,
+    ) -> None:
+        """Best-effort append of an event derived from the given fields.
+
+        No-op if ``changes`` is empty. Failures are logged at DEBUG and
+        swallowed so the caller's primary write path is never broken by
+        an event-log issue.
+        """
+        if not changes:
+            return
+        event = EventRecord(
+            event_type=event_type,
+            issue_id=full_id,
+            timestamp=timestamp,
+            by=by,
+            title=title,
+            changes=changes,
+        )
+        try:
+            self.append(event)
+        except (OSError, RuntimeError):
+            logging.getLogger(__name__).debug(
+                "Failed to write event for %s", full_id, exc_info=True
+            )
 
     def read(
         self,

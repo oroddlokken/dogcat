@@ -434,10 +434,10 @@ def _load_issues_at_ref(
 
 
 def _field_value(value: Any) -> Any:
-    """Normalize a field value for comparison."""
-    if hasattr(value, "value"):
-        return value.value
-    return value
+    """Normalize a field value for comparison (delegates to _diff)."""
+    from dogcat._diff import field_value
+
+    return field_value(value)
 
 
 def detect_concurrent_edits(

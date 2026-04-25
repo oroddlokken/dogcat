@@ -10,14 +10,15 @@ import typer
 from dogcat.config import get_issue_prefix, load_config
 
 from ._completions import complete_issue_ids, complete_labels, complete_subcommands
-from ._helpers import get_storage
-from ._json_state import echo_error, is_json_output
+from ._helpers import get_storage, with_ns_shim
+from ._json_state import echo_error, is_json, set_json
 
 
 def register(app: typer.Typer) -> None:
     """Register label and namespace commands."""
 
     @app.command()
+    @with_ns_shim
     def label(
         issue_id: str = typer.Argument(
             ...,
@@ -38,23 +39,11 @@ def register(app: typer.Typer) -> None:
         ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         by: str = typer.Option(None, "--by", help="Who is managing labels"),
-        all_namespaces: bool = typer.Option(  # noqa: ARG001
-            False,
-            "--all-namespaces",
-            "--all-ns",
-            "-A",
-            hidden=True,
-        ),
-        namespace: str | None = typer.Option(  # noqa: ARG001
-            None,
-            "--namespace",
-            hidden=True,
-        ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Manage issue labels."""
         try:
-            is_json_output(json_output)  # sync local flag for echo_error
+            set_json(json_output)
             storage = get_storage(dogcats_dir)
 
             if subcommand == "add":
@@ -110,7 +99,7 @@ def register(app: typer.Typer) -> None:
                     echo_error(f"Issue {issue_id} not found")
                     raise typer.Exit(1)
 
-                if is_json_output(json_output):
+                if is_json():
                     typer.echo(orjson.dumps(issue.labels).decode())
                 else:
                     if issue.labels:
@@ -134,6 +123,7 @@ def register(app: typer.Typer) -> None:
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """List all labels used across issues with counts."""
+        set_json(json_output)
         try:
             storage = get_storage(dogcats_dir)
             issues = storage.list()
@@ -145,7 +135,7 @@ def register(app: typer.Typer) -> None:
                 for lbl in issue.labels:
                     label_counts[lbl] = label_counts.get(lbl, 0) + 1
 
-            if is_json_output(json_output):
+            if is_json():
                 result = [
                     {"label": lbl, "count": count}
                     for lbl, count in sorted(label_counts.items())
@@ -170,6 +160,7 @@ def register(app: typer.Typer) -> None:
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """List all namespaces used across issues with counts."""
+        set_json(json_output)
         try:
             from dogcat.storage import get_namespaces
 
@@ -192,7 +183,7 @@ def register(app: typer.Typer) -> None:
                     return "hidden" if ns in hidden else "visible"
                 return ""
 
-            if is_json_output(json_output):
+            if is_json():
                 result = [
                     {
                         "namespace": ns,

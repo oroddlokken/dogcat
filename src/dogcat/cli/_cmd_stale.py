@@ -22,7 +22,7 @@ from ._formatting import (
     format_issue_tree,
 )
 from ._helpers import apply_common_filters, get_storage
-from ._json_state import echo_error, is_json_output
+from ._json_state import echo_error, is_json, set_json
 
 
 def _parse_duration_arg(value: str) -> timedelta:
@@ -144,6 +144,7 @@ def register(app: typer.Typer) -> None:
             dcat stale 3h           # shorthand for --hours 3
             dcat stale 1d12h        # 1 day and 12 hours
         """
+        set_json(json_output)
         try:
             # Determine threshold
             if duration_arg and (days is not None or hours is not None):
@@ -207,7 +208,7 @@ def register(app: typer.Typer) -> None:
             if limit:
                 issues = issues[:limit]
 
-            if is_json_output(json_output):
+            if is_json():
                 from dogcat.models import issue_to_dict
 
                 output = [issue_to_dict(issue) for issue in issues]

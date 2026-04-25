@@ -12,7 +12,7 @@ from dogcat.models import Issue, Status, classify_record
 
 from ._completions import complete_durations, complete_namespaces
 from ._helpers import get_storage
-from ._json_state import echo_error, is_json_output
+from ._json_state import echo_error, is_json, set_json
 
 
 def _archive_inbox(
@@ -183,6 +183,7 @@ def register(app: typer.Typer) -> None:
             dcat archive --namespace myproj   # Archive only 'myproj' namespace
             dcat archive --yes                # Skip confirmation prompt
         """
+        set_json(json_output)
         import re
         import tempfile
         from datetime import timedelta
@@ -502,7 +503,7 @@ def register(app: typer.Typer) -> None:
                 days,
             )
 
-            if is_json_output(json_output):
+            if is_json():
                 output: dict[str, object] = {
                     "archived": len(archivable),
                     "skipped": len(skipped),

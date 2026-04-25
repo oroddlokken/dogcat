@@ -11,14 +11,15 @@ from ._completions import (
     complete_link_types,
     complete_subcommands,
 )
-from ._helpers import get_storage
-from ._json_state import echo_error, is_json_output
+from ._helpers import get_storage, with_ns_shim
+from ._json_state import echo_error, is_json, set_json
 
 
 def register(app: typer.Typer) -> None:
     """Register dep and link commands."""
 
     @app.command("dep")
+    @with_ns_shim
     def dependency(
         issue_id: str = typer.Argument(
             ...,
@@ -46,21 +47,10 @@ def register(app: typer.Typer) -> None:
         ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         by: str = typer.Option(None, "--by", help="Who is making this change"),
-        all_namespaces: bool = typer.Option(  # noqa: ARG001
-            False,
-            "--all-namespaces",
-            "--all-ns",
-            "-A",
-            hidden=True,
-        ),
-        namespace: str | None = typer.Option(  # noqa: ARG001
-            None,
-            "--namespace",
-            hidden=True,
-        ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Manage issue dependencies."""
+        set_json(json_output)
         try:
             storage = get_storage(dogcats_dir)
 
@@ -91,7 +81,7 @@ def register(app: typer.Typer) -> None:
             elif subcommand == "list":
                 deps = storage.get_dependencies(issue_id)
 
-                if is_json_output(json_output):
+                if is_json():
                     output = [
                         {
                             "issue_id": dep.issue_id,
@@ -123,6 +113,7 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(1)
 
     @app.command("link")
+    @with_ns_shim
     def link(
         issue_id: str = typer.Argument(
             ...,
@@ -150,21 +141,10 @@ def register(app: typer.Typer) -> None:
         ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         by: str = typer.Option(None, "--by", help="Who is making this change"),
-        all_namespaces: bool = typer.Option(  # noqa: ARG001
-            False,
-            "--all-namespaces",
-            "--all-ns",
-            "-A",
-            hidden=True,
-        ),
-        namespace: str | None = typer.Option(  # noqa: ARG001
-            None,
-            "--namespace",
-            hidden=True,
-        ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Manage issue links (general relationships)."""
+        set_json(json_output)
         try:
             storage = get_storage(dogcats_dir)
 
@@ -195,7 +175,7 @@ def register(app: typer.Typer) -> None:
                 links = storage.get_links(issue_id)
                 incoming = storage.get_incoming_links(issue_id)
 
-                if is_json_output(json_output):
+                if is_json():
                     output = {
                         "outgoing": [
                             {

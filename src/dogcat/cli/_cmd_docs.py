@@ -17,7 +17,7 @@ from dogcat.constants import (
 )
 
 from ._helpers import SortedGroup, find_dogcats_dir
-from ._json_state import echo_error, is_json_output
+from ._json_state import echo_error, is_json, set_json
 
 # Sub-app for 'dcat git' subcommands
 git_app = typer.Typer(
@@ -236,12 +236,13 @@ def register(app: typer.Typer) -> None:
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     ) -> None:
         """Check git-related configuration for dogcat."""
+        set_json(json_output)
         import orjson
 
         dogcats_dir = find_dogcats_dir()
         config = load_config(dogcats_dir)
         if config.get("git_tracking") is False:
-            if is_json_output(json_output):
+            if is_json():
                 typer.echo(
                     orjson.dumps(
                         {"status": "skipped", "reason": "git_tracking is disabled"},
@@ -257,7 +258,7 @@ def register(app: typer.Typer) -> None:
         all_passed, checks = _run_git_checks()
 
         # Output
-        if is_json_output(json_output):
+        if is_json():
             output_data = {
                 "status": "ok" if all_passed else "issues_found",
                 "checks": {

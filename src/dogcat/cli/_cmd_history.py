@@ -12,7 +12,7 @@ from dogcat.config import extract_prefix, get_namespace_filter
 from ._completions import complete_issue_ids
 from ._formatting import format_event, get_event_legend
 from ._helpers import get_storage
-from ._json_state import echo_error, is_json_output
+from ._json_state import echo_error, is_json, set_json
 
 if TYPE_CHECKING:
     from dogcat.event_log import EventRecord
@@ -93,6 +93,7 @@ def register(app: typer.Typer) -> None:
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Show change history as a chronological timeline."""
+        set_json(json_output)
         try:
             from dogcat.event_log import EventLog, InboxEventLog, _serialize
 
@@ -158,7 +159,7 @@ def register(app: typer.Typer) -> None:
                             )
                         event.title = inbox_cache.get(event.issue_id)
 
-            if is_json_output(json_output):
+            if is_json():
                 output = [_serialize(e) for e in events]
                 typer.echo(orjson.dumps(output).decode())
             elif not events:

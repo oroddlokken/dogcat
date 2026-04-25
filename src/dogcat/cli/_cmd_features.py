@@ -7,7 +7,7 @@ import typer
 
 from dogcat.feature_flags import FeatureFlag, _env_var_name, feature_enabled
 
-from ._json_state import is_json_output
+from ._json_state import is_json, set_json
 
 
 def register(app: typer.Typer) -> None:
@@ -18,11 +18,12 @@ def register(app: typer.Typer) -> None:
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     ) -> None:
         """List all feature flags with their env var and current status."""
+        set_json(json_output)
         if not list(FeatureFlag):
             typer.echo("No feature flags defined")
             return
 
-        if is_json_output(json_output):
+        if is_json():
             output = [
                 {
                     "flag": flag.value,

@@ -23,7 +23,7 @@ from dogcat.idgen import (
 )
 
 from ._helpers import find_dogcats_dir, get_storage, is_gitignored
-from ._json_state import is_json_output
+from ._json_state import is_json, set_json
 from ._validate import detect_concurrent_edits, validate_inbox_jsonl, validate_jsonl
 
 
@@ -58,6 +58,7 @@ def register(app: typer.Typer) -> None:
         the active ID-length thresholds.
         Exit code 0 = all OK, 1 = issues found.
         """
+        set_json(json_output)
         import shutil
 
         checks: dict[str, dict[str, Any]] = {}
@@ -453,7 +454,7 @@ def register(app: typer.Typer) -> None:
                 pass  # Not in a git repo or path not relative
 
         # Output results
-        if is_json_output(json_output):
+        if is_json():
             output_data: dict[str, Any] = {
                 "status": "ok" if all_passed else "issues_found",
                 "checks": {

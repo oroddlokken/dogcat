@@ -20,7 +20,7 @@ from ._completions import (
     complete_types,
 )
 from ._helpers import apply_common_filters, get_storage
-from ._json_state import echo_error, is_json_output
+from ._json_state import echo_error, is_json, set_json
 
 
 def register(app: typer.Typer) -> None:
@@ -43,6 +43,7 @@ def register(app: typer.Typer) -> None:
         tombstone status from their storage files. Use --dry-run to preview
         what would be removed.
         """
+        set_json(json_output)
         try:
             from dogcat.inbox import InboxStorage
 
@@ -63,7 +64,7 @@ def register(app: typer.Typer) -> None:
                 inbox = None
 
             if not tombstones and not inbox_tombstones:
-                if is_json_output(json_output):
+                if is_json():
                     typer.echo(
                         orjson.dumps(
                             {
@@ -79,7 +80,7 @@ def register(app: typer.Typer) -> None:
                 return
 
             if dry_run:
-                if is_json_output(json_output):
+                if is_json():
                     output: dict[str, Any] = {
                         "dry_run": True,
                         "count": len(tombstones),
@@ -112,7 +113,7 @@ def register(app: typer.Typer) -> None:
                     if inbox is not None and inbox_tombstones
                     else []
                 )
-                if is_json_output(json_output):
+                if is_json():
                     output = {
                         "pruned": len(pruned_ids),
                         "ids": list(pruned_ids),
@@ -376,6 +377,7 @@ def register(app: typer.Typer) -> None:
         Displays all valid values for issue fields, useful for
         understanding what options are available.
         """
+        set_json(json_output)
         from dogcat.constants import (
             INBOX_STATUS_OPTIONS,
             PRIORITY_OPTIONS,
@@ -385,7 +387,7 @@ def register(app: typer.Typer) -> None:
             TYPE_SHORTHANDS,
         )
 
-        if is_json_output(json_output):
+        if is_json():
             output = {
                 "types": [
                     {"label": label, "value": value} for label, value in TYPE_OPTIONS
@@ -456,6 +458,7 @@ def register(app: typer.Typer) -> None:
             dcat status         # Show prefix and counts
             dcat status --json  # Output as JSON
         """
+        set_json(json_output)
         try:
             storage = get_storage(dogcats_dir)
             # Get the actual dogcats_dir from storage (in case it was found by search)
@@ -488,7 +491,7 @@ def register(app: typer.Typer) -> None:
             except (ValueError, RuntimeError):
                 pass  # No inbox file or invalid — just skip
 
-            if is_json_output(json_output):
+            if is_json():
                 output: dict[str, object] = {
                     "prefix": prefix,
                     "total": total,
@@ -535,6 +538,7 @@ def register(app: typer.Typer) -> None:
         intermediate states. Should be run once after upgrading to populate
         the event log for existing issues.
         """
+        set_json(json_output)
         try:
             from dogcat.constants import TRACKED_FIELDS
             from dogcat.event_log import EventLog, EventRecord, _serialize
@@ -653,7 +657,7 @@ def register(app: typer.Typer) -> None:
                     events_generated += 1
                     issue_states[full_id] = new_state
 
-            if is_json_output(json_output):
+            if is_json():
                 output = {
                     "dry_run": dry_run,
                     "events_generated": events_generated,

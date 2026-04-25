@@ -13,7 +13,7 @@ from dogcat.constants import TRACKED_FIELDS, TRACKED_PROPOSAL_FIELDS
 
 from ._formatting import format_event, get_event_legend
 from ._helpers import get_storage
-from ._json_state import echo_error, is_json_output
+from ._json_state import echo_error, is_json, set_json
 
 
 def _get_git_root(cwd: Path | None = None) -> Path | None:
@@ -185,7 +185,7 @@ def register(app: typer.Typer) -> None:
         try:
             from dogcat.event_log import EventRecord, _serialize, diff_metadata
 
-            is_json_output(json_output)  # sync local flag for echo_error
+            set_json(json_output)
             if staged and unstaged:
                 echo_error("--staged and --unstaged are mutually exclusive")
                 raise typer.Exit(1)
@@ -383,7 +383,7 @@ def register(app: typer.Typer) -> None:
             # Sort oldest first (chronological)
             events.sort(key=lambda e: e.timestamp)
 
-            if is_json_output(json_output):
+            if is_json():
                 output = [_serialize(e) for e in events]
                 typer.echo(orjson.dumps(output).decode())
             elif not events:

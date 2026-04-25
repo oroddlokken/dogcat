@@ -31,7 +31,7 @@ from ._helpers import (
     get_default_operator,
     get_storage,
 )
-from ._json_state import echo_error, is_json_output
+from ._json_state import echo_error, is_json, set_json
 
 _CREATE_DOC = """\
 Create a new issue.
@@ -204,6 +204,7 @@ def register(app: typer.Typer) -> None:
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Create a new issue (implementation)."""
+        set_json(json_output)
         try:
             # Merge --body into --description (hidden alias)
             if body is not None:
@@ -375,7 +376,7 @@ def register(app: typer.Typer) -> None:
                     created_by=created_by,
                 )
 
-            if is_json_output(json_output):
+            if is_json():
                 from dogcat.models import issue_to_dict
 
                 typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
@@ -460,6 +461,7 @@ def register(app: typer.Typer) -> None:
             dcat new 0 b "Critical bug"        # Priority 0 + type bug + title
             dcat new d "Initial thoughts"      # Draft status + title
         """
+        set_json(json_output)
         try:
             title = ""
             priority_sh: int | None = None
@@ -487,7 +489,7 @@ def register(app: typer.Typer) -> None:
                 status=status_sh,
             )
             if created is not None:
-                if is_json_output(json_output):
+                if is_json():
                     from dogcat.models import issue_to_dict
 
                     typer.echo(orjson.dumps(issue_to_dict(created)).decode())

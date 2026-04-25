@@ -10,8 +10,8 @@ import typer
 from dogcat.models import Status
 
 from ._completions import complete_issue_ids
-from ._helpers import get_default_operator, get_storage
-from ._json_state import echo_error, is_json_output
+from ._helpers import apply_to_each, get_default_operator, get_storage, with_ns_shim
+from ._json_state import is_json, set_json
 
 if TYPE_CHECKING:
     from dogcat.storage import JSONLStorage
@@ -19,33 +19,6 @@ if TYPE_CHECKING:
 
 def register(app: typer.Typer) -> None:
     """Register close, delete, and remove commands."""
-
-    def _close_one(
-        storage: JSONLStorage,
-        issue_id: str,
-        reason: str | None,
-        closed_by: str | None,
-        json_output: bool,
-    ) -> tuple[bool, str | None]:
-        """Close a single issue. Returns (had_error, parent_id)."""
-        try:
-            issue = storage.close(
-                issue_id,
-                reason=reason,
-                closed_by=closed_by,
-            )
-
-            if is_json_output(json_output):
-                from dogcat.models import issue_to_dict
-
-                typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
-            else:
-                typer.echo(f"✓ Closed {issue.full_id}: {issue.title}")
-        except (ValueError, Exception) as e:
-            echo_error(f"closing {issue_id}: {e}")
-            return True, None
-        else:
-            return False, issue.parent
 
     def _check_epic_completion(
         storage: JSONLStorage,
@@ -66,6 +39,7 @@ def register(app: typer.Typer) -> None:
                 )
 
     @app.command()
+    @with_ns_shim
     def close(
         issue_ids: list[str] = typer.Argument(  # noqa: B008
             ...,
@@ -84,71 +58,35 @@ def register(app: typer.Typer) -> None:
             "--by",
             help="Who is closing this",
         ),
-        all_namespaces: bool = typer.Option(  # noqa: ARG001
-            False,
-            "--all-namespaces",
-            "--all-ns",
-            "-A",
-            hidden=True,
-        ),
-        namespace: str | None = typer.Option(  # noqa: ARG001
-            None,
-            "--namespace",
-            hidden=True,
-        ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Close one or more issues."""
+        set_json(json_output)
         storage = get_storage(dogcats_dir)
         final_closed_by = closed_by if closed_by is not None else get_default_operator()
-        has_errors = False
         parent_ids: set[str] = set()
 
-        for issue_id in issue_ids:
-            had_error, parent_id = _close_one(
-                storage,
-                issue_id,
-                reason,
-                final_closed_by,
-                json_output,
-            )
-            has_errors = had_error or has_errors
-            if parent_id:
-                parent_ids.add(parent_id)
+        def _close(issue_id: str) -> None:
+            issue = storage.close(issue_id, reason=reason, closed_by=final_closed_by)
+            if issue.parent:
+                parent_ids.add(issue.parent)
+            if is_json():
+                from dogcat.models import issue_to_dict
 
-        if parent_ids and not is_json_output(json_output):
+                typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
+            else:
+                typer.echo(f"✓ Closed {issue.full_id}: {issue.title}")
+
+        has_errors = apply_to_each(issue_ids, _close, verb="closing")
+
+        if parent_ids and not is_json():
             _check_epic_completion(storage, parent_ids)
 
         if has_errors:
             raise typer.Exit(1)
 
-    def _delete_one(
-        storage: JSONLStorage,
-        issue_id: str,
-        reason: str | None,
-        deleted_by: str | None,
-        json_output: bool,
-    ) -> bool:
-        """Delete a single issue. Returns True if an error occurred."""
-        try:
-            deleted_issue = storage.delete(
-                issue_id,
-                reason=reason,
-                deleted_by=deleted_by,
-            )
-
-            if is_json_output(json_output):
-                from dogcat.models import issue_to_dict
-
-                typer.echo(orjson.dumps(issue_to_dict(deleted_issue)).decode())
-            else:
-                typer.echo(f"✓ Deleted {deleted_issue.full_id}: {deleted_issue.title}")
-        except (ValueError, Exception) as e:
-            echo_error(f"deleting {issue_id}: {e}")
-            return True
-        return False
-
     @app.command()
+    @with_ns_shim
     def delete(
         issue_ids: list[str] = typer.Argument(  # noqa: B008
             ...,
@@ -167,18 +105,6 @@ def register(app: typer.Typer) -> None:
             "--by",
             help="Who is deleting this",
         ),
-        all_namespaces: bool = typer.Option(  # noqa: ARG001
-            False,
-            "--all-namespaces",
-            "--all-ns",
-            "-A",
-            hidden=True,
-        ),
-        namespace: str | None = typer.Option(  # noqa: ARG001
-            None,
-            "--namespace",
-            hidden=True,
-        ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
         """Delete one or more issues (creates tombstone).
@@ -187,28 +113,28 @@ def register(app: typer.Typer) -> None:
         removing them from the database. Issues will be hidden from normal lists
         but can still be viewed with --all flag.
         """
+        set_json(json_output)
         storage = get_storage(dogcats_dir)
         final_deleted_by = (
             deleted_by if deleted_by is not None else get_default_operator()
         )
-        has_errors = False
 
-        for issue_id in issue_ids:
-            has_errors = (
-                _delete_one(
-                    storage,
-                    issue_id,
-                    reason,
-                    final_deleted_by,
-                    json_output,
-                )
-                or has_errors
+        def _delete(issue_id: str) -> None:
+            deleted = storage.delete(
+                issue_id, reason=reason, deleted_by=final_deleted_by
             )
+            if is_json():
+                from dogcat.models import issue_to_dict
 
-        if has_errors:
+                typer.echo(orjson.dumps(issue_to_dict(deleted)).decode())
+            else:
+                typer.echo(f"✓ Deleted {deleted.full_id}: {deleted.title}")
+
+        if apply_to_each(issue_ids, _delete, verb="deleting"):
             raise typer.Exit(1)
 
     @app.command(name="remove", hidden=True)
+    @with_ns_shim
     def remove(
         issue_id: str = typer.Argument(
             ...,
@@ -221,18 +147,6 @@ def register(app: typer.Typer) -> None:
             None,
             "--by",
             help="Who is deleting this",
-        ),
-        all_namespaces: bool = typer.Option(  # noqa: ARG001
-            False,
-            "--all-namespaces",
-            "--all-ns",
-            "-A",
-            hidden=True,
-        ),
-        namespace: str | None = typer.Option(  # noqa: ARG001
-            None,
-            "--namespace",
-            hidden=True,
         ),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:

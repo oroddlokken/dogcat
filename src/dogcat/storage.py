@@ -4,17 +4,18 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-import os
 import subprocess
-import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import IO, TYPE_CHECKING, Any
 
 import orjson
 
 from dogcat._compaction import should_compact
+from dogcat._diff import field_value, tracked_changes
+from dogcat._id_resolve import resolve_partial_id
 from dogcat._indexes import rebuild_indexes
+from dogcat._jsonl_io import append_jsonl_payload, atomic_rewrite_jsonl
 from dogcat._schema import current_version_tuple, parse_version
 from dogcat._version import version as _dcat_version
 from dogcat.constants import TRACKED_FIELDS
@@ -294,91 +295,67 @@ class JSONLStorage:
         """
         if _reload and self.path.exists():
             self._load()
-        # Write to temporary file first
-        with tempfile.NamedTemporaryFile(
-            mode="wb",
-            dir=self.dogcats_dir,
-            delete=False,
-            suffix=".jsonl",
-        ) as tmp_file:
-            tmp_path = Path(tmp_file.name)
 
-            try:
-                line_count = 0
-                # Write all issues
-                for issue in self._issues.values():
-                    data = issue_to_dict(issue)
-                    tmp_file.write(orjson.dumps(data))
-                    tmp_file.write(b"\n")
-                    line_count += 1
+        def _write(tmp_file: IO[bytes]) -> int:
+            line_count = 0
+            for issue in self._issues.values():
+                tmp_file.write(orjson.dumps(issue_to_dict(issue)))
+                tmp_file.write(b"\n")
+                line_count += 1
 
-                # Write all dependencies
-                for dep in self._dependencies:
-                    dep_data = {
-                        "record_type": "dependency",
-                        "dcat_version": _dcat_version,
-                        "issue_id": dep.issue_id,
-                        "depends_on_id": dep.depends_on_id,
-                        "type": dep.dep_type.value,
-                        "created_at": dep.created_at.isoformat(),
-                        "created_by": dep.created_by,
-                    }
-                    tmp_file.write(orjson.dumps(dep_data))
-                    tmp_file.write(b"\n")
-                    line_count += 1
+            for dep in self._dependencies:
+                dep_data = {
+                    "record_type": "dependency",
+                    "dcat_version": _dcat_version,
+                    "issue_id": dep.issue_id,
+                    "depends_on_id": dep.depends_on_id,
+                    "type": dep.dep_type.value,
+                    "created_at": dep.created_at.isoformat(),
+                    "created_by": dep.created_by,
+                }
+                tmp_file.write(orjson.dumps(dep_data))
+                tmp_file.write(b"\n")
+                line_count += 1
 
-                # Write all links
-                for link in self._links:
-                    link_data = {
-                        "record_type": "link",
-                        "dcat_version": _dcat_version,
-                        "from_id": link.from_id,
-                        "to_id": link.to_id,
-                        "link_type": link.link_type,
-                        "created_at": link.created_at.isoformat(),
-                        "created_by": link.created_by,
-                    }
-                    tmp_file.write(orjson.dumps(link_data))
-                    tmp_file.write(b"\n")
-                    line_count += 1
+            for link in self._links:
+                link_data = {
+                    "record_type": "link",
+                    "dcat_version": _dcat_version,
+                    "from_id": link.from_id,
+                    "to_id": link.to_id,
+                    "link_type": link.link_type,
+                    "created_at": link.created_at.isoformat(),
+                    "created_by": link.created_by,
+                }
+                tmp_file.write(orjson.dumps(link_data))
+                tmp_file.write(b"\n")
+                line_count += 1
 
-                # Preserve event records from the current file
-                if self.path.exists():
-                    with self.path.open("rb") as src:
-                        for raw_line in src:
-                            raw_line = raw_line.strip()
-                            if not raw_line:
+            # Preserve event records from the current file
+            if self.path.exists():
+                with self.path.open("rb") as src:
+                    for raw_line in src:
+                        raw_line = raw_line.strip()
+                        if not raw_line:
+                            continue
+                        try:
+                            data = orjson.loads(raw_line)
+                        except (orjson.JSONDecodeError, ValueError):
+                            continue  # Skip malformed lines
+                        if data.get("record_type") == "event":
+                            eid = data.get("issue_id", "")
+                            if _prune_event_ids and eid in _prune_event_ids:
                                 continue
-                            try:
-                                data = orjson.loads(raw_line)
-                            except (orjson.JSONDecodeError, ValueError):
-                                continue  # Skip malformed lines
-                            if data.get("record_type") == "event":
-                                eid = data.get("issue_id", "")
-                                if _prune_event_ids and eid in _prune_event_ids:
-                                    continue
-                                if _rename_event_ids and eid in _rename_event_ids:
-                                    data["issue_id"] = _rename_event_ids[eid]
-                                    raw_line = orjson.dumps(data)
-                                tmp_file.write(raw_line)
-                                tmp_file.write(b"\n")
-                                line_count += 1
+                            if _rename_event_ids and eid in _rename_event_ids:
+                                data["issue_id"] = _rename_event_ids[eid]
+                                raw_line = orjson.dumps(data)
+                            tmp_file.write(raw_line)
+                            tmp_file.write(b"\n")
+                            line_count += 1
 
-                tmp_file.flush()
-                os.fsync(tmp_file.fileno())
-            except (OSError, orjson.JSONEncodeError, TypeError) as e:
-                tmp_path.unlink(missing_ok=True)
-                msg = f"Failed to write to temporary file: {e}"
-                raise RuntimeError(msg) from e
+            return line_count
 
-        # Atomic rename to target file
-        try:
-            tmp_path.replace(self.path)
-        except OSError as e:
-            tmp_path.unlink(missing_ok=True)
-            msg = f"Failed to write storage file: {e}"
-            raise RuntimeError(msg) from e
-
+        line_count = atomic_rewrite_jsonl(self.path, self.dogcats_dir, _write)
         self._base_lines = line_count
         self._appended_lines = 0
 
@@ -406,24 +383,7 @@ class JSONLStorage:
         payload = b"".join(orjson.dumps(r) + b"\n" for r in records)
 
         with self._file_lock():
-            try:
-                # If the file exists and doesn't end with a newline (e.g.
-                # from a prior truncated write), prepend one to avoid
-                # concatenating with the corrupt trailing content.
-                if self.path.exists() and self.path.stat().st_size > 0:
-                    with self.path.open("rb") as check:
-                        check.seek(-1, 2)
-                        if check.read(1) != b"\n":
-                            payload = b"\n" + payload
-
-                with self.path.open("ab") as f:
-                    f.write(payload)
-                    f.flush()
-                    os.fsync(f.fileno())
-            except OSError as e:
-                msg = f"Failed to append to storage file: {e}"
-                raise RuntimeError(msg) from e
-
+            append_jsonl_payload(self.path, payload)
             self._appended_lines += len(records)
             # Eligibility check + compaction must run under the same lock
             # the append used. Otherwise two processes can both see counts
@@ -465,34 +425,19 @@ class JSONLStorage:
         by: str | None = None,
     ) -> None:
         """Emit an event to the event log (best-effort)."""
-        from dogcat.event_log import EventRecord
-
-        if not changes:
-            return
-
-        event = EventRecord(
-            event_type=event_type,
-            issue_id=issue.full_id,
-            timestamp=issue.updated_at.isoformat(),
+        self._event_log.emit(
+            event_type,
+            issue.full_id,
+            issue.updated_at.isoformat(),
+            issue.title,
+            changes,
             by=by,
-            title=issue.title,
-            changes=changes,
         )
-        try:
-            self._event_log.append(event)
-        except (OSError, RuntimeError):
-            logging.getLogger(__name__).debug(
-                "Failed to write event for %s",
-                issue.full_id,
-                exc_info=True,
-            )
 
     @staticmethod
     def _field_value(value: Any) -> Any:
-        """Normalize a field value for event storage."""
-        if hasattr(value, "value"):
-            return value.value  # Enum -> string
-        return value
+        """Normalize a field value for event storage (delegates to _diff)."""
+        return field_value(value)
 
     def _tracked_changes(
         self,
@@ -500,15 +445,11 @@ class JSONLStorage:
         new_values: dict[str, Any],
     ) -> dict[str, dict[str, Any]]:
         """Compute tracked field changes between old and new values."""
-        changes: dict[str, dict[str, Any]] = {}
-        for field_name in old_values:
-            if field_name not in TRACKED_FIELDS:
-                continue
-            old = self._field_value(old_values[field_name])
-            new = self._field_value(new_values[field_name])
-            if old != new:
-                changes[field_name] = {"old": old, "new": new}
-        return changes
+        # Restrict to fields present in old_values to preserve historical
+        # behavior (only diff what the caller knew to compare).
+        return tracked_changes(
+            old_values, new_values, TRACKED_FIELDS & frozenset(old_values)
+        )
 
     @staticmethod
     def _issue_record(issue: Issue) -> dict[str, Any]:
@@ -606,29 +547,7 @@ class JSONLStorage:
         Raises:
             ValueError: If partial ID matches multiple issues (ambiguous)
         """
-        # Exact match first
-        if partial_id in self._issues:
-            return partial_id
-
-        # Try matching as suffix (hash part)
-        matches = [
-            issue_id
-            for issue_id in self._issues
-            if issue_id.endswith(partial_id) or issue_id.split("-", 1)[-1] == partial_id
-        ]
-
-        if len(matches) == 1:
-            return matches[0]
-
-        if len(matches) > 1:
-            msg = (
-                f"Ambiguous partial ID '{partial_id}' matches {len(matches)} issues: "
-                f"{', '.join(sorted(matches)[:5])}"
-                + (f" and {len(matches) - 5} more" if len(matches) > 5 else "")
-            )
-            raise ValueError(msg)
-
-        return None
+        return resolve_partial_id(partial_id, self._issues, kind="issues")
 
     def get(self, issue_id: str) -> Issue | None:
         """Get an issue by ID.
