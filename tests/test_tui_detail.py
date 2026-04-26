@@ -494,10 +494,31 @@ class TestDependencyInputs:
             assert blocks.value == "blocking: dc-blocked"
 
     @pytest.mark.asyncio
-    async def test_deps_inputs_stay_disabled_after_edit(self) -> None:
-        """Depends-on and blocks inputs stay disabled after switching to edit mode."""
+    async def test_deps_inputs_become_editable_after_edit(self) -> None:
+        """Depends-on / blocks inputs become editable on enter_edit (dogcat-3nrb).
+
+        The displayed value also switches from "blocked by: a, b" prefix-style
+        to bare "a, b" so the user can type IDs directly.
+        """
+        from dogcat.models import Dependency, DependencyType
+
         issue = _make_issue()
-        app, screen, _ = await _push_view(issue)
+        storage = _make_storage()
+        storage.get_dependencies.return_value = [
+            Dependency(
+                issue_id="dc-test",
+                depends_on_id="dc-blocker",
+                dep_type=DependencyType.BLOCKS,
+            ),
+        ]
+        storage.get_dependents.return_value = [
+            Dependency(
+                issue_id="dc-blocked",
+                depends_on_id="dc-test",
+                dep_type=DependencyType.BLOCKS,
+            ),
+        ]
+        app, screen, _ = await _push_view(issue, storage)
 
         async with app.run_test() as pilot:
             app.push_screen(screen)
@@ -509,8 +530,13 @@ class TestDependencyInputs:
             screen.action_enter_edit()
             await pilot.pause()
 
-            assert screen.query_one("#depends-on-input", Input).disabled is True
-            assert screen.query_one("#blocks-input", Input).disabled is True
+            depends_on = screen.query_one("#depends-on-input", Input)
+            blocks = screen.query_one("#blocks-input", Input)
+            assert depends_on.disabled is False
+            assert blocks.disabled is False
+            # Value swaps from prefix-style display to bare CSV for editing
+            assert depends_on.value == "dc-blocker"
+            assert blocks.value == "dc-blocked"
 
 
 class TestDependencyViewSections:
@@ -577,3 +603,284 @@ class TestDependencyViewSections:
             collapsibles = screen.query(Collapsible)
             titles = [c.title for c in collapsibles]
             assert "Dependencies" in titles
+
+
+class TestFormSafetyGuards:
+    """Pre-validate length, narrow exceptions, escape markup (dogcat-3sor)."""
+
+    @pytest.mark.asyncio
+    async def test_oversized_title_short_circuits_with_clear_error(self) -> None:
+        """Title > MAX_TITLE_LEN must notify and not reach storage."""
+        from textual.app import App, ComposeResult
+
+        from dogcat.constants import MAX_TITLE_LEN
+        from dogcat.tui.detail_panel import IssueDetailPanel
+
+        issue = _make_issue()
+        storage = _make_storage()
+        screen = IssueEditorScreen(issue, storage)
+
+        class TestApp(App[None]):
+            def compose(self) -> ComposeResult:
+                yield Header()
+
+        app = TestApp()
+        async with app.run_test() as pilot:
+            app.push_screen(screen)
+            await pilot.pause()
+
+            panel = screen.query_one("#editor-panel", IssueDetailPanel)
+            panel.query_one("#title-input", Input).value = "x" * (MAX_TITLE_LEN + 1)
+            panel.do_save()
+            await pilot.pause()
+
+            storage.update.assert_not_called()
+            storage.create_issue.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_oversized_description_short_circuits(self) -> None:
+        """Description > MAX_DESC_LEN must notify and not reach storage."""
+        from textual.app import App, ComposeResult
+
+        from dogcat.constants import MAX_DESC_LEN
+        from dogcat.tui.detail_panel import IssueDetailPanel
+
+        issue = _make_issue()
+        storage = _make_storage()
+        screen = IssueEditorScreen(issue, storage)
+
+        class TestApp(App[None]):
+            def compose(self) -> ComposeResult:
+                yield Header()
+
+        app = TestApp()
+        async with app.run_test() as pilot:
+            app.push_screen(screen)
+            await pilot.pause()
+
+            panel = screen.query_one("#editor-panel", IssueDetailPanel)
+            panel.query_one("#description-input", TextArea).text = "y" * (
+                MAX_DESC_LEN + 1
+            )
+            panel.do_save()
+            await pilot.pause()
+
+            storage.update.assert_not_called()
+
+
+class TestConfirmDeleteMarkupEscape:
+    """ConfirmDeleteScreen must not render Rich markup in user-controlled title."""
+
+    @pytest.mark.asyncio
+    async def test_markup_in_title_renders_as_literal(self) -> None:
+        """A title containing [red]...[/red] must not style the dialog."""
+        from textual.app import App, ComposeResult
+
+        from dogcat.tui.dashboard import ConfirmDeleteScreen
+
+        screen = ConfirmDeleteScreen("dc-abc1", "[red]boom[/red]")
+
+        class TestApp(App[None]):
+            def compose(self) -> ComposeResult:
+                yield Header()
+
+        app = TestApp()
+        async with app.run_test() as pilot:
+            app.push_screen(screen)
+            await pilot.pause()
+
+            statics = list(screen.query(Static))
+            rendered = [str(s.render()) for s in statics]
+            # The literal brackets must survive in the rendered output
+            assert any("[red]" in r and "[/red]" in r for r in rendered), rendered
+
+
+class TestDependencyEditingRoundTrip:
+    """Inline dep editing + atomic reconcile (dogcat-3nrb / dogcat-11n6).
+
+    These run against real ``JSONLStorage`` because the validation path
+    walks the dep graph through ``would_create_cycle``.
+    """
+
+    @pytest.mark.asyncio
+    async def test_save_adds_new_depends_on(self, tmp_path: Any) -> None:
+        """Typing a valid issue id into depends-on and saving creates the dep."""
+        from textual.app import App, ComposeResult
+
+        from dogcat.storage import JSONLStorage
+        from dogcat.tui.detail_panel import IssueDetailPanel
+
+        storage_path = tmp_path / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+        storage.create(_make_issue(id="src", title="Source"))
+        storage.create(_make_issue(id="tgt", title="Target"))
+
+        src = storage.get("dc-src")
+        assert src is not None
+        screen = IssueEditorScreen(src, storage)
+
+        class TestApp(App[None]):
+            def compose(self) -> ComposeResult:
+                yield Header()
+
+        app = TestApp()
+        async with app.run_test() as pilot:
+            app.push_screen(screen)
+            await pilot.pause()
+
+            panel = screen.query_one("#editor-panel", IssueDetailPanel)
+            panel.query_one("#depends-on-input", Input).value = "dc-tgt"
+            panel.do_save()
+            await pilot.pause()
+
+            deps = storage.get_dependencies("dc-src")
+            assert any(d.depends_on_id == "dc-tgt" for d in deps)
+
+    @pytest.mark.asyncio
+    async def test_unknown_dep_id_aborts_entire_save(self, tmp_path: Any) -> None:
+        """An unknown dep id must NOT half-apply a title change."""
+        from textual.app import App, ComposeResult
+
+        from dogcat.storage import JSONLStorage
+        from dogcat.tui.detail_panel import IssueDetailPanel
+
+        storage_path = tmp_path / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+        storage.create(_make_issue(id="src", title="Original title"))
+
+        src = storage.get("dc-src")
+        assert src is not None
+        screen = IssueEditorScreen(src, storage)
+
+        class TestApp(App[None]):
+            def compose(self) -> ComposeResult:
+                yield Header()
+
+        app = TestApp()
+        async with app.run_test() as pilot:
+            app.push_screen(screen)
+            await pilot.pause()
+
+            panel = screen.query_one("#editor-panel", IssueDetailPanel)
+            panel.query_one("#title-input", Input).value = "Renamed"
+            panel.query_one("#depends-on-input", Input).value = "dc-ghost"
+            panel.do_save()
+            await pilot.pause()
+
+            # Title must NOT have been written; deps must be empty.
+            after = storage.get("dc-src")
+            assert after is not None
+            assert after.title == "Original title"
+            assert storage.get_dependencies("dc-src") == []
+
+    @pytest.mark.asyncio
+    async def test_cycle_aborts_entire_save(self, tmp_path: Any) -> None:
+        """Adding a depends-on that would create a cycle is rejected."""
+        from textual.app import App, ComposeResult
+
+        from dogcat.storage import JSONLStorage
+        from dogcat.tui.detail_panel import IssueDetailPanel
+
+        storage_path = tmp_path / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+        storage.create(_make_issue(id="a"))
+        storage.create(_make_issue(id="b"))
+        # b depends on a (i.e. a blocks b). Now adding "a depends on b"
+        # would close the loop.
+        storage.add_dependency("dc-b", "dc-a", "blocks")
+
+        a = storage.get("dc-a")
+        assert a is not None
+        screen = IssueEditorScreen(a, storage)
+
+        class TestApp(App[None]):
+            def compose(self) -> ComposeResult:
+                yield Header()
+
+        app = TestApp()
+        async with app.run_test() as pilot:
+            app.push_screen(screen)
+            await pilot.pause()
+
+            panel = screen.query_one("#editor-panel", IssueDetailPanel)
+            panel.query_one("#depends-on-input", Input).value = "dc-b"
+            panel.do_save()
+            await pilot.pause()
+
+            # No new edge should have been added in either direction
+            a_deps = storage.get_dependencies("dc-a")
+            assert all(d.depends_on_id != "dc-b" for d in a_deps)
+
+
+class TestBrokenParentDetection:
+    """Detail panel flags a tombstoned parent on mount (dogcat-4g9i)."""
+
+    @pytest.mark.asyncio
+    async def test_tombstoned_parent_marks_button_broken(
+        self,
+        tmp_path: Any,
+    ) -> None:
+        """Tombstoned parent picks up the ``parent-broken`` class.
+
+        Simulates an issue whose parent was deleted by another process.
+        """
+        from textual.app import App, ComposeResult
+
+        from dogcat.storage import JSONLStorage
+        from dogcat.tui.detail_panel import IssueDetailPanel
+
+        storage_path = tmp_path / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+        parent = storage.create(_make_issue(id="par", title="Parent"))
+        storage.create(_make_issue(id="kid", title="Child", parent=parent.full_id))
+        storage.delete(parent.full_id)
+
+        kid = storage.get("dc-kid")
+        assert kid is not None
+        screen = IssueEditorScreen(kid, storage, view_mode=True)
+
+        class TestApp(App[None]):
+            def compose(self) -> ComposeResult:
+                yield Header()
+
+        app = TestApp()
+        async with app.run_test() as pilot:
+            app.push_screen(screen)
+            await pilot.pause()
+
+            panel = screen.query_one("#editor-panel", IssueDetailPanel)
+            btn = panel.query_one("#parent-input", Button)
+            assert "parent-broken" in btn.classes
+
+    @pytest.mark.asyncio
+    async def test_intact_parent_does_not_mark_broken(
+        self,
+        tmp_path: Any,
+    ) -> None:
+        """Sanity: an intact parent must NOT get the broken class."""
+        from textual.app import App, ComposeResult
+
+        from dogcat.storage import JSONLStorage
+        from dogcat.tui.detail_panel import IssueDetailPanel
+
+        storage_path = tmp_path / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+        parent = storage.create(_make_issue(id="par", title="Parent"))
+        storage.create(_make_issue(id="kid", title="Child", parent=parent.full_id))
+
+        kid = storage.get("dc-kid")
+        assert kid is not None
+        screen = IssueEditorScreen(kid, storage, view_mode=True)
+
+        class TestApp(App[None]):
+            def compose(self) -> ComposeResult:
+                yield Header()
+
+        app = TestApp()
+        async with app.run_test() as pilot:
+            app.push_screen(screen)
+            await pilot.pause()
+
+            panel = screen.query_one("#editor-panel", IssueDetailPanel)
+            btn = panel.query_one("#parent-input", Button)
+            assert "parent-broken" not in btn.classes

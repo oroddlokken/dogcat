@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from textual.binding import Binding
@@ -23,6 +24,8 @@ from textual.widgets import (
 )
 
 from dogcat.constants import (
+    MAX_DESC_LEN,
+    MAX_TITLE_LEN,
     PRIORITY_OPTIONS,
     STATUS_OPTIONS,
     TYPE_OPTIONS,
@@ -40,6 +43,19 @@ if TYPE_CHECKING:
 
 
 _PARENT_PLACEHOLDER = "No parent"
+
+
+@dataclass
+class _DepPlan:
+    """A validated set of dependency mutations ready to commit."""
+
+    add_deps: list[str] = field(default_factory=list[str])
+    rem_deps: list[str] = field(default_factory=list[str])
+    add_blks: list[str] = field(default_factory=list[str])
+    rem_blks: list[str] = field(default_factory=list[str])
+
+    def is_empty(self) -> bool:
+        return not (self.add_deps or self.rem_deps or self.add_blks or self.rem_blks)
 
 
 class ParentPickerScreen(ModalScreen[str | None]):
@@ -178,7 +194,7 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
     BINDINGS: ClassVar = [
         Binding("ctrl+s", "save", "Save", priority=True),
         Binding("e", "enter_edit", "Edit"),
-        Binding("p", "pick_parent", "Parent", priority=True),
+        Binding("p", "pick_parent", "Parent"),
     ]
 
     DEFAULT_CSS = (
@@ -220,6 +236,11 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
 
     IssueDetailPanel .parent-placeholder {
         color: $text-muted;
+    }
+
+    IssueDetailPanel Button.parent-broken {
+        color: $error;
+        text-style: bold;
     }
     """
     )
@@ -391,14 +412,14 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
                         if depends_on_ids
                         else ""
                     ),
-                    placeholder="no blockers",
+                    placeholder="Blocked by (no blockers)",
                     id="depends-on-input",
                     disabled=True,
                 )
                 blocks_ids = self._get_blocks_ids()
                 yield Input(
                     value=("blocking: " + ", ".join(blocks_ids) if blocks_ids else ""),
-                    placeholder="not blocking",
+                    placeholder="Blocks (none)",
                     id="blocks-input",
                     disabled=True,
                 )
@@ -495,6 +516,28 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
             self.query_one("#title-input", Input).focus()
         else:
             self.query_one("#title-input", Input).focus()
+        self._flag_broken_parent()
+
+    def _flag_broken_parent(self) -> None:
+        """Mark the parent button broken if the parent is tombstoned/missing.
+
+        Catches the concurrent-edit case where another process tombstones
+        an issue's parent between loads; without this, save would write
+        back the stale ID and the user would never see the breakage.
+        """
+        if not self._issue.parent or self._create_mode:
+            return
+        parent = self._storage.get(self._issue.parent)
+        if parent is not None and not parent.is_tombstone():
+            return
+        # Visual-only signal: red color + "(deleted)" text suffix. We used
+        # to also notify here, but the panel re-mounts on every selection
+        # change in split mode, so navigating past a broken-parent child
+        # would burst N toasts. The visual is sufficient.
+        with contextlib.suppress(Exception):
+            btn = self.query_one("#parent-input", Button)
+            btn.add_class("parent-broken")
+            btn.label = f"{self._issue.parent} (deleted)"
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
@@ -518,7 +561,11 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
         """Read the currently selected parent from the field."""
         btn = self.query_one("#parent-input", Button)
         text = str(btn.label)
-        return text if text != _PARENT_PLACEHOLDER else None
+        if text == _PARENT_PLACEHOLDER:
+            return None
+        # Strip the "(deleted)" decoration applied by _flag_broken_parent so
+        # we save the original id back, not "abc (deleted)".
+        return text.removesuffix(" (deleted)")
 
     def _open_parent_picker(self) -> None:
         """Open the parent picker modal."""
@@ -571,10 +618,18 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
         """Enable editing on all form fields."""
         self._view_mode = False
 
-        _readonly_inputs = {"depends-on-input", "blocks-input"}
+        # Swap deps inputs from "blocked by: a, b" prefix-style display values
+        # to bare comma-separated IDs the user can edit directly. Cancel
+        # remounts the panel and restores the prefix display via compose().
+        deps_input = self.query_one("#depends-on-input", Input)
+        deps_input.value = ", ".join(self._get_depends_on_ids())
+        deps_input.placeholder = "Blocked by (comma-separated IDs)"
+        blocks_input = self.query_one("#blocks-input", Input)
+        blocks_input.value = ", ".join(self._get_blocks_ids())
+        blocks_input.placeholder = "Blocks (comma-separated IDs)"
+
         for inp in self.query(Input):
-            if inp.id not in _readonly_inputs:
-                inp.disabled = False
+            inp.disabled = False
         for sel in self.query(Select):  # type: ignore[reportUnknownVariableType]
             sel.disabled = False  # type: ignore[reportUnknownMemberType]
         self.query_one("#manual-input", Checkbox).disabled = False
@@ -610,63 +665,94 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
         raw = value.replace(",", " ").split()
         return [v.strip() for v in raw if v.strip()]
 
-    def _save_dependencies(self, issue_id: str) -> None:
-        """Reconcile dependency inputs with storage."""
+    def _compute_dep_plan(
+        self,
+        issue_id: str,
+    ) -> tuple[list[str], _DepPlan]:
+        """Diff form deps against storage and pre-validate the change set.
+
+        Returns ``(errors, plan)``. If ``errors`` is non-empty, the caller
+        should surface them and abort the save before touching storage.
+        Otherwise ``plan`` is safe to pass to :meth:`_apply_dep_plan`.
+
+        Resolves partial IDs up front so cycle checks and the commit phase
+        agree on full IDs. Pre-validating the entire diff here lets the
+        caller refuse to half-apply a form (e.g. commit a title change but
+        bail on a bad dep id).
+        """
+        from dogcat.deps import would_create_cycle
+
         new_depends_on = self._parse_dep_ids(
             self.query_one("#depends-on-input", Input).value,
         )
         new_blocks = self._parse_dep_ids(
             self.query_one("#blocks-input", Input).value,
         )
-
         old_depends_on = set(self._get_depends_on_ids())
         old_blocks = set(self._get_blocks_ids())
 
-        # Add new "depends on" relationships
-        for dep_id in new_depends_on:
-            if dep_id not in old_depends_on:
-                try:
-                    self._storage.add_dependency(
-                        issue_id,
-                        dep_id,
-                        DependencyType.BLOCKS.value,
-                    )
-                except ValueError as e:
-                    self.notify(f"Dependency error: {e}", severity="error")
+        errors: list[str] = []
+        resolved_add_deps: list[str] = []
+        resolved_add_blks: list[str] = []
 
-        # Remove old "depends on" relationships
-        for dep_id in old_depends_on:
-            if dep_id not in new_depends_on:
-                try:
-                    self._storage.remove_dependency(issue_id, dep_id)
-                except ValueError as e:
-                    self.notify(f"Dependency error: {e}", severity="error")
+        for dep_id in (d for d in new_depends_on if d not in old_depends_on):
+            resolved = self._storage.resolve_id(dep_id)
+            if resolved is None:
+                errors.append(f"Unknown issue: {dep_id}")
+                continue
+            if issue_id and would_create_cycle(self._storage, issue_id, resolved):
+                errors.append(f"Cycle: {issue_id} -> {resolved}")
+                continue
+            resolved_add_deps.append(resolved)
 
-        # Add new "blocks" relationships (reverse: blocked issue depends on this)
-        for dep_id in new_blocks:
-            if dep_id not in old_blocks:
-                try:
-                    self._storage.add_dependency(
-                        dep_id,
-                        issue_id,
-                        DependencyType.BLOCKS.value,
-                    )
-                except ValueError as e:
-                    self.notify(f"Dependency error: {e}", severity="error")
+        for dep_id in (d for d in new_blocks if d not in old_blocks):
+            resolved = self._storage.resolve_id(dep_id)
+            if resolved is None:
+                errors.append(f"Unknown issue: {dep_id}")
+                continue
+            if issue_id and would_create_cycle(self._storage, resolved, issue_id):
+                errors.append(f"Cycle: {resolved} -> {issue_id}")
+                continue
+            resolved_add_blks.append(resolved)
 
-        # Remove old "blocks" relationships
-        for dep_id in old_blocks:
-            if dep_id not in new_blocks:
-                try:
-                    self._storage.remove_dependency(dep_id, issue_id)
-                except ValueError as e:
-                    self.notify(f"Dependency error: {e}", severity="error")
+        plan = _DepPlan(
+            add_deps=resolved_add_deps,
+            rem_deps=[d for d in old_depends_on if d not in new_depends_on],
+            add_blks=resolved_add_blks,
+            rem_blks=[d for d in old_blocks if d not in new_blocks],
+        )
+        return errors, plan
+
+    def _apply_dep_plan(self, issue_id: str, plan: _DepPlan) -> None:
+        """Commit a validated dep plan. Raises on commit failure."""
+        for dep_id in plan.add_deps:
+            self._storage.add_dependency(
+                issue_id,
+                dep_id,
+                DependencyType.BLOCKS.value,
+            )
+        for dep_id in plan.rem_deps:
+            self._storage.remove_dependency(issue_id, dep_id)
+        for dep_id in plan.add_blks:
+            self._storage.add_dependency(
+                dep_id,
+                issue_id,
+                DependencyType.BLOCKS.value,
+            )
+        for dep_id in plan.rem_blks:
+            self._storage.remove_dependency(dep_id, issue_id)
 
     def do_save(self) -> None:
         """Execute the save."""
         title = self.query_one("#title-input", Input).value.strip()
         if not title:
             self.notify("Title cannot be empty", severity="error")
+            return
+        if len(title) > MAX_TITLE_LEN:
+            self.notify(
+                f"Title is {len(title)} chars; max is {MAX_TITLE_LEN}",
+                severity="error",
+            )
             return
 
         type_val = cast("Select[str]", self.query_one("#type-input", Select)).value
@@ -676,11 +762,29 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
             self.query_one("#priority-input", Select),
         ).value
         description = self.query_one("#description-input", TextArea).text.strip()
+        if len(description) > MAX_DESC_LEN:
+            self.notify(
+                f"Description is {len(description)} chars; max is {MAX_DESC_LEN}",
+                severity="error",
+            )
+            return
 
         if self._create_mode:
             self._do_create(title, type_val, status_val, priority_val, description)
         else:
-            self._do_update(title, type_val, status_val, priority_val, description)
+            # Pre-validate the dep diff so a bad dep id never half-applies a
+            # form save (e.g. title commits, then deps fail). For create mode
+            # the issue doesn't exist yet, so we validate post-create instead.
+            errors, plan = self._compute_dep_plan(self._issue.full_id)
+            if errors:
+                self.notify(
+                    "Dependency error:\n" + "\n".join(errors),
+                    severity="error",
+                )
+                return
+            self._do_update(
+                title, type_val, status_val, priority_val, description, plan
+            )
 
     def _do_create(
         self,
@@ -725,9 +829,25 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
                 design=self.query_one("#design-input", TextArea).text.strip() or None,
                 metadata=metadata,
             )
-            self.post_message(self.Saved(issue))
-        except Exception as e:
+        except (ValueError, RuntimeError, OSError) as e:
             self.notify(f"Create failed: {e}", severity="error")
+            return
+
+        # Now that the new issue exists in storage we can validate dep IDs
+        # (cycle checks are vacuous — a fresh issue has no graph edges yet).
+        errors, plan = self._compute_dep_plan(issue.full_id)
+        if errors:
+            self.notify(
+                "Issue created, but dependency error:\n" + "\n".join(errors),
+                severity="error",
+            )
+            self.post_message(self.Saved(issue))
+            return
+        try:
+            self._apply_dep_plan(issue.full_id, plan)
+        except (ValueError, RuntimeError, OSError) as e:
+            self.notify(f"Dependency commit failed: {e}", severity="error")
+        self.post_message(self.Saved(issue))
 
     def _do_update(
         self,
@@ -736,6 +856,7 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
         status_val: Any,
         priority_val: Any,
         description: str,
+        dep_plan: _DepPlan,
     ) -> None:
         """Update an existing issue with changed fields."""
         updates: dict[str, Any] = {}
@@ -792,13 +913,17 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
                 self._issue.metadata or {}, manual=manual_val
             )
 
-        if not updates:
+        if not updates and dep_plan.is_empty():
             self.notify("No changes to save")
             self.post_message(self.Cancelled())
             return
 
         try:
-            updated = self._storage.update(self._issue.full_id, updates)
+            if updates:
+                updated = self._storage.update(self._issue.full_id, updates)
+            else:
+                updated = self._issue
+            self._apply_dep_plan(self._issue.full_id, dep_plan)
             self.post_message(self.Saved(updated))
-        except Exception as e:
+        except (ValueError, RuntimeError, OSError) as e:
             self.notify(f"Save failed: {e}", severity="error")

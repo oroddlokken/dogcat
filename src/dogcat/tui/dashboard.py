@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from rich.markup import escape
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -13,7 +14,6 @@ from textual.reactive import reactive
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Input, OptionList, Static
 
-from dogcat.cli._formatting import build_hierarchy
 from dogcat.constants import SPLIT_PANE_MIN_COLS, SPLIT_PANE_MIN_ROWS
 from dogcat.tui.shared import make_issue_label
 
@@ -25,10 +25,12 @@ if TYPE_CHECKING:
 
 
 class ConfirmDeleteScreen(Screen[bool]):
-    """Tiny confirmation dialog for issue deletion."""
+    """Confirmation dialog for issue deletion (soft tombstone, recoverable)."""
 
     BINDINGS: ClassVar = [
         Binding("escape", "cancel", "Cancel", priority=True),
+        Binding("y", "confirm", "Delete", show=False),
+        Binding("n", "cancel", "Cancel", show=False),
     ]
 
     CSS = """
@@ -37,11 +39,18 @@ class ConfirmDeleteScreen(Screen[bool]):
     }
 
     #confirm-dialog {
-        width: 50;
+        width: 90%;
+        min-width: 36;
+        max-width: 80;
         height: auto;
-        max-height: 10;
+        max-height: 12;
         border: thick $accent;
         padding: 1 2;
+    }
+
+    #confirm-hint {
+        color: $text-muted;
+        margin-top: 1;
     }
 
     #confirm-buttons {
@@ -63,19 +72,28 @@ class ConfirmDeleteScreen(Screen[bool]):
     def compose(self) -> ComposeResult:
         """Build the confirmation dialog."""
         with Vertical(id="confirm-dialog"):
-            yield Static(f"Delete [b]{self._issue_id}[/b]?")
-            yield Static(f"  {self._title}")
+            yield Static(f"Delete [b]{escape(self._issue_id)}[/b]?")
+            yield Static(f"  {self._title}", markup=False)
+            yield Static(
+                "Soft delete — recoverable with `dcat reopen`.",
+                id="confirm-hint",
+                markup=False,
+            )
             with Horizontal(id="confirm-buttons"):
-                yield Button("Yes", id="yes-btn", variant="error")
-                yield Button("No", id="no-btn", variant="default")
+                yield Button("Cancel", id="confirm-cancel", variant="default")
+                yield Button("Delete", id="confirm-delete", variant="error")
 
     def on_mount(self) -> None:
-        """Focus the Yes button by default."""
-        self.query_one("#yes-btn", Button).focus()
+        """Focus the safe (Cancel) button by default."""
+        self.query_one("#confirm-cancel", Button).focus()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button clicks."""
-        self.dismiss(event.button.id == "yes-btn")
+        self.dismiss(event.button.id == "confirm-delete")
+
+    def action_confirm(self) -> None:
+        """Confirm deletion (y key)."""
+        self.dismiss(True)
 
     def action_cancel(self) -> None:
         """Cancel deletion."""
@@ -95,7 +113,6 @@ class DogcatTUI(App[None]):
         Binding("n", "new_issue", "New"),
         Binding("e", "edit_issue", "Edit"),
         Binding("d", "delete_issue", "Delete"),
-        Binding("D", "force_delete_issue", "Delete!", show=False),
     ]
 
     CSS = """
@@ -169,6 +186,8 @@ class DogcatTUI(App[None]):
 
     def on_resize(self, event: Resize) -> None:
         """Toggle split-pane mode based on terminal size."""
+        if self._is_panel_editing():
+            return
         self._split_mode = (
             event.size.width >= SPLIT_PANE_MIN_COLS
             and event.size.height >= SPLIT_PANE_MIN_ROWS
@@ -192,7 +211,16 @@ class DogcatTUI(App[None]):
         from dogcat.tui.detail_panel import IssueDetailPanel
 
         issue = self._storage.get(full_id)
-        if issue is None:
+        if issue is None or issue.is_tombstone():
+            # The issue was deleted out from under us (e.g. by another
+            # process between refresh and panel-mount). Tell the user
+            # explicitly and clear the stale panel instead of leaving the
+            # previous issue's content visible.
+            self.notify(
+                f"Issue {full_id} no longer exists",
+                severity="warning",
+            )
+            await self._clear_detail_panel()
             return
 
         right_pane = self.query_one("#right-pane", Vertical)
@@ -243,7 +271,15 @@ class DogcatTUI(App[None]):
         blocked = get_blocked_issues(self._storage)
         self._blocked_ids: set[str] = {bi.issue_id for bi in blocked}
 
-        hierarchy = build_hierarchy(issues)
+        # Reparent orphans (parent tombstoned, closed, or namespace-filtered)
+        # to root so they stay reachable in the list. Without this the
+        # orphan sits under a missing parent_id key and never gets walked
+        # by _build_tree(parent_id=None).
+        visible_ids = {i.full_id for i in issues}
+        hierarchy: dict[str | None, list[Issue]] = {}
+        for issue in issues:
+            parent_key = issue.parent if issue.parent in visible_ids else None
+            hierarchy.setdefault(parent_key, []).append(issue)
         self._issues = []
         self._build_tree(hierarchy, parent_id=None, depth=0)
         # Dict for O(1) selected-label -> full_id resolution. Keyed by the
@@ -382,6 +418,7 @@ class DogcatTUI(App[None]):
         self._highlight_issue(option_list, saved_issue.full_id)
         # Reload panel in view mode
         await self._show_issue_in_panel(saved_issue.full_id)
+        self._reapply_split_mode_to_size()
 
     async def on_issue_detail_panel_cancelled(
         self,
@@ -394,6 +431,7 @@ class DogcatTUI(App[None]):
         if full_id is not None:
             await self._show_issue_in_panel(full_id)
         self.query_one("#issue-list", OptionList).focus()
+        self._reapply_split_mode_to_size()
 
     def on_issue_detail_panel_edit_mode_changed(self, event: Any) -> None:
         """Update app title when inline edit mode changes."""
@@ -405,6 +443,18 @@ class DogcatTUI(App[None]):
                     self.title = f"Edit: {issue.full_id} - {issue.title}"
         else:
             self.title = "dogcat"
+
+    def _reapply_split_mode_to_size(self) -> None:
+        """Re-evaluate split mode against current terminal size.
+
+        Resize events are suppressed while the panel is editing (so the
+        buffer survives a shrink); after exiting edit mode we re-check
+        the size so split mode collapses if the terminal is now too small.
+        """
+        self._split_mode = (
+            self.size.width >= SPLIT_PANE_MIN_COLS
+            and self.size.height >= SPLIT_PANE_MIN_ROWS
+        )
 
     def _is_panel_editing(self) -> bool:
         """Check if the inline detail panel is in edit mode."""
@@ -423,7 +473,7 @@ class DogcatTUI(App[None]):
         parameters: tuple[object, ...],  # noqa: ARG002
     ) -> bool | None:
         """Disable dashboard-only actions when a screen is pushed."""
-        if action in ("new_issue", "edit_issue", "delete_issue", "force_delete_issue"):
+        if action in ("new_issue", "edit_issue", "delete_issue"):
             return self.screen is self.screen_stack[0]
         return not (action == "quit" and self._is_panel_editing())
 
@@ -504,14 +554,6 @@ class DogcatTUI(App[None]):
             callback=lambda confirmed: self._do_delete(full_id) if confirmed else None,
         )
 
-    def action_force_delete_issue(self) -> None:
-        """Delete the selected issue immediately without confirmation."""
-        full_id = self._get_selected_issue_id()
-        if full_id is None:
-            self.notify("No issue selected", severity="warning")
-            return
-        self._do_delete(full_id)
-
     def _do_delete(self, full_id: str) -> None:
         """Execute the deletion and refresh the list."""
         try:
@@ -531,10 +573,35 @@ class DogcatTUI(App[None]):
 
     async def action_refresh(self) -> None:
         """Reload issues from disk and refresh the list and detail panel."""
+        if self._is_panel_editing():
+            self.notify(
+                "Save or cancel the open edit before refreshing",
+                severity="warning",
+            )
+            return
+        # Capture the highlighted id before the list reload moves the
+        # cursor; if the id is gone after reload, surface that to the
+        # user instead of silently jumping to a different issue.
+        prev_id = self._get_selected_issue_id()
         self._storage.reload()
         self._load_issues()
         search = self.query_one("#dashboard-search", Input)
         search.value = ""
+        if prev_id is not None:
+            prev = self._storage.get(prev_id)
+            if prev is None or prev.is_tombstone():
+                self.notify(
+                    f"Issue {prev_id} no longer exists",
+                    severity="warning",
+                )
+            else:
+                # Restore the prior selection so the user doesn't get
+                # silently bumped to a different issue (and the panel
+                # below re-shows the same issue).
+                self._highlight_issue(
+                    self.query_one("#issue-list", OptionList),
+                    prev_id,
+                )
 
         if self._split_mode:
             full_id = self._get_selected_issue_id()

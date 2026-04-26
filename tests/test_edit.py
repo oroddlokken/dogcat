@@ -479,6 +479,9 @@ class TestParentPicker:
         storage = _make_storage()
         parent_issue = _make_issue(id="par1", title="Parent issue")
         storage.list.return_value = [parent_issue]
+        # The detail panel calls storage.get(parent) on mount to detect a
+        # tombstoned/missing parent (dogcat-4g9i). Make it find the parent.
+        storage.get.return_value = parent_issue
         storage.get_children.return_value = []
         app = IssueEditorApp(issue, storage)
 
