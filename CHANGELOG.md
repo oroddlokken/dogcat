@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.12.0 (2026-04-26)
+
 ### Fixed
 
 - **`test_collaborator_rebase_force_push` no longer flaky** — the test ran `git rebase -i main~0` purely as a no-op preamble before simulating the squash via `git reset --soft main`. With `HOME=/dev/null` and no `GIT_EDITOR` in the test env, the interactive rebase intermittently exited nonzero and tripped `GitRepo.git()`'s default `check=True`, failing CI at random. Removed the dead call; `reset --soft` already does the work the comment claimed (closes dogcat-651n).
