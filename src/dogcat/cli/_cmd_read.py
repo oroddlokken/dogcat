@@ -155,6 +155,117 @@ def _collapse_deferred_subtrees(
     return filtered, hidden_counts, deferred_blocker_map, preview_subtasks
 
 
+def _is_closed_excluded_by_default(
+    *,
+    status: str | None,
+    closed: bool,
+    all_issues: bool,
+    closed_after: str | None,
+    closed_before: str | None,
+) -> bool:
+    return (
+        not status
+        and not closed
+        and not all_issues
+        and not (closed_after or closed_before)
+    )
+
+
+def _apply_default_visibility(
+    issues: list[Issue],
+    *,
+    status: str | None,
+    closed: bool,
+    all_issues: bool,
+    closed_after: str | None,
+    closed_before: str | None,
+    include_snoozed: bool,
+) -> list[Issue]:
+    """Hide closed/tombstoned and snoozed issues unless the user opted in."""
+    from datetime import datetime as dt
+
+    if _is_closed_excluded_by_default(
+        status=status,
+        closed=closed,
+        all_issues=all_issues,
+        closed_after=closed_after,
+        closed_before=closed_before,
+    ):
+        issues = [i for i in issues if i.status.value not in ("closed", "tombstone")]
+
+    if not include_snoozed and not all_issues:
+        now = dt.now().astimezone()
+        issues = [
+            i for i in issues if i.snoozed_until is None or i.snoozed_until <= now
+        ]
+    return issues
+
+
+def _apply_closed_date_filter(
+    issues: list[Issue],
+    *,
+    closed_after: str | None,
+    closed_before: str | None,
+) -> list[Issue]:
+    """Keep only issues whose closed_at falls inside the [after, before] window.
+
+    Raises typer.Exit(1) via echo_error on a malformed ISO8601 input.
+    """
+    if not (closed_after or closed_before):
+        return issues
+    from datetime import datetime as dt
+
+    try:
+        after_dt = None
+        before_dt = None
+        if closed_after:
+            after_dt = dt.fromisoformat(closed_after)
+            if after_dt.tzinfo is None:
+                after_dt = after_dt.replace(tzinfo=timezone.utc)
+        if closed_before:
+            before_dt = dt.fromisoformat(closed_before)
+            if before_dt.tzinfo is None:
+                before_dt = before_dt.replace(tzinfo=timezone.utc)
+    except ValueError as e:
+        echo_error(f"parsing date: {e}")
+        raise typer.Exit(1)
+
+    filtered_issues: list[Issue] = []
+    for issue in issues:
+        if not issue.closed_at:
+            continue
+        if after_dt is not None and issue.closed_at < after_dt:
+            continue
+        if before_dt is not None and issue.closed_at > before_dt:
+            continue
+        filtered_issues.append(issue)
+    return filtered_issues
+
+
+def _reinclude_tree_parents(
+    issues: list[Issue],
+    storage: JSONLStorage,
+) -> list[Issue]:
+    """Re-include closed (non-tombstone) parents so the tree stays connected."""
+    visible_ids = {i.full_id for i in issues}
+    checked: set[str] = set()
+    while True:
+        missing_parent_ids = {
+            i.parent
+            for i in issues
+            if i.parent and i.parent not in visible_ids and i.parent not in checked
+        }
+        if not missing_parent_ids:
+            break
+        for parent_id in missing_parent_ids:
+            checked.add(parent_id)
+            parent_issue = storage.get(parent_id)
+            if parent_issue and not parent_issue.is_tombstone():
+                issues.append(parent_issue)
+                visible_ids.add(parent_issue.full_id)
+    return issues
+
+
 def _filter_issues_for_list(
     storage: JSONLStorage,
     *,
@@ -183,8 +294,6 @@ def _filter_issues_for_list(
 
     Shared by `list` and `random` so both commands draw from the same candidate set.
     """
-    from datetime import datetime as dt
-
     from ._helpers import apply_common_filters
 
     filters: dict[str, Any] = {}
@@ -223,20 +332,15 @@ def _filter_issues_for_list(
         if ns_filter is not None:
             issues = [i for i in issues if ns_filter(i.namespace)]
 
-    closed_excluded_by_default = (
-        not status
-        and not closed
-        and not all_issues
-        and not (closed_after or closed_before)
+    issues = _apply_default_visibility(
+        issues,
+        status=status,
+        closed=closed,
+        all_issues=all_issues,
+        closed_after=closed_after,
+        closed_before=closed_before,
+        include_snoozed=include_snoozed,
     )
-    if closed_excluded_by_default:
-        issues = [i for i in issues if i.status.value not in ("closed", "tombstone")]
-
-    if not include_snoozed and not all_issues:
-        now = dt.now().astimezone()
-        issues = [
-            i for i in issues if i.snoozed_until is None or i.snoozed_until <= now
-        ]
 
     if open_issues:
         issues = [i for i in issues if i.status.value in ("open", "in_progress")]
@@ -249,31 +353,9 @@ def _filter_issues_for_list(
         without_comments=without_comments,
     )
 
-    if closed_after or closed_before:
-        try:
-            filtered_issues: list[Issue] = []
-            for issue in issues:
-                if not issue.closed_at:
-                    continue
-                should_include = True
-                if closed_after:
-                    after_dt = dt.fromisoformat(closed_after)
-                    if after_dt.tzinfo is None:
-                        after_dt = after_dt.replace(tzinfo=timezone.utc)
-                    if issue.closed_at < after_dt:
-                        should_include = False
-                if closed_before and should_include:
-                    before_dt = dt.fromisoformat(closed_before)
-                    if before_dt.tzinfo is None:
-                        before_dt = before_dt.replace(tzinfo=timezone.utc)
-                    if issue.closed_at > before_dt:
-                        should_include = False
-                if should_include:
-                    filtered_issues.append(issue)
-            issues = filtered_issues
-        except ValueError as e:
-            echo_error(f"parsing date: {e}")
-            raise typer.Exit(1)
+    issues = _apply_closed_date_filter(
+        issues, closed_after=closed_after, closed_before=closed_before
+    )
 
     return sorted(issues, key=lambda i: (i.priority, i.id))
 
@@ -525,34 +607,16 @@ def register(app: typer.Typer) -> None:
                 include_snoozed=include_snoozed,
             )
 
-            closed_excluded_by_default = (
-                not status
-                and not closed
-                and not all_issues
-                and not (closed_after or closed_before)
-            )
-
             # In tree mode, re-include closed parents of visible children
             # so the hierarchy is preserved (closed parents show with ✓ icon)
-            if tree and closed_excluded_by_default:
-                visible_ids = {i.full_id for i in issues}
-                checked: set[str] = set()
-                while True:
-                    missing_parent_ids = {
-                        i.parent
-                        for i in issues
-                        if i.parent
-                        and i.parent not in visible_ids
-                        and i.parent not in checked
-                    }
-                    if not missing_parent_ids:
-                        break
-                    for parent_id in missing_parent_ids:
-                        checked.add(parent_id)
-                        parent_issue = storage.get(parent_id)
-                        if parent_issue and not parent_issue.is_tombstone():
-                            issues.append(parent_issue)
-                            visible_ids.add(parent_issue.full_id)
+            if tree and _is_closed_excluded_by_default(
+                status=status,
+                closed=closed,
+                all_issues=all_issues,
+                closed_after=closed_after,
+                closed_before=closed_before,
+            ):
+                issues = _reinclude_tree_parents(issues, storage)
 
             # Sort by priority (lower number = higher priority)
             issues = sorted(issues, key=lambda i: (i.priority, i.id))

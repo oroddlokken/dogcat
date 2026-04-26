@@ -119,6 +119,7 @@ from typing import TYPE_CHECKING, Any, cast
 import orjson
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 from dogcat.models import classify_record
@@ -360,15 +361,18 @@ def _event_key(record: dict[str, Any]) -> tuple[str, str, str, str, str]:
     )
 
 
-def _replay_deps(
+def _replay_with_ops(
     records: list[dict[str, Any]],
-) -> dict[tuple[str, str, str], dict[str, Any]]:
-    """Replay dependency add/remove records to get effective state."""
-    state: dict[tuple[str, str, str], dict[str, Any]] = {}
+    *,
+    record_type: str,
+    key_fn: Callable[[dict[str, Any]], tuple[str, ...]],
+) -> dict[tuple[str, ...], dict[str, Any]]:
+    """Replay add/remove records of one type to get effective state."""
+    state: dict[tuple[str, ...], dict[str, Any]] = {}
     for record in records:
-        if classify_record(record) != "dependency":
+        if classify_record(record) != record_type:
             continue
-        key = _dep_key(record)
+        key = key_fn(record)
         if record.get("op", "add") == "remove":
             state.pop(key, None)
         else:
@@ -376,20 +380,121 @@ def _replay_deps(
     return state
 
 
-def _replay_links(
-    records: list[dict[str, Any]],
-) -> dict[tuple[str, str, str], dict[str, Any]]:
-    """Replay link add/remove records to get effective state."""
-    state: dict[tuple[str, str, str], dict[str, Any]] = {}
-    for record in records:
-        if classify_record(record) != "link":
+def _merge_issues_lww(
+    ours_records: list[dict[str, Any]],
+    theirs_records: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Merge issues by status finality, then ``updated_at``.
+
+    Status finality (TOMBSTONE > CLOSED > active states > DRAFT) wins over
+    ``updated_at`` so a concurrent edit on one branch cannot silently revert
+    a tombstone or close from the other branch. Within the same rank, the
+    record with the later ``updated_at`` wins. (dogcat-mro6)
+    """
+    issues: dict[str, dict[str, Any]] = {}
+    for record in [*ours_records, *theirs_records]:
+        if classify_record(record) != "issue":
             continue
-        key = _link_key(record)
-        if record.get("op", "add") == "remove":
-            state.pop(key, None)
-        else:
-            state[key] = record
-    return state
+        fid = _issue_full_id(record)
+        existing = issues.get(fid)
+        if existing is None:
+            issues[fid] = record
+            continue
+        new_rank = _ISSUE_STATUS_RANK.get(record.get("status", "open"), 1)
+        old_rank = _ISSUE_STATUS_RANK.get(existing.get("status", "open"), 1)
+        if new_rank > old_rank:
+            issues[fid] = record
+        elif new_rank == old_rank:
+            new_ts = _parse_iso_ts(record.get("updated_at", ""))
+            old_ts = _parse_iso_ts(existing.get("updated_at", ""))
+            if new_ts >= old_ts:
+                issues[fid] = record
+    return issues
+
+
+def _merge_proposals(
+    ours_records: list[dict[str, Any]],
+    theirs_records: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Merge proposals by status finality, then ``updated_at`` / ``created_at``.
+
+    Higher status finality always wins (TOMBSTONE > CLOSED > OPEN). Within
+    the same rank, the record with the latest ``updated_at`` (falling back
+    to ``created_at`` for legacy records) wins, so deletions and closures
+    are never reverted by concurrent edits.
+    """
+    proposals: dict[str, dict[str, Any]] = {}
+    for record in [*ours_records, *theirs_records]:
+        if classify_record(record) != "proposal":
+            continue
+        fid = _proposal_full_id(record)
+        existing = proposals.get(fid)
+        if existing is None:
+            proposals[fid] = record
+            continue
+        new_rank = _PROPOSAL_STATUS_RANK.get(record.get("status", "open"), 0)
+        old_rank = _PROPOSAL_STATUS_RANK.get(existing.get("status", "open"), 0)
+        if new_rank > old_rank:
+            proposals[fid] = record
+        elif new_rank == old_rank:
+            new_ts = _parse_iso_ts(
+                record.get("updated_at", record.get("created_at", ""))
+            )
+            old_ts = _parse_iso_ts(
+                existing.get("updated_at", existing.get("created_at", ""))
+            )
+            if new_ts >= old_ts:
+                proposals[fid] = record
+    return proposals
+
+
+def _merge_events(
+    ours_records: list[dict[str, Any]],
+    theirs_records: list[dict[str, Any]],
+) -> dict[tuple[str, str, str, str, str], dict[str, Any]]:
+    """Union events from both sides, deduplicating by identity tuple."""
+    events: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
+    for record in [*ours_records, *theirs_records]:
+        if classify_record(record) != "event":
+            continue
+        key = _event_key(record)
+        if key not in events:
+            events[key] = record
+    return events
+
+
+def _merge_three_way(
+    base_records: list[dict[str, Any]],
+    ours_records: list[dict[str, Any]],
+    theirs_records: list[dict[str, Any]],
+    *,
+    record_type: str,
+    key_fn: Callable[[dict[str, Any]], tuple[str, ...]],
+) -> dict[tuple[str, ...], dict[str, Any]]:
+    """Three-way merge for add/remove records (deps, links).
+
+    Replays each side to its effective state, then for each key in the union:
+    a deletion by one side wins over a no-op on the other; an add not in base
+    is kept; an add by both sides collapses to theirs (representative).
+    """
+    base = _replay_with_ops(base_records, record_type=record_type, key_fn=key_fn)
+    ours = _replay_with_ops(ours_records, record_type=record_type, key_fn=key_fn)
+    theirs = _replay_with_ops(theirs_records, record_type=record_type, key_fn=key_fn)
+
+    merged: dict[tuple[str, ...], dict[str, Any]] = {}
+    for key in set(base) | set(ours) | set(theirs):
+        in_base = key in base
+        in_ours = key in ours
+        in_theirs = key in theirs
+
+        if in_ours and in_theirs:
+            merged[key] = theirs[key]
+        elif in_ours and not in_theirs:
+            if not in_base:
+                merged[key] = ours[key]
+        elif in_theirs and not in_ours and not in_base:
+            merged[key] = theirs[key]
+    return merged
 
 
 def merge_jsonl(
@@ -399,131 +504,42 @@ def merge_jsonl(
 ) -> list[dict[str, Any]]:
     """Merge three sets of JSONL records using JSONL-aware semantics.
 
-    - Issues: union by full_id, latest ``updated_at`` wins for conflicts.
-    - Events: union (deduplicated by issue_id + timestamp + event_type).
+    - Issues: union by full_id, status finality then latest ``updated_at`` wins.
+    - Proposals: union by full_id, status finality then latest timestamp wins.
+    - Events: union (deduplicated by identity tuple).
     - Dependencies & Links: proper three-way merge using base records.
       A deletion by either side (present in base, absent from that side)
       is honored unless the other side also re-added it.
 
     Returns the merged list of records.
     """
-    # --- Issues: status finality first, then updated_at ---
-    # Status finality (TOMBSTONE > CLOSED > active states > DRAFT) wins
-    # over updated_at so a concurrent edit on one branch cannot silently
-    # revert a tombstone or close from the other branch. Within the same
-    # rank, the record with the later updated_at wins. (dogcat-mro6)
-    issues: dict[str, dict[str, Any]] = {}
-    for record in [*ours_records, *theirs_records]:
-        if classify_record(record) != "issue":
-            continue
-        fid = _issue_full_id(record)
-        existing = issues.get(fid)
-        if existing is None:
-            issues[fid] = record
-        else:
-            new_rank = _ISSUE_STATUS_RANK.get(record.get("status", "open"), 1)
-            old_rank = _ISSUE_STATUS_RANK.get(existing.get("status", "open"), 1)
-            if new_rank > old_rank:
-                issues[fid] = record
-            elif new_rank == old_rank:
-                new_ts = _parse_iso_ts(record.get("updated_at", ""))
-                old_ts = _parse_iso_ts(existing.get("updated_at", ""))
-                if new_ts >= old_ts:
-                    issues[fid] = record
+    issues = _merge_issues_lww(ours_records, theirs_records)
+    proposals = _merge_proposals(ours_records, theirs_records)
+    events = _merge_events(ours_records, theirs_records)
+    merged_deps = _merge_three_way(
+        base_records,
+        ours_records,
+        theirs_records,
+        record_type="dependency",
+        key_fn=_dep_key,
+    )
+    merged_links = _merge_three_way(
+        base_records,
+        ours_records,
+        theirs_records,
+        record_type="link",
+        key_fn=_link_key,
+    )
 
-    # --- Proposals: last-write-wins by status finality, then updated_at ---
-    # Merge strategy: higher status finality always wins (TOMBSTONE > CLOSED > OPEN).
-    # When both sides have the same status, the record with the latest updated_at
-    # (falling back to created_at for older records) wins. This ensures that
-    # deletions and closures are never reverted by concurrent edits.
-    proposals: dict[str, dict[str, Any]] = {}
-    for record in [*ours_records, *theirs_records]:
-        if classify_record(record) != "proposal":
-            continue
-        fid = _proposal_full_id(record)
-        existing = proposals.get(fid)
-        if existing is None:
-            proposals[fid] = record
-        else:
-            new_rank = _PROPOSAL_STATUS_RANK.get(
-                record.get("status", "open"),
-                0,
-            )
-            old_rank = _PROPOSAL_STATUS_RANK.get(
-                existing.get("status", "open"),
-                0,
-            )
-            if new_rank > old_rank:
-                proposals[fid] = record
-            elif new_rank == old_rank:
-                new_ts = _parse_iso_ts(
-                    record.get("updated_at", record.get("created_at", ""))
-                )
-                old_ts = _parse_iso_ts(
-                    existing.get("updated_at", existing.get("created_at", ""))
-                )
-                if new_ts >= old_ts:
-                    proposals[fid] = record
-
-    # --- Events: keep all, deduplicate ---
-    events: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
-    for record in [*ours_records, *theirs_records]:
-        if classify_record(record) != "event":
-            continue
-        key = _event_key(record)
-        if key not in events:
-            events[key] = record
-
-    # --- Dependencies: three-way merge ---
-    base_deps = _replay_deps(base_records)
-    ours_deps = _replay_deps(ours_records)
-    theirs_deps = _replay_deps(theirs_records)
-
-    merged_deps: dict[tuple[str, str, str], dict[str, Any]] = {}
-    for key in set(base_deps) | set(ours_deps) | set(theirs_deps):
-        in_base = key in base_deps
-        in_ours = key in ours_deps
-        in_theirs = key in theirs_deps
-
-        if in_ours and in_theirs:
-            merged_deps[key] = theirs_deps[key]
-        elif in_ours and not in_theirs:
-            if not in_base:
-                # New in ours — keep it
-                merged_deps[key] = ours_deps[key]
-        elif in_theirs and not in_ours and not in_base:
-            merged_deps[key] = theirs_deps[key]
-
-    # --- Links: three-way merge ---
-    base_links = _replay_links(base_records)
-    ours_links = _replay_links(ours_records)
-    theirs_links = _replay_links(theirs_records)
-
-    merged_links: dict[tuple[str, str, str], dict[str, Any]] = {}
-    for key in set(base_links) | set(ours_links) | set(theirs_links):
-        in_base = key in base_links
-        in_ours = key in ours_links
-        in_theirs = key in theirs_links
-
-        if in_ours and in_theirs:
-            merged_links[key] = theirs_links[key]
-        elif in_ours and not in_theirs:
-            if not in_base:
-                merged_links[key] = ours_links[key]
-        elif in_theirs and not in_ours and not in_base:
-            merged_links[key] = theirs_links[key]
-
-    # Assemble: issues, proposals, deps, links, events (matches compaction order)
+    # Assemble: issues, proposals, deps, links, events (matches compaction order).
+    # Events are sorted by absolute time so cross-timezone records come out in
+    # the right order. (dogcat-623e)
     result: list[dict[str, Any]] = []
     result.extend(issues.values())
     result.extend(proposals.values())
     result.extend(merged_deps.values())
     result.extend(merged_links.values())
-    # Sort events by absolute time (parsed) so cross-timezone records
-    # come out in the right order. (dogcat-623e)
-    sorted_events = sorted(
-        events.values(), key=lambda e: _parse_iso_ts(e.get("timestamp", ""))
+    result.extend(
+        sorted(events.values(), key=lambda e: _parse_iso_ts(e.get("timestamp", "")))
     )
-    result.extend(sorted_events)
-
     return result

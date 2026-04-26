@@ -402,7 +402,9 @@ def register(app: typer.Typer) -> None:
                 else:
                     typer.echo(f"✓ Updated {issue.full_id}: {issue.title}")
 
-            if apply_to_each(issue_ids, _update, verb="updating"):
+            with storage.batch():
+                has_errors = apply_to_each(issue_ids, _update, verb="updating")
+            if has_errors:
                 raise typer.Exit(1)
 
         except typer.Exit:

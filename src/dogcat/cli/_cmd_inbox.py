@@ -374,7 +374,9 @@ def register(app: typer.Typer) -> None:
             else:
                 typer.echo(f"✓ Closed {proposal.full_id}: {proposal.title}")
 
-        if apply_to_each(proposal_ids, _close, verb="closing"):
+        with inbox.batch():
+            has_errors = apply_to_each(proposal_ids, _close, verb="closing")
+        if has_errors:
             raise typer.Exit(1)
 
     @inbox_app.command("delete")
@@ -418,7 +420,9 @@ def register(app: typer.Typer) -> None:
             else:
                 typer.echo(f"✓ Deleted {proposal.full_id}: {proposal.title}")
 
-        if apply_to_each(proposal_ids, _delete, verb="deleting"):
+        with inbox.batch():
+            has_errors = apply_to_each(proposal_ids, _delete, verb="deleting")
+        if has_errors:
             raise typer.Exit(1)
 
     @inbox_app.command("accept")
@@ -610,5 +614,7 @@ def register(app: typer.Typer) -> None:
             else:
                 typer.echo(f"✓ Rejected {proposal.full_id}: {proposal.title}")
 
-        if apply_to_each(proposal_ids, _reject, verb="rejecting"):
+        with remote_inbox.batch():
+            has_errors = apply_to_each(proposal_ids, _reject, verb="rejecting")
+        if has_errors:
             raise typer.Exit(1)

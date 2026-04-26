@@ -77,7 +77,8 @@ def register(app: typer.Typer) -> None:
             else:
                 typer.echo(f"✓ Closed {issue.full_id}: {issue.title}")
 
-        has_errors = apply_to_each(issue_ids, _close, verb="closing")
+        with storage.batch():
+            has_errors = apply_to_each(issue_ids, _close, verb="closing")
 
         if parent_ids and not is_json():
             _check_epic_completion(storage, parent_ids)
@@ -130,7 +131,9 @@ def register(app: typer.Typer) -> None:
             else:
                 typer.echo(f"✓ Deleted {deleted.full_id}: {deleted.title}")
 
-        if apply_to_each(issue_ids, _delete, verb="deleting"):
+        with storage.batch():
+            has_errors = apply_to_each(issue_ids, _delete, verb="deleting")
+        if has_errors:
             raise typer.Exit(1)
 
     @app.command(name="remove", hidden=True)

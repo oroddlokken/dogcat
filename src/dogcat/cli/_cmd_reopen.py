@@ -53,5 +53,7 @@ def register(app: typer.Typer) -> None:
             else:
                 typer.echo(f"✓ Reopened {issue.full_id}: {issue.title}")
 
-        if apply_to_each(issue_ids, _reopen, verb="reopening"):
+        with storage.batch():
+            has_errors = apply_to_each(issue_ids, _reopen, verb="reopening")
+        if has_errors:
             raise typer.Exit(1)

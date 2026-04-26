@@ -42,7 +42,7 @@ def _ensure_gitignore_entry(entry: str, *, quiet: bool = False) -> None:
 
 
 def register(app: typer.Typer) -> None:
-    """Register init and import-beads commands."""
+    """Register init command."""
 
     @app.command()
     def init(
@@ -180,97 +180,3 @@ def register(app: typer.Typer) -> None:
             typer.echo(
                 f"  Issues will be named: {namespace}-<hash> (e.g., {namespace}-a3f2)"
             )
-
-    @app.command("import-beads")
-    def import_beads(
-        beads_jsonl: str = typer.Argument(..., help="Path to beads issues.jsonl file"),
-        dogcats_dir: str = typer.Option(
-            ".dogcats",
-            help="Output directory for dogcat (will be created)",
-        ),
-        force: bool = typer.Option(
-            False,
-            "--force",
-            "-f",
-            help="Import into existing project (merge issues, keep current prefix)",
-        ),
-        verbose: bool = typer.Option(
-            False,
-            "--verbose",
-            "-v",
-            help="Show import progress",
-        ),
-    ) -> None:
-        """Import issues from beads format into dogcat.
-
-        By default, requires a fresh project (no existing issues.jsonl).
-        Use --force to import into an existing project
-        (merges issues, skips duplicates).
-        """
-        try:
-            from dogcat.migrate import migrate_from_beads
-
-            # Check if dogcat project already exists
-            dogcats_path = Path(dogcats_dir)
-            issues_file = dogcats_path / "issues.jsonl"
-            has_existing_project = issues_file.exists()
-            has_existing_data = has_existing_project and issues_file.stat().st_size > 0
-
-            if has_existing_data:
-                if force:
-                    # Merge mode: import into existing project
-                    if verbose:
-                        typer.echo("Importing into existing project (merge mode)...")
-                else:
-                    echo_error(
-                        ".dogcats/issues.jsonl already exists. "
-                        "Use --force to import into existing project (merge)"
-                    )
-                    raise typer.Exit(1)
-
-            # When --force is used on existing project, merge (even if empty)
-            merge_mode = force and has_existing_project
-
-            # Perform import
-            migrated, failed, skipped = migrate_from_beads(
-                beads_jsonl,
-                dogcats_dir,
-                verbose=verbose,
-                merge=merge_mode,
-            )
-
-            # Only set prefix if this is a fresh import (not merging)
-            if migrated > 0 and not merge_mode:
-                storage = get_storage(dogcats_dir)
-                all_issues = storage.list()
-                if all_issues:
-                    # Sort by created_at descending to get newest
-                    sorted_issues = sorted(
-                        all_issues,
-                        key=lambda i: i.created_at,
-                        reverse=True,
-                    )
-                    newest_issue = sorted_issues[0]
-                    detected_prefix = newest_issue.namespace
-                    if detected_prefix:
-                        set_issue_prefix(dogcats_dir, detected_prefix)
-                        typer.echo(f"✓ Set namespace: {detected_prefix}")
-
-            typer.echo("\n✓ Import complete!")
-            typer.echo(f"  Imported: {migrated} issues")
-            if skipped > 0:
-                typer.echo(f"  Skipped (already exist): {skipped} issues")
-            if failed > 0:
-                typer.echo(f"  Failed: {failed} issues")
-
-        except FileNotFoundError as e:
-            echo_error(str(e))
-            raise typer.Exit(1)
-        except ValueError as e:
-            echo_error(str(e))
-            raise typer.Exit(1)
-        except typer.Exit:
-            raise
-        except Exception as e:
-            echo_error(str(e))
-            raise typer.Exit(1)

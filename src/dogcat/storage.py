@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import logging
 import subprocess
@@ -15,7 +16,11 @@ from dogcat._compaction import should_compact
 from dogcat._diff import field_value, tracked_changes
 from dogcat._id_resolve import resolve_partial_id
 from dogcat._indexes import rebuild_indexes
-from dogcat._jsonl_io import append_jsonl_payload, atomic_rewrite_jsonl
+from dogcat._jsonl_io import (
+    append_jsonl_payload,
+    atomic_rewrite_jsonl,
+    split_and_rewrite_jsonl,
+)
 from dogcat._schema import current_version_tuple, parse_version
 from dogcat._version import version as _dcat_version
 from dogcat.constants import (
@@ -42,7 +47,26 @@ from dogcat.models import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
     from contextlib import AbstractContextManager
+
+
+@dataclasses.dataclass(frozen=True)
+class ArchivePartition:
+    """Result of partitioning candidates into archivable + skipped sets."""
+
+    archivable: list[Issue]
+    skipped: list[tuple[Issue, str]]
+
+
+@dataclasses.dataclass(frozen=True)
+class ArchiveStats:
+    """Counts returned by :meth:`JSONLStorage.archive`."""
+
+    issues: int
+    dependencies: int
+    links: int
+    archive_path: Path
 
 
 class JSONLStorage:
@@ -74,6 +98,13 @@ class JSONLStorage:
         # Track lines for compaction decisions
         self._base_lines: int = 0
         self._appended_lines: int = 0
+        # When set, _append() buffers records here instead of writing to disk;
+        # the batch() context manager flushes everything in one locked write.
+        self._batch_records: list[dict[str, Any]] | None = None
+        # Memoized result of _is_default_branch(); cached per-instance because
+        # CLI commands construct a fresh JSONLStorage per invocation and the
+        # branch can't legitimately change mid-command.
+        self._default_branch_cache: bool | None = None
 
         if create_dir:
             # Create .dogcats directory if it doesn't exist (used by init)
@@ -436,9 +467,17 @@ class JSONLStorage:
         (e.g. from a prior truncated write), a newline is prepended to
         avoid concatenating with the corrupt trailing content.
 
+        When :meth:`batch` is active the records are buffered and written
+        when the batch context exits, so a multi-id ``dcat close`` only
+        pays one lock + one fsync + one compaction check.
+
         Args:
             records: List of dicts to serialize and append as JSONL lines.
         """
+        if self._batch_records is not None:
+            self._batch_records.extend(records)
+            return
+
         # If the file had a corrupt last line, rewrite it cleanly first
         # so the garbage doesn't persist between valid records.
         # Use _reload=False because callers (e.g. create()) may have already
@@ -464,7 +503,41 @@ class JSONLStorage:
 
     _DEFAULT_BRANCHES = DEFAULT_BRANCH_NAMES
 
+    @contextlib.contextmanager
+    def batch(self) -> Generator[None]:
+        """Defer file writes until the context exits.
+
+        Inside the block every mutation that goes through :meth:`_append` (or
+        :meth:`_append_with_event`) records its serialized payload in memory
+        instead of acquiring the file lock and writing to disk. On exit the
+        full buffer is appended in one locked write and the compaction check
+        runs once. Re-entering an active batch is a no-op.
+        """
+        if self._batch_records is not None:
+            yield
+            return
+        self._batch_records = []
+        try:
+            yield
+        finally:
+            pending = self._batch_records
+            self._batch_records = None
+            if pending:
+                self._append(pending)
+
     def _is_default_branch(self) -> bool:
+        """Return :meth:`_compute_default_branch`'s memoized result.
+
+        Each ``dcat`` invocation forks ``git rev-parse`` per compaction check,
+        so a 26-id ``dcat close`` paid for 26 forks. The result can't change
+        mid-command (we're not switching branches under our own feet), so we
+        memoize it on the instance — fresh storage per CLI invocation.
+        """
+        if self._default_branch_cache is None:
+            self._default_branch_cache = self._compute_default_branch()
+        return self._default_branch_cache
+
+    def _compute_default_branch(self) -> bool:
         """Check whether the working tree is on a default branch (main/master).
 
         ``True`` when there is genuinely no git repository (FileNotFoundError
@@ -1806,6 +1879,164 @@ class JSONLStorage:
         This re-reads the JSONL file and updates the in-memory state.
         """
         self._load()
+
+    def archivable_partition(self, candidates: list[Issue]) -> ArchivePartition:
+        """Split ``candidates`` into archivable issues and skipped-with-reason.
+
+        An issue is archivable iff it has no open children, no parent staying
+        behind, no dependencies / dependents / links / incoming links pointing
+        outside the candidate set. ``candidates`` is treated as the set under
+        consideration — a dependency on another candidate is not a blocker.
+        """
+        candidate_ids = {i.full_id for i in candidates}
+        archivable: list[Issue] = []
+        skipped: list[tuple[Issue, str]] = []
+
+        for issue in candidates:
+            children = self.get_children(issue.full_id)
+            open_children = [c for c in children if c.status != Status.CLOSED]
+            if open_children:
+                skipped.append(
+                    (
+                        issue,
+                        f"has {len(open_children)} open child(ren): "
+                        + ", ".join(c.full_id for c in open_children[:3]),
+                    )
+                )
+                continue
+
+            if issue.parent and issue.parent not in candidate_ids:
+                parent_issue = self.get(issue.parent)
+                parent_status = parent_issue.status.value if parent_issue else "unknown"
+                skipped.append(
+                    (
+                        issue,
+                        f"parent {issue.parent} is not being archived"
+                        f" (status: {parent_status})",
+                    )
+                )
+                continue
+
+            deps = self.get_dependencies(issue.full_id)
+            bad_deps = [d for d in deps if d.depends_on_id not in candidate_ids]
+            if bad_deps:
+                skipped.append(
+                    (
+                        issue,
+                        "depends on non-archived issue(s): "
+                        + ", ".join(d.depends_on_id for d in bad_deps[:3]),
+                    )
+                )
+                continue
+
+            dependents = self.get_dependents(issue.full_id)
+            bad_dependents = [d for d in dependents if d.issue_id not in candidate_ids]
+            if bad_dependents:
+                skipped.append(
+                    (
+                        issue,
+                        "is depended on by non-archived issue(s): "
+                        + ", ".join(d.issue_id for d in bad_dependents[:3]),
+                    )
+                )
+                continue
+
+            links = self.get_links(issue.full_id)
+            bad_links = [link for link in links if link.to_id not in candidate_ids]
+            if bad_links:
+                skipped.append(
+                    (
+                        issue,
+                        "has links to non-archived issue(s): "
+                        + ", ".join(link.to_id for link in bad_links[:3]),
+                    )
+                )
+                continue
+
+            incoming_links = self.get_incoming_links(issue.full_id)
+            bad_incoming = [
+                link for link in incoming_links if link.from_id not in candidate_ids
+            ]
+            if bad_incoming:
+                skipped.append(
+                    (
+                        issue,
+                        "has incoming links from non-archived issue(s): "
+                        + ", ".join(link.from_id for link in bad_incoming[:3]),
+                    )
+                )
+                continue
+
+            archivable.append(issue)
+
+        return ArchivePartition(archivable=archivable, skipped=skipped)
+
+    def archive(self, archivable_ids: set[str], archive_path: Path) -> ArchiveStats:
+        """Move records for ``archivable_ids`` from storage to ``archive_path``.
+
+        Holds the storage file lock across the entire read+partition+rewrite so
+        a concurrent ``dcat new`` cannot append between the read and the atomic
+        replace (which would silently overwrite the new record). Updates the
+        in-memory state via :meth:`remove_archived` after the rewrite lands.
+        """
+        dep_count = 0
+        link_count = 0
+
+        def classify(stripped: bytes) -> bool:
+            nonlocal dep_count, link_count
+            try:
+                data = orjson.loads(stripped)
+            except orjson.JSONDecodeError:
+                return False
+
+            rtype = classify_record(data)
+            if rtype == "link":
+                if (
+                    data["from_id"] in archivable_ids
+                    and data["to_id"] in archivable_ids
+                ):
+                    link_count += 1
+                    return True
+                return False
+            if rtype == "dependency":
+                if (
+                    data["issue_id"] in archivable_ids
+                    and data["depends_on_id"] in archivable_ids
+                ):
+                    dep_count += 1
+                    return True
+                return False
+            if rtype == "event":
+                return data.get("issue_id") in archivable_ids
+
+            # Issue record — resolve full_id from raw dict
+            if "namespace" in data:
+                full_id = f"{data['namespace']}-{data['id']}"
+            elif "-" in str(data.get("id", "")):
+                full_id = data["id"]
+            else:
+                full_id = f"dc-{data['id']}"
+            return full_id in archivable_ids
+
+        with self._file_lock():
+            archive_path.parent.mkdir(parents=True, exist_ok=True)
+            archived_count, remaining_lines = split_and_rewrite_jsonl(
+                self.path,
+                self.dogcats_dir,
+                archive_path,
+                archive_path.parent,
+                classify,
+            )
+
+        if archived_count > 0:
+            self.remove_archived(archivable_ids, remaining_lines)
+
+        return ArchiveStats(
+            issues=len(archivable_ids),
+            dependencies=dep_count,
+            links=link_count,
+            archive_path=archive_path,
+        )
 
     def remove_archived(self, archived_ids: set[str], remaining_lines: int) -> None:
         """Remove archived issues, dependencies, and links from in-memory state.

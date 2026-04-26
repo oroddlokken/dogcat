@@ -10,16 +10,6 @@
 - [Tips & tricks](#tips--tricks)
 - [FAQ](#faq)
 
-## Relation to Beads
-
-Heavily inspired by [steveyegge/beads](https://github.com/steveyegge/beads).
-
-Beads is great, but it is ever expanding and slowly getting more and more complicated as he is building Kubernetes for Agents.
-
-Dogcat is a simpler, more minimal version that focuses on the core functionality. The goal is to keep it simple and not chase orchestration of tens of agents running at the same time.
-
-It also avoids some complexity by not using a daemon and/or SQL database, and only relying on the `issues.jsonl` file.
-
 ## Installation
 
 ### Homebrew (macOS)
@@ -210,15 +200,8 @@ alias dce="dcat edit"
 **What's a dogcat?**  
 ¯\_(ツ)_/¯ Some cats are dog-like, and some dogs are cat-like.
 
-**Why a new project and just not use or fork beads?**  
-Dogcat started out as some tooling on top of beads, that quickly grew into its own separate project. I found it tricky to integrate against beads, and instead of trying to keep up with changes in beads, it was more fun to just build my own.
-
 **Why Python?**  
 I wanted to use [Textual](https://textual.textualize.io/), which is awesome for making TUIs with. It's also the language I am the most familiar with.
-
-## Migrating from beads
-
-If you already have a collection of issues in Beads, you can import them in dogcat. In a folder without a `.dogcats` folder run `dogcat import-beads /path/to/project/.beads/issues.jsonl`.
 
 ## Development
 

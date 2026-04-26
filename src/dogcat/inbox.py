@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -28,6 +29,7 @@ from dogcat.models import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
     from contextlib import AbstractContextManager
 
 
@@ -62,6 +64,9 @@ class InboxStorage:
         self._needs_compaction = False
         # Bad lines skipped during _load(); see JSONLStorage for the contract.
         self._bad_lines: list[tuple[int, bytes, str]] = []
+        # When set, _append() buffers records here instead of writing to disk;
+        # the batch() context manager flushes everything in one locked write.
+        self._batch_records: list[dict[str, Any]] | None = None
 
         # Initialize event log for inbox change tracking
         from dogcat.event_log import InboxEventLog
@@ -129,6 +134,28 @@ class InboxStorage:
         """Acquire an advisory file lock for exclusive writes."""
         return advisory_file_lock(self._lock_path)
 
+    @contextlib.contextmanager
+    def batch(self) -> Generator[None]:
+        """Defer file writes until the context exits.
+
+        Mirror of :meth:`JSONLStorage.batch` for the inbox: every mutation
+        that goes through :meth:`_append` (or :meth:`_append_with_event`)
+        buffers its serialized payload in memory; on exit the full buffer
+        is appended in one locked write. Re-entering an active batch is a
+        no-op.
+        """
+        if self._batch_records is not None:
+            yield
+            return
+        self._batch_records = []
+        try:
+            yield
+        finally:
+            pending = self._batch_records
+            self._batch_records = None
+            if pending:
+                self._append(pending)
+
     def _save(self) -> None:
         """Compact: rewrite the entire file with only current state."""
         with self._file_lock():
@@ -153,7 +180,15 @@ class InboxStorage:
         atomic_rewrite_jsonl(self.path, self.dogcats_dir, _write)
 
     def _append(self, records: list[dict[str, Any]]) -> None:
-        """Append records to the JSONL file without rewriting it."""
+        """Append records to the JSONL file without rewriting it.
+
+        When :meth:`batch` is active the records are buffered and written
+        when the batch context exits.
+        """
+        if self._batch_records is not None:
+            self._batch_records.extend(records)
+            return
+
         if self._needs_compaction:
             self._save()
             self._needs_compaction = False

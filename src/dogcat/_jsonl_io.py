@@ -101,3 +101,55 @@ def append_jsonl_payload(target: Path, payload: bytes) -> None:
     except OSError as e:
         msg = f"Failed to append to {target.name}: {e}"
         raise RuntimeError(msg) from e
+
+
+def _write_lines(lines: list[bytes]) -> Callable[[IO[bytes]], int]:
+    """Return a write_fn for ``atomic_rewrite_jsonl`` that flushes ``lines``."""
+
+    def writer(f: IO[bytes]) -> int:
+        for line in lines:
+            f.write(line if line.endswith(b"\n") else line + b"\n")
+        return len(lines)
+
+    return writer
+
+
+def split_and_rewrite_jsonl(
+    source: Path,
+    source_dir: Path,
+    archive: Path,
+    archive_dir: Path,
+    classify: Callable[[bytes], bool],
+) -> tuple[int, int]:
+    """Partition ``source`` into archive vs keep, then atomically rewrite both.
+
+    ``classify(stripped_line)`` returns True when a line belongs in the archive
+    file, False when it stays in the source file. Blank lines are dropped on
+    both sides. Lines that fail to be classified (e.g. corrupt JSON whose
+    classifier raises) are the caller's responsibility — they should classify
+    such lines as "keep" so the source isn't quietly losing rows.
+
+    Returns ``(archived_lines, remaining_lines)``. When nothing was classified
+    as archive, the source is left untouched and ``(0, 0)`` is returned.
+    """
+    if not source.exists():
+        return 0, 0
+
+    archived_lines: list[bytes] = []
+    remaining_lines: list[bytes] = []
+    for raw_line in source.read_bytes().splitlines(keepends=True):
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        if classify(stripped):
+            archived_lines.append(raw_line)
+        else:
+            remaining_lines.append(raw_line)
+
+    if not archived_lines:
+        return 0, 0
+
+    atomic_rewrite_jsonl(archive, archive_dir, _write_lines(archived_lines))
+    atomic_rewrite_jsonl(source, source_dir, _write_lines(remaining_lines))
+
+    return len(archived_lines), len(remaining_lines)

@@ -8,7 +8,8 @@ from pathlib import Path
 import orjson
 import typer
 
-from dogcat.models import Issue, Status, classify_record
+from dogcat._jsonl_io import split_and_rewrite_jsonl
+from dogcat.models import Status
 
 from ._completions import complete_durations, complete_namespaces
 from ._helpers import get_storage
@@ -26,7 +27,6 @@ def _archive_inbox(
 
     Returns the number of proposals archived.
     """
-    import tempfile
     from datetime import timedelta
 
     from dogcat.inbox import InboxStorage
@@ -55,88 +55,30 @@ def _archive_inbox(
         return 0
 
     closed_ids = {p.full_id for p in closed}
+    inbox_path = inbox.get_file_path()
+    archive_path = archive_dir / f"inbox-closed-{timestamp}.jsonl"
 
-    # Split inbox.jsonl lines into archived vs remaining.
+    def classify(stripped: bytes) -> bool:
+        try:
+            data = orjson.loads(stripped)
+        except orjson.JSONDecodeError:
+            return False
+        ns = data.get("namespace", "dc")
+        pid = data.get("id", "")
+        return f"{ns}-inbox-{pid}" in closed_ids
+
     # Hold the inbox file lock across read+rewrite so a concurrent
     # ``dcat propose`` append cannot race the atomic-replace and lose data.
-    inbox_path = inbox.get_file_path()
-    if not inbox_path.exists():
-        return 0
-
-    archived_lines: list[bytes] = []
-    remaining_lines: list[bytes] = []
-
-    archive_filename = f"inbox-closed-{timestamp}.jsonl"
-    archive_path = archive_dir / archive_filename
-
     with inbox._file_lock():
-        for raw_line in inbox_path.read_bytes().splitlines(keepends=True):
-            stripped = raw_line.strip()
-            if not stripped:
-                continue
-            try:
-                data = orjson.loads(stripped)
-            except orjson.JSONDecodeError:
-                remaining_lines.append(raw_line)
-                continue
+        archived_count, _ = split_and_rewrite_jsonl(
+            inbox_path,
+            inbox_path.parent,
+            archive_path,
+            archive_dir,
+            classify,
+        )
 
-            ns = data.get("namespace", "dc")
-            pid = data.get("id", "")
-            full_id = f"{ns}-inbox-{pid}"
-
-            if full_id in closed_ids:
-                archived_lines.append(raw_line)
-            else:
-                remaining_lines.append(raw_line)
-
-        if not archived_lines:
-            return 0
-
-        # Write archived lines atomically
-        with tempfile.NamedTemporaryFile(
-            mode="wb",
-            dir=archive_dir,
-            delete=False,
-            suffix=".jsonl",
-        ) as tmp_file:
-            tmp_path = Path(tmp_file.name)
-            try:
-                for line in archived_lines:
-                    tmp_file.write(line if line.endswith(b"\n") else line + b"\n")
-                tmp_file.flush()
-            except Exception:
-                tmp_path.unlink(missing_ok=True)
-                return 0
-
-        try:
-            tmp_path.replace(archive_path)
-        except OSError:
-            tmp_path.unlink(missing_ok=True)
-            return 0
-
-        # Rewrite inbox.jsonl with remaining lines
-        with tempfile.NamedTemporaryFile(
-            mode="wb",
-            dir=str(inbox_path.parent),
-            delete=False,
-            suffix=".jsonl",
-        ) as tmp_file:
-            tmp_main = Path(tmp_file.name)
-            try:
-                for line in remaining_lines:
-                    tmp_file.write(line if line.endswith(b"\n") else line + b"\n")
-                tmp_file.flush()
-            except Exception:
-                tmp_main.unlink(missing_ok=True)
-                return 0
-
-        try:
-            tmp_main.replace(inbox_path)
-        except OSError:
-            tmp_main.unlink(missing_ok=True)
-            return 0
-
-    return len(closed)
+    return len(closed) if archived_count > 0 else 0
 
 
 def register(app: typer.Typer) -> None:
@@ -188,7 +130,6 @@ def register(app: typer.Typer) -> None:
         """
         set_json(json_output)
         import re
-        import tempfile
         from datetime import timedelta
 
         # Validate --older-than format early
@@ -204,11 +145,9 @@ def register(app: typer.Typer) -> None:
             storage = get_storage(dogcats_dir)
             actual_dogcats_dir = str(storage.dogcats_dir)
 
-            # Get all closed issues (not tombstoned)
-            all_issues = storage.list()
             closed_issues = [
                 i
-                for i in all_issues
+                for i in storage.list()
                 if i.status == Status.CLOSED and not i.is_tombstone()
             ]
 
@@ -216,7 +155,6 @@ def register(app: typer.Typer) -> None:
                 typer.echo("No closed issues to archive.")
                 return
 
-            # Apply namespace filter if specified
             if namespace is not None:
                 closed_issues = [i for i in closed_issues if i.namespace == namespace]
                 if not closed_issues:
@@ -225,7 +163,6 @@ def register(app: typer.Typer) -> None:
                     )
                     return
 
-            # Apply age filter if specified
             if days is not None:
                 cutoff = datetime.now(timezone.utc) - timedelta(days=days)
                 closed_issues = [
@@ -238,102 +175,9 @@ def register(app: typer.Typer) -> None:
                     typer.echo(f"No closed issues older than {days} days to archive.")
                     return
 
-            # Build set of IDs we want to archive
-            candidate_ids = {i.full_id for i in closed_issues}
-
-            # Determine which issues can actually be archived
-            archivable: list[Issue] = []
-            skipped: list[tuple[Issue, str]] = []
-
-            for issue in closed_issues:
-                # Check for open children
-                children = storage.get_children(issue.full_id)
-                open_children = [c for c in children if c.status != Status.CLOSED]
-                if open_children:
-                    skipped.append(
-                        (
-                            issue,
-                            f"has {len(open_children)} open child(ren): "
-                            + ", ".join(c.full_id for c in open_children[:3]),
-                        ),
-                    )
-                    continue
-
-                # Check if parent is still open (not being archived)
-                if issue.parent and issue.parent not in candidate_ids:
-                    parent_issue = storage.get(issue.parent)
-                    parent_status = (
-                        parent_issue.status.value if parent_issue else "unknown"
-                    )
-                    skipped.append(
-                        (
-                            issue,
-                            f"parent {issue.parent} is not being archived"
-                            f" (status: {parent_status})",
-                        ),
-                    )
-                    continue
-
-                # Check dependencies pointing to non-archived issues
-                deps = storage.get_dependencies(issue.full_id)
-                bad_deps = [d for d in deps if d.depends_on_id not in candidate_ids]
-                if bad_deps:
-                    skipped.append(
-                        (
-                            issue,
-                            "depends on non-archived issue(s): "
-                            + ", ".join(d.depends_on_id for d in bad_deps[:3]),
-                        ),
-                    )
-                    continue
-
-                # Check dependents (issues that depend on this one)
-                dependents = storage.get_dependents(issue.full_id)
-                bad_dependents = [
-                    d for d in dependents if d.issue_id not in candidate_ids
-                ]
-                if bad_dependents:
-                    skipped.append(
-                        (
-                            issue,
-                            "is depended on by non-archived issue(s): "
-                            + ", ".join(d.issue_id for d in bad_dependents[:3]),
-                        ),
-                    )
-                    continue
-
-                # Check links from this issue to non-archived issues
-                links = storage.get_links(issue.full_id)
-                bad_links = [link for link in links if link.to_id not in candidate_ids]
-                if bad_links:
-                    skipped.append(
-                        (
-                            issue,
-                            "has links to non-archived issue(s): "
-                            + ", ".join(link.to_id for link in bad_links[:3]),
-                        ),
-                    )
-                    continue
-
-                # Check incoming links from non-archived issues
-                incoming_links = storage.get_incoming_links(issue.full_id)
-                bad_incoming = [
-                    link for link in incoming_links if link.from_id not in candidate_ids
-                ]
-                if bad_incoming:
-                    skipped.append(
-                        (
-                            issue,
-                            "has incoming links from non-archived issue(s): "
-                            + ", ".join(link.from_id for link in bad_incoming[:3]),
-                        ),
-                    )
-                    continue
-
-                archivable.append(issue)
-
-            # Update candidate_ids to only include actually archivable issues
-            archivable_ids = {i.full_id for i in archivable}
+            partition = storage.archivable_partition(closed_issues)
+            archivable = partition.archivable
+            skipped = partition.skipped
 
             if not archivable:
                 typer.echo("No issues can be archived.")
@@ -343,7 +187,6 @@ def register(app: typer.Typer) -> None:
                         typer.echo(f"  {issue.full_id}: {reason}")
                 return
 
-            # Show summary
             typer.echo(f"\nWill archive {len(archivable)} issue(s):")
             for issue in archivable[:10]:
                 typer.echo(f"  {issue.full_id}: {issue.title}")
@@ -361,7 +204,6 @@ def register(app: typer.Typer) -> None:
                 typer.echo("\n(dry run - no changes made)")
                 return
 
-            # Confirm unless --yes flag is passed
             if not yes:
                 typer.echo("")
                 proceed = typer.confirm(
@@ -372,142 +214,13 @@ def register(app: typer.Typer) -> None:
                     typer.echo("Aborted.")
                     return
 
-            # Create archive directory
             archive_dir = Path(actual_dogcats_dir) / "archive"
             archive_dir.mkdir(exist_ok=True)
-
-            # Generate timestamp for archive file
             timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
-            archive_filename = f"closed-{timestamp}.jsonl"
-            archive_path = archive_dir / archive_filename
+            archive_path = archive_dir / f"closed-{timestamp}.jsonl"
 
-            # Split raw JSONL lines into archive vs keep buckets to preserve
-            # the full append-only event history for both sets of issues.
-            # Hold the storage file lock for the entire read/partition/rewrite
-            # window so a concurrent ``dcat new`` cannot append between our
-            # read and our atomic-replace (which would silently overwrite the
-            # new record). The lock is the same advisory flock that
-            # _save()/_append() use; archive must order with them.
-            archived_lines: list[bytes] = []
-            remaining_lines: list[bytes] = []
-            archived_dep_count = 0
-            archived_link_count = 0
+            stats = storage.archive({i.full_id for i in archivable}, archive_path)
 
-            with storage._file_lock():
-                with storage.path.open("rb") as f:
-                    for raw_line in f:
-                        stripped = raw_line.strip()
-                        if not stripped:
-                            continue
-
-                        try:
-                            data = orjson.loads(stripped)
-                        except orjson.JSONDecodeError:
-                            remaining_lines.append(raw_line)
-                            continue
-
-                        rtype = classify_record(data)
-                        if rtype == "link":
-                            if (
-                                data["from_id"] in archivable_ids
-                                and data["to_id"] in archivable_ids
-                            ):
-                                archived_lines.append(raw_line)
-                                archived_link_count += 1
-                            else:
-                                remaining_lines.append(raw_line)
-                        elif rtype == "dependency":
-                            if (
-                                data["issue_id"] in archivable_ids
-                                and data["depends_on_id"] in archivable_ids
-                            ):
-                                archived_lines.append(raw_line)
-                                archived_dep_count += 1
-                            else:
-                                remaining_lines.append(raw_line)
-                        elif rtype == "event":
-                            # Event record — follow issue_id
-                            if data.get("issue_id") in archivable_ids:
-                                archived_lines.append(raw_line)
-                            else:
-                                remaining_lines.append(raw_line)
-                        else:
-                            # Issue record — resolve full_id from raw dict
-                            if "namespace" in data:
-                                full_id = f"{data['namespace']}-{data['id']}"
-                            elif "-" in str(data.get("id", "")):
-                                full_id = data["id"]
-                            else:
-                                full_id = f"dc-{data['id']}"
-
-                            if full_id in archivable_ids:
-                                archived_lines.append(raw_line)
-                            else:
-                                remaining_lines.append(raw_line)
-
-                # Write archived lines to archive file atomically.
-                with tempfile.NamedTemporaryFile(
-                    mode="wb",
-                    dir=archive_dir,
-                    delete=False,
-                    suffix=".jsonl",
-                ) as tmp_file:
-                    tmp_path = Path(tmp_file.name)
-
-                    try:
-                        for line in archived_lines:
-                            tmp_file.write(
-                                line if line.endswith(b"\n") else line + b"\n"
-                            )
-                        tmp_file.flush()
-                    except typer.Exit:
-                        raise
-                    except Exception as e:
-                        tmp_path.unlink(missing_ok=True)
-                        msg = f"Failed to write archive file: {e}"
-                        raise RuntimeError(msg) from e
-
-                # Atomic rename to final archive path
-                try:
-                    tmp_path.replace(archive_path)
-                except OSError as e:
-                    tmp_path.unlink(missing_ok=True)
-                    msg = f"Failed to create archive file: {e}"
-                    raise RuntimeError(msg) from e
-
-                # Rewrite main file with only remaining lines (preserving history)
-                with tempfile.NamedTemporaryFile(
-                    mode="wb",
-                    dir=storage.dogcats_dir,
-                    delete=False,
-                    suffix=".jsonl",
-                ) as tmp_file:
-                    tmp_main_path = Path(tmp_file.name)
-
-                    try:
-                        for line in remaining_lines:
-                            tmp_file.write(
-                                line if line.endswith(b"\n") else line + b"\n"
-                            )
-                        tmp_file.flush()
-                    except typer.Exit:
-                        raise
-                    except Exception as e:
-                        tmp_main_path.unlink(missing_ok=True)
-                        msg = f"Failed to rewrite storage file: {e}"
-                        raise RuntimeError(msg) from e
-
-                try:
-                    tmp_main_path.replace(storage.path)
-                except OSError as e:
-                    tmp_main_path.unlink(missing_ok=True)
-                    msg = f"Failed to write storage file: {e}"
-                    raise RuntimeError(msg) from e
-
-            # Update in-memory state
-            storage.remove_archived(archivable_ids, len(remaining_lines))
-
-            # Archive closed inbox proposals alongside issues
             inbox_archived = _archive_inbox(
                 actual_dogcats_dir,
                 archive_dir,
@@ -518,19 +231,21 @@ def register(app: typer.Typer) -> None:
 
             if is_json():
                 output: dict[str, object] = {
-                    "archived": len(archivable),
+                    "archived": stats.issues,
                     "skipped": len(skipped),
-                    "archive_path": str(archive_path),
+                    "archive_path": str(stats.archive_path),
                 }
                 if inbox_archived:
                     output["inbox_archived"] = inbox_archived
                 typer.echo(orjson.dumps(output).decode())
             else:
-                typer.echo(f"\n✓ Archived {len(archivable)} issue(s) to {archive_path}")
-                if archived_dep_count:
-                    typer.echo(f"  Including {archived_dep_count} dependency record(s)")
-                if archived_link_count:
-                    typer.echo(f"  Including {archived_link_count} link record(s)")
+                typer.echo(
+                    f"\n✓ Archived {stats.issues} issue(s) to {stats.archive_path}"
+                )
+                if stats.dependencies:
+                    typer.echo(f"  Including {stats.dependencies} dependency record(s)")
+                if stats.links:
+                    typer.echo(f"  Including {stats.links} link record(s)")
                 if inbox_archived:
                     typer.echo(f"  Archived {inbox_archived} inbox proposal(s)")
 
