@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- **`test_collaborator_rebase_force_push` no longer flaky** — the test ran `git rebase -i main~0` purely as a no-op preamble before simulating the squash via `git reset --soft main`. With `HOME=/dev/null` and no `GIT_EDITOR` in the test env, the interactive rebase intermittently exited nonzero and tripped `GitRepo.git()`'s default `check=True`, failing CI at random. Removed the dead call; `reset --soft` already does the work the comment claimed (closes dogcat-651n).
 - **`event_log.read(limit=...)` rejects negative limits** — previously a negative limit silently sliced off the last N events (`events[:-1]`) instead of raising. The API now raises `ValueError` for any `limit < 0`; `limit=0` continues to return an empty list (closes dogcat-3r0s).
 - **`dcat web propose` rejects negative `Content-Length` headers** — `int("-1") > MAX` is False, so a negative content-length used to slip past the early body-size guard and only hit the slow-path stream cap. The middleware now returns 400 for any non-numeric or negative Content-Length (closes dogcat-3r0s).
 - **Time-sensitive tests gain explicit slack against clock skew** — every `before <= obj.created_at <= after` bracket now widens by ±1s and `test_stream`'s `time.sleep(0.1) + is_alive()` check is replaced with poll-with-deadline, so NTP slew, suspend/resume, or VM time-drift between two `now()` calls can no longer flip the comparison (closes dogcat-ixyi).

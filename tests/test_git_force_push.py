@@ -43,10 +43,8 @@ class TestForcePushRecovery:
         s.create(Issue(id="collab2", namespace="test", title="Collab Issue 2"))
         repo.commit_all("Add collab issue 2")
 
-        # Simulate rebasing the branch (squash commits)
-        result = repo.git("rebase", "-i", "main~0")
-        # Note: Interactive rebase would need user input, but we can simulate with reset
-        # Instead, just create a clean squash
+        # Simulate a squash-rebase via soft reset (interactive rebase would
+        # require an editor, which the test env does not provide).
         repo.git("reset", "--soft", "main")
         s = repo.storage()
         s.update("test-collab2", {"priority": 1})
