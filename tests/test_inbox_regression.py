@@ -205,6 +205,28 @@ _FIXTURE_GROUND_TRUTH: dict[str, dict[str, dict[str, object]]] = {
             "status": ProposalStatus.CLOSED,
         },
     },
+    "v0.12.0": {
+        "open": {
+            "full_id": "tmpalr4ndqw-inbox-57a4",
+            "title": "Add webhook support for issue events",
+            "namespace": "tmpalr4ndqw",
+            "proposed_by": "eve@partner-corp.com",
+            "source_repo": "/home/eve/repos/partner-dashboard",
+            "description_prefix": "We'd like to receive webhooks",
+            "status": ProposalStatus.OPEN,
+        },
+        "closed": {
+            "full_id": "tmpalr4ndqw-inbox-20k9",
+            "title": "Add priority filtering to list command",
+            "namespace": "tmpalr4ndqw",
+            "proposed_by": "charlie@example.com",
+            "source_repo": "/home/charlie/repos/dogcat-contrib",
+            "closed_by": "alice@example.com",
+            "closed_reason": "Implemented in v0.9.2",
+            "resolved_issue": "tmpalr4ndqw-abcd",
+            "status": ProposalStatus.CLOSED,
+        },
+    },
 }
 
 
