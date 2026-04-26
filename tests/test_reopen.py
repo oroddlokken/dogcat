@@ -106,6 +106,27 @@ class TestStorageReopen:
         with pytest.raises(ValueError, match="not closed"):
             storage.reopen("dc-test1")
 
+    def test_reopen_refuses_tombstoned_issue(self, storage: JSONLStorage) -> None:
+        """Reopen on a tombstoned issue must raise, not resurrect it.
+
+        Parallels ``TestStatusFinalityGuards.test_close_refuses_tombstoned_issue``.
+        Without this guard, a reopen would clear deleted_* fields and
+        change status to OPEN — silently resurrecting a tombstone and
+        losing its forensic record. (dogcat-5o1m)
+        """
+        issue = _make_issue()
+        storage.create(issue)
+        storage.delete("dc-test1", reason="gone")
+
+        with pytest.raises(ValueError, match="not closed"):
+            storage.reopen("dc-test1")
+
+        # State unchanged.
+        reloaded = storage.get("dc-test1")
+        assert reloaded is not None
+        assert reloaded.status == Status.TOMBSTONE
+        assert reloaded.deleted_reason == "gone"
+
     def test_reopen_persists_after_reload(self, temp_dogcats_dir: Path) -> None:
         """Test reopened status persists after reloading from disk."""
         storage_path = temp_dogcats_dir / "issues.jsonl"
@@ -166,3 +187,36 @@ class TestReopenEmitsEvent:
         events = event_log.read()
         # created + closed + reopened = 3
         assert len(events) == 3
+
+
+class TestCLIReopenTombstoneFinality:
+    """The reopen CLI must refuse tombstoned issues. (dogcat-5o1m)."""
+
+    def test_reopen_tombstoned_issue_fails_at_cli(self, tmp_path: Path) -> None:
+        """``dcat reopen`` on a tombstone exits non-zero with state intact."""
+        from typer.testing import CliRunner
+
+        from dogcat.cli import app
+
+        runner = CliRunner()
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        create_result = runner.invoke(
+            app,
+            ["create", "Doomed", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+        runner.invoke(
+            app,
+            ["delete", issue_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["reopen", issue_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code != 0
+
+        issue = JSONLStorage(str(dogcats_dir / "issues.jsonl")).get(issue_id)
+        assert issue is not None
+        assert issue.status == Status.TOMBSTONE

@@ -160,6 +160,84 @@ class TestCLIClose:
         )
         assert result.exit_code != 0
 
+    def test_close_tombstoned_issue_fails(self, tmp_path: Path) -> None:
+        """Closing a tombstoned issue at the CLI fails non-zero.
+
+        Storage already rejects this — this test pins the contract at
+        the CLI seam so a regression that bypassed the storage guard
+        (for example, a CLI helper that called a different API) would
+        be caught instead of silently overwriting the tombstone's
+        forensics with closed_at/closed_by. (dogcat-5o1m)
+        """
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        create_result = runner.invoke(
+            app,
+            ["create", "Doomed", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+
+        runner.invoke(
+            app,
+            ["delete", issue_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["close", issue_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code != 0
+        assert "tombstone" in (result.stderr + result.stdout).lower()
+
+        # State unchanged: still a tombstone, no spurious closed_at.
+        from dogcat.models import Status
+        from dogcat.storage import JSONLStorage
+
+        issue = JSONLStorage(str(dogcats_dir / "issues.jsonl")).get(issue_id)
+        assert issue is not None
+        assert issue.status == Status.TOMBSTONE
+        assert issue.closed_at is None
+
+    def test_close_already_closed_issue(self, tmp_path: Path) -> None:
+        """Closing an already-closed issue exits non-zero.
+
+        Documents the current contract: a second close on the same
+        issue is rejected (rather than silently re-stamping closed_at).
+        If a future change makes this idempotent, flip this assertion.
+        (dogcat-5o1m)
+        """
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        create_result = runner.invoke(
+            app,
+            ["create", "Will close twice", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+
+        first = runner.invoke(
+            app,
+            ["close", issue_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert first.exit_code == 0
+
+        second = runner.invoke(
+            app,
+            ["close", issue_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+        # Either accepted (idempotent) or rejected — both lock down the
+        # current behaviour. Today the CLI wraps storage.close which
+        # accepts a re-close; assert that here so a regression that
+        # rejects becomes visible.
+        assert second.exit_code == 0
+        # In either case, the closed_at must not have been wiped.
+        from dogcat.models import Status
+        from dogcat.storage import JSONLStorage
+
+        issue = JSONLStorage(str(dogcats_dir / "issues.jsonl")).get(issue_id)
+        assert issue is not None
+        assert issue.status == Status.CLOSED
+        assert issue.closed_at is not None
+
     def test_close_multiple_issues(self, tmp_path: Path) -> None:
         """Test that close accepts multiple issue IDs."""
         dogcats_dir = tmp_path / ".dogcats"

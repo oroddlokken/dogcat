@@ -6,10 +6,36 @@ and complex merge scenarios similar to real-world usage.
 
 from __future__ import annotations
 
+import os
 import time
 from typing import Any
 
 from dogcat.merge_driver import merge_jsonl
+
+# Hard wall-clock budgets are fragile under ``pytest -n 8`` worksteal where
+# tests compete for CPU; slow CI (esp. macOS arm64) regularly exhibits
+# 2-3x variance. Gate the budget assertions behind ``DCAT_RUN_PERF_TESTS``
+# so they only run when explicitly requested. The merge correctness
+# (issue counts) still runs in every test run. (dogcat-6c00)
+_PERF_BUDGET_ENABLED = os.environ.get("DCAT_RUN_PERF_TESTS") == "1"
+# Even when enabled, the budget is generous enough to absorb -n 8 jitter
+# while still flagging genuine 10x regressions.
+_PERF_BUDGET_SECS = 15.0
+
+
+def _check_perf_budget(merge_time: float) -> None:
+    """Assert merge_time fits the perf budget when budgets are enabled.
+
+    No-op when ``DCAT_RUN_PERF_TESTS`` is unset, so default test runs
+    don't flake under parallel/slow CI conditions. (dogcat-6c00)
+    """
+    if not _PERF_BUDGET_ENABLED:
+        return
+    assert merge_time < _PERF_BUDGET_SECS, (
+        f"Merge took {merge_time:.2f}s (budget < {_PERF_BUDGET_SECS}s; "
+        f"set DCAT_RUN_PERF_TESTS=1 to enable this assertion)"
+    )
+
 
 # ---------------------------------------------------------------------------
 # Test scenarios
@@ -84,7 +110,7 @@ class TestMergeScale:
         assert issue_count == 300, f"Expected 300 issues, got {issue_count}"
 
         # Verify performance: merge should be fast (< 5 seconds)
-        assert merge_time < 5.0, f"Merge took {merge_time:.2f}s (expected < 5s)"
+        _check_perf_budget(merge_time)
 
     def test_heavy_contention_same_issue_multiple_edits(self) -> None:
         """Same 50 issues edited 5 times each on both sides.
@@ -169,7 +195,7 @@ class TestMergeScale:
                 "ours_edit_5",
             ], f"Unexpected status: {issue['status']}"
 
-        assert merge_time < 5.0, f"Merge took {merge_time:.2f}s (expected < 5s)"
+        _check_perf_budget(merge_time)
 
     def test_mixed_type_churn(self) -> None:
         """Complex record mix: 50 issues, 100 deps, 100+ events.
@@ -263,7 +289,7 @@ class TestMergeScale:
         # Events should include all unique events from both sides
         assert len(events) >= 150, f"Expected >= 150 events, got {len(events)}"
 
-        assert merge_time < 5.0, f"Merge took {merge_time:.2f}s (expected < 5s)"
+        _check_perf_budget(merge_time)
 
     def test_compaction_mixed_files(self) -> None:
         """One side compacted (snapshot), other side has event log.
@@ -342,4 +368,4 @@ class TestMergeScale:
             # Should have theirs version (later timestamp)
             assert issue["status"] == "in_progress"
 
-        assert merge_time < 5.0, f"Merge took {merge_time:.2f}s (expected < 5s)"
+        _check_perf_budget(merge_time)

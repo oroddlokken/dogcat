@@ -872,3 +872,155 @@ class TestArchiveLockingRace:
             "Archive's atomic-replace fired outside the storage lock — "
             "a concurrent append could be silently clobbered"
         )
+
+
+class TestArchiveReadback:
+    """Verify archived files load cleanly via JSONLStorage and pass parse checks.
+
+    The split-and-rewrite path is unit-tested, but no test reads the
+    written archive back. Format drift in the archive writer
+    (re-ordering, missing event records, extra whitespace) would slip
+    through. Users will eventually want to inspect old archives, so the
+    archive file's contract must be lockable. (dogcat-cxif)
+    """
+
+    def test_archived_file_loads_via_jsonlstorage(self, tmp_path: Path) -> None:
+        """Archive file is a valid JSONL store loadable by JSONLStorage."""
+        dogcats_dir = tmp_path / ".dogcats"
+        init_repo(dogcats_dir)
+        issue_id = create_issue(dogcats_dir, "To archive")
+        close_issue(dogcats_dir, issue_id)
+
+        result = runner.invoke(
+            app, ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)]
+        )
+        assert result.exit_code == 0, result.stdout
+
+        archive_files = list((dogcats_dir / "archive").glob("closed-*.jsonl"))
+        assert len(archive_files) == 1, archive_files
+
+        archived_storage = JSONLStorage(str(archive_files[0]))
+        archived_issues = archived_storage.list()
+        assert len(archived_issues) == 1
+        assert archived_issues[0].full_id == issue_id
+        assert archived_issues[0].title == "To archive"
+
+    def test_archive_file_is_valid_jsonl(self, tmp_path: Path) -> None:
+        """Every non-blank line in the archive file is valid JSON.
+
+        A malformed archive would corrupt history retrieval and prevent
+        a future restore. We parse every line independently so an extra
+        comma, missing newline, or BOM at the front is caught here.
+        """
+        dogcats_dir = tmp_path / ".dogcats"
+        init_repo(dogcats_dir)
+        for i in range(3):
+            iid = create_issue(dogcats_dir, f"Issue {i}")
+            close_issue(dogcats_dir, iid)
+
+        runner.invoke(app, ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)])
+
+        archive_file = next(iter((dogcats_dir / "archive").glob("closed-*.jsonl")))
+        for raw_line in archive_file.read_text().splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            orjson.loads(line)  # raises if malformed
+
+    def test_archived_event_history_loads(self, tmp_path: Path) -> None:
+        """Event records in the archive file are also recoverable.
+
+        The archive contract preserves history alongside the issue
+        records — a regression that wrote only issues (or only events)
+        would surface here.
+        """
+        dogcats_dir = tmp_path / ".dogcats"
+        init_repo(dogcats_dir)
+        issue_id = create_issue(dogcats_dir, "Issue with history")
+        # Status change + close — both should produce events.
+        runner.invoke(
+            app,
+            [
+                "update",
+                issue_id,
+                "--status",
+                "in_progress",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        close_issue(dogcats_dir, issue_id)
+
+        runner.invoke(app, ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)])
+        archive_file = next(iter((dogcats_dir / "archive").glob("closed-*.jsonl")))
+
+        # Count event records by record_type — assert at least one of
+        # each kind we expect (created, status change, closed).
+        event_types: list[str] = []
+        for raw_line in archive_file.read_text().splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            data = orjson.loads(line)
+            if data.get("record_type") == "event":
+                event_types.append(data.get("event_type", ""))
+
+        assert "created" in event_types, f"no created event in archive: {event_types}"
+        assert "closed" in event_types, f"no closed event in archive: {event_types}"
+
+    def test_repeated_archives_produce_distinct_files(self, tmp_path: Path) -> None:
+        """Two archive runs leave two timestamped archive files.
+
+        A regression that overwrote the previous archive (or appended
+        to it) would lose history across the two runs.
+        """
+        import time
+
+        dogcats_dir = tmp_path / ".dogcats"
+        init_repo(dogcats_dir)
+        first_id = create_issue(dogcats_dir, "First")
+        close_issue(dogcats_dir, first_id)
+
+        runner.invoke(app, ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)])
+
+        # Sleep enough to roll the second-resolution timestamp filename.
+        time.sleep(1.1)
+
+        second_id = create_issue(dogcats_dir, "Second")
+        close_issue(dogcats_dir, second_id)
+        runner.invoke(app, ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)])
+
+        archive_files = sorted((dogcats_dir / "archive").glob("closed-*.jsonl"))
+        assert len(archive_files) == 2, archive_files
+
+        # Each archive contains exactly one issue (its own).
+        ids_per_file: list[set[str]] = []
+        for f in archive_files:
+            archived = JSONLStorage(str(f))
+            ids_per_file.append({i.full_id for i in archived.list()})
+        assert ids_per_file[0] != ids_per_file[1]
+
+    def test_doctor_passes_after_archive(self, tmp_path: Path) -> None:
+        """``dcat doctor`` reports OK after archiving.
+
+        Surfaces any archive-induced JSONL corruption that the file's
+        per-line parse would miss (e.g. duplicate IDs, dependency
+        records pointing at archived issues).
+        """
+        dogcats_dir = tmp_path / ".dogcats"
+        init_repo(dogcats_dir)
+        issue_id = create_issue(dogcats_dir, "To archive then check")
+        close_issue(dogcats_dir, issue_id)
+
+        runner.invoke(app, ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["doctor", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data = json.loads(result.stdout)
+        # Every required (non-optional) check passes after archive.
+        for name, check in data["checks"].items():
+            if check.get("optional"):
+                continue
+            assert check["passed"], f"check {name!r} failed after archive: {check}"

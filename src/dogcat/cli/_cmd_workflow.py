@@ -33,6 +33,7 @@ from ._helpers import (
     get_storage,
     load_open_inbox_proposals,
     parse_duration,
+    resolve_limit,
     with_ns_shim,
 )
 from ._json_state import echo_error, is_json, set_json
@@ -137,7 +138,7 @@ def register(app: typer.Typer) -> None:
         try:
             from dogcat.deps import get_ready_work
 
-            final_limit = limit_arg or limit
+            final_limit = resolve_limit(limit_arg, limit)
             storage = get_storage(dogcats_dir)
             ready_issues = get_ready_work(storage, include_snoozed=include_snoozed)
 
@@ -159,7 +160,7 @@ def register(app: typer.Typer) -> None:
                 storage=storage,
             )
 
-            if final_limit:
+            if final_limit is not None:
                 ready_issues = ready_issues[:final_limit]
 
             if is_json():
@@ -291,7 +292,7 @@ def register(app: typer.Typer) -> None:
         try:
             from dogcat.deps import get_blocked_issues
 
-            final_limit = limit_arg or limit
+            final_limit = resolve_limit(limit_arg, limit)
             storage = get_storage(dogcats_dir)
             blocked_issues = get_blocked_issues(storage)
 
@@ -321,7 +322,7 @@ def register(app: typer.Typer) -> None:
                 bi for bi in blocked_issues if bi.issue_id in filtered_ids
             ]
 
-            if final_limit:
+            if final_limit is not None:
                 blocked_issues = blocked_issues[:final_limit]
 
             if is_json():
@@ -755,7 +756,7 @@ def register(app: typer.Typer) -> None:
         ``--tree`` flag semantics by leaving ``auto_tree=False``.
         """
         try:
-            final_limit = limit_arg or limit
+            final_limit = resolve_limit(limit_arg, limit)
             storage = get_storage(dogcats_dir)
             issues = storage.list({"status": status})
             issues.sort(key=lambda i: i.priority)
@@ -778,7 +779,7 @@ def register(app: typer.Typer) -> None:
                 storage=storage,
             )
 
-            if final_limit:
+            if final_limit is not None:
                 issues = issues[:final_limit]
 
             if is_json():
@@ -1212,7 +1213,7 @@ def register(app: typer.Typer) -> None:
         """Show issues marked as manual."""
         set_json(json_output)
         try:
-            final_limit = limit_arg or limit
+            final_limit = resolve_limit(limit_arg, limit)
             storage = get_storage(dogcats_dir)
             issues = storage.list()
             issues = [
@@ -1235,7 +1236,7 @@ def register(app: typer.Typer) -> None:
                 storage=storage,
             )
             issues.sort(key=lambda i: i.priority)
-            if final_limit:
+            if final_limit is not None:
                 issues = issues[:final_limit]
 
             if is_json():
@@ -1366,7 +1367,7 @@ def register(app: typer.Typer) -> None:
             )
 
             storage = get_storage(dogcats_dir)
-            final_limit = limit_arg or limit or 10
+            final_limit = resolve_limit(limit_arg, limit, default=10)
             event_log = EventLog(storage.dogcats_dir)
             events = [e for e in event_log.read() if e.event_type == "closed"]
 
@@ -1489,7 +1490,7 @@ def register(app: typer.Typer) -> None:
                 storage=storage,
             )
 
-            final_limit = limit_arg or limit or 10
+            final_limit = resolve_limit(limit_arg, limit, default=10)
             # Sort descending to select the N most recent, then reverse for display
             issues.sort(key=lambda i: i.created_at, reverse=True)
 
@@ -1824,7 +1825,7 @@ def register(app: typer.Typer) -> None:
         try:
             from datetime import datetime as dt
 
-            final_limit = limit_arg or limit
+            final_limit = resolve_limit(limit_arg, limit)
             storage = get_storage(dogcats_dir)
             now = dt.now().astimezone()
 
@@ -1856,7 +1857,7 @@ def register(app: typer.Typer) -> None:
                 storage=storage,
             )
             issues.sort(key=lambda i: (i.snoozed_until or now, i.priority))
-            if final_limit:
+            if final_limit is not None:
                 issues = issues[:final_limit]
 
             if is_json():

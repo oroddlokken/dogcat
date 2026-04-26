@@ -40,6 +40,9 @@ class TestCLICreate:
 
     def test_create_with_options(self, tmp_path: Path) -> None:
         """Test creating an issue with all options."""
+        from dogcat.models import IssueType
+        from dogcat.storage import JSONLStorage
+
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(
             app,
@@ -64,6 +67,17 @@ class TestCLICreate:
             ],
         )
         assert result.exit_code == 0
+
+        # Persisted record must carry every flag — banner-only assertions
+        # would pass even if create() silently dropped flags. (dogcat-4tud)
+        storage = JSONLStorage(str(dogcats_dir / "issues.jsonl"))
+        issues = [i for i in storage.list() if i.title == "Bug fix"]
+        assert len(issues) == 1
+        issue = issues[0]
+        assert issue.issue_type == IssueType.BUG
+        assert issue.priority == 1
+        assert issue.owner == "dev@example.com"
+        assert sorted(issue.labels) == ["backend", "urgent"]
 
     def test_create_with_namespace(self, tmp_path: Path) -> None:
         """Test creating an issue with explicit --namespace."""
@@ -1204,7 +1218,17 @@ class TestEditAlias:
                 ["e", issue_id, "--dogcats-dir", str(dogcats_dir)],
             )
             assert result.exit_code == 0
-            mock_edit.assert_called_once_with(issue_id, mock_edit.call_args[0][1])
+            # Pin both args: the issue id we passed AND the storage
+            # instance type. The previous assertion compared the second
+            # arg against ``mock_edit.call_args[0][1]`` (itself) — a
+            # tautology that would pass even if the wrong storage type
+            # was forwarded. (dogcat-3ibu)
+            from dogcat.storage import JSONLStorage
+
+            mock_edit.assert_called_once()
+            call_args = mock_edit.call_args
+            assert call_args.args[0] == issue_id
+            assert isinstance(call_args.args[1], JSONLStorage)
             assert "Updated" in result.stdout
 
     def test_e_alias_nonexistent_issue(self, tmp_path: Path) -> None:

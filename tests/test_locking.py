@@ -35,15 +35,20 @@ def test_timeout_raises_runtimeerror_with_path(
     Uses a multiprocessing child to actually take fcntl.LOCK_EX (advisory
     locks are per-process, so a second acquire in the same process from a
     threading would not block).
+
+    Timeout is set to 1.0s — large enough to be stable under ``-n 8`` CI
+    where fork/IPC latency can exceed the contender's deadline before
+    the child's ``started.set()`` is observed, while still well under
+    the 30s default so the test stays fast. (dogcat-1ypi)
     """
-    monkeypatch.setenv(LOCK_TIMEOUT_ENV_VAR, "0.2")
+    monkeypatch.setenv(LOCK_TIMEOUT_ENV_VAR, "1.0")
     lock_path = tmp_path / ".issues.lock"
 
     ctx = multiprocessing.get_context("fork")
     started = ctx.Event()
     proc = ctx.Process(
         target=_hold_lock_and_signal,
-        args=(str(lock_path), started, 5.0),
+        args=(str(lock_path), started, 10.0),
     )
     proc.start()
     try:
@@ -63,15 +68,22 @@ def test_timeout_raises_runtimeerror_with_path(
 
 
 def test_env_var_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """DCAT_LOCK_TIMEOUT_SECS overrides the default wait."""
-    monkeypatch.setenv(LOCK_TIMEOUT_ENV_VAR, "0.1")
+    """DCAT_LOCK_TIMEOUT_SECS overrides the default wait.
+
+    Asserts both an upper bound (much faster than the 30s default) and
+    a lower bound (the contender actually waited at least the configured
+    timeout, not less). The lower bound prevents a regression where the
+    timeout calculation collapses to zero. (dogcat-1ypi)
+    """
+    configured_timeout = 1.0
+    monkeypatch.setenv(LOCK_TIMEOUT_ENV_VAR, str(configured_timeout))
     lock_path = tmp_path / ".issues.lock"
 
     ctx = multiprocessing.get_context("fork")
     started = ctx.Event()
     proc = ctx.Process(
         target=_hold_lock_and_signal,
-        args=(str(lock_path), started, 5.0),
+        args=(str(lock_path), started, 10.0),
     )
     proc.start()
     try:
@@ -83,8 +95,14 @@ def test_env_var_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
         ):
             pass
         elapsed = time.monotonic() - start
-        # Should fail far faster than the default 30s.
-        assert elapsed < 2.0, f"Expected fast timeout, took {elapsed:.2f}s"
+        # Must wait at least the configured timeout — minus a small
+        # tolerance for the polling cadence rounding down — so the
+        # configured timeout is actually being honored.
+        assert elapsed >= configured_timeout - 0.1, (
+            f"Timed out before configured {configured_timeout}s: {elapsed:.2f}s"
+        )
+        # Should still fail far faster than the 30s default.
+        assert elapsed < 5.0, f"Expected fast timeout, took {elapsed:.2f}s"
     finally:
         proc.terminate()
         proc.join(timeout=5)

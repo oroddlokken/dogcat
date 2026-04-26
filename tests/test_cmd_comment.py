@@ -1,11 +1,16 @@
 """Tests for Dogcat CLI commands."""
 
+from __future__ import annotations
+
 import json
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from typer.testing import CliRunner
 
 from dogcat.cli import app
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 runner = CliRunner()
 
@@ -231,3 +236,163 @@ class TestCLIComments:
         )
         assert result.exit_code == 0
         assert "Deleted comment" in result.stdout
+
+
+def _add_comment(dogcats_dir: Path, issue_id: str, text: str) -> None:
+    """Add a comment to an issue and assert success."""
+    result = runner.invoke(
+        app,
+        [
+            "comment",
+            issue_id,
+            "add",
+            "--text",
+            text,
+            "--by",
+            "tester",
+            "--dogcats-dir",
+            str(dogcats_dir),
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+
+
+def _comment_count(dogcats_dir: Path, issue_id: str) -> int:
+    """Return the number of comments via the JSON list output."""
+    result = runner.invoke(
+        app,
+        [
+            "comment",
+            issue_id,
+            "list",
+            "--json",
+            "--dogcats-dir",
+            str(dogcats_dir),
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    return len(json.loads(result.stdout))
+
+
+class TestCommentLifecycleFlow:
+    """Comments must survive close/reopen/archive/rename-namespace.
+
+    A regression that wiped comments on a status transition or a
+    namespace rename would only show up across this whole flow — each
+    step in isolation already had coverage. (dogcat-2mv7)
+    """
+
+    def test_comments_survive_full_lifecycle(self, tmp_path: Path) -> None:
+        """Three comments added across status transitions all survive."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        create_result = runner.invoke(
+            app,
+            ["create", "Lifecycle issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+
+        _add_comment(dogcats_dir, issue_id, "first")
+
+        # Transition: open → in_progress
+        runner.invoke(
+            app,
+            [
+                "update",
+                issue_id,
+                "--status",
+                "in_progress",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        _add_comment(dogcats_dir, issue_id, "second")
+
+        # Transition: in_progress → closed
+        runner.invoke(
+            app,
+            ["close", issue_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+        # Comments must still be listed after close.
+        assert _comment_count(dogcats_dir, issue_id) == 2
+
+        # Transition: closed → open
+        runner.invoke(
+            app,
+            ["reopen", issue_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+        _add_comment(dogcats_dir, issue_id, "third")
+        assert _comment_count(dogcats_dir, issue_id) == 3
+
+    def test_comments_survive_archive(self, tmp_path: Path) -> None:
+        """Archived issues retain every comment in the archive file.
+
+        Reading the archive file directly (rather than the live
+        ``issues.jsonl``) is the whole point: a regression that dropped
+        comments during the split-rewrite step would only show up here.
+        """
+        from dogcat.storage import JSONLStorage
+
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        create_result = runner.invoke(
+            app,
+            ["create", "To be archived", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+
+        _add_comment(dogcats_dir, issue_id, "alpha")
+        _add_comment(dogcats_dir, issue_id, "beta")
+        _add_comment(dogcats_dir, issue_id, "gamma")
+
+        runner.invoke(app, ["close", issue_id, "--dogcats-dir", str(dogcats_dir)])
+
+        archive_result = runner.invoke(
+            app,
+            ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert archive_result.exit_code == 0, archive_result.stdout
+
+        # Locate the archive file and load it through JSONLStorage.
+        archive_dir = dogcats_dir / "archive"
+        archive_files = list(archive_dir.glob("closed-*.jsonl"))
+        assert len(archive_files) == 1, archive_files
+        archived = JSONLStorage(str(archive_files[0]))
+        issue = archived.get(issue_id)
+        assert issue is not None, "archived issue not loadable"
+        comment_texts = [c.text for c in issue.comments]
+        assert comment_texts == ["alpha", "beta", "gamma"]
+
+    def test_comments_survive_rename_namespace(self, tmp_path: Path) -> None:
+        """rename-namespace preserves every comment on every issue."""
+        from dogcat.config import save_config
+
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        save_config(str(dogcats_dir), {"namespace": "old"})
+
+        create_result = runner.invoke(
+            app,
+            ["create", "Rename issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+
+        _add_comment(dogcats_dir, issue_id, "before-rename-1")
+        _add_comment(dogcats_dir, issue_id, "before-rename-2")
+
+        result = runner.invoke(
+            app,
+            [
+                "rename-namespace",
+                "old",
+                "new",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0, result.stdout
+
+        # Issue's full_id now uses the new namespace.
+        new_id = issue_id.replace("old-", "new-", 1)
+        count = _comment_count(dogcats_dir, new_id)
+        assert count == 2, f"expected 2 comments after rename, got {count}"

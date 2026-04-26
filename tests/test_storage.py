@@ -17,6 +17,18 @@ def storage(temp_dogcats_dir: Path) -> JSONLStorage:
     return JSONLStorage(str(storage_path), create_dir=True)
 
 
+def _mp_create_issues(
+    storage_path: str, start: int, count: int, errors: "list[str]"
+) -> None:
+    """Concurrent-write worker (module-level so multiprocessing can pickle it)."""
+    try:
+        local_storage = JSONLStorage(storage_path)
+        for i in range(start, start + count):
+            local_storage.create(Issue(id=f"issue-{i}", title=f"Issue {i}"))
+    except Exception as e:  # noqa: BLE001 - propagate any failure to the parent
+        errors.append(repr(e))
+
+
 class TestStorageInitialization:
     """Test storage initialization."""
 
@@ -65,12 +77,22 @@ class TestCRUDOperations:
     """Test CRUD operations."""
 
     def test_create_issue(self, storage: JSONLStorage) -> None:
-        """Test creating an issue."""
+        """Test creating an issue.
+
+        Inspecting the returned object only proves ``create`` constructs
+        a record — to prove the record actually persisted, reload the
+        store from disk and look it up. (dogcat-4tud)
+        """
         issue = Issue(id="issue-1", title="Test Issue")
         created = storage.create(issue)
 
         assert created.id == "issue-1"
         assert created.title == "Test Issue"
+
+        reloaded = JSONLStorage(str(storage.path)).get("dc-issue-1")
+        assert reloaded is not None
+        assert reloaded.id == "issue-1"
+        assert reloaded.title == "Test Issue"
 
     def test_create_duplicate_id_raises(self, storage: JSONLStorage) -> None:
         """Test that creating issue with duplicate ID raises."""
@@ -601,6 +623,128 @@ class TestUpdateTypeGuards:
         with pytest.raises(TypeError, match="owner"):
             storage.update("dc-x", {"owner": 42})
 
+    def test_create_rejects_bool_priority(self, storage: JSONLStorage) -> None:
+        """create() rejects bool priority — bool is an int subclass.
+
+        Without this guard ``priority=True`` would slip through
+        ``validate_priority`` and persist on disk. (dogcat-65fm)
+        """
+        with pytest.raises(ValueError, match="Priority must be"):
+            storage.create(Issue(id="x", title="X", priority=True))  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="Priority must be"):
+            storage.create(Issue(id="y", title="Y", priority=False))  # type: ignore[arg-type]
+
+
+class TestBatchContextManager:
+    """Direct coverage for ``storage.batch()`` write coalescing. (dogcat-29nz)."""
+
+    def test_batch_writes_all_records_in_one_append(
+        self,
+        temp_dogcats_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """N creates inside batch produce one disk write, not N.
+
+        Without batching, each ``create`` acquires the lock and fsyncs
+        separately — N creates would be N round trips. The batch
+        contract amortizes this. We count actual disk writes via
+        ``append_jsonl_payload`` rather than ``_append`` because
+        ``_append`` returns early when batching, so call counts on
+        ``_append`` don't reflect real I/O. (dogcat-29nz)
+        """
+        from dogcat import _jsonl_io as io_mod
+
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+
+        write_count = {"n": 0}
+        original_write = io_mod.append_jsonl_payload
+
+        def counting_write(target: Path, payload: bytes) -> None:
+            write_count["n"] += 1
+            return original_write(target, payload)
+
+        # Patch the symbol on the storage module — that's the binding the
+        # storage code resolves at call time.
+        monkeypatch.setattr("dogcat.storage.append_jsonl_payload", counting_write)
+
+        with storage.batch():
+            for i in range(5):
+                storage.create(Issue(id=f"b{i}", title=f"Batch {i}"))
+
+        assert write_count["n"] == 1, (
+            f"expected exactly one disk write inside batch, got {write_count['n']}"
+        )
+
+        # All 5 issues persisted.
+        reloaded = JSONLStorage(str(storage_path))
+        assert len([i for i in reloaded.list() if i.id.startswith("b")]) == 5
+
+    def test_batch_nested_is_noop(
+        self,
+        temp_dogcats_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A nested ``with storage.batch():`` does not double-buffer.
+
+        The inner enter/exit must not flush the outer batch — only the
+        outermost exit performs the locked write. (dogcat-29nz)
+        """
+        from dogcat import _jsonl_io as io_mod
+
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+
+        write_count = {"n": 0}
+        original_write = io_mod.append_jsonl_payload
+
+        def counting_write(target: Path, payload: bytes) -> None:
+            write_count["n"] += 1
+            return original_write(target, payload)
+
+        monkeypatch.setattr("dogcat.storage.append_jsonl_payload", counting_write)
+
+        with storage.batch():
+            storage.create(Issue(id="outer1", title="O1"))
+            with storage.batch():
+                storage.create(Issue(id="inner", title="I"))
+            # Inner exit must not have flushed.
+            assert write_count["n"] == 0, (
+                f"inner batch flushed prematurely: {write_count['n']} writes"
+            )
+            storage.create(Issue(id="outer2", title="O2"))
+        # Single flush at the outer exit.
+        assert write_count["n"] == 1
+
+    def test_batch_flushes_pending_on_exception(
+        self,
+        temp_dogcats_dir: Path,
+    ) -> None:
+        """When the ``with`` block raises, buffered records are still flushed.
+
+        Documents the current best-effort save contract: the in-memory
+        state already mutated, and flushing keeps disk consistent with
+        memory rather than silently dropping completed writes. Callers
+        wanting rollback must reset in-memory state themselves.
+        """
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+
+        class _BoomError(RuntimeError):
+            pass
+
+        def _raise_inside_batch() -> None:
+            with storage.batch():
+                storage.create(Issue(id="pre-boom", title="Should persist"))
+                raise _BoomError
+
+        with pytest.raises(_BoomError):
+            _raise_inside_batch()
+
+        # The pre-exception write was flushed despite the raise.
+        reloaded = JSONLStorage(str(storage_path))
+        assert reloaded.get("dc-pre-boom") is not None
+
 
 class TestStatusFinalityGuards:
     """Tombstone status is final — close/update/delete must not resurrect it.
@@ -678,6 +822,28 @@ class TestInputCapEnforcement:
         with pytest.raises(ValueError, match="description exceeds"):
             storage.create(Issue(id="big", title="OK", description=oversized))
 
+    def test_title_at_exact_limit_accepted(self, storage: JSONLStorage) -> None:
+        """A title at exactly MAX_TITLE_LEN must be accepted.
+
+        Pins the boundary so a typo loosening the bound from ``>`` to
+        ``>=`` is caught at the storage layer (the web layer already
+        has parity coverage). (dogcat-3d29)
+        """
+        from dogcat.constants import MAX_TITLE_LEN
+
+        title = "x" * MAX_TITLE_LEN
+        issue = storage.create(Issue(id="exact", title=title))
+        assert len(issue.title) == MAX_TITLE_LEN
+
+    def test_description_at_exact_limit_accepted(self, storage: JSONLStorage) -> None:
+        """A description at exactly MAX_DESC_LEN must be accepted. (dogcat-3d29)."""
+        from dogcat.constants import MAX_DESC_LEN
+
+        body = "x" * MAX_DESC_LEN
+        issue = storage.create(Issue(id="exact-d", title="OK", description=body))
+        assert issue.description is not None
+        assert len(issue.description) == MAX_DESC_LEN
+
     def test_invalid_namespace_rejected_on_create(self, storage: JSONLStorage) -> None:
         """A namespace with spaces / control bytes is rejected on create()."""
         with pytest.raises(ValueError, match="namespace"):
@@ -713,6 +879,69 @@ class TestInputCapEnforcement:
         """A title containing only control bytes is rejected (post-strip empty)."""
         with pytest.raises(ValueError, match="empty after stripping"):
             storage.create(Issue(id="x", title="\x1b\x00\x07"))
+
+    def test_c1_controls_stripped_from_title(self, storage: JSONLStorage) -> None:
+        r"""C1 control bytes (U+0080..U+009F) are also stripped, not just C0.
+
+        ``_control_char_pattern`` covers ``\\x7f-\\x9f`` — pin that with
+        a test so a regex change that drops the upper range silently
+        re-opens a prompt-injection vector via ``\\x9b`` (CSI in C1).
+        (dogcat-2rpd)
+        """
+        # \x9b is CSI in the C1 control set; surrounded by safe text.
+        issue = storage.create(
+            Issue(id="c1", title="ok\x9b[2Jstill ok"),
+        )
+        assert "\x9b" not in issue.title
+        assert "ok" in issue.title
+        assert "still ok" in issue.title
+
+    def test_invisible_format_chars_pass_through(self, storage: JSONLStorage) -> None:
+        """RTL override (U+202E) and zero-width chars (U+200B) are not stripped.
+
+        Documents the current contract: ``strip_control_bytes`` only
+        targets C0/C1 controls + DEL. Format characters render through
+        because the render-side ``sanitize_for_terminal`` is the layer
+        that handles display safety; storage records the raw text.
+        Pinning this prevents an over-eager strip that would mangle
+        legitimate uses of bidi marks. (dogcat-2rpd)
+        """
+        storage.create(Issue(id="zw", title="hello​world‮marker"))
+        # Both characters survive the storage round-trip.
+        reloaded = JSONLStorage(str(storage.path)).get("dc-zw")
+        assert reloaded is not None
+        assert "​" in reloaded.title
+        assert "‮" in reloaded.title
+
+    def test_multibyte_utf8_title_round_trips(self, storage: JSONLStorage) -> None:
+        """CJK characters and emoji round-trip through write + reload.
+
+        Most existing storage tests use ASCII titles; without a
+        multi-byte test, a regression in the JSON encoding (e.g.
+        ``ensure_ascii=True``) or in the byte-size cap would slip
+        through. (dogcat-2rpd)
+        """
+        title = "Issue 中文 — 日本語 — 한국어 — 🐱🐶"
+        storage.create(Issue(id="utf", title=title))
+        reloaded = JSONLStorage(str(storage.path)).get("dc-utf")
+        assert reloaded is not None
+        assert reloaded.title == title
+
+    def test_realistic_namespaces_round_trip(self, storage: JSONLStorage) -> None:
+        """Hyphen, mixed-case, digit, and single-char namespaces round-trip.
+
+        Most tests use ``namespace='test'``; pin the format whitelist
+        with realistic alternatives so a regression to the namespace
+        validator surfaces here. (dogcat-2rpd)
+        """
+        cases = ["my-cool-project", "Team42", "client_alpha", "a"]
+        for i, ns in enumerate(cases):
+            storage.create(Issue(id=f"n{i:03d}", title=f"From {ns}", namespace=ns))
+        reloaded = JSONLStorage(str(storage.path))
+        for i, ns in enumerate(cases):
+            issue = reloaded.get(f"{ns}-n{i:03d}")
+            assert issue is not None, f"namespace={ns!r} not round-tripped"
+            assert issue.namespace == ns
 
     def test_oversized_title_rejected_on_update(self, storage: JSONLStorage) -> None:
         """A too-long title fed via update() is rejected too."""
@@ -1903,43 +2132,52 @@ class TestFileLock:
         assert storage.get("lock-1") is not None
 
     def test_concurrent_writes_dont_corrupt(self, temp_workspace: Path) -> None:
-        """Test that concurrent writes under lock don't corrupt data."""
-        import threading
+        """Concurrent writes from two processes preserve every record.
+
+        Uses multiprocessing because ``fcntl.flock`` is per-process — two
+        threads in the same process share an open file description and would
+        not actually contend for the lock, leaving the lock path untested.
+        Asserts no errors and exact issue count so a regression that drops
+        writes (e.g. lost wakeup, truncate-vs-rename ordering) shows up
+        instead of silently passing. (dogcat-5l9g)
+        """
+        import multiprocessing
 
         storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
         JSONLStorage(str(storage_path), create_dir=True)
 
-        errors: list[Exception] = []
+        ctx = multiprocessing.get_context("fork")
+        manager = ctx.Manager()
+        errors = manager.list()  # type: ignore[var-annotated]
 
-        def create_issues(start: int, count: int) -> None:
-            try:
-                local_storage = JSONLStorage(str(storage_path))
-                for i in range(start, start + count):
-                    local_storage.create(Issue(id=f"issue-{i}", title=f"Issue {i}"))
-            except Exception as e:
-                errors.append(e)
+        p1 = ctx.Process(
+            target=_mp_create_issues, args=(str(storage_path), 0, 10, errors)
+        )
+        p2 = ctx.Process(
+            target=_mp_create_issues, args=(str(storage_path), 100, 10, errors)
+        )
+        p1.start()
+        p2.start()
+        p1.join(timeout=30)
+        p2.join(timeout=30)
 
-        # Create issues from two threads
-        t1 = threading.Thread(target=create_issues, args=(0, 10))
-        t2 = threading.Thread(target=create_issues, args=(100, 10))
-        t1.start()
-        t2.start()
-        t1.join()
-        t2.join()
+        assert not p1.is_alive(), "child 1 hung"
+        assert not p2.is_alive(), "child 2 hung"
+        assert p1.exitcode == 0, f"child 1 exit={p1.exitcode}"
+        assert p2.exitcode == 0, f"child 2 exit={p2.exitcode}"
+        assert list(errors) == [], f"workers reported errors: {list(errors)}"
 
-        # Reload and verify data integrity
+        # Exact count: 10 from each process, no dropped writes.
         final_storage = JSONLStorage(str(storage_path))
         all_issues = final_storage.list()
+        assert len(all_issues) == 20
 
-        # Should not have any errors (though duplicate IDs might if threads overlap)
-        # The important thing is no corruption - all existing issues can be loaded
-        assert len(all_issues) > 0
-        # Each line in the file should be valid JSON
+        # Each line in the file is still valid JSONL.
         with storage_path.open() as f:
             for line in f:
-                line = line.strip()
-                if line:
-                    json.loads(line)  # Should not raise
+                stripped = line.strip()
+                if stripped:
+                    json.loads(stripped)
 
     def test_file_lock_open_failure_raises_runtimeerror(
         self, temp_workspace: Path

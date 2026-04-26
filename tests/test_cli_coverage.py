@@ -152,6 +152,95 @@ class TestRecentlyClosed:
         assert len(lines) == 1
 
 
+class TestLimitBoundaryHandling:
+    """--limit 0 must truncate to empty; --limit -1 must be rejected.
+
+    Regression for dogcat-26a4: ``if limit:`` falsy-checks silently
+    skipped truncation when ``--limit 0`` was passed, and ``-1`` slipped
+    through to ``issues[:-1]`` which drops the last item.
+    """
+
+    def _run_three_issues(self, tmp_path: Path) -> Path:
+        dogcats_dir, _ = _init_and_create(tmp_path, "Issue A", "Issue B", "Issue C")
+        return dogcats_dir
+
+    def test_ready_limit_zero_returns_empty(self, tmp_path: Path) -> None:
+        """--limit 0 returns an empty result set."""
+        dogcats_dir = self._run_three_issues(tmp_path)
+        result = runner.invoke(
+            app,
+            ["ready", "--limit", "0", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert json.loads(result.stdout) == []
+
+    def test_ready_limit_negative_rejected(self, tmp_path: Path) -> None:
+        """--limit -1 fails non-zero instead of silently dropping a row."""
+        dogcats_dir = self._run_three_issues(tmp_path)
+        result = runner.invoke(
+            app,
+            ["ready", "--limit", "-1", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code != 0
+
+    def test_list_limit_zero_returns_empty(self, tmp_path: Path) -> None:
+        """``list --limit 0`` returns an empty result set."""
+        dogcats_dir = self._run_three_issues(tmp_path)
+        result = runner.invoke(
+            app,
+            ["list", "--limit", "0", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert json.loads(result.stdout) == []
+
+    def test_list_limit_negative_rejected(self, tmp_path: Path) -> None:
+        """``list --limit -1`` fails non-zero."""
+        dogcats_dir = self._run_three_issues(tmp_path)
+        result = runner.invoke(
+            app,
+            ["list", "--limit", "-1", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code != 0
+
+    def test_recently_closed_limit_zero(self, tmp_path: Path) -> None:
+        """recently-closed --limit 0 returns an empty result set."""
+        dogcats_dir, ids = _init_and_create(tmp_path, "Issue A", "Issue B", "Issue C")
+        for issue_id in ids:
+            runner.invoke(
+                app,
+                [
+                    "close",
+                    issue_id,
+                    "--reason",
+                    "Done",
+                    "--dogcats-dir",
+                    str(dogcats_dir),
+                ],
+            )
+        result = runner.invoke(
+            app,
+            [
+                "recently-closed",
+                "--limit",
+                "0",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert json.loads(result.stdout) == []
+
+    def test_recently_closed_limit_negative_rejected(self, tmp_path: Path) -> None:
+        """recently-closed --limit -1 fails non-zero."""
+        dogcats_dir = self._run_three_issues(tmp_path)
+        result = runner.invoke(
+            app,
+            ["recently-closed", "--limit", "-1", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code != 0
+
+
 class TestSearch:
     """Test the search command."""
 

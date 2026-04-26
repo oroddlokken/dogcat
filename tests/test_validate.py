@@ -495,6 +495,71 @@ class TestDetectConcurrentEdits:
         )
         assert warnings == []
 
+    def test_unloadable_ref_emits_integrity_warning(
+        self,
+        git_repo: GitRepo,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """When ``git show ref:path`` fails, surface a warning instead of [].
+
+        The previous behaviour was to treat a failed load identically to
+        ``no issues at this ref``, which made detect_concurrent_edits
+        report a clean merge while real concurrent edits went unflagged.
+        (dogcat-9wj2)
+        """
+        repo = git_repo
+        _install_merge_driver(repo)
+
+        # Build a real merge so detect_concurrent_edits gets past the
+        # ``no merge_commit`` early-return.
+        s = repo.storage()
+        s.create(Issue(id="shared", namespace="test", title="Original"))
+        repo.commit_all("Seed")
+        repo.create_branch("branch-a")
+        s = repo.storage()
+        s.update("test-shared", {"title": "Title from A"})
+        repo.commit_all("Update on A")
+        repo.switch_branch("main")
+        repo.create_branch("branch-b")
+        s = repo.storage()
+        s.update("test-shared", {"title": "Title from B"})
+        repo.commit_all("Update on B")
+        repo.switch_branch("main")
+        repo.merge("branch-a")
+        repo.merge("branch-b")
+
+        # Force show_file to return None for the base ref so the
+        # integrity guard triggers. Patch the symbol on the dogcat.git
+        # module since _load_issues_at_ref imports the module locally.
+        import dogcat.git as git_helpers
+
+        real_show_file = git_helpers.show_file
+        merge_commit = git_helpers.latest_merge_commit(cwd=repo.path)
+        assert merge_commit is not None
+        parents = git_helpers.merge_parents(merge_commit, cwd=repo.path)
+        assert parents is not None
+        base = git_helpers.merge_base(parents[0], parents[1], cwd=repo.path)
+        assert base is not None
+        bad_ref = f"{base}:.dogcats/issues.jsonl"
+
+        def fake_show_file(git_ref: str, **kwargs: Any) -> bytes | None:
+            if git_ref == bad_ref:
+                return None
+            return real_show_file(git_ref, **kwargs)
+
+        monkeypatch.setattr(git_helpers, "show_file", fake_show_file)
+
+        warnings = detect_concurrent_edits(
+            cwd=repo.path,
+            storage_rel=".dogcats/issues.jsonl",
+        )
+        assert warnings, "expected an integrity warning when a ref fails to load"
+        assert any(w.get("level") == "warning" for w in warnings)
+        assert any("could not read" in w.get("message", "") for w in warnings)
+        # The failed ref must be reported so the user knows what to investigate.
+        all_failed = [entry for w in warnings for entry in w.get("failed_refs", [])]
+        assert any(entry["role"] == "base" for entry in all_failed)
+
     def test_detects_field_level_loss_different_fields(self, git_repo: GitRepo) -> None:
         """Detect when branches edit different fields on the same issue.
 

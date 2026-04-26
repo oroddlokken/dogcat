@@ -113,7 +113,15 @@ class TestPropose:
         assert "id" in data
 
     def test_propose_creates_inbox_file(self, tmp_path: Path) -> None:
-        """Test that propose creates inbox.jsonl in the target."""
+        """Test that propose persists a proposal record to inbox.jsonl.
+
+        ``inbox.jsonl`` already exists after ``init``, so file existence
+        proves nothing. Read the proposal back to verify the title, open
+        status, and matching ID actually landed on disk. (dogcat-4tud)
+        """
+        from dogcat.inbox import InboxStorage
+        from dogcat.models import ProposalStatus
+
         dogcats_dir = _init(tmp_path)
 
         runner.invoke(
@@ -125,8 +133,13 @@ class TestPropose:
                 str(tmp_path),
             ],
         )
-        inbox_file = dogcats_dir / "inbox.jsonl"
-        assert inbox_file.exists()
+        inbox = InboxStorage(dogcats_dir=str(dogcats_dir))
+        proposals = [p for p in inbox.list() if p.title == "New proposal"]
+        assert len(proposals) == 1
+        proposal = proposals[0]
+        assert proposal.status == ProposalStatus.OPEN
+        # The proposal's full_id round-trips back through the lookup API.
+        assert inbox.get(proposal.full_id) is not None
 
     def test_propose_to_dogcats_dir_directly(self, tmp_path: Path) -> None:
         """Test --to pointing directly at a .dogcats directory."""

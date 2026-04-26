@@ -255,6 +255,9 @@ class TestInboxClose:
 
     def test_close_proposal(self, tmp_path: Path) -> None:
         """Test closing a proposal."""
+        from dogcat.inbox import InboxStorage
+        from dogcat.models import ProposalStatus
+
         dogcats_dir = _init(tmp_path)
         full_id = _create_proposal(tmp_path, "Close me")
 
@@ -266,8 +269,17 @@ class TestInboxClose:
         assert "Closed" in result.stdout
         assert "Close me" in result.stdout
 
+        # Read state back: a regression that prints "Closed" but skips
+        # the actual write must fail this assertion. (dogcat-4tud)
+        proposal = InboxStorage(dogcats_dir=str(dogcats_dir)).get(full_id)
+        assert proposal is not None
+        assert proposal.status == ProposalStatus.CLOSED
+
     def test_close_with_reason(self, tmp_path: Path) -> None:
         """Test closing with a reason."""
+        from dogcat.inbox import InboxStorage
+        from dogcat.models import ProposalStatus
+
         dogcats_dir = _init(tmp_path)
         full_id = _create_proposal(tmp_path, "Reasoned close")
 
@@ -286,8 +298,18 @@ class TestInboxClose:
         assert result.exit_code == 0
         assert "Closed" in result.stdout
 
+        # Persisted close: the reason must round-trip through the JSONL
+        # store, not just appear in the success banner. (dogcat-4tud)
+        proposal = InboxStorage(dogcats_dir=str(dogcats_dir)).get(full_id)
+        assert proposal is not None
+        assert proposal.status == ProposalStatus.CLOSED
+        assert proposal.closed_reason == "Not needed"
+
     def test_close_with_issue(self, tmp_path: Path) -> None:
         """Test closing with a linked issue ID."""
+        from dogcat.inbox import InboxStorage
+        from dogcat.models import ProposalStatus
+
         dogcats_dir = _init(tmp_path)
         full_id = _create_proposal(tmp_path, "Issue link close")
 
@@ -304,6 +326,12 @@ class TestInboxClose:
             ],
         )
         assert result.exit_code == 0
+
+        # The linked issue ID must persist on the proposal record. (dogcat-4tud)
+        proposal = InboxStorage(dogcats_dir=str(dogcats_dir)).get(full_id)
+        assert proposal is not None
+        assert proposal.status == ProposalStatus.CLOSED
+        assert proposal.resolved_issue == "dc-abcd"
 
     def test_close_json_output(self, tmp_path: Path) -> None:
         """Test close with --json output."""
@@ -405,6 +433,9 @@ class TestInboxDelete:
 
     def test_delete_proposal(self, tmp_path: Path) -> None:
         """Test deleting a proposal."""
+        from dogcat.inbox import InboxStorage
+        from dogcat.models import ProposalStatus
+
         dogcats_dir = _init(tmp_path)
         full_id = _create_proposal(tmp_path, "Delete me")
 
@@ -415,6 +446,11 @@ class TestInboxDelete:
         assert result.exit_code == 0
         assert "Deleted" in result.stdout
         assert "Delete me" in result.stdout
+
+        # Tombstone must be persisted, not just announced. (dogcat-4tud)
+        proposal = InboxStorage(dogcats_dir=str(dogcats_dir)).get(full_id)
+        assert proposal is not None
+        assert proposal.status == ProposalStatus.TOMBSTONE
 
     def test_delete_json_output(self, tmp_path: Path) -> None:
         """Test delete with --json output."""
@@ -438,6 +474,9 @@ class TestInboxDelete:
 
     def test_delete_multiple(self, tmp_path: Path) -> None:
         """Test deleting multiple proposals at once."""
+        from dogcat.inbox import InboxStorage
+        from dogcat.models import ProposalStatus
+
         dogcats_dir = _init(tmp_path)
         id1 = _create_proposal(tmp_path, "Delete first")
         id2 = _create_proposal(tmp_path, "Delete second")
@@ -449,6 +488,13 @@ class TestInboxDelete:
         assert result.exit_code == 0
         assert "Delete first" in result.stdout
         assert "Delete second" in result.stdout
+
+        # Both proposals must be tombstoned on disk. (dogcat-4tud)
+        inbox = InboxStorage(dogcats_dir=str(dogcats_dir))
+        for pid in (id1, id2):
+            proposal = inbox.get(pid)
+            assert proposal is not None
+            assert proposal.status == ProposalStatus.TOMBSTONE
 
     def test_delete_multiple_partial_failure(self, tmp_path: Path) -> None:
         """Test that deleting continues on error and exits 1."""
@@ -835,16 +881,29 @@ class TestInboxAccept:
         issue_data = json.loads(result.stdout)
         assert issue_data["description"] == "This is the detailed description"
 
+    @pytest.mark.parametrize(
+        ("extra_args", "label"),
+        [
+            ([], "bare"),
+            (["-p", "1", "-t", "bug", "-l", "x"], "with-options"),
+        ],
+        ids=["bare", "with-options"],
+    )
     def test_accept_rolls_back_local_issue_on_remote_close_failure(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
+        extra_args: list[str],
+        label: str,
     ) -> None:
-        """If closing the remote proposal fails, the local issue is deleted.
+        """Closing-failure rollback covers both accept paths.
 
-        Without rollback, a failed close would leave an orphaned local issue
-        with no link back to the remote proposal — silent inconsistency.
+        Bare-accept and accept-with-options route through different
+        ``create_issue`` invocations. Without parametrization, a future
+        change that diverges the rollback path on one side could leave
+        orphan local issues silently. (dogcat-6bbf)
         """
+        del label
         local_dogcats, remote_dogcats = _setup_remote_inbox(tmp_path)
         proposal_id = _create_remote_proposal(remote_dogcats, "Will fail to close")
 
@@ -858,7 +917,7 @@ class TestInboxAccept:
 
         monkeypatch.setattr(InboxStorage, "close", boom)
         monkeypatch.chdir(local_dogcats.parent)
-        result = runner.invoke(app, ["inbox", "accept", proposal_id])
+        result = runner.invoke(app, ["inbox", "accept", proposal_id, *extra_args])
         assert result.exit_code == 1
         output = result.stdout + (result.stderr or "")
         assert "Failed to close remote proposal" in output or "Rolled back" in output
@@ -866,7 +925,8 @@ class TestInboxAccept:
         # Restore close so we can inspect storage state.
         monkeypatch.setattr(InboxStorage, "close", original_close)
 
-        # Local issue must be tombstoned so the orphan does not linger.
+        # Local issue must be tombstoned so the orphan does not linger,
+        # regardless of which accept code path was taken.
         from dogcat.storage import JSONLStorage
 
         local_storage = JSONLStorage(str(local_dogcats / "issues.jsonl"))

@@ -5,15 +5,19 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 from typer.testing import CliRunner
 
 from dogcat.cli import app
 from dogcat.storage import JSONLStorage
 
-if TYPE_CHECKING:
-    from pathlib import Path
+# Absolute path to the repo's ``src/`` so child subprocess imports work
+# regardless of the cwd pytest was invoked from. Using ``'src'`` (a
+# bare relative path) silently fell back to the installed dogcat
+# package or failed import when pytest ran from any other dir. (dogcat-1m8h)
+_REPO_SRC = Path(__file__).resolve().parents[1] / "src"
+
 
 runner = CliRunner()
 
@@ -159,7 +163,7 @@ class TestConcurrentProcessAccess:
                     "-c",
                     f"""
 import sys
-sys.path.insert(0, 'src')
+sys.path.insert(0, {str(_REPO_SRC)!r})
 from dogcat.models import Issue
 from dogcat.storage import JSONLStorage
 s = JSONLStorage('{storage_path}')
@@ -211,7 +215,7 @@ for j in range(5):
                     "-c",
                     f"""
 import sys
-sys.path.insert(0, 'src')
+sys.path.insert(0, {str(_REPO_SRC)!r})
 from dogcat.storage import JSONLStorage
 s = JSONLStorage('{storage_path}')
 for j in range(5):

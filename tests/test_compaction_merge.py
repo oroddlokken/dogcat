@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import orjson
 
 from dogcat.constants import MERGE_DRIVER_CMD
-from dogcat.models import Issue
+from dogcat.models import Issue, Status
 from dogcat.storage import JSONLStorage
 
 if TYPE_CHECKING:
@@ -95,9 +95,15 @@ class TestConcurrentCompaction:
         assert _all_valid_json(repo)
         storage = JSONLStorage(str(repo.storage_path))
 
+        # Exactly 10 issues — no duplicates from compact-then-merge.
+        all_issues = storage.list()
+        assert len(all_issues) == 10
+
         for i in range(10):
             issue = storage.get(f"test-shared{i}")
             assert issue is not None, f"Issue shared{i} missing after merge"
+            # Identical content on both sides: title must round-trip unchanged.
+            assert issue.title == f"Shared {i}"
 
     def test_compact_then_edit_on_both_sides(self, git_repo: GitRepo) -> None:
         """Both sides compact, then both make edits to different issues.
@@ -147,16 +153,28 @@ class TestConcurrentCompaction:
         # Check unique edits from each side
         issue2 = storage.get("test-issue2")
         assert issue2 is not None
-        assert issue2.status == "closed"
+        assert issue2.status == Status.CLOSED
 
         issue3 = storage.get("test-issue3")
         assert issue3 is not None
         assert issue3.priority == 1
 
-        # Check contested edit (issue0) - whichever is later should win
+        # Branch A also touched issue1 (priority=0) only on its side. The
+        # merge must preserve A's lone edit so we know the merge driver
+        # didn't drop one branch's work entirely. (dogcat-2bt3)
+        issue1 = storage.get("test-issue1")
+        assert issue1 is not None
+        assert issue1.priority == 0
+
+        # Contested edit on issue0: A set status=in_progress, then B set
+        # status=in_review,priority=2. B's commit has the later
+        # ``updated_at`` so LWW must surface B's full record. Asserting
+        # the exact field values is the whole point of an LWW driver —
+        # ``is not None`` proves nothing about which side won.
         issue0 = storage.get("test-issue0")
         assert issue0 is not None
-        # Both have later timestamps, so one should be fully merged result
+        assert issue0.status == Status.IN_REVIEW
+        assert issue0.priority == 2
 
     def test_compact_then_edit_one_side_only(self, git_repo: GitRepo) -> None:
         """One side compacts and edits; other side not compacted.

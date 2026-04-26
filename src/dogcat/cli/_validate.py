@@ -486,13 +486,19 @@ def _load_issues_at_ref(
     ref: str,
     storage_rel: str,
     cwd: Path,
-) -> dict[str, dict[str, Any]]:
-    """Load issue states from a git ref."""
+) -> dict[str, dict[str, Any]] | None:
+    """Load issue states from a git ref.
+
+    Returns ``None`` when ``git show <ref>:<path>`` fails (missing ref,
+    missing path at that ref, permission denied, git unavailable). Callers
+    must distinguish this from an empty dict, which legitimately means
+    ``the file existed at that ref and contained no issues``. (dogcat-9wj2)
+    """
     import dogcat.git as git_helpers
 
     raw = git_helpers.show_file(f"{ref}:{storage_rel}", cwd=cwd)
     if raw is None:
-        return {}
+        return None
 
     issues: dict[str, dict[str, Any]] = {}
     for raw_line in raw.splitlines():
@@ -544,10 +550,44 @@ def detect_concurrent_edits(
     if base is None:
         return warnings
 
-    # Load issue states at each ref
+    # Load issue states at each ref. ``None`` means the ref itself loaded
+    # but the storage file couldn't be read (missing path at that ref, git
+    # error, permission denied). Returning [] in that case used to look
+    # like ``no concurrent edits`` while actually meaning ``we have no
+    # idea`` — surface the integrity gap as a warning instead. (dogcat-9wj2)
     base_issues = _load_issues_at_ref(base, storage_rel, work_dir)
     p1_issues = _load_issues_at_ref(parent1, storage_rel, work_dir)
     p2_issues = _load_issues_at_ref(parent2, storage_rel, work_dir)
+
+    failed_refs: list[tuple[str, str]] = []
+    if base_issues is None:
+        failed_refs.append(("base", base))
+    if p1_issues is None:
+        failed_refs.append(("parent_1", parent1))
+    if p2_issues is None:
+        failed_refs.append(("parent_2", parent2))
+    if failed_refs:
+        names = ", ".join(f"{role}={ref}" for role, ref in failed_refs)
+        warnings.append(
+            {
+                "level": "warning",
+                "message": (
+                    "Concurrent-edit detection skipped: could not read"
+                    f" {storage_rel} at {names}. Detection is incomplete;"
+                    " investigate the missing ref(s) before trusting the"
+                    " merge result."
+                ),
+                "failed_refs": [
+                    {"role": role, "ref": ref} for role, ref in failed_refs
+                ],
+            },
+        )
+        return warnings
+
+    # Narrow types after the integrity guard above.
+    assert base_issues is not None
+    assert p1_issues is not None
+    assert p2_issues is not None
 
     # Find issues modified in BOTH parents relative to base
     p1_modified = {

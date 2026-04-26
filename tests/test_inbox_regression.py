@@ -171,3 +171,105 @@ class TestInboxFixtureRegression:
         """Count method returns correct totals (excludes tombstones by default)."""
         proposals = loaded_inbox.list()
         assert loaded_inbox.count() == len(proposals)
+
+
+# Hardcoded ground-truth records per fixture version. Each entry pins
+# the exact field values for one open and one closed proposal so a
+# silent migration regression (e.g. ``proposed_by`` ↔ ``closed_by``
+# field-swap, description wiped to a constant) fails this test rather
+# than slipping through ``len > 0`` / ``field is non-empty`` checks.
+# (dogcat-2umh)
+#
+# When adding a new fixture version: pick one open proposal and one
+# closed proposal from the fixture and add their exact fields here.
+_FIXTURE_GROUND_TRUTH: dict[str, dict[str, dict[str, object]]] = {
+    "v0.10.1": {
+        "open": {
+            "full_id": "tmpmba-qxeu-inbox-2w4v",
+            "title": "Add webhook support for issue events",
+            "namespace": "tmpmba-qxeu",
+            "proposed_by": "eve@partner-corp.com",
+            "source_repo": "/home/eve/repos/partner-dashboard",
+            "description_prefix": "We'd like to receive webhooks",
+            "status": ProposalStatus.OPEN,
+        },
+        "closed": {
+            "full_id": "tmpmba-qxeu-inbox-5503",
+            "title": "Add priority filtering to list command",
+            "namespace": "tmpmba-qxeu",
+            "proposed_by": "charlie@example.com",
+            "source_repo": "/home/charlie/repos/dogcat-contrib",
+            "closed_by": "alice@example.com",
+            "closed_reason": "Implemented in v0.9.2",
+            "resolved_issue": "tmpmba-qxeu-abcd",
+            "status": ProposalStatus.CLOSED,
+        },
+    },
+}
+
+
+@pytest.fixture(params=_fixtures, ids=_fixture_ids(_fixtures))
+def fixture_with_truth(
+    request: pytest.FixtureRequest, tmp_path: Path
+) -> tuple[InboxStorage, str]:
+    """Load a fixture and return ``(storage, version_label)``.
+
+    Pairs each fixture file with its version label so the ground-truth
+    table can be looked up without re-deriving it from the path.
+    """
+    fixture_path: Path = request.param
+    version = fixture_path.stem.replace("_inbox", "")
+    dogcats_dir = tmp_path / ".dogcats"
+    dogcats_dir.mkdir()
+    shutil.copy2(fixture_path, dogcats_dir / "inbox.jsonl")
+    return InboxStorage(dogcats_dir=str(dogcats_dir)), version
+
+
+class TestInboxFixtureGroundTruth:
+    """Pin exact field values per fixture so a field-swap fails loudly."""
+
+    def test_open_proposal_exact_fields(
+        self, fixture_with_truth: tuple[InboxStorage, str]
+    ) -> None:
+        """The named open proposal loads with the exact field values."""
+        storage, version = fixture_with_truth
+        truth = _FIXTURE_GROUND_TRUTH.get(version, {}).get("open")
+        if truth is None:
+            pytest.skip(f"No open ground-truth recorded for {version}")
+        proposal = storage.get(str(truth["full_id"]))
+        assert proposal is not None, f"open record {truth['full_id']!r} missing"
+        assert proposal.title == truth["title"]
+        assert proposal.namespace == truth["namespace"]
+        assert proposal.proposed_by == truth["proposed_by"]
+        assert proposal.source_repo == truth["source_repo"]
+        assert proposal.status == truth["status"]
+        # description prefix-match keeps the assertion short while still
+        # rejecting a wipe-to-constant migration regression.
+        assert proposal.description is not None
+        assert proposal.description.startswith(str(truth["description_prefix"]))
+
+    def test_closed_proposal_exact_fields(
+        self, fixture_with_truth: tuple[InboxStorage, str]
+    ) -> None:
+        """A closed proposal preserves closer/reason/resolved_issue exactly.
+
+        These are precisely the fields a field-swap regression would
+        scramble (``proposed_by`` ↔ ``closed_by``, etc.).
+        """
+        storage, version = fixture_with_truth
+        truth = _FIXTURE_GROUND_TRUTH.get(version, {}).get("closed")
+        if truth is None:
+            pytest.skip(f"No closed ground-truth recorded for {version}")
+        proposal = storage.get(str(truth["full_id"]))
+        assert proposal is not None, f"closed record {truth['full_id']!r} missing"
+        assert proposal.title == truth["title"]
+        assert proposal.namespace == truth["namespace"]
+        assert proposal.proposed_by == truth["proposed_by"]
+        assert proposal.source_repo == truth["source_repo"]
+        assert proposal.closed_by == truth["closed_by"]
+        assert proposal.closed_reason == truth["closed_reason"]
+        assert proposal.resolved_issue == truth["resolved_issue"]
+        assert proposal.status == truth["status"]
+        # The author must be a different person than the closer — guards
+        # against the symmetric swap that wouldn't be caught above.
+        assert proposal.proposed_by != proposal.closed_by

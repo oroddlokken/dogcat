@@ -522,6 +522,12 @@ class TestValidation:
         with pytest.raises(ValueError, match="Priority must be"):
             validate_priority(priority)  # type: ignore[arg-type]
 
+    @pytest.mark.parametrize("priority", [True, False])
+    def test_validate_priority_rejects_bool(self, priority: bool) -> None:
+        """Bool is an int subclass — must be rejected explicitly (dogcat-65fm)."""
+        with pytest.raises(ValueError, match="Priority must be"):
+            validate_priority(priority)  # type: ignore[arg-type]
+
     @pytest.mark.parametrize("status", list(Status))
     def test_validate_status_valid(self, status: Status) -> None:
         """Test that valid status doesn't raise."""

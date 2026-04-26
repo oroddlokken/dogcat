@@ -67,7 +67,12 @@ class TestBackfillHistory:
         assert "0 event(s)" in result.stdout
 
     def test_backfill_from_existing_issues(self, tmp_path: Path) -> None:
-        """Test backfill from existing issues."""
+        """Backfill emits one ``created`` event per stripped issue.
+
+        Asserting the substring ``event(s)`` would also match
+        ``0 event(s)`` — count exactly so a regression that emits zero
+        events still fails. (dogcat-io6d)
+        """
         dogcats_dir = _init_repo(tmp_path)
         _create_issue(dogcats_dir, "Issue one")
         _create_issue(dogcats_dir, "Issue two")
@@ -78,14 +83,31 @@ class TestBackfillHistory:
             ["backfill-history", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
-        # Should have at least 2 created events
-        assert "event(s)" in result.stdout
+        # Exact count: two issues → two backfilled created events.
+        assert "2 event(s)" in result.stdout
+
+        # Read the JSONL directly and verify the events landed on disk.
+        from dogcat.event_log import EventLog
+
+        events = list(EventLog(dogcats_dir).read())
+        created = [e for e in events if e.event_type == "created"]
+        assert len(created) == 2
 
     def test_backfill_dry_run(self, tmp_path: Path) -> None:
-        """Test backfill dry run."""
+        """``--dry-run`` previews events but writes none to disk.
+
+        The previous assertion only checked the ``Dry run`` substring —
+        it would still pass if dry-run silently wrote events. Count event
+        records before vs after to lock down the contract. (dogcat-io6d)
+        """
+        from dogcat.event_log import EventLog
+
         dogcats_dir = _init_repo(tmp_path)
         _create_issue(dogcats_dir, "Dry run test")
         _strip_event_records(dogcats_dir)
+
+        before = list(EventLog(dogcats_dir).read())
+        assert before == []
 
         result = runner.invoke(
             app,
@@ -93,6 +115,10 @@ class TestBackfillHistory:
         )
         assert result.exit_code == 0
         assert "Dry run" in result.stderr or "Dry run" in result.output
+
+        # No events written during the dry run.
+        after = list(EventLog(dogcats_dir).read())
+        assert after == []
 
     def test_backfill_warns_on_existing_events(self, tmp_path: Path) -> None:
         """Test backfill warns on existing events."""
@@ -129,7 +155,16 @@ class TestBackfillHistory:
         assert result.exit_code == 0
 
     def test_backfill_detects_updates(self, tmp_path: Path) -> None:
-        """Test backfill detects updates."""
+        """Backfill emits both ``created`` and ``updated`` events.
+
+        The previous OR assertion (``Created`` OR ``Updated``) was a
+        tautology — ``Created`` is always present after backfilling a
+        single issue, so the OR made the ``detects updates`` claim
+        untestable. Read the event log directly and assert at least one
+        ``updated`` event landed. (dogcat-io6d)
+        """
+        from dogcat.event_log import EventLog
+
         dogcats_dir = _init_repo(tmp_path)
         issue_id = _create_issue(dogcats_dir, "Updatable issue")
         runner.invoke(
@@ -151,16 +186,10 @@ class TestBackfillHistory:
         )
         assert result.exit_code == 0
 
-        # Verify events were created
-        history_result = runner.invoke(
-            app,
-            [
-                "history",
-                "--issue",
-                issue_id,
-                "--dogcats-dir",
-                str(dogcats_dir),
-            ],
+        events = list(EventLog(dogcats_dir).read())
+        types = [e.event_type for e in events]
+        assert "created" in types, f"created event missing from {types}"
+        # The whole point of detecting *updates*: an update event must land.
+        assert any(t in {"updated", "status_changed"} for t in types), (
+            f"no update-shaped event in {types}"
         )
-        assert history_result.exit_code == 0
-        assert "Created" in history_result.stdout or "Updated" in history_result.stdout

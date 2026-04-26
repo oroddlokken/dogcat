@@ -90,6 +90,45 @@ def _verify_jsonl_integrity(repo: GitRepo) -> JSONLStorage:
     return JSONLStorage(str(repo.storage_path))
 
 
+def _record_on_branch(repo: GitRepo, branch: str, full_id: str) -> Issue:
+    """Read an issue's record while ``branch`` is checked out.
+
+    Used by LWW assertions: captures a branch's view of a contested
+    record (specifically its ``updated_at``) before a merge so the test
+    can prove the merge result equals the side with the later
+    timestamp. (dogcat-2bt3)
+    """
+    repo.switch_branch(branch)
+    issue = JSONLStorage(str(repo.storage_path)).get(full_id)
+    assert issue is not None, f"{full_id} missing on {branch}"
+    return issue
+
+
+def _assert_lww_winner(
+    merged: Issue,
+    side_a: Issue,
+    side_b: Issue,
+    *,
+    fields: tuple[str, ...] = ("status", "priority", "title"),
+) -> None:
+    """Assert the merged record equals the side with the later ``updated_at``.
+
+    A merge driver that quietly mixes fields, drops one side, or returns
+    the wrong record entirely will fail this — ``is not None`` will not.
+    (dogcat-2bt3)
+    """
+    assert side_a.updated_at != side_b.updated_at, (
+        "test setup must produce distinct updated_at timestamps so LWW has"
+        " a definite winner"
+    )
+    winner = side_a if side_a.updated_at > side_b.updated_at else side_b
+    for field_name in fields:
+        assert getattr(merged, field_name) == getattr(winner, field_name), (
+            f"LWW lost {field_name}: merged={getattr(merged, field_name)!r}"
+            f" winner={getattr(winner, field_name)!r}"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Test scenarios
 # ---------------------------------------------------------------------------
@@ -126,7 +165,13 @@ class TestGitPullMerge:
             repo, "main", "test-shared", {"priority": 1}, "Main edit"
         )
 
+        # Capture each side's view of the contested issue BEFORE the merge
+        # so we can assert which side wins under LWW after merging.
+        feature_view = _record_on_branch(repo, "feature", "test-shared")
+        main_view = _record_on_branch(repo, "main", "test-shared")
+
         # Merge feature into main
+        repo.switch_branch("main")
         result = repo.merge("feature")
         assert result.returncode == 0
 
@@ -137,9 +182,13 @@ class TestGitPullMerge:
         assert storage.get("test-feature1") is not None
         assert storage.get("test-main1") is not None
 
-        # Shared issue: whichever edit is later should win
+        # Shared issue: the LATER updated_at must win exactly. The
+        # earlier-side's edits are lost — that's the documented LWW
+        # contract, and asserting it explicitly guards against a future
+        # merge driver that quietly mixes fields.
         shared = storage.get("test-shared")
         assert shared is not None
+        _assert_lww_winner(shared, feature_view, main_view)
 
 
 class TestGitRebase:
@@ -174,15 +223,21 @@ class TestGitRebase:
 
         assert result.returncode == 0, f"Rebase failed: {result.stderr}"
 
-        # Verify integrity
+        # Verify integrity AND that each record carries the title its
+        # author wrote — a merge driver that drops/swaps fields would
+        # leave the records present but with the wrong content. (dogcat-2bt3)
         storage = _verify_jsonl_integrity(repo)
-
-        # All issues should exist
-        assert storage.get("test-base") is not None
-        assert storage.get("test-f1") is not None
-        assert storage.get("test-f2") is not None
-        assert storage.get("test-f3") is not None
-        assert storage.get("test-m1") is not None
+        expected = {
+            "test-base": "Base",
+            "test-f1": "Feature 1",
+            "test-f2": "Feature 2",
+            "test-f3": "Feature 3",
+            "test-m1": "Main 1",
+        }
+        for full_id, title in expected.items():
+            issue = storage.get(full_id)
+            assert issue is not None, f"{full_id} missing after rebase"
+            assert issue.title == title, f"{full_id} title swapped: {issue.title!r}"
 
     def test_rebase_with_same_issue_edits(self, git_repo: GitRepo) -> None:
         """Both branches edit the same issue. Rebase should resolve cleanly.
@@ -209,16 +264,21 @@ class TestGitRebase:
             repo, "main", "test-shared", {"priority": 1}, "Main edit"
         )
 
+        # Capture both sides' views of the contested issue before rebase.
+        feature_view = _record_on_branch(repo, "feature", "test-shared")
+        main_view = _record_on_branch(repo, "main", "test-shared")
+
         # Rebase feature onto main
         repo.switch_branch("feature")
         result = repo.git("rebase", "main", check=False)
 
         assert result.returncode == 0, f"Rebase failed: {result.stderr}"
 
-        # Verify integrity
+        # Verify integrity and that the later-updated_at side won.
         storage = _verify_jsonl_integrity(repo)
         shared = storage.get("test-shared")
         assert shared is not None
+        _assert_lww_winner(shared, feature_view, main_view)
 
 
 class TestBranchMergeStrategies:
@@ -253,12 +313,18 @@ class TestBranchMergeStrategies:
 
         assert result.returncode == 0
 
-        # Verify integrity and all issues exist
+        # Verify integrity, all issues exist with author-written titles. (dogcat-2bt3)
         storage = _verify_jsonl_integrity(repo)
-        assert storage.get("test-m1") is not None
-        assert storage.get("test-m2") is not None
-        assert storage.get("test-f1") is not None
-        assert storage.get("test-f2") is not None
+        expected = {
+            "test-m1": "Main 1",
+            "test-m2": "Main 2",
+            "test-f1": "Feature 1",
+            "test-f2": "Feature 2",
+        }
+        for full_id, title in expected.items():
+            issue = storage.get(full_id)
+            assert issue is not None, f"{full_id} missing after merge"
+            assert issue.title == title
 
 
 class TestMergeConflictResolution:
@@ -288,11 +354,13 @@ class TestMergeConflictResolution:
 
         assert result.returncode == 0
 
-        # Verify all commits integrated
+        # Verify all commits integrated and title content survived. (dogcat-2bt3)
         storage = _verify_jsonl_integrity(repo)
-        assert storage.get("test-base") is not None
-        assert storage.get("test-f1") is not None
-        assert storage.get("test-f2") is not None
+        expected = {"test-base": "Base", "test-f1": "Feature 1", "test-f2": "Feature 2"}
+        for full_id, title in expected.items():
+            issue = storage.get(full_id)
+            assert issue is not None, f"{full_id} missing after fast-forward"
+            assert issue.title == title
 
     def test_diverged_branches_merge(self, git_repo: GitRepo) -> None:
         """When branches diverge, merge driver handles conflict resolution.
@@ -322,17 +390,23 @@ class TestMergeConflictResolution:
             repo, "feature", "test-shared", {"status": "in_progress"}, "Feature edit"
         )
 
+        # Capture pre-merge views before resolving the conflict.
+        feature_view = _record_on_branch(repo, "feature", "test-shared")
+        main_view = _record_on_branch(repo, "main", "test-shared")
+
         # Merge (should use merge driver)
         repo.switch_branch("main")
         result = repo.merge("feature")
 
         assert result.returncode == 0
 
-        # Verify both unique issues exist
+        # Verify both unique issues exist + LWW winner on contested record.
         storage = _verify_jsonl_integrity(repo)
         assert storage.get("test-m1") is not None
         assert storage.get("test-f1") is not None
-        assert storage.get("test-shared") is not None
+        shared = storage.get("test-shared")
+        assert shared is not None
+        _assert_lww_winner(shared, feature_view, main_view)
 
 
 class TestComplexRebaseScenarios:

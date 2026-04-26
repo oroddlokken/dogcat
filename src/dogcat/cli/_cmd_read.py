@@ -35,6 +35,7 @@ from ._helpers import (
     get_storage,
     load_open_inbox_proposals,
     load_remote_inbox_proposals,
+    resolve_limit,
     with_ns_shim,
 )
 from ._json_state import echo_error, is_json, set_json
@@ -621,9 +622,11 @@ def register(app: typer.Typer) -> None:
             # Sort by priority (lower number = higher priority)
             issues = sorted(issues, key=lambda i: (i.priority, i.id))
 
+            final_limit = resolve_limit(None, limit)
+
             if is_json():
-                if limit:
-                    issues = issues[:limit]
+                if final_limit is not None:
+                    issues = issues[:final_limit]
                 from dogcat.models import issue_to_dict
 
                 output = [issue_to_dict(issue) for issue in issues]
@@ -639,8 +642,8 @@ def register(app: typer.Typer) -> None:
                         _collapse_deferred_subtrees(issues, storage)
                     )
 
-                if limit:
-                    issues = issues[:limit]
+                if final_limit is not None:
+                    issues = issues[:final_limit]
 
                 # Get blocked issue IDs to show correct status symbol
                 from dogcat.deps import get_blocked_issues

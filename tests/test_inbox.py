@@ -256,7 +256,13 @@ class TestInboxStorage:
         return InboxStorage(dogcats_dir=inbox_dir)
 
     def test_create_proposal(self, storage: object) -> None:
-        """Test creating a proposal in storage."""
+        """Test creating a proposal in storage.
+
+        Reload from disk so an in-memory return value can't be confused
+        with persistence — a regression that returned the constructed
+        proposal without writing it would still satisfy ``result.full_id``.
+        (dogcat-4tud)
+        """
         from dogcat.inbox import InboxStorage
 
         s = storage
@@ -264,6 +270,10 @@ class TestInboxStorage:
         proposal = Proposal(id="4kzj", title="Add feature X", namespace="test")
         result = s.create(proposal)
         assert result.full_id == "test-inbox-4kzj"
+
+        reloaded = InboxStorage(dogcats_dir=str(s.dogcats_dir)).get("test-inbox-4kzj")
+        assert reloaded is not None
+        assert reloaded.title == "Add feature X"
 
     def test_create_duplicate_raises(self, storage: object) -> None:
         """Test that creating a duplicate ID raises ValueError."""
@@ -426,6 +436,31 @@ class TestInboxStorage:
         assert isinstance(s, InboxStorage)
         with pytest.raises(ValueError, match="not found"):
             s.close("nonexistent")
+
+    def test_close_refuses_tombstoned_proposal(self, storage: object) -> None:
+        """Closing a tombstoned proposal raises rather than overwriting it.
+
+        Without the finality guard, ``close`` would replace
+        ``deleted_at``/``deleted_by`` with ``closed_at``/``closed_by``
+        and resurrect the proposal from ``list()``. Mirrors the
+        ``JSONLStorage.close`` tombstone guard. (dogcat-5o1m)
+        """
+        from dogcat.inbox import InboxStorage
+
+        s = storage
+        assert isinstance(s, InboxStorage)
+        s.create(Proposal(id="dead", title="Will be tombstoned", namespace="test"))
+        s.delete("test-inbox-dead", deleted_by="admin@example.com")
+
+        with pytest.raises(ValueError, match="tombstoned"):
+            s.close("test-inbox-dead", reason="late close")
+
+        # State unchanged: still a tombstone, no closed_at written.
+        proposal = s.get("test-inbox-dead")
+        assert proposal is not None
+        assert proposal.status == ProposalStatus.TOMBSTONE
+        assert proposal.closed_at is None
+        assert proposal.deleted_by == "admin@example.com"
 
     def test_delete_proposal(self, storage: object) -> None:
         """Test soft-deleting a proposal creates a tombstone."""
@@ -679,6 +714,98 @@ class TestCreateProposalFactory:
         assert proposal.source_repo == "/some/repo"
 
 
+class TestInboxBatchContextManager:
+    """Direct coverage for ``inbox.batch()`` write coalescing. (dogcat-29nz)."""
+
+    def test_batch_writes_all_records_in_one_disk_write(
+        self, tmp_path: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """N inbox creates inside batch produce one disk write."""
+        from pathlib import Path
+
+        from dogcat import _jsonl_io as io_mod
+        from dogcat.inbox import InboxStorage
+
+        dogcats = Path(str(tmp_path)) / ".dogcats"
+        dogcats.mkdir()
+        s = InboxStorage(dogcats_dir=str(dogcats))
+
+        write_count = {"n": 0}
+        original_write = io_mod.append_jsonl_payload
+
+        def counting_write(target: Path, payload: bytes) -> None:
+            write_count["n"] += 1
+            return original_write(target, payload)
+
+        monkeypatch.setattr("dogcat.inbox.append_jsonl_payload", counting_write)
+
+        with s.batch():
+            for i in range(4):
+                s.create(Proposal(id=f"a{i:03d}", title=f"Batched {i}", namespace="ns"))
+
+        assert write_count["n"] == 1, (
+            f"expected exactly one disk write inside batch, got {write_count['n']}"
+        )
+
+        # All 4 proposals persisted.
+        reloaded = InboxStorage(dogcats_dir=str(dogcats))
+        assert len([p for p in reloaded.list() if p.id.startswith("a")]) == 4
+
+    def test_batch_nested_is_noop(
+        self, tmp_path: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A nested inbox batch does not flush the outer batch early."""
+        from pathlib import Path
+
+        from dogcat import _jsonl_io as io_mod
+        from dogcat.inbox import InboxStorage
+
+        dogcats = Path(str(tmp_path)) / ".dogcats"
+        dogcats.mkdir()
+        s = InboxStorage(dogcats_dir=str(dogcats))
+
+        write_count = {"n": 0}
+        original_write = io_mod.append_jsonl_payload
+
+        def counting_write(target: Path, payload: bytes) -> None:
+            write_count["n"] += 1
+            return original_write(target, payload)
+
+        monkeypatch.setattr("dogcat.inbox.append_jsonl_payload", counting_write)
+
+        with s.batch():
+            s.create(Proposal(id="out1", title="O1", namespace="ns"))
+            with s.batch():
+                s.create(Proposal(id="inn1", title="I1", namespace="ns"))
+            assert write_count["n"] == 0
+            s.create(Proposal(id="out2", title="O2", namespace="ns"))
+        assert write_count["n"] == 1
+
+    def test_batch_flushes_pending_on_exception(self, tmp_path: object) -> None:
+        """Exception inside batch flushes buffered records (best-effort save)."""
+        from pathlib import Path
+
+        from dogcat.inbox import InboxStorage
+
+        dogcats = Path(str(tmp_path)) / ".dogcats"
+        dogcats.mkdir()
+        s = InboxStorage(dogcats_dir=str(dogcats))
+
+        class _BoomError(RuntimeError):
+            pass
+
+        def _raise_inside_batch() -> None:
+            with s.batch():
+                s.create(Proposal(id="prep", title="Should persist", namespace="ns"))
+                raise _BoomError
+
+        with pytest.raises(_BoomError):
+            _raise_inside_batch()
+
+        reloaded = InboxStorage(dogcats_dir=str(dogcats))
+        assert reloaded.get("ns-inbox-prep") is not None
+
+
 class TestInboxInputCapEnforcement:
     """validate_proposal caps are enforced at the inbox storage boundary."""
 
@@ -710,6 +837,43 @@ class TestInboxInputCapEnforcement:
         s = InboxStorage(dogcats_dir=str(dogcats))
         with pytest.raises(ValueError, match="namespace"):
             s.create(Proposal(id="aaaa", title="OK", namespace="bad ns"))
+
+    def test_title_at_exact_limit_accepted(self, tmp_path: object) -> None:
+        """A title at exactly MAX_TITLE_LEN is accepted on InboxStorage.create().
+
+        Pins the inbox bound so a typo loosening ``>`` to ``>=`` is
+        caught (parity with the storage / web tests). (dogcat-3d29)
+        """
+        from pathlib import Path
+
+        from dogcat.constants import MAX_TITLE_LEN
+        from dogcat.inbox import InboxStorage
+        from dogcat.models import Proposal
+
+        dogcats = Path(str(tmp_path)) / ".dogcats"
+        dogcats.mkdir()
+        s = InboxStorage(dogcats_dir=str(dogcats))
+        title = "x" * MAX_TITLE_LEN
+        proposal = s.create(Proposal(id="exct", title=title, namespace="ns"))
+        assert len(proposal.title) == MAX_TITLE_LEN
+
+    def test_description_at_exact_limit_accepted(self, tmp_path: object) -> None:
+        """A description at exactly MAX_DESC_LEN is accepted. (dogcat-3d29)."""
+        from pathlib import Path
+
+        from dogcat.constants import MAX_DESC_LEN
+        from dogcat.inbox import InboxStorage
+        from dogcat.models import Proposal
+
+        dogcats = Path(str(tmp_path)) / ".dogcats"
+        dogcats.mkdir()
+        s = InboxStorage(dogcats_dir=str(dogcats))
+        body = "x" * MAX_DESC_LEN
+        proposal = s.create(
+            Proposal(id="excd", title="OK", namespace="ns", description=body),
+        )
+        assert proposal.description is not None
+        assert len(proposal.description) == MAX_DESC_LEN
 
 
 class TestInboxLoadStrictness:

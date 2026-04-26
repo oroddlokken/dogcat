@@ -302,6 +302,24 @@ class TestMultiDevWorkflows:
             result = repo.merge("alice-branch")
             assert result.returncode == 0
 
+        # Capture Alice's and Bob's branch states AFTER each independently
+        # merged the other's branch — the eventual-consistency claim is
+        # that these two record sets are equal regardless of merge order.
+        # (dogcat-2bt3)
+        repo.switch_branch("alice-branch")
+        alice_records = sorted(
+            (i.full_id, i.title) for i in JSONLStorage(str(repo.storage_path)).list()
+        )
+        repo.switch_branch("bob-branch")
+        bob_records = sorted(
+            (i.full_id, i.title) for i in JSONLStorage(str(repo.storage_path)).list()
+        )
+        assert alice_records == bob_records, (
+            "Alice and Bob diverged after independently merging the other's"
+            " branch — the merge driver lost eventual consistency."
+            f"\nAlice: {alice_records}\nBob:   {bob_records}"
+        )
+
         # Merge both into main for final check
         repo.switch_branch("main")
         with as_developer(repo, "Merger", "merger@example.com"):
@@ -310,15 +328,18 @@ class TestMultiDevWorkflows:
             result2 = repo.merge("bob-branch")
             assert result2.returncode == 0
 
-        # Verify final state
+        # Verify final state on main matches the converged set.
         storage = JSONLStorage(str(repo.storage_path))
+        main_records = sorted((i.full_id, i.title) for i in storage.list())
+        assert main_records == alice_records
 
-        alice1 = storage.get("test-alice1")
-        alice2 = storage.get("test-alice2")
-        bob1 = storage.get("test-bob1")
-        bob2 = storage.get("test-bob2")
-
-        assert alice1 is not None
-        assert alice2 is not None
-        assert bob1 is not None
-        assert bob2 is not None
+        # Each issue carries the title set by its author — the merge
+        # must not have shuffled titles between records.
+        assert storage.get("test-alice1") is not None
+        assert storage.get("test-alice1").title == "Alice Issue 1"  # type: ignore[union-attr]
+        assert storage.get("test-alice2") is not None
+        assert storage.get("test-alice2").title == "Alice Issue 2"  # type: ignore[union-attr]
+        assert storage.get("test-bob1") is not None
+        assert storage.get("test-bob1").title == "Bob Issue 1"  # type: ignore[union-attr]
+        assert storage.get("test-bob2") is not None
+        assert storage.get("test-bob2").title == "Bob Issue 2"  # type: ignore[union-attr]

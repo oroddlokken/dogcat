@@ -512,6 +512,14 @@ class JSONLStorage:
         instead of acquiring the file lock and writing to disk. On exit the
         full buffer is appended in one locked write and the compaction check
         runs once. Re-entering an active batch is a no-op.
+
+        Exception semantics: when the ``with`` block raises, the buffered
+        records are still flushed in ``finally``. This is a best-effort
+        save — the in-memory state already reflects the mutations, and
+        flushing keeps disk consistent with memory rather than dropping
+        completed writes that happened before the exception. Callers
+        that want all-or-nothing semantics must roll back the in-memory
+        state themselves before re-raising. (dogcat-29nz)
         """
         if self._batch_records is not None:
             yield

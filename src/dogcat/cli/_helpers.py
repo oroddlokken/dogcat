@@ -383,6 +383,26 @@ def check_agent_manual_exclusive(*, agent_only: bool, manual_only: bool) -> None
         )
 
 
+def resolve_limit(
+    limit_arg: int | None,
+    limit_opt: int | None,
+    default: int | None = None,
+) -> int | None:
+    """Coalesce positional ``LIMIT`` and ``--limit`` and reject negatives.
+
+    ``limit_arg or limit_opt`` (the previous pattern) treats ``0`` as
+    falsy, silently skipping truncation, and lets ``-1`` slip through to
+    ``issues[:-1]`` which drops the last item. (dogcat-26a4)
+    """
+    value = limit_arg if limit_arg is not None else limit_opt
+    if value is None:
+        return default
+    if value < 0:
+        msg = f"--limit must be >= 0 (got {value})"
+        raise typer.BadParameter(msg)
+    return value
+
+
 def check_comments_exclusive(*, has_comments: bool, without_comments: bool) -> None:
     """Reject --has-comments combined with --without-comments."""
     if has_comments and without_comments:

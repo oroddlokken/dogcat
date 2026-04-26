@@ -143,6 +143,11 @@ class InboxStorage:
         buffers its serialized payload in memory; on exit the full buffer
         is appended in one locked write. Re-entering an active batch is a
         no-op.
+
+        Exception semantics: a raise inside the ``with`` block still
+        flushes the buffered records in ``finally`` — the contract
+        matches :meth:`JSONLStorage.batch` (best-effort save, not
+        all-or-nothing rollback). (dogcat-29nz)
         """
         if self._batch_records is not None:
             yield
@@ -425,11 +430,21 @@ class InboxStorage:
             The closed proposal.
 
         Raises:
-            ValueError: If proposal doesn't exist.
+            ValueError: If proposal doesn't exist or is already tombstoned.
         """
         resolved_id = self._resolve_or_raise(proposal_id)
 
         proposal = self._proposals[resolved_id]
+        # Tombstone is final — closing a tombstoned proposal would
+        # silently overwrite its forensics (deleted_at/deleted_by) with
+        # closed_at/closed_by and resurrect it from list() filters.
+        # Mirrors the JSONLStorage.close guard. (dogcat-5o1m)
+        if proposal.status == ProposalStatus.TOMBSTONE:
+            msg = (
+                f"Cannot close tombstoned proposal {proposal.full_id!r}: "
+                f"tombstones are final."
+            )
+            raise ValueError(msg)
         old_data = proposal_to_dict(proposal)
         now = datetime.now().astimezone()
         proposal.status = ProposalStatus.CLOSED

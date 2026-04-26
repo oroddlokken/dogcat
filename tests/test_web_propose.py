@@ -696,6 +696,72 @@ class TestNewNamespacePersistence:
         pinned = local.get("pinned_namespaces", [])
         assert pinned.count("once") == 1
 
+    def test_persist_failure_rolls_back_in_process_state(
+        self, web_dogcats: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A failing ``_persist_pinned_namespace`` rolls back ``valid_namespaces``.
+
+        Without rollback the in-process list remembers the never-pinned
+        namespace, which silently passes the next submit's
+        ``is_new_namespace`` check — so the namespace would never make
+        it into pinned_namespaces and would vanish on restart while
+        looking valid in this process. (dogcat-30jb)
+        """
+        from dogcat.web.propose import routes as propose_routes
+
+        app = create_app(dogcats_dir=str(web_dogcats), allow_creating_namespaces=True)
+        client = TestClient(app)
+
+        # Force the persist step to fail — the proposal write itself
+        # should still have succeeded so this tests the rollback path,
+        # not the proposal-failure path.
+        def fail_persist(_dogcats_dir: str, _namespace: str) -> None:
+            msg = "simulated pinned-namespace persist failure"
+            raise RuntimeError(msg)
+
+        monkeypatch.setattr(propose_routes, "_persist_pinned_namespace", fail_persist)
+
+        first = client.post(
+            "/",
+            data={
+                "csrf_token": _csrf(client),
+                "namespace": "rollback_me",
+                "title": "first",
+                "description": "",
+            },
+        )
+        # The route catches the RuntimeError and renders the generic
+        # error response (form re-rendered, status 200).
+        assert first.status_code == 200
+        assert "Failed to submit proposal" in first.text
+
+        # Submitting to the same namespace again must STILL look "new"
+        # — that is the whole point of the rollback. Without it, the
+        # second submit would pass `is_new_namespace=False`, skip the
+        # pinned-namespace persistence path entirely, and the namespace
+        # would never make it to disk.
+        # We exercise this by un-patching persist and confirming the
+        # second submit successfully pins the namespace.
+        monkeypatch.undo()
+        second = client.post(
+            "/",
+            data={
+                "csrf_token": _csrf(client),
+                "namespace": "rollback_me",
+                "title": "second",
+                "description": "",
+            },
+        )
+        assert second.status_code in {200, 303}
+
+        from dogcat.config import load_local_config
+
+        local = load_local_config(str(web_dogcats))
+        assert "rollback_me" in local.get("pinned_namespaces", []), (
+            "rollback was not effective — namespace stayed in valid_namespaces"
+            " in-process, so the second submit skipped the persist call"
+        )
+
 
 class TestNamespaceValidation:
     """Regression tests for dogcat-1819: namespace format whitelist.
@@ -1326,3 +1392,105 @@ class TestAllowCreatingNamespacesDefault:
         client = TestClient(app)
         resp = client.get("/")
         assert "New&hellip;" not in resp.text
+
+
+class TestWebToCliFlow:
+    """End-to-end: stranger fills web form → maintainer accepts via CLI.
+
+    Each side already has unit coverage but the cross-service handoff —
+    *the headline product flow* — was previously never exercised. A
+    regression in either layer's contract (inbox path resolution, the
+    namespace shape on the proposal record, the metadata the accept
+    flow looks for) would only surface when a real user submitted.
+    (dogcat-5l8q)
+    """
+
+    def test_web_proposal_accepted_by_cli_converges_both_sides(
+        self, tmp_path: Path
+    ) -> None:
+        """POST a proposal via FastAPI; accept via Typer CliRunner; both converge."""
+        from dogcat.config import save_local_config
+        from dogcat.models import ProposalStatus
+
+        # Remote dogcats: this is what the web server writes proposals into.
+        remote_dogcats = tmp_path / "remote" / ".dogcats"
+        remote_dogcats.mkdir(parents=True)
+        (remote_dogcats / "inbox.jsonl").touch()
+        save_config(str(remote_dogcats), {"namespace": "inbox"})
+
+        # Local dogcats: maintainer's project. inbox_remote → remote.
+        local_dogcats = tmp_path / "local" / ".dogcats"
+        local_dogcats.mkdir(parents=True)
+        runner.invoke(cli_app, ["init", "--dogcats-dir", str(local_dogcats)])
+        save_config(str(local_dogcats), {"namespace": "myproj"})
+        save_local_config(
+            str(local_dogcats), {"inbox_remote": str(remote_dogcats.parent)}
+        )
+
+        # Stranger fills the web form against the remote dogcats.
+        # ``allow_creating_namespaces`` mirrors the typical web deployment
+        # where strangers can submit to namespaces that didn't pre-exist.
+        web_app = create_app(
+            dogcats_dir=str(remote_dogcats), allow_creating_namespaces=True
+        )
+        web_client = TestClient(web_app)
+        post_resp = web_client.post(
+            "/",
+            data={
+                "csrf_token": _csrf(web_client),
+                "namespace": "myproj",
+                "title": "Webhook support please",
+                "description": "Listening for issue events would help us.",
+            },
+        )
+        assert post_resp.status_code in {200, 303}, post_resp.text
+
+        # Confirm the proposal landed in the remote inbox.
+        remote_inbox = InboxStorage(dogcats_dir=str(remote_dogcats))
+        proposals = list(remote_inbox.list())
+        assert len(proposals) == 1, (
+            f"web POST did not write exactly one proposal: {proposals}"
+        )
+        full_id = proposals[0].full_id
+
+        # Maintainer accepts via CLI (chdir into local repo so the inbox
+        # accept's resolve_dogcats_dir picks it up).
+        accept_result = runner.invoke(
+            cli_app,
+            [
+                "inbox",
+                "accept",
+                full_id,
+                "--json",
+                "--dogcats-dir",
+                str(local_dogcats),
+            ],
+        )
+        assert accept_result.exit_code == 0, (
+            f"accept failed: {accept_result.stdout}\n{accept_result.stderr}"
+        )
+
+        import json as _json
+
+        issue_data = _json.loads(accept_result.stdout)
+
+        # Local issue carries the title and description from the web POST.
+        assert issue_data["title"] == "Webhook support please"
+        assert (
+            issue_data.get("description") == "Listening for issue events would help us."
+        )
+
+        # The local issue lives in the project's namespace, not the inbox's.
+        local_storage = JSONLStorage(str(local_dogcats / "issues.jsonl"))
+        local_issue = local_storage.get(issue_data.get("full_id") or issue_data["id"])
+        assert local_issue is not None
+        # The remote proposal must now be CLOSED with resolved_issue
+        # pointing at the new local issue.
+        # Re-load the inbox to pick up the close write.
+        remote_inbox = InboxStorage(dogcats_dir=str(remote_dogcats))
+        closed_proposal = remote_inbox.get(full_id)
+        assert closed_proposal is not None
+        assert closed_proposal.status == ProposalStatus.CLOSED
+        assert closed_proposal.resolved_issue == (
+            issue_data.get("full_id") or local_issue.full_id
+        ), f"resolved_issue mismatch: {closed_proposal.resolved_issue!r}"

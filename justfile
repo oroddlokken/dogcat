@@ -50,6 +50,10 @@ test-regression:
 test-all:
     COVERAGE_CORE=sysmon uv run pytest --timeout 60 -n 8 tests --cov-report=html --cov=src/dogcat
 
+# run merge_driver perf budget tests (gated behind DCAT_RUN_PERF_TESTS)
+test-perf:
+    DCAT_RUN_PERF_TESTS=1 uv run pytest --timeout 60 tests/test_merge_scale.py
+
 # generate JSONL fixture for a specific tag (or all tags)
 generate-fixture tag="":
     python tests/generate_fixture.py {{tag}}

@@ -99,6 +99,70 @@ class TestCreateEmitsEvent:
         }
 
 
+class TestFailedCreateEmitsNoEvent:
+    """A create() that raises must not pollute the audit log.
+
+    A regression that emits the ``created`` event before validation
+    raises would leave a stray event for a record that never persisted.
+    The audit log should reflect only successful operations. (dogcat-5j73)
+    """
+
+    def test_duplicate_id_does_not_emit_second_event(
+        self,
+        storage: JSONLStorage,
+        event_log: EventLog,
+    ) -> None:
+        """Duplicate-id create raises and emits no extra event."""
+        storage.create(_make_issue(issue_id="dup"))
+        assert len(event_log.read()) == 1
+
+        with pytest.raises(ValueError, match="already exists"):
+            storage.create(_make_issue(issue_id="dup", title="second"))
+
+        events = event_log.read()
+        assert len(events) == 1, (
+            f"failed create polluted the audit log: {[e.event_type for e in events]}"
+        )
+
+    def test_oversized_title_does_not_emit_event(
+        self,
+        storage: JSONLStorage,
+        event_log: EventLog,
+    ) -> None:
+        """validate_issue rejection (oversized title) emits no event."""
+        from dogcat.constants import MAX_TITLE_LEN
+
+        oversized = "x" * (MAX_TITLE_LEN + 1)
+        with pytest.raises(ValueError, match="title exceeds"):
+            storage.create(_make_issue(issue_id="big", title=oversized))
+
+        assert event_log.read() == []
+
+    def test_inbox_duplicate_id_does_not_emit_second_event(
+        self,
+        temp_dogcats_dir: Path,
+    ) -> None:
+        """InboxStorage parity: duplicate proposal id raises cleanly.
+
+        The inbox event log must not record a ``created`` event for a
+        proposal that never persisted. (dogcat-5j73)
+        """
+        from dogcat.event_log import InboxEventLog
+        from dogcat.inbox import InboxStorage
+        from dogcat.models import Proposal
+
+        inbox = InboxStorage(dogcats_dir=str(temp_dogcats_dir), create_dir=True)
+        log = InboxEventLog(temp_dogcats_dir)
+
+        inbox.create(Proposal(id="abcd", title="first", namespace="t"))
+        assert len(log.read()) == 1
+
+        with pytest.raises(ValueError, match="already exists"):
+            inbox.create(Proposal(id="abcd", title="second", namespace="t"))
+
+        assert len(log.read()) == 1
+
+
 class TestUpdateEmitsEvent:
     """Tests for update emits event."""
 

@@ -9,7 +9,7 @@ from dogcat.cli._formatting import (
     get_legend,
 )
 from dogcat.event_log import EventRecord
-from dogcat.models import Issue, Status, sanitize_for_terminal
+from dogcat.models import Comment, Issue, Status, sanitize_for_terminal
 
 
 class TestTerminalEscapeSanitization:
@@ -657,6 +657,90 @@ class TestBlockedStatusPrecedence:
         blocked_ids = {"dc-ip1"}
         output = format_issue_brief(issue, blocked_ids=blocked_ids)
         assert "■" in output
+
+
+class TestCommentCountSuffix:
+    """Comment count suffix in list-style row output."""
+
+    def _comment(self, issue_id: str, idx: int) -> Comment:
+        return Comment(
+            id=f"c{idx}",
+            issue_id=issue_id,
+            author="alice",
+            text=f"comment {idx}",
+        )
+
+    def test_brief_omits_bracket_when_zero_comments(self) -> None:
+        """Brief format omits the comment bracket when there are no comments."""
+        issue = Issue(id="cm1", namespace="dc", title="Bare issue")
+        out = format_issue_brief(issue)
+        assert "comment" not in out
+
+    def test_brief_singular_when_one_comment(self) -> None:
+        """Brief format uses ``1 comment`` (singular) for exactly one comment."""
+        issue = Issue(
+            id="cm2",
+            namespace="dc",
+            title="One comment",
+            comments=[self._comment("dc-cm2", 1)],
+        )
+        out = format_issue_brief(issue)
+        assert "[1 comment]" in out
+        assert "[1 comments]" not in out
+
+    def test_brief_plural_when_multiple_comments(self) -> None:
+        """Brief format pluralizes for >1 comments."""
+        issue = Issue(
+            id="cm3",
+            namespace="dc",
+            title="Many comments",
+            comments=[self._comment("dc-cm3", i) for i in range(3)],
+        )
+        out = format_issue_brief(issue)
+        assert "[3 comments]" in out
+
+    def test_brief_comment_bracket_after_labels(self) -> None:
+        """Comment bracket renders after the labels bracket."""
+        issue = Issue(
+            id="cm4",
+            namespace="dc",
+            title="With labels and comments",
+            labels=["cli", "ux"],
+            comments=[self._comment("dc-cm4", 1), self._comment("dc-cm4", 2)],
+        )
+        out = format_issue_brief(issue)
+        assert "[cli, ux]" in out
+        assert "[2 comments]" in out
+        assert out.index("[cli, ux]") < out.index("[2 comments]")
+
+    def test_table_omits_bracket_when_zero_comments(self) -> None:
+        """Table format omits the comment bracket for zero-comment issues."""
+        issue = Issue(id="cm5", namespace="dc", title="Bare row")
+        out = format_issue_table([issue])
+        assert "comment" not in out
+
+    def test_table_singular_when_one_comment(self) -> None:
+        """Table format uses ``1 comment`` (singular) for one comment."""
+        issue = Issue(
+            id="cm6",
+            namespace="dc",
+            title="Table one comment",
+            comments=[self._comment("dc-cm6", 1)],
+        )
+        out = format_issue_table([issue])
+        assert "[1 comment]" in out
+        assert "[1 comments]" not in out
+
+    def test_table_plural_when_multiple_comments(self) -> None:
+        """Table format pluralizes for >1 comments."""
+        issue = Issue(
+            id="cm7",
+            namespace="dc",
+            title="Table many",
+            comments=[self._comment("dc-cm7", i) for i in range(5)],
+        )
+        out = format_issue_table([issue])
+        assert "[5 comments]" in out
 
 
 class TestFormatEventLongFormFields:

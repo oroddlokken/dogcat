@@ -215,6 +215,12 @@ def format_issue_brief(
             f"[blocked by deferred: {ids}]",
             fg="bright_black",
         )
+    comments_str = ""
+    n_comments = len(issue.comments)
+    if n_comments:
+        word = "comment" if n_comments == 1 else "comments"
+        comments_color = "bright_black" if is_closed else "bright_blue"
+        comments_str = " " + typer.style(f"[{n_comments} {word}]", fg=comments_color)
     safe_title = sanitize_for_terminal(issue.title)
     if is_closed:
         id_title = typer.style(f"{issue.full_id}: {safe_title}", fg="bright_black")
@@ -224,7 +230,7 @@ def format_issue_brief(
 
     suffixes = parent_str + labels_str + snoozed_str + manual_str
     suffixes += blocked_by_str + hidden_str + deferred_blocker_str
-    suffixes += ext_ref_str + closed_str
+    suffixes += ext_ref_str + closed_str + comments_str
     return f"{base}{suffixes}"
 
 
@@ -559,6 +565,13 @@ def _add_issue_row(
     labels_str = ", ".join(escape(lbl) for lbl in issue.labels) if issue.labels else ""
     manual_str = " [yellow]\\[manual][/]" if is_manual_issue(issue.metadata) else ""
     hidden_suffix = _hidden_subtask_suffix(issue, hidden_counts, preview_subtasks)
+    n_comments = len(issue.comments)
+    if n_comments:
+        word = "comment" if n_comments == 1 else "comments"
+        comments_color = "bright_black" if dimmed else "bright_blue"
+        comments_suffix = f" [{comments_color}]\\[{n_comments} {word}][/]"
+    else:
+        comments_suffix = ""
 
     title_text = escape(issue.title)
     if dimmed:
@@ -570,7 +583,7 @@ def _add_issue_row(
         f"[bright_black]{parent_id}[/]" if dimmed else parent_id,
         f"[{type_color}]{issue_type}[/]",
         f"[{priority_color}]{issue.priority}[/]",
-        f"{title_text}{manual_str}{hidden_suffix}",
+        f"{title_text}{manual_str}{hidden_suffix}{comments_suffix}",
         f"[cyan]{labels_str}[/]" if labels_str else "",
     ]
     if has_ext_ref:

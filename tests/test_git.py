@@ -12,13 +12,18 @@ if TYPE_CHECKING:
     import pytest
 
 
-def _completed(rc: int, stdout: object = "", stderr: str = "") -> object:
-    """Build a fake CompletedProcess for monkey-patching ``subprocess.run``."""
-    return type(
-        "CompletedProcess",
-        (),
-        {"returncode": rc, "stdout": stdout, "stderr": stderr},
-    )()
+def _completed(
+    rc: int, stdout: object = "", stderr: str = ""
+) -> subprocess.CompletedProcess[Any]:
+    """Build a real ``subprocess.CompletedProcess`` for monkey-patching.
+
+    Using the actual class (rather than a duck-typed look-alike) means
+    this test fixture stays honest if ``dogcat.git`` ever inspects extra
+    attributes (``args``, ``stdout`` type checks). (dogcat-3ibu)
+    """
+    return subprocess.CompletedProcess(
+        args=[], returncode=rc, stdout=stdout, stderr=stderr
+    )
 
 
 def test_repo_root_returns_path(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -261,3 +266,80 @@ class TestGitTimeout:
         monkeypatch.setattr(subprocess, "run", fake_run)
         # current_branch returns None when _run returns None.
         assert git_helpers.current_branch() is None
+
+
+class TestCLocaleEnvOverlay:
+    """git subprocess calls must run with ``LC_ALL=C, LANG=C``.
+
+    Regression-fix dogcat-4tl1 added the overlay so localized git
+    stderr/stdout doesn't break substring checks like ``"not a git
+    repository"``. A refactor that drops the ``env=`` kwarg on the
+    underlying ``_run`` would silently re-introduce the bug — this
+    fixture pins it down. (dogcat-3ibu)
+    """
+
+    def test_repo_root_forwards_c_locale_env(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``repo_root`` (and every helper through ``_run``) sets LC_ALL=C, LANG=C."""
+        captured: dict[str, dict[str, str] | None] = {}
+
+        def fake_run(*_args: Any, **kwargs: Any) -> object:  # noqa: ARG001
+            captured["env"] = kwargs.get("env")
+            return _completed(0, "/tmp/some-repo\n")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        git_helpers.repo_root()
+
+        env = captured["env"]
+        assert env is not None, "env was not forwarded to subprocess.run"
+        assert env.get("LC_ALL") == "C", (
+            f"LC_ALL not forwarded as 'C': {env.get('LC_ALL')!r}"
+        )
+        assert env.get("LANG") == "C", f"LANG not forwarded as 'C': {env.get('LANG')!r}"
+
+    def test_current_branch_forwards_c_locale_env(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A second helper through ``_run`` also sees the overlay.
+
+        Two helpers are checked instead of one to catch a refactor that
+        passed env to a single helper but not the shared ``_run`` path.
+        """
+        captured: dict[str, dict[str, str] | None] = {}
+
+        def fake_run(*_args: Any, **kwargs: Any) -> object:  # noqa: ARG001
+            captured["env"] = kwargs.get("env")
+            return _completed(0, "main\n")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        git_helpers.current_branch()
+
+        env = captured["env"]
+        assert env is not None
+        assert env.get("LC_ALL") == "C"
+        assert env.get("LANG") == "C"
+
+    def test_overlay_does_not_drop_caller_environ(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The overlay merges into ``os.environ`` rather than replacing it.
+
+        Without the merge, dropping the rest of the environment (PATH,
+        HOME, GIT_*) would break git's ability to find subcommands or
+        credentials — a far more disruptive regression than localized
+        stderr.
+        """
+        monkeypatch.setenv("DCAT_TEST_SENTINEL", "preserved")
+        captured: dict[str, dict[str, str] | None] = {}
+
+        def fake_run(*_args: Any, **kwargs: Any) -> object:  # noqa: ARG001
+            captured["env"] = kwargs.get("env")
+            return _completed(0, "")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        git_helpers.repo_root()
+
+        env = captured["env"]
+        assert env is not None
+        assert env.get("DCAT_TEST_SENTINEL") == "preserved"

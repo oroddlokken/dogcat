@@ -408,7 +408,15 @@ class UpdateRequest:
 
 def validate_priority(priority: Any) -> None:
     """Validate that priority is in valid range (0-4)."""
-    if not isinstance(priority, int) or priority < 0 or priority > 4:
+    # bool is an int subclass — exclude it explicitly so True/False can't
+    # slip through and persist (e.g. via storage.create() / validate_issue).
+    # storage._coerce_update_value also guards this on the update path.
+    # ValueError (not TypeError) keeps the public contract stable for
+    # callers that already catch ValueError on out-of-range values.
+    if isinstance(priority, bool) or not isinstance(priority, int):
+        msg = "Priority must be an integer between 0 and 4"
+        raise ValueError(msg)  # noqa: TRY004
+    if priority < 0 or priority > 4:
         msg = "Priority must be an integer between 0 and 4"
         raise ValueError(msg)
 

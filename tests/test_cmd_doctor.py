@@ -13,6 +13,30 @@ from dogcat.cli import app
 runner = CliRunner()
 
 
+def _assert_doctor_check_passes(dogcats_dir: Path, check_name: str) -> None:
+    """Re-run ``dcat doctor`` and assert the named check now reports passed.
+
+    The canonical user flow is ``doctor said X is broken → I --fix → doctor
+    confirms X is healthy``. Inspecting the file directly after a --fix
+    proves the file changed but not that the originally failing check
+    actually passes now (the --fix could have mutated unrelated state
+    that *looks* correct). (dogcat-4rb5)
+    """
+    result = runner.invoke(
+        app,
+        ["doctor", "--json", "--dogcats-dir", str(dogcats_dir)],
+    )
+    data = json.loads(result.stdout)
+    checks = data.get("checks", {})
+    assert check_name in checks, (
+        f"check {check_name!r} not in doctor output keys: {list(checks)}"
+    )
+    assert checks[check_name]["passed"] is True, (
+        f"doctor still reports {check_name} as failing after --fix: "
+        f"{checks[check_name]}"
+    )
+
+
 class TestCLIDoctor:
     """Test doctor diagnostic command."""
 
@@ -141,6 +165,9 @@ class TestCLIDoctor:
         )
         assert config_file.exists()
         assert "Fixed: Created config.toml" in result.stdout
+
+        # Re-run doctor: the originally failing check must now pass.
+        _assert_doctor_check_passes(dogcats_dir, "config_toml")
 
     def test_doctor_valid_config(self, tmp_path: Path) -> None:
         """Test doctor passes when config.toml is properly set up."""
@@ -306,6 +333,10 @@ class TestDoctorFixDanglingDeps:
         storage3 = JSONLStorage(str(storage_path))
         assert storage3.find_dangling_dependencies() == []
 
+        # Re-run doctor: the data_integrity check that surfaced the
+        # dangling dep must now pass. (dogcat-4rb5)
+        _assert_doctor_check_passes(dogcats_dir, "data_integrity")
+
 
 class TestDoctorFixIssuePrefixMigration:
     """Tests for ``dcat doctor --fix`` migrating ``issue_prefix`` → ``namespace``.
@@ -332,6 +363,9 @@ class TestDoctorFixIssuePrefixMigration:
         config = load_config(str(dogcats_dir))
         assert config.get("namespace") == "legacy"
         assert "issue_prefix" not in config
+
+        # Re-run doctor: the deprecated-keys check must now pass. (dogcat-4rb5)
+        _assert_doctor_check_passes(dogcats_dir, "config_deprecated_keys")
 
 
 class TestAtomicSettingsWrite:
@@ -399,6 +433,10 @@ class TestDoctorNamespaceConfig:
         config = load_config(str(dogcats_dir))
         assert "hidden_namespaces" not in config
         assert "visible_namespaces" in config
+
+        # Re-run doctor: the namespace mutual-exclusion check must now
+        # pass. (dogcat-4rb5)
+        _assert_doctor_check_passes(dogcats_dir, "namespace_config_mutual")
 
     def test_only_one_key_no_warning(self, tmp_path: Path) -> None:
         """Only one set → no warning."""
@@ -727,6 +765,9 @@ class TestDoctorPreCompactHook:
             ["doctor", "--fix", "--dogcats-dir", str(dogcats_dir)],
         )
         assert "Installed PreCompact hook" in result.stdout
+
+        # Re-run doctor: the claude_precompact check must now pass. (dogcat-4rb5)
+        _assert_doctor_check_passes(dogcats_dir, "claude_precompact")
 
         # Verify it was written with --replay
         data = json.loads((claude_dir / "settings.json").read_text())

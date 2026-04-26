@@ -1,4 +1,29 @@
-"""Shared test helpers for CLI test modules."""
+"""Shared test helpers for CLI test modules.
+
+Persistence-readback pattern (dogcat-4tud)
+-----------------------------------------
+After every CLI mutation, instantiate a fresh ``JSONLStorage`` (or
+``InboxStorage``) and read the field back. Asserting only on
+``result.stdout`` / ``result.exit_code`` lets a regression where the
+banner prints but the write is skipped pass silently.
+
+Bad::
+
+    result = runner.invoke(app, ["close", "dc-x"])
+    assert result.exit_code == 0
+    assert "Closed" in result.stdout
+
+Good::
+
+    result = runner.invoke(app, ["close", "dc-x"])
+    assert result.exit_code == 0
+    assert JSONLStorage(str(dogcats_dir / "issues.jsonl")).get(
+        "dc-x"
+    ).status == Status.CLOSED  # <-- state read back from disk
+
+The ``--json`` variants of these tests already do this naturally; the
+non-JSON variants used to stop at the banner.
+"""
 
 from __future__ import annotations
 

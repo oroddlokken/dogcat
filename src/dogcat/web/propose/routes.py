@@ -429,7 +429,21 @@ async def submit_proposal(
         # vanishes on restart even though valid_namespaces remembers it).
         if is_new_namespace:
             valid_namespaces.append(namespace)
-            await asyncio.to_thread(_persist_pinned_namespace, dogcats_dir, namespace)
+            try:
+                await asyncio.to_thread(
+                    _persist_pinned_namespace, dogcats_dir, namespace
+                )
+            except (ValueError, RuntimeError, OSError):
+                # Roll back the in-process append so the next submit's
+                # ``is_new_namespace`` check correctly classifies this
+                # namespace as still-new — otherwise the namespace would
+                # be invisible to the persisted pin layer for the rest of
+                # the process lifetime, vanishing on restart while
+                # silently passing the in-process validity check.
+                # (dogcat-30jb)
+                if namespace in valid_namespaces:
+                    valid_namespaces.remove(namespace)
+                raise
     except (ValueError, RuntimeError, OSError):
         logger.exception("Failed to create proposal")
         return _render_error("Failed to submit proposal.")
