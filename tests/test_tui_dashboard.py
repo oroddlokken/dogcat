@@ -26,17 +26,43 @@ def _make_issue(**kwargs: object) -> Issue:
     return Issue(**defaults)  # type: ignore[arg-type]
 
 
-def _make_storage(issues: list[Issue] | None = None) -> MagicMock:
-    """Create a mock storage backend with optional issues."""
-    storage = MagicMock()
+def _make_storage(
+    issues: list[Issue] | None = None,
+    *,
+    tmp_path: Path | None = None,
+) -> MagicMock:
+    """Create a mock storage backend bound to ``JSONLStorage``.
+
+    ``spec=JSONLStorage`` makes MagicMock raise ``AttributeError`` on
+    references to methods the real class does not have, so a TUI/storage
+    rename surfaces here instead of silently passing.
+
+    ``dogcats_dir`` is pointed at a real on-disk path (an empty
+    ``.dogcats`` directory) when ``tmp_path`` is provided. Without this,
+    the dashboard's namespace/prefix config silently falls back to
+    defaults because the path lookup short-circuits on a missing dir.
+    (dogcat-wgjf)
+    """
+    from dogcat.storage import JSONLStorage
+
+    storage = MagicMock(spec=JSONLStorage)
     issue_list = issues or []
     storage.list.return_value = issue_list
     storage.get.return_value = issue_list[0] if issue_list else None
     storage.get_children.return_value = []
     storage.get_dependencies.return_value = []
     storage.get_issue_ids.return_value = {i.full_id for i in issue_list}
-    storage.dogcats_dir = MagicMock()
-    storage.dogcats_dir.__str__ = MagicMock(return_value="/tmp/_nonexistent_dogcats")
+    if tmp_path is not None:
+        dogcats = tmp_path / ".dogcats"
+        dogcats.mkdir(parents=True, exist_ok=True)
+        storage.dogcats_dir = dogcats
+    else:
+        # Backwards-compatible fallback: tests that have not yet been
+        # migrated still get a stringifiable dogcats_dir, but they
+        # should pass tmp_path going forward.
+        fallback = MagicMock()
+        fallback.__str__ = MagicMock(return_value="/tmp/_nonexistent_dogcats")
+        storage.dogcats_dir = fallback
     return storage
 
 

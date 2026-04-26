@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`event_log.read(limit=...)` rejects negative limits** — previously a negative limit silently sliced off the last N events (`events[:-1]`) instead of raising. The API now raises `ValueError` for any `limit < 0`; `limit=0` continues to return an empty list (closes dogcat-3r0s).
+- **`dcat web propose` rejects negative `Content-Length` headers** — `int("-1") > MAX` is False, so a negative content-length used to slip past the early body-size guard and only hit the slow-path stream cap. The middleware now returns 400 for any non-numeric or negative Content-Length (closes dogcat-3r0s).
+- **Time-sensitive tests gain explicit slack against clock skew** — every `before <= obj.created_at <= after` bracket now widens by ±1s and `test_stream`'s `time.sleep(0.1) + is_alive()` check is replaced with poll-with-deadline, so NTP slew, suspend/resume, or VM time-drift between two `now()` calls can no longer flip the comparison (closes dogcat-ixyi).
+
+### Removed
+
+- **Unused `cli_command` decorator** — defined in `cli/_helpers.py` but never wired up. Deleted as dead code (closes dogcat-5quu).
+
+### Development
+
+- **Boundary tests for small CLI helpers** — parametrized cases for `_format_age` (zero delta, exactly 24h, negative-delta clock skew), `_extract_snippet` (empty text, context=0, match-at-start/end, match longer than text), `parse_duration` (`0w`/`0m`, month form near the 100y cap), `_parse_duration_arg` (`0d`/`0h`/`0d0h`), `event_log.read` (limit 0 / negative / giant), `is_valid_namespace` (empty, single-char, max length, over-cap), `should_compact` (exact `(20, 11)` trigger boundary), and the body-size middleware's `Content-Length: 0` / `-1` edge cases. New `tests/test_constants.py` and `tests/test_cmd_search_helpers.py` (closes dogcat-3r0s).
+- **Direct unit tests for previously-uncovered modules** — `validate_proposal_record` / `validate_inbox_jsonl`, `event_log.diff_metadata` / `EventLog.build_record`, `archivable_partition` (one test per skip-reason branch), `InboxStorage.get_file_path` / `reload`, `dogcat.git.common_dir` / `set_config` failure / `add_paths` non-empty / `get_config` missing-vs-empty, and `utils.estimate_tokens`. New `tests/test_utils.py`, `tests/test_inbox_helpers.py`, `tests/test_archivable_partition.py` (closes dogcat-5quu).
+- **Direct unit tests for cross-cutting CLI helpers** — `tests/test_cli_helpers.py` extended with one focused test per branch of `apply_common_filters` (issue_type / priority / label single+multi / owner / no_parent / agent_only / manual_only / has_comments / without_comments / namespace explicit+all / parent), plus the smaller cross-cuts (`with_ns_shim`, `require_resolved_id`, `_make_alias`, `check_agent_manual_exclusive`, `check_comments_exclusive`, `apply_comment_filter`). Each helper is exercised directly without going through `CliRunner` (closes dogcat-2kw5).
+- **Test suite decoupled from `JSONLStorage` private state** — every read/write of `storage._issues` / `_dependencies` / `_links` / `_base_lines` / `_appended_lines` / `_children_by_parent` / `_save_locked` replaced with public APIs (`get_children`, `all_links`, `find_dangling_dependencies`) or with input-driven setup (malformed JSONL files that produce the same state via the load path). The compaction-under-lock probe wraps the public `_file_lock` boundary instead of monkeypatching the private `_save_locked` method (closes dogcat-308p).
+- **CLI/web tests no longer rely on stdout / HTML markup substrings** — `_init_and_create` extracts issue ids from `dcat create --json` instead of parsing `"✓ Created dc-xxxx: Title"`. Web propose tests parse HTML via stdlib `html.parser` and assert by element/attribute. Completion tests use set comparison instead of order-dependent list equality. Doctor glyph (`✓` / `✗`) assertions converted to JSON-based `_failed_check_names` queries (closes dogcat-3nfa).
+- **TUI tests use `spec=JSONLStorage` for storage mocks** — `MagicMock(spec=JSONLStorage)` raises `AttributeError` if a test references a method the real class lacks, so a TUI/storage rename surfaces here instead of silently passing. The dashboard `_make_storage` helper accepts an optional `tmp_path` to point `dogcats_dir` at a real directory (closes dogcat-wgjf).
+
 ### Added
 
 - **Comment count suffix on list-style rows** — `dcat list`, `ready`, `blocked`, `pr`, `search`, `random`, `snoozed`, `recently-closed`, `recently-added`, `stale`, and the `--table` variants append `[N comment]` / `[N comments]` (bright_blue) after labels for issues with at least one comment. Issues with zero comments render unchanged. Pluralization handled (1 → "comment", N → "comments") (closes dogcat-m7uq).

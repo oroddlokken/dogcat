@@ -46,6 +46,18 @@ class TestParseDurationArg:
         with pytest.raises(ValueError, match="Invalid duration"):
             _parse_duration_arg("")
 
+    def test_zero_days(self) -> None:
+        """'0d' parses to a zero-duration timedelta."""
+        assert _parse_duration_arg("0d") == timedelta(0)
+
+    def test_zero_hours(self) -> None:
+        """'0h' parses to a zero-duration timedelta."""
+        assert _parse_duration_arg("0h") == timedelta(0)
+
+    def test_zero_days_and_hours(self) -> None:
+        """'0d0h' parses to a zero-duration timedelta."""
+        assert _parse_duration_arg("0d0h") == timedelta(0)
+
 
 class TestFormatAge:
     """Test age formatting."""
@@ -67,6 +79,27 @@ class TestFormatAge:
         now = datetime.now(timezone.utc)
         updated = now - timedelta(days=10)
         assert _format_age(now, updated) == "10 days ago"
+
+    def test_zero_delta(self) -> None:
+        """Zero delta renders as 0h ago."""
+        now = datetime.now(timezone.utc)
+        assert _format_age(now, now) == "0h ago"
+
+    def test_exactly_24h(self) -> None:
+        """Exactly 24h crosses the day boundary and renders as 1 day."""
+        now = datetime.now(timezone.utc)
+        updated = now - timedelta(hours=24)
+        assert _format_age(now, updated) == "1 day ago"
+
+    def test_negative_delta_clock_skew(self) -> None:
+        """A future updated_at (clock skew) renders without crashing."""
+        now = datetime.now(timezone.utc)
+        updated = now + timedelta(hours=2)
+        # Negative total_hours floors toward minus infinity; we just
+        # require the call to not raise. Concrete output (e.g. -2h ago)
+        # is implementation-defined.
+        result = _format_age(now, updated)
+        assert isinstance(result, str)
 
 
 class TestStaleCommand:

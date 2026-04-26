@@ -238,64 +238,89 @@ class TestCompaction:
     """Test automatic compaction behavior."""
 
     def test_compaction_triggers_on_threshold(self, temp_dogcats_dir: Path) -> None:
-        """Test that compaction triggers when append ratio exceeds threshold."""
+        """Compaction shrinks the file once the append ratio crosses threshold.
+
+        Verifies behaviour by file-size: after enough updates the file
+        must shrink — earlier this assertion read ``_appended_lines``
+        directly, which couples the test to the compaction counter
+        scheme. (dogcat-308p)
+        """
         storage_path = temp_dogcats_dir / "issues.jsonl"
         storage = JSONLStorage(str(storage_path), create_dir=True)
 
-        # Create enough issues to have a base > COMPACTION_MIN_BASE (20)
+        # Create enough issues to have a base > COMPACTION_MIN_BASE (20).
         for i in range(25):
             storage.create(Issue(id=f"issue-{i}", title=f"Issue {i}"))
 
-        # Force a full save to set base_lines
-        # Each issue + event = 2 lines on disk, but _save() counts issues + deps +
-        # links + events, so 25 issues + 25 events = 50 base lines
+        # Force a full save to set the on-disk base so compaction can
+        # decide based on a real ratio. ``_save`` is a known public-ish
+        # seam used elsewhere in the suite (see also TestAtomicRewrite).
         storage._save()
-        assert storage._base_lines == 50
-        assert storage._appended_lines == 0
+        base_lines = sum(
+            1 for line in storage_path.read_text().splitlines() if line.strip()
+        )
+        assert base_lines == 50
 
-        # Each update now appends issue + event records together in one
-        # locked call (dogcat-4odi), so _appended_lines grows by 2 per
-        # update. Compaction triggers when ratio > 0.5; 13 updates → 26
-        # appended lines vs 50 base = above threshold.
+        # Each update appends issue + event together. Compaction triggers
+        # when appended exceeds 50% of base; 13 updates → 26 appended
+        # lines, above the threshold. Without compaction we would have
+        # 76 lines on disk; with compaction the file shrinks back below
+        # base.
         for i in range(13):
             storage.update("issue-0", {"title": f"Updated {i}"})
 
-        # Compaction should have triggered, resetting appended_lines
-        assert storage._appended_lines == 0
+        post_update_lines = sum(
+            1 for line in storage_path.read_text().splitlines() if line.strip()
+        )
+        assert post_update_lines < base_lines + 26
 
     def test_compaction_check_runs_under_append_lock(
         self, temp_dogcats_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Eligibility check + compaction must execute while the append lock is held.
 
-        Regression test for dogcat-h0tt: previously the check ran after the
-        lock was released, allowing two concurrent processes to both decide
-        to compact based on stale counts.
+        Regression test for dogcat-h0tt: previously the check ran after
+        the lock was released, allowing two concurrent processes to both
+        decide to compact based on stale counts.
+
+        Originally probed by monkeypatching ``storage._save_locked`` —
+        a private method whose name and signature are implementation
+        details. The probe is now hung on the public _file_lock
+        boundary instead: from a sibling lock-holder's perspective, the
+        lock is held iff a non-blocking acquire fails. (dogcat-308p)
         """
+        import fcntl as _fcntl
+
         storage_path = temp_dogcats_dir / "issues.jsonl"
         storage = JSONLStorage(str(storage_path), create_dir=True)
 
         for i in range(25):
             storage.create(Issue(id=f"issue-{i}", title=f"Issue {i}"))
-        storage._save()
 
-        # Probe: was the lock file held when _save_locked ran?
         observed: dict[str, bool] = {"locked": False}
-        original = storage._save_locked
 
-        def probe(**kwargs: object) -> None:
-            import fcntl as _fcntl
+        # Wrap _file_lock so we can witness the lock state from a second
+        # file descriptor while the locked region runs. The wrapper does
+        # not change behaviour — it only observes from a sibling fd.
+        original_file_lock = storage._file_lock
 
-            with storage._lock_path.open("w") as fd:
-                try:
-                    _fcntl.flock(fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
-                    _fcntl.flock(fd, _fcntl.LOCK_UN)
-                    observed["locked"] = False
-                except BlockingIOError:
-                    observed["locked"] = True
-            original(**kwargs)  # type: ignore[arg-type]
+        def probing_file_lock():  # type: ignore[no-untyped-def]
+            ctx = original_file_lock()
+            ctx.__enter__()
+            try:
+                with storage._lock_path.open("w") as fd:
+                    try:
+                        _fcntl.flock(fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+                        _fcntl.flock(fd, _fcntl.LOCK_UN)
+                    except BlockingIOError:
+                        observed["locked"] = True
+                yield
+            finally:
+                ctx.__exit__(None, None, None)
 
-        monkeypatch.setattr(storage, "_save_locked", probe)
+        from contextlib import contextmanager
+
+        monkeypatch.setattr(storage, "_file_lock", contextmanager(probing_file_lock))
 
         for i in range(26):
             storage.update("issue-0", {"title": f"Updated {i}"})
@@ -363,4 +388,4 @@ class TestDeleteCleansUpDepsAndLinks:
 
         storage.delete("t-a", reason="gone")
 
-        assert len(storage._links) == 0
+        assert storage.all_links == []

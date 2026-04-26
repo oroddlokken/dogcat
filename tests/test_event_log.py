@@ -7,7 +7,13 @@ from typing import TYPE_CHECKING
 import orjson
 import pytest
 
-from dogcat.event_log import EventLog, EventRecord, _deserialize, _serialize
+from dogcat.event_log import (
+    EventLog,
+    EventRecord,
+    _deserialize,
+    _serialize,
+    diff_metadata,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -187,6 +193,40 @@ class TestEventLogAppendAndRead:
         events = event_log.read(limit=3)
         assert len(events) == 3
 
+    def test_read_limit_zero_returns_empty(self, event_log: EventLog) -> None:
+        """``limit=0`` is a valid input that returns an empty list."""
+        for i in range(3):
+            event_log.append(
+                EventRecord(
+                    event_type="updated",
+                    issue_id="dc-abcd",
+                    timestamp=f"2026-02-10T{10 + i}:00:00+01:00",
+                ),
+            )
+        assert event_log.read(limit=0) == []
+
+    def test_read_limit_negative_rejected(self, event_log: EventLog) -> None:
+        """Negative limits are rejected with ``ValueError``.
+
+        Prior to dogcat-3r0s the API silently accepted ``limit=-1`` and
+        sliced off the last event (``events[:-1]``), an off-by-one bug
+        observable to any caller passing through user input.
+        """
+        with pytest.raises(ValueError, match="limit must be"):
+            event_log.read(limit=-1)
+
+    def test_read_limit_giant_returns_all(self, event_log: EventLog) -> None:
+        """A limit larger than the total event count returns every event."""
+        for i in range(3):
+            event_log.append(
+                EventRecord(
+                    event_type="updated",
+                    issue_id="dc-abcd",
+                    timestamp=f"2026-02-10T{10 + i}:00:00+01:00",
+                ),
+            )
+        assert len(event_log.read(limit=10_000)) == 3
+
     def test_read_with_issue_id_and_limit(self, event_log: EventLog) -> None:
         """Test read with issue id and limit."""
         for i in range(5):
@@ -280,3 +320,95 @@ class TestEventLogAppendAndRead:
                     timestamp="2026-02-10T10:00:00+01:00",
                 ),
             )
+
+
+class TestDiffMetadata:
+    """Tests for the ``diff_metadata`` helper."""
+
+    def test_returns_empty_for_identical_inputs(self) -> None:
+        """Returns empty for identical inputs."""
+        assert diff_metadata({"manual": True}, {"manual": True}) == {}
+
+    def test_returns_empty_for_two_empty_dicts(self) -> None:
+        """Returns empty for two empty dicts."""
+        assert diff_metadata({}, {}) == {}
+
+    def test_returns_empty_for_two_none_inputs(self) -> None:
+        """Returns empty for two none inputs."""
+        assert diff_metadata(None, None) == {}
+
+    def test_added_key_yields_old_none(self) -> None:
+        """Added key yields old none."""
+        result = diff_metadata({}, {"manual": True})
+        assert result == {"metadata.manual": {"old": None, "new": True}}
+
+    def test_removed_key_yields_new_none(self) -> None:
+        """Removed key yields new none."""
+        result = diff_metadata({"manual": True}, {})
+        assert result == {"metadata.manual": {"old": True, "new": None}}
+
+    def test_changed_value(self) -> None:
+        """Changed value."""
+        result = diff_metadata({"prio": 1}, {"prio": 2})
+        assert result == {"metadata.prio": {"old": 1, "new": 2}}
+
+    def test_none_old_treated_as_empty(self) -> None:
+        """None old treated as empty."""
+        result = diff_metadata(None, {"manual": True})
+        assert result == {"metadata.manual": {"old": None, "new": True}}
+
+    def test_none_new_treated_as_empty(self) -> None:
+        """None new treated as empty."""
+        result = diff_metadata({"manual": True}, None)
+        assert result == {"metadata.manual": {"old": True, "new": None}}
+
+    def test_keys_emitted_with_metadata_prefix(self) -> None:
+        """Keys emitted with metadata prefix."""
+        result = diff_metadata({}, {"a": 1, "b": 2})
+        assert set(result) == {"metadata.a", "metadata.b"}
+
+
+class TestBuildRecord:
+    """Tests for the static ``EventLog.build_record`` helper."""
+
+    def test_returns_none_when_no_changes(self) -> None:
+        """Returns none when no changes."""
+        assert (
+            EventLog.build_record(
+                event_type="updated",
+                full_id="dc-abcd",
+                timestamp="2026-02-10T10:00:00+01:00",
+                title=None,
+                changes={},
+            )
+            is None
+        )
+
+    def test_returns_serialized_dict_with_record_type(self) -> None:
+        """Returns serialized dict with record type."""
+        record = EventLog.build_record(
+            event_type="updated",
+            full_id="dc-abcd",
+            timestamp="2026-02-10T10:00:00+01:00",
+            title="Test issue",
+            changes={"status": {"old": "open", "new": "closed"}},
+            by="user@example.com",
+        )
+        assert record is not None
+        assert record["record_type"] == "event"
+        assert record["event_type"] == "updated"
+        assert record["issue_id"] == "dc-abcd"
+        assert record["title"] == "Test issue"
+        assert record["by"] == "user@example.com"
+        assert record["changes"] == {"status": {"old": "open", "new": "closed"}}
+
+    def test_no_event_written_to_disk(self, event_log: EventLog) -> None:
+        """build_record never touches the file — only ``append`` does."""
+        EventLog.build_record(
+            event_type="updated",
+            full_id="dc-abcd",
+            timestamp="2026-02-10T10:00:00+01:00",
+            title=None,
+            changes={"status": {"old": "open", "new": "closed"}},
+        )
+        assert not event_log.path.exists()

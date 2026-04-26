@@ -118,7 +118,7 @@ class TestCompleteStatuses:
     def test_filters_by_prefix(self) -> None:
         """Should filter statuses by incomplete prefix."""
         result = complete_statuses("in_")
-        assert _values(result) == ["in_progress", "in_review"]
+        assert set(_values(result)) == {"in_progress", "in_review"}
 
     def test_no_match(self) -> None:
         """Should return empty list when no status matches."""
@@ -431,7 +431,7 @@ class TestCompleteSubcommands:
         """Should return add, remove, list with descriptions."""
         result = complete_subcommands("")
         values = _values(result)
-        assert values == ["add", "remove", "list"]
+        assert set(values) == {"add", "remove", "list"}
         assert all(isinstance(item, tuple) and len(item) == 2 for item in result)
 
     def test_filters_by_prefix(self) -> None:
@@ -452,7 +452,7 @@ class TestCompleteCommentActions:
         """Should return add, list, delete with descriptions."""
         result = complete_comment_actions("")
         values = _values(result)
-        assert values == ["add", "list", "delete"]
+        assert set(values) == {"add", "list", "delete"}
         assert all(isinstance(item, tuple) and len(item) == 2 for item in result)
 
     def test_filters_by_prefix(self) -> None:

@@ -29,6 +29,15 @@ class TestShouldCompact:
         appended = int(base * COMPACTION_RATIO) + 1
         assert should_compact(base_lines=base, appended_lines=appended)
 
+    def test_exact_min_base_trigger_boundary(self) -> None:
+        """At exactly (base=20, appended=11) — both thresholds satisfied."""
+        # COMPACTION_MIN_BASE is 20; 20 * 0.5 = 10; appended must exceed 10.
+        # So (20, 11) is the smallest pair that triggers compaction.
+        assert COMPACTION_MIN_BASE == 20
+        assert should_compact(base_lines=20, appended_lines=11)
+        # And (20, 10) is the largest pair that does not trigger.
+        assert not should_compact(base_lines=20, appended_lines=10)
+
 
 class TestRebuildIndexes:
     """Test that rebuild_indexes returns correctly-shaped maps."""

@@ -336,14 +336,17 @@ class TestStreamEmitterIncrementalParsing:
         assert emitter._file_position > 0
         assert len(emitter.current_state) == 3
 
-        # Simulate compaction by rewriting file with fewer lines
-        # (keeping only dc-issue-1, removing dc-issue-2 and dc-issue-3)
-        storage._issues = {
-            "dc-issue-1": storage._issues["dc-issue-1"],
-        }
-        storage._dependencies = []
-        storage._links = []
-        storage._save(_reload=False)
+        # Simulate compaction by rewriting the file in place with a
+        # subset of records. Drives the shrink from real file input
+        # rather than mutating storage._issues / _dependencies / _links
+        # directly. (dogcat-308p)
+        kept_lines = [
+            line
+            for line in storage_path.read_text().splitlines()
+            if line.strip()
+            and ('"id":"issue-1"' in line or '"issue_id":"dc-issue-1"' in line)
+        ]
+        storage_path.write_text("\n".join(kept_lines) + "\n")
 
         # Now file is smaller than file_position — should trigger full reload
         emitter._handle_file_change()  # noqa: SLF001
@@ -669,9 +672,13 @@ class TestStreamWatcherObserverIntegration:
         watcher = StreamWatcher(storage_path=str(storage_path))
         watcher.start()
         try:
-            # Give the observer thread a moment to settle.
-            time.sleep(0.1)
+            deadline = time.monotonic() + 5.0
+            while not watcher.observer.is_alive() and time.monotonic() < deadline:
+                time.sleep(0.01)
             assert watcher.observer.is_alive()
         finally:
             watcher.stop()
+        deadline = time.monotonic() + 5.0
+        while watcher.observer.is_alive() and time.monotonic() < deadline:
+            time.sleep(0.01)
         assert not watcher.observer.is_alive()

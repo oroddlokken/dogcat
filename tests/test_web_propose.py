@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from html.parser import HTMLParser as _HTMLParser
 from typing import TYPE_CHECKING
 
 import pytest
@@ -69,6 +70,37 @@ def _csrf(client: TestClient) -> str:
     return match.group(1)
 
 
+class _AttrCollector(_HTMLParser):
+    """Collect every (tag, attrs-dict) pair encountered in an HTML document.
+
+    Used by web tests to assert by element/attribute rather than by raw
+    substring — a class rename or attribute reorder no longer breaks
+    behaviour-equivalent tests. (dogcat-3nfa)
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.elements: list[tuple[str, dict[str, str]]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.elements.append((tag, {k: v or "" for k, v in attrs}))
+
+
+def _parse_html(text: str) -> list[tuple[str, dict[str, str]]]:
+    parser = _AttrCollector()
+    parser.feed(text)
+    return parser.elements
+
+
+def _has_element(text: str, tag: str, **required_attrs: str) -> bool:
+    for el_tag, attrs in _parse_html(text):
+        if el_tag != tag:
+            continue
+        if all(attrs.get(k) == v for k, v in required_attrs.items()):
+            return True
+    return False
+
+
 class TestGetForm:
     """Tests for GET / (the proposal form)."""
 
@@ -81,17 +113,20 @@ class TestGetForm:
     def test_form_has_namespace_dropdown(self, client: TestClient) -> None:
         """The form contains the namespace dropdown."""
         resp = client.get("/")
-        assert 'data-value="testns"' in resp.text
+        assert any(
+            attrs.get("data-value") == "testns"
+            for _tag, attrs in _parse_html(resp.text)
+        )
 
     def test_form_has_title_input(self, client: TestClient) -> None:
         """The form contains the title input."""
         resp = client.get("/")
-        assert 'name="title"' in resp.text
+        assert _has_element(resp.text, "input", name="title")
 
     def test_form_has_description_textarea(self, client: TestClient) -> None:
         """The form contains the description textarea."""
         resp = client.get("/")
-        assert 'name="description"' in resp.text
+        assert _has_element(resp.text, "textarea", name="description")
 
     def test_form_has_submit_button(self, client: TestClient) -> None:
         """The form contains the submit button."""
@@ -101,7 +136,7 @@ class TestGetForm:
     def test_form_has_home_link(self, client: TestClient) -> None:
         """The header links back to /."""
         resp = client.get("/")
-        assert '<a href="/">' in resp.text
+        assert _has_element(resp.text, "a", href="/")
 
     def test_csp_disallows_inline_script(self, client: TestClient) -> None:
         """CSP must not include 'unsafe-inline' for script-src.
@@ -149,8 +184,16 @@ class TestNamespacePopulation:
     def test_default_namespace_selected(self, client: TestClient) -> None:
         """The primary namespace is marked as active."""
         resp = client.get("/")
-        assert "dropdown-item active" in resp.text
-        assert 'data-value="testns"' in resp.text
+        # The active namespace entry has both the active class and the
+        # primary namespace as data-value. Use the parser to assert by
+        # attribute presence rather than raw markup substring.
+        active_entries = [
+            attrs
+            for _tag, attrs in _parse_html(resp.text)
+            if "active" in attrs.get("class", "").split()
+            and attrs.get("data-value") == "testns"
+        ]
+        assert active_entries, "expected one active dropdown entry for testns"
 
     def test_multiple_namespaces(self, web_dogcats_multi_ns: Path) -> None:
         """All namespaces from issues appear in the dropdown."""
@@ -1112,6 +1155,33 @@ class TestBodySizeLimit:
             },
         )
         # 200 (form rendered with success) or 303 (redirect) — anything but 413.
+        assert resp.status_code != 413
+
+    def test_negative_content_length_rejected(self, client: TestClient) -> None:
+        """A negative ``Content-Length`` header is rejected with 400.
+
+        Regression for dogcat-3r0s: ``int("-1") > MAX`` is False, so the
+        header used to slip past the early-reject branch and hit the
+        slow-path stream-cap.
+        """
+        resp = client.post(
+            "/",
+            content=b"",
+            headers={"Content-Length": "-1"},
+        )
+        assert resp.status_code == 400
+
+    def test_zero_content_length_passes_size_check(self, client: TestClient) -> None:
+        """``Content-Length: 0`` passes the body-size check (request is empty).
+
+        It will likely be rejected downstream for missing form fields,
+        but the body-size middleware itself must not 413 it.
+        """
+        resp = client.post(
+            "/",
+            content=b"",
+            headers={"Content-Length": "0"},
+        )
         assert resp.status_code != 413
 
 

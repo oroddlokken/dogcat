@@ -38,12 +38,21 @@ def _make_issue(**kwargs: object) -> Issue:
 def _make_storage() -> MagicMock:
     """Create a mock storage backend.
 
+    Bound to the real :class:`JSONLStorage` interface via
+    ``spec=JSONLStorage`` so MagicMock raises ``AttributeError`` if a
+    test references a method that the real class does not have. Without
+    the spec, a refactor that renames or removes a method would let the
+    editor tests continue to pass against the now-fictional API.
+    (dogcat-wgjf)
+
     ``create_issue`` mirrors the real factory shape: it builds an Issue
     from the keyword arguments (with a synthetic id) and records the
     constructed issue on ``create.call_args`` so existing test assertions
     keep working after the TUI moved to ``storage.create_issue``.
     """
-    storage = MagicMock()
+    from dogcat.storage import JSONLStorage
+
+    storage = MagicMock(spec=JSONLStorage)
     storage.get.return_value = None
     storage.get_issue_ids.return_value = set()
 

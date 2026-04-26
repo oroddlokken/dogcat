@@ -160,39 +160,6 @@ def require_resolved_id(
     return resolved
 
 
-def cli_command(func: Callable[..., Any]) -> Callable[..., Any]:
-    """Wrap a Typer command body in the standard try/except envelope.
-
-    Most CLI commands wrap their body in::
-
-        try:
-            ...
-        except typer.Exit:
-            raise
-        except Exception as e:
-            echo_error(str(e))
-            raise typer.Exit(1)
-
-    This decorator handles that uniform envelope so command bodies can
-    focus on the work. ``typer.BadParameter`` is also re-raised so Typer
-    can surface its own usage message; everything else flows through
-    :func:`echo_error` and exits with rc=1.
-    """
-    from ._json_state import echo_error
-
-    @functools.wraps(func)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        try:
-            return func(*args, **kwargs)
-        except (typer.Exit, typer.BadParameter):
-            raise
-        except Exception as e:  # noqa: BLE001
-            echo_error(str(e))
-            raise typer.Exit(1) from e
-
-    return wrapper
-
-
 def apply_to_each(
     ids: list[str],
     op: Callable[[str], None],

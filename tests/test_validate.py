@@ -18,8 +18,10 @@ from dogcat.cli import app
 from dogcat.cli._validate import (
     detect_concurrent_edits,
     parse_raw_records,
+    validate_inbox_jsonl,
     validate_issue_record,
     validate_jsonl,
+    validate_proposal_record,
     validate_references,
 )
 from dogcat.constants import MERGE_DRIVER_CMD
@@ -97,6 +99,25 @@ def _event(
         "issue_id": issue_id,
         "event_type": event_type,
         "timestamp": "2026-01-01T00:00:00+00:00",
+    }
+    defaults.update(kwargs)
+    return defaults
+
+
+def _proposal(
+    proposal_id: str = "abc",
+    namespace: str = "test",
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Build a minimal valid proposal record."""
+    defaults: dict[str, Any] = {
+        "record_type": "proposal",
+        "id": proposal_id,
+        "namespace": namespace,
+        "title": "Test Proposal",
+        "status": "open",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
     }
     defaults.update(kwargs)
     return defaults
@@ -731,3 +752,73 @@ class TestDoctorPostMerge:
         assert "concurrent_edits" in data
         assert len(data["concurrent_edits"]) == 1
         assert data["concurrent_edits"][0]["issue_id"] == "test-shared"
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for validate_proposal_record / validate_inbox_jsonl
+# ---------------------------------------------------------------------------
+
+
+class TestValidateProposalRecord:
+    """Direct tests for the proposal validator."""
+
+    def test_valid_proposal(self) -> None:
+        """A well-formed proposal produces no errors."""
+        assert validate_proposal_record(_proposal(), lineno=1) == []
+
+    def test_missing_required_field(self) -> None:
+        """Detect missing required fields (id, namespace, title, status)."""
+        record = _proposal()
+        del record["title"]
+        errors = validate_proposal_record(record, lineno=1)
+        assert len(errors) == 1
+        assert "missing required field 'title'" in errors[0]["message"]
+
+    def test_invalid_status(self) -> None:
+        """Detect invalid proposal status values."""
+        errors = validate_proposal_record(_proposal(status="bogus"), lineno=1)
+        assert len(errors) == 1
+        assert "invalid status 'bogus'" in errors[0]["message"]
+
+    def test_tombstone_status_accepted(self) -> None:
+        """Proposal status 'tombstone' is a valid value."""
+        assert validate_proposal_record(_proposal(status="tombstone"), lineno=1) == []
+
+    def test_invalid_timestamp(self) -> None:
+        """Detect invalid ISO 8601 timestamps on proposals."""
+        errors = validate_proposal_record(
+            _proposal(closed_at="not-a-timestamp"), lineno=1
+        )
+        assert len(errors) == 1
+        assert "invalid timestamp" in errors[0]["message"]
+
+    def test_lineno_appears_in_message(self) -> None:
+        """Errors include the line number for diagnostics."""
+        errors = validate_proposal_record(_proposal(status="bogus"), lineno=42)
+        assert "Line 42" in errors[0]["message"]
+
+
+class TestValidateInboxJsonl:
+    """Tests for the file-level inbox validator."""
+
+    def test_valid_inbox_file(self, tmp_path: Path) -> None:
+        """A file of valid proposals returns no errors."""
+        path = tmp_path / "inbox.jsonl"
+        _write_jsonl(path, [_proposal(proposal_id="a"), _proposal(proposal_id="b")])
+        assert validate_inbox_jsonl(path) == []
+
+    def test_invalid_proposal_surfaces_error(self, tmp_path: Path) -> None:
+        """An invalid proposal record yields its error in file-level output."""
+        path = tmp_path / "inbox.jsonl"
+        _write_jsonl(path, [_proposal(status="bogus")])
+        errors = validate_inbox_jsonl(path)
+        messages = [e["message"] for e in errors]
+        assert any("invalid status 'bogus'" in m for m in messages)
+
+    def test_non_proposal_records_ignored(self, tmp_path: Path) -> None:
+        """Issue records in inbox.jsonl are ignored (only proposals validated)."""
+        path = tmp_path / "inbox.jsonl"
+        # An issue record with an invalid status that would fail the issue
+        # validator, but inbox validation must skip it entirely.
+        _write_jsonl(path, [_issue(status="bogus")])
+        assert validate_inbox_jsonl(path) == []

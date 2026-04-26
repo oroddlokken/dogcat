@@ -222,8 +222,13 @@ class _BaseEventLog:
 
         Args:
             issue_id: Filter to events for this ID (issue or proposal).
-            limit: Maximum number of events to return.
+            limit: Maximum number of events to return. Must be >= 0;
+                negative values raise ``ValueError``. ``limit=0`` returns
+                an empty list.
         """
+        if limit is not None and limit < 0:
+            msg = f"limit must be >= 0, got {limit}"
+            raise ValueError(msg)
         if not self.path.exists():
             return []
 

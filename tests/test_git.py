@@ -154,6 +154,143 @@ def test_set_config_returns_true_on_success(
     assert git_helpers.set_config("merge.foo.driver", "cmd") is True
 
 
+def test_set_config_returns_false_on_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """set_config returns False when git config exits non-zero."""
+
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+        return _completed(128, "", "fatal: bad config name\n")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert git_helpers.set_config("bogus..key", "cmd") is False
+
+
+def test_set_config_returns_false_when_git_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """set_config returns False when git is unavailable."""
+
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+        msg = "no git"
+        raise FileNotFoundError(msg)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert git_helpers.set_config("merge.foo.driver", "cmd") is False
+
+
+def test_common_dir_returns_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    """common_dir parses ``git rev-parse --git-common-dir`` output."""
+
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+        return _completed(0, "/tmp/some-repo/.git\n")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert git_helpers.common_dir() == Path("/tmp/some-repo/.git")
+
+
+def test_common_dir_returns_none_outside_repo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """common_dir returns None when git reports failure."""
+
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+        return _completed(128, "", "fatal: not a git repository\n")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert git_helpers.common_dir() is None
+
+
+def test_common_dir_returns_none_when_git_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """common_dir returns None when the git binary is unavailable."""
+
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+        msg = "no git"
+        raise FileNotFoundError(msg)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert git_helpers.common_dir() is None
+
+
+def test_common_dir_returns_none_for_empty_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """common_dir returns None when stdout is whitespace-only."""
+
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+        return _completed(0, "  \n")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert git_helpers.common_dir() is None
+
+
+def test_get_config_returns_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    """get_config returns the trimmed config value."""
+
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+        return _completed(0, "abcd\n")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert git_helpers.get_config("merge.foo.driver") == "abcd"
+
+
+def test_get_config_returns_none_for_missing_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """get_config returns None when git exits non-zero (key not set)."""
+
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+        return _completed(1, "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert git_helpers.get_config("nonexistent.key") is None
+
+
+def test_get_config_returns_none_for_empty_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """get_config collapses an empty/whitespace value to None.
+
+    A git config key set to the empty string is treated identically to
+    a missing key — callers that care can distinguish via direct git.
+    """
+
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+        return _completed(0, "  \n")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert git_helpers.get_config("explicitly.empty") is None
+
+
+def test_add_paths_non_empty_invokes_git(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """add_paths runs ``git add <paths>`` for a non-empty list."""
+    captured: list[list[str]] = []
+
+    def fake_run(args: list[str], *_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+        captured.append(args)
+        return _completed(0, "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert git_helpers.add_paths(["a.txt", "b.txt"]) is True
+    assert captured == [["git", "add", "a.txt", "b.txt"]]
+
+
+def test_add_paths_returns_false_on_git_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """add_paths returns False when git exits non-zero."""
+
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+        return _completed(128, "", "fatal: not a repository\n")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert git_helpers.add_paths(["foo.txt"]) is False
+
+
 def test_latest_merge_commit_returns_sha(monkeypatch: pytest.MonkeyPatch) -> None:
     """latest_merge_commit returns the trimmed SHA on success."""
 

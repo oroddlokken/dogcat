@@ -12,7 +12,7 @@ from dogcat.deps import (
     has_blockers,
     would_create_cycle,
 )
-from dogcat.models import Dependency, DependencyType, Issue
+from dogcat.models import Issue
 from dogcat.storage import JSONLStorage
 
 
@@ -28,6 +28,30 @@ def storage_with_issues(temp_dogcats_dir: Path) -> JSONLStorage:
         storage.create(issue)
 
     return storage
+
+
+def _inject_cycle_via_jsonl(
+    storage: JSONLStorage, edges: list[tuple[str, str]]
+) -> JSONLStorage:
+    """Append raw dependency records and re-load so storage sees a cycle.
+
+    ``add_dependency`` rejects cycle-creating edges, so cycle-detection
+    tests need a way to inject a malformed graph. Earlier the suite
+    pushed Dependency objects onto ``storage._dependencies`` and called
+    ``_rebuild_indexes`` — both private. The on-disk equivalent is to
+    append dependency JSONL lines and reopen the storage; the same
+    state arrives via the public load path. (dogcat-308p)
+    """
+    with storage.path.open("a") as f:
+        for issue_id, depends_on_id in edges:
+            f.write(
+                '{"record_type": "dependency", '
+                f'"issue_id": "{issue_id}", '
+                f'"depends_on_id": "{depends_on_id}", '
+                '"type": "blocks", '
+                '"created_at": "2026-04-25T12:00:00+00:00"}\n'
+            )
+    return JSONLStorage(str(storage.path))
 
 
 class TestGetReadyWork:
@@ -211,23 +235,10 @@ class TestDetectCycles:
 
         Simulates data imported from external source that already has cycles.
         """
-        # Directly add dependencies to simulate imported data with cycles
-        # t-i0 -> t-i1 -> t-i0
-        storage_with_issues._dependencies.append(
-            Dependency(
-                issue_id="t-i0",
-                depends_on_id="t-i1",
-                dep_type=DependencyType.BLOCKS,
-            ),
+        storage_with_issues = _inject_cycle_via_jsonl(
+            storage_with_issues,
+            [("t-i0", "t-i1"), ("t-i1", "t-i0")],
         )
-        storage_with_issues._dependencies.append(
-            Dependency(
-                issue_id="t-i1",
-                depends_on_id="t-i0",
-                dep_type=DependencyType.BLOCKS,
-            ),
-        )
-        storage_with_issues._rebuild_indexes()
 
         cycles = detect_cycles(storage_with_issues)
 
@@ -241,30 +252,10 @@ class TestDetectCycles:
 
         Simulates data imported from external source that already has cycles.
         """
-        # Directly add dependencies to simulate imported data with cycles
-        # Create a chain: 0 -> 1 -> 2 -> 0
-        storage_with_issues._dependencies.append(
-            Dependency(
-                issue_id="t-i0",
-                depends_on_id="t-i1",
-                dep_type=DependencyType.BLOCKS,
-            ),
+        storage_with_issues = _inject_cycle_via_jsonl(
+            storage_with_issues,
+            [("t-i0", "t-i1"), ("t-i1", "t-i2"), ("t-i2", "t-i0")],
         )
-        storage_with_issues._dependencies.append(
-            Dependency(
-                issue_id="t-i1",
-                depends_on_id="t-i2",
-                dep_type=DependencyType.BLOCKS,
-            ),
-        )
-        storage_with_issues._dependencies.append(
-            Dependency(
-                issue_id="t-i2",
-                depends_on_id="t-i0",
-                dep_type=DependencyType.BLOCKS,
-            ),
-        )
-        storage_with_issues._rebuild_indexes()
 
         cycles = detect_cycles(storage_with_issues)
 
@@ -275,22 +266,10 @@ class TestDetectCycles:
         storage_with_issues: JSONLStorage,
     ) -> None:
         """Test that detect_cycles returns no duplicate cycle entries."""
-        # Create a simple 2-node cycle: t-i0 <-> t-i1
-        storage_with_issues._dependencies.append(
-            Dependency(
-                issue_id="t-i0",
-                depends_on_id="t-i1",
-                dep_type=DependencyType.BLOCKS,
-            ),
+        storage_with_issues = _inject_cycle_via_jsonl(
+            storage_with_issues,
+            [("t-i0", "t-i1"), ("t-i1", "t-i0")],
         )
-        storage_with_issues._dependencies.append(
-            Dependency(
-                issue_id="t-i1",
-                depends_on_id="t-i0",
-                dep_type=DependencyType.BLOCKS,
-            ),
-        )
-        storage_with_issues._rebuild_indexes()
 
         cycles = detect_cycles(storage_with_issues)
 
@@ -423,22 +402,10 @@ class TestGetDependencyChain:
         storage_with_issues: JSONLStorage,
     ) -> None:
         """Dependency chain with a cycle terminates instead of infinite recursion."""
-        # Inject a cycle directly (bypassing add_dependency's cycle guard)
-        storage_with_issues._dependencies.append(
-            Dependency(
-                issue_id="t-i0",
-                depends_on_id="t-i1",
-                dep_type=DependencyType.BLOCKS,
-            ),
+        storage_with_issues = _inject_cycle_via_jsonl(
+            storage_with_issues,
+            [("t-i0", "t-i1"), ("t-i1", "t-i0")],
         )
-        storage_with_issues._dependencies.append(
-            Dependency(
-                issue_id="t-i1",
-                depends_on_id="t-i0",
-                dep_type=DependencyType.BLOCKS,
-            ),
-        )
-        storage_with_issues._rebuild_indexes()
 
         # Should terminate without RecursionError
         chain = get_dependency_chain(storage_with_issues, "t-i0")
@@ -490,28 +457,38 @@ class TestDeepDependencyChain:
     """
 
     @staticmethod
-    def _build_deep_chain(storage: JSONLStorage, depth: int) -> None:
-        """Create ``depth`` issues with t-i{n} blocks t-i{n+1}."""
+    def _build_deep_chain(storage: JSONLStorage, depth: int) -> JSONLStorage:
+        """Create ``depth`` issues with t-i{n} blocks t-i{n+1}.
+
+        Drives the chain from real on-disk JSONL input: we append issue
+        records via the public API, then write dependency records
+        directly to the file, then re-load. This avoids paying the
+        per-call cycle-prevention cost in ``add_dependency`` (each call
+        is O(N), making 10k of them O(N²) and unusable as test setup)
+        while keeping the test honest at the public-API boundary.
+        (dogcat-308p)
+        """
         for i in range(depth):
             storage.create(Issue(id=f"i{i}", namespace="t", title=f"Issue {i}"))
-        # Add deps via the underlying _dependencies list so we don't pay
-        # the cycle-prevention cost on every add_dependency call.
-        for i in range(depth - 1):
-            storage._dependencies.append(
-                Dependency(
-                    issue_id=f"t-i{i}",
-                    depends_on_id=f"t-i{i + 1}",
-                    dep_type=DependencyType.BLOCKS,
+
+        with storage.path.open("a") as f:
+            for i in range(depth - 1):
+                f.write(
+                    '{"record_type": "dependency", '
+                    f'"issue_id": "t-i{i}", '
+                    f'"depends_on_id": "t-i{i + 1}", '
+                    '"type": "blocks", '
+                    '"created_at": "2026-04-25T12:00:00+00:00"}\n'
                 )
-            )
-        storage._rebuild_indexes()
+        # Reload from disk to pick up the dep records.
+        return JSONLStorage(str(storage.path))
 
     def test_detect_cycles_handles_10000_deep_chain(
         self, temp_dogcats_dir: Path
     ) -> None:
         """detect_cycles does not raise RecursionError on a 10k-deep chain."""
         storage = JSONLStorage(str(temp_dogcats_dir / "issues.jsonl"))
-        self._build_deep_chain(storage, 10000)
+        storage = self._build_deep_chain(storage, 10000)
         cycles = detect_cycles(storage)
         # Linear chain has no cycle.
         assert cycles == []
@@ -521,7 +498,7 @@ class TestDeepDependencyChain:
     ) -> None:
         """would_create_cycle handles 10k-deep reachability."""
         storage = JSONLStorage(str(temp_dogcats_dir / "issues.jsonl"))
-        self._build_deep_chain(storage, 10000)
+        storage = self._build_deep_chain(storage, 10000)
         # Adding t-i9999 -> t-i0 would close the chain into a cycle.
         assert would_create_cycle(storage, "t-i9999", "t-i0") is True
         # A side-edge between two non-related ids does not create a cycle.
@@ -535,6 +512,6 @@ class TestDeepDependencyChain:
     ) -> None:
         """get_dependency_chain walks a 5k-deep chain without recursion."""
         storage = JSONLStorage(str(temp_dogcats_dir / "issues.jsonl"))
-        self._build_deep_chain(storage, 5000)
+        storage = self._build_deep_chain(storage, 5000)
         chain = get_dependency_chain(storage, "t-i0")
         assert len(chain) == 5000

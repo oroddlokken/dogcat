@@ -1149,7 +1149,7 @@ class TestChildrenByParentIndex:
         storage.create(parent)
         storage.create(child)
 
-        assert "test-c1" in storage._children_by_parent.get("test-p1", [])
+        assert {c.full_id for c in storage.get_children("test-p1")} == {"test-c1"}
 
     def test_index_updated_on_reparent(self, storage: JSONLStorage) -> None:
         """Test index is updated when an issue's parent changes."""
@@ -1162,8 +1162,8 @@ class TestChildrenByParentIndex:
 
         storage.update("test-c1", {"parent": "test-p2"})
 
-        assert "test-c1" not in storage._children_by_parent.get("test-p1", [])
-        assert "test-c1" in storage._children_by_parent.get("test-p2", [])
+        assert storage.get_children("test-p1") == []
+        assert {c.full_id for c in storage.get_children("test-p2")} == {"test-c1"}
 
     def test_index_updated_on_parent_removed(self, storage: JSONLStorage) -> None:
         """Test index is updated when parent is set to None."""
@@ -1174,7 +1174,7 @@ class TestChildrenByParentIndex:
 
         storage.update("test-c1", {"parent": None})
 
-        assert storage._children_by_parent.get("test-p1", []) == []
+        assert storage.get_children("test-p1") == []
 
     def test_index_survives_reload(self, storage: JSONLStorage) -> None:
         """Test index is rebuilt correctly after reload."""
@@ -1188,14 +1188,13 @@ class TestChildrenByParentIndex:
         children = storage.get_children("test-p1")
         assert len(children) == 1
         assert children[0].full_id == "test-c1"
-        assert "test-c1" in storage._children_by_parent["test-p1"]
 
     def test_index_empty_for_no_children(self, storage: JSONLStorage) -> None:
         """Test index has no entry for issues without children."""
         issue = Issue(id="p1", namespace="test", title="No children")
         storage.create(issue)
 
-        assert "test-p1" not in storage._children_by_parent
+        assert storage.get_children("test-p1") == []
 
 
 class TestUpdateFieldAllowlist:
@@ -1805,15 +1804,22 @@ class TestRemoveArchived:
         children = storage.get_children("t-parent")
         assert len(children) == 0
 
-    def test_remove_archived_updates_line_counts(self, storage: JSONLStorage) -> None:
-        """Test that _base_lines and _appended_lines are updated."""
+    def test_remove_archived_keeps_only_unarchived(self, storage: JSONLStorage) -> None:
+        """remove_archived removes the named ids from the in-memory view.
+
+        Previously this test asserted on the private ``_base_lines`` /
+        ``_appended_lines`` counters. The behaviour observable to
+        callers is that archived issues no longer appear via ``list``
+        or ``get``; that is what we assert here. (dogcat-308p)
+        """
         storage.create(Issue(id="a", namespace="t", title="A"))
         storage.create(Issue(id="b", namespace="t", title="B"))
 
         storage.remove_archived({"t-a"}, remaining_lines=42)
 
-        assert storage._base_lines == 42
-        assert storage._appended_lines == 0
+        assert storage.get("t-a") is None
+        assert storage.get("t-b") is not None
+        assert {i.full_id for i in storage.list()} == {"t-b"}
 
     def test_remove_archived_no_ids(self, storage: JSONLStorage) -> None:
         """Test remove_archived with empty set does not remove anything."""
@@ -1936,29 +1942,54 @@ class TestFindDanglingDependencies:
         dangling = storage.find_dangling_dependencies()
         assert dangling == []
 
-    def test_dangling_dep_issue_id_missing(self, storage: JSONLStorage) -> None:
-        """Test finding deps where issue_id no longer exists."""
-        storage.create(Issue(id="a", namespace="t", title="A"))
-        storage.create(Issue(id="b", namespace="t", title="B"))
-        storage.add_dependency("t-a", "t-b", "blocks")
+    def test_dangling_dep_issue_id_missing(self, tmp_path: Path) -> None:
+        """A dependency whose issue_id no longer has an issue record is dangling.
 
-        # Simulate that t-a was removed from _issues (e.g. by external manipulation)
-        del storage._issues["t-a"]
+        Drives the malformed state from real input: a JSONL file that
+        contains a dependency record but no matching issue record. This
+        is exactly what merge collisions or hand-edits can produce, and
+        is what the dangling-dep check has to detect on disk reload.
+        (dogcat-308p)
+        """
+        path = tmp_path / "issues.jsonl"
+        path.write_text(
+            '{"record_type": "issue", "id": "b", "namespace": "t", '
+            '"title": "B", "status": "open", "priority": 2, '
+            '"issue_type": "task", '
+            '"created_at": "2026-04-25T12:00:00+00:00", '
+            '"updated_at": "2026-04-25T12:00:00+00:00"}\n'
+            '{"record_type": "dependency", "issue_id": "t-a", '
+            '"depends_on_id": "t-b", "type": "blocks", '
+            '"created_at": "2026-04-25T12:00:00+00:00"}\n'
+        )
+        s = JSONLStorage(str(path))
 
-        dangling = storage.find_dangling_dependencies()
+        dangling = s.find_dangling_dependencies()
         assert len(dangling) == 1
         assert dangling[0].issue_id == "t-a"
 
-    def test_dangling_dep_depends_on_id_missing(self, storage: JSONLStorage) -> None:
-        """Test finding deps where depends_on_id no longer exists."""
-        storage.create(Issue(id="a", namespace="t", title="A"))
-        storage.create(Issue(id="b", namespace="t", title="B"))
-        storage.add_dependency("t-a", "t-b", "blocks")
+    def test_dangling_dep_depends_on_id_missing(self, tmp_path: Path) -> None:
+        """A dependency whose depends_on_id has no issue record is dangling.
 
-        # Simulate that t-b was removed
-        del storage._issues["t-b"]
+        Mirrors :meth:`test_dangling_dep_issue_id_missing` for the
+        opposite endpoint. Loading a file that names ``t-b`` only as a
+        target, never as an issue, is the on-disk shape of an
+        out-of-order delete. (dogcat-308p)
+        """
+        path = tmp_path / "issues.jsonl"
+        path.write_text(
+            '{"record_type": "issue", "id": "a", "namespace": "t", '
+            '"title": "A", "status": "open", "priority": 2, '
+            '"issue_type": "task", '
+            '"created_at": "2026-04-25T12:00:00+00:00", '
+            '"updated_at": "2026-04-25T12:00:00+00:00"}\n'
+            '{"record_type": "dependency", "issue_id": "t-a", '
+            '"depends_on_id": "t-b", "type": "blocks", '
+            '"created_at": "2026-04-25T12:00:00+00:00"}\n'
+        )
+        s = JSONLStorage(str(path))
 
-        dangling = storage.find_dangling_dependencies()
+        dangling = s.find_dangling_dependencies()
         assert len(dangling) == 1
         assert dangling[0].depends_on_id == "t-b"
 

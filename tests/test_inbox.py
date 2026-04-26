@@ -1,6 +1,6 @@
 """Tests for inbox proposal system (data model and storage)."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -112,7 +112,8 @@ class TestProposalModel:
         before = datetime.now(timezone.utc)
         proposal = Proposal(id="1", title="Test")
         after = datetime.now(timezone.utc)
-        assert before <= proposal.created_at <= after
+        slack = timedelta(seconds=1)
+        assert before - slack <= proposal.created_at <= after + slack
 
 
 class TestProposalSerialization:

@@ -179,10 +179,13 @@ def create_app(
             content_length = request.headers.get("content-length")
             if content_length:
                 try:
-                    if int(content_length) > MAX_REQUEST_BODY_BYTES:
-                        return PlainTextResponse("Payload Too Large", status_code=413)
+                    parsed_length = int(content_length)
                 except ValueError:
                     return PlainTextResponse("Bad Request", status_code=400)
+                if parsed_length < 0:
+                    return PlainTextResponse("Bad Request", status_code=400)
+                if parsed_length > MAX_REQUEST_BODY_BYTES:
+                    return PlainTextResponse("Payload Too Large", status_code=413)
 
             # Slow path for chunked bodies: wrap the receive callable so
             # we can count bytes as they arrive and abort once we cross

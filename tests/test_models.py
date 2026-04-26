@@ -1,6 +1,6 @@
 """Tests for Dogcat models."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -383,7 +383,8 @@ class TestCommentModel:
             text="Test",
         )
         after = datetime.now(timezone.utc)
-        assert before <= comment.created_at <= after
+        slack = timedelta(seconds=1)
+        assert before - slack <= comment.created_at <= after + slack
 
 
 class TestDependencyModel:
@@ -411,7 +412,8 @@ class TestDependencyModel:
             dep_type=DependencyType.PARENT_CHILD,
         )
         after = datetime.now(timezone.utc)
-        assert before <= dep.created_at <= after
+        slack = timedelta(seconds=1)
+        assert before - slack <= dep.created_at <= after + slack
 
 
 class TestIssueModel:
@@ -468,9 +470,9 @@ class TestIssueModel:
         before = datetime.now(timezone.utc)
         issue = Issue(id="issue-1", title="Test")
         after = datetime.now(timezone.utc)
-
-        assert before <= issue.created_at <= after
-        assert before <= issue.updated_at <= after
+        slack = timedelta(seconds=1)
+        assert before - slack <= issue.created_at <= after + slack
+        assert before - slack <= issue.updated_at <= after + slack
 
     def test_is_closed_method(self) -> None:
         """Test the is_closed() convenience method."""

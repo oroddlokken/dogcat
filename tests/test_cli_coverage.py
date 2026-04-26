@@ -16,7 +16,12 @@ def _init_and_create(
     *titles: str,
     close_ids: list[str] | None = None,
 ) -> tuple[Path, list[str]]:
-    """Initialize a repo and create issues, returning (dogcats_dir, issue_ids)."""
+    """Initialize a repo and create issues, returning (dogcats_dir, issue_ids).
+
+    IDs are extracted from ``dcat create --json`` rather than parsed
+    from stdout, so a UX rename or glyph change in the human output
+    cannot break the helper. (dogcat-3nfa)
+    """
     dogcats_dir = tmp_path / ".dogcats"
     runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
 
@@ -24,12 +29,14 @@ def _init_and_create(
     for title in titles:
         result = runner.invoke(
             app,
-            ["create", title, "--dogcats-dir", str(dogcats_dir)],
+            ["create", title, "--json", "--dogcats-dir", str(dogcats_dir)],
         )
-        # Extract issue ID from output like "✓ Created dc-xxxx: Title"
-        line = result.stdout.strip()
-        issue_id = line.split(": ")[0].split()[-1]
-        ids.append(issue_id)
+        payload = json.loads(result.stdout)
+        # Compose full_id (namespace-id) to match the historical
+        # behaviour of the stdout-parsing form. CLI commands accept
+        # both the partial id and the full id, but downstream tests
+        # sometimes substring-match the full id.
+        ids.append(f"{payload['namespace']}-{payload['id']}")
 
     if close_ids:
         for issue_id in close_ids:

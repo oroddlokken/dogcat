@@ -37,6 +37,38 @@ def _assert_doctor_check_passes(dogcats_dir: Path, check_name: str) -> None:
     )
 
 
+def _doctor_status(
+    dogcats_dir: Path, *, extra_args: list[str] | None = None
+) -> tuple[int, dict[str, object]]:
+    """Run ``dcat doctor --json`` and return (exit_code, parsed payload).
+
+    Avoids substring-matching glyphs (✓/✗) on the human output — the
+    structured output exposes per-check ``passed`` booleans and an
+    overall ``status`` field. (dogcat-3nfa)
+    """
+    result = runner.invoke(
+        app,
+        ["doctor", "--json", "--dogcats-dir", str(dogcats_dir), *(extra_args or [])],
+    )
+    return result.exit_code, json.loads(result.stdout)
+
+
+def _failed_check_names(payload: dict[str, object]) -> set[str]:
+    """Return the set of check names that reported ``passed: false``."""
+    raw_checks = payload.get("checks")
+    if not isinstance(raw_checks, dict):
+        return set()
+    failed: set[str] = set()
+    items: list[tuple[object, object]] = list(raw_checks.items())  # type: ignore[arg-type]
+    for name, data in items:
+        if not isinstance(data, dict):
+            continue
+        passed = data.get("passed", True)  # type: ignore[misc]
+        if not passed:
+            failed.add(str(name))
+    return failed
+
+
 class TestCLIDoctor:
     """Test doctor diagnostic command."""
 
@@ -105,13 +137,9 @@ class TestCLIDoctor:
         issues_file = dogcats_dir / "issues.jsonl"
         issues_file.write_text("not valid json\n")
 
-        result = runner.invoke(
-            app,
-            ["doctor", "--dogcats-dir", str(dogcats_dir)],
-        )
-        assert result.exit_code != 0
-        assert "is valid JSON" in result.stdout
-        assert "✗" in result.stdout
+        exit_code, payload = _doctor_status(dogcats_dir)
+        assert exit_code != 0
+        assert "issues_jsonl" in _failed_check_names(payload)
 
     def test_doctor_missing_config_toml(self, tmp_path: Path) -> None:
         """Test doctor detects missing config.toml."""
@@ -120,15 +148,13 @@ class TestCLIDoctor:
         issues_file = dogcats_dir / "issues.jsonl"
         issues_file.touch()
 
-        result = runner.invoke(
-            app,
-            ["doctor", "--dogcats-dir", str(dogcats_dir)],
-        )
-        assert result.exit_code != 0
-        assert "config.toml not found" in result.stdout
-        assert "✗" in result.stdout
-        # Prefix check should be skipped when config.toml is missing
-        assert "namespace is not configured" not in result.stdout
+        exit_code, payload = _doctor_status(dogcats_dir)
+        assert exit_code != 0
+        failed = _failed_check_names(payload)
+        assert "config_toml" in failed
+        # Prefix check is skipped when config.toml is missing — i.e., it
+        # is either absent from the payload or not in the failed set.
+        assert "namespace_config_mutual" not in failed
 
     def test_doctor_empty_namespace(self, tmp_path: Path) -> None:
         """Test doctor detects empty namespace in config.toml."""
@@ -141,13 +167,13 @@ class TestCLIDoctor:
         config_file = dogcats_dir / "config.toml"
         config_file.write_text('namespace = ""\n')
 
-        result = runner.invoke(
-            app,
-            ["doctor", "--dogcats-dir", str(dogcats_dir)],
+        exit_code, payload = _doctor_status(dogcats_dir)
+        assert exit_code != 0
+        failed = _failed_check_names(payload)
+        # Some check related to namespace must have failed.
+        assert any("namespace" in name for name in failed), (
+            f"expected a namespace check to fail, got: {failed}"
         )
-        assert result.exit_code != 0
-        assert "namespace is not configured" in result.stdout
-        assert "✗" in result.stdout
 
     def test_doctor_fix_missing_config(self, tmp_path: Path) -> None:
         """Test doctor --fix creates config.toml with auto-detected prefix."""

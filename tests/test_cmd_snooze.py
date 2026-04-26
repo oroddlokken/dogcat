@@ -342,7 +342,47 @@ class TestParseDuration:
         before = datetime.now().astimezone()
         result = parse_duration("0d")
         after = datetime.now().astimezone()
-        assert before <= result <= after
+        slack = timedelta(seconds=1)
+        assert before - slack <= result <= after + slack
+
+    def test_zero_weeks(self) -> None:
+        """'0w' yields a duration equal to (or within microseconds of) now."""
+        from dogcat.cli._helpers import parse_duration
+
+        before = datetime.now().astimezone()
+        result = parse_duration("0w")
+        after = datetime.now().astimezone()
+        slack = timedelta(seconds=1)
+        assert before - slack <= result <= after + slack
+
+    def test_zero_months(self) -> None:
+        """'0m' yields a duration equal to (or within microseconds of) now."""
+        from dogcat.cli._helpers import parse_duration
+
+        before = datetime.now().astimezone()
+        result = parse_duration("0m")
+        after = datetime.now().astimezone()
+        slack = timedelta(seconds=1)
+        assert before - slack <= result <= after + slack
+
+    def test_month_form_at_100y_cap(self) -> None:
+        """Months that map to exactly 100y * 365d are accepted."""
+        from dogcat.cli._helpers import parse_duration
+
+        # 1216 months * 30 days = 36480 days (just under 365 * 100 = 36500)
+        result = parse_duration("1216m")
+        expected_min = datetime.now().astimezone() + timedelta(days=36479)
+        assert result > expected_min
+
+    def test_month_form_above_100y_cap_rejected(self) -> None:
+        """Months that exceed the 100y cap are rejected with a clear error."""
+        import pytest
+
+        from dogcat.cli._helpers import parse_duration
+
+        # 1217 months * 30 days = 36510 days > 36500 (100y cap)
+        with pytest.raises(ValueError, match="too far in the future"):
+            parse_duration("1217m")
 
     def test_decimal_amount_rejected(self) -> None:
         """'1.5d' is rejected — the regex requires integer amounts."""
