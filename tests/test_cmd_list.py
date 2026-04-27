@@ -54,6 +54,106 @@ class TestCLIList:
         assert "Issue 1" in result.stdout
         assert "Issue 2" in result.stdout
 
+    def test_list_exclude_type(self, tmp_path: Path) -> None:
+        """--exclude-type drops issues of the given type but keeps children."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # An epic with a child task — exclude-type should hide the epic only.
+        epic_result = runner.invoke(
+            app,
+            [
+                "create",
+                "Epic parent",
+                "--type",
+                "epic",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        epic = json.loads(epic_result.stdout)
+        epic_full_id = f"{epic['namespace']}-{epic['id']}"
+
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Child task",
+                "--type",
+                "task",
+                "--parent",
+                epic_full_id,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Standalone bug",
+                "--type",
+                "bug",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "list",
+                "--exclude-type",
+                "epic",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Epic parent" not in result.stdout
+        assert "Child task" in result.stdout
+        assert "Standalone bug" in result.stdout
+
+    def test_list_exclude_type_repeatable(self, tmp_path: Path) -> None:
+        """--exclude-type can be passed multiple times."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        for title, t in [
+            ("An epic", "epic"),
+            ("A bug", "bug"),
+            ("A task", "task"),
+        ]:
+            runner.invoke(
+                app,
+                [
+                    "create",
+                    title,
+                    "--type",
+                    t,
+                    "--dogcats-dir",
+                    str(dogcats_dir),
+                ],
+            )
+
+        result = runner.invoke(
+            app,
+            [
+                "list",
+                "--exclude-type",
+                "epic",
+                "--exclude-type",
+                "bug",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "An epic" not in result.stdout
+        assert "A bug" not in result.stdout
+        assert "A task" in result.stdout
+
     def test_list_filter_by_status(self, tmp_path: Path) -> None:
         """Test filtering issues by status."""
         dogcats_dir = tmp_path / ".dogcats"

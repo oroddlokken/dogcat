@@ -135,6 +135,48 @@ class TestCLIReady:
         assert result.exit_code == 0
         assert issue1_id in result.stdout
 
+    def test_ready_exclude_type(self, tmp_path: Path) -> None:
+        """Ready --exclude-type drops the given type (epic) but keeps children."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        runner.invoke(
+            app,
+            [
+                "create",
+                "An epic",
+                "--type",
+                "epic",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        runner.invoke(
+            app,
+            [
+                "create",
+                "A bug",
+                "--type",
+                "bug",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "ready",
+                "--exclude-type",
+                "epic",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "An epic" not in result.stdout
+        assert "A bug" in result.stdout
+
     def test_ready_agent_only(self, tmp_path: Path) -> None:
         """Test that ready --agent-only filters out manual issues."""
         dogcats_dir = tmp_path / ".dogcats"

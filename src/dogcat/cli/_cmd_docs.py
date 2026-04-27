@@ -555,9 +555,11 @@ def register(app: typer.Typer) -> None:
     dcat list <parent_id>
     dcat list --parent <parent_id>        # same, using explicit flag
 
-  View a specific issue in detail:
+  View a specific issue in detail (or several at once):
 
     dcat show <issue_id>
+    dcat show <id1> <id2> <id3>           # rendered in order, separated by a rule
+    dcat show <id1> <id2> --json          # one JSON object per line (NDJSON)
 
   Search issues by keyword across all fields (title, description,
   notes, acceptance criteria, design, comments):
@@ -956,7 +958,7 @@ Allowed issue types, priorities, and statuses:
   dcat update <id> --blocks <other_id>       - Mark as blocking another
   dcat update <id> --remove-depends-on <id>  - Remove a dependency
   dcat update <id> --remove-blocks <id>      - Remove a blocks relationship
-  dcat show <id>                             - View issue details
+  dcat show <id> [<id> ...]                  - View one or more issues
   dcat random                                - Show one random issue (same filters)
   dcat search <query>                        - Search issues (supports --type filter)
   dcat close <id>                            - Mark issue as closed

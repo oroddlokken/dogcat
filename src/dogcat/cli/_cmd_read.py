@@ -273,6 +273,7 @@ def _filter_issues_for_list(
     status: str | None,
     priority: int | None,
     issue_type: str | None,
+    exclude_types: list[str] | None,
     label: str | None,
     owner: str | None,
     parent: str | None,
@@ -348,6 +349,7 @@ def _filter_issues_for_list(
 
     issues = apply_common_filters(
         issues,
+        exclude_types=exclude_types,
         agent_only=agent_only,
         manual_only=manual,
         has_comments=has_comments,
@@ -359,6 +361,18 @@ def _filter_issues_for_list(
     )
 
     return sorted(issues, key=lambda i: (i.priority, i.id))
+
+
+_SHOW_SEPARATOR_WIDTH = 72
+
+
+def _issue_separator(issue_id: str) -> str:
+    """Build the section header rule used between issues in `dcat show`."""
+    label = f"  {issue_id}  "
+    fill = max(_SHOW_SEPARATOR_WIDTH - len(label), 8)
+    left = fill // 2
+    right = fill - left
+    return ("─" * left) + label + ("─" * right)
 
 
 def _render_issue_show(issue: Issue, storage: JSONLStorage) -> str:
@@ -454,6 +468,12 @@ def register(app: typer.Typer) -> None:
             "--type",
             "-t",
             help="Filter by type",
+            autocompletion=complete_types,
+        ),
+        exclude_type: list[str] = typer.Option(  # noqa: B008
+            [],
+            "--exclude-type",
+            help="Exclude issues of this type (repeatable)",
             autocompletion=complete_types,
         ),
         label: str | None = typer.Option(
@@ -589,6 +609,7 @@ def register(app: typer.Typer) -> None:
                 status=status,
                 priority=priority,
                 issue_type=issue_type,
+                exclude_types=exclude_type,
                 label=label,
                 owner=owner,
                 parent=parent,
@@ -762,35 +783,52 @@ def register(app: typer.Typer) -> None:
     @app.command()
     @with_ns_shim
     def show(
-        issue_id: str = typer.Argument(
+        issue_ids: list[str] = typer.Argument(  # noqa: B008
             ...,
-            help="Issue ID",
+            help="Issue ID(s) to show",
             autocompletion=complete_issue_ids,
         ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
-        """Show details of a specific issue."""
-        try:
-            set_json(json_output)
-            storage = get_storage(dogcats_dir)
-            issue = storage.get(issue_id)
+        """Show details of one or more issues.
+
+        With multiple IDs, each issue's full block is rendered in argument
+        order, separated by a horizontal rule labeled with the next ID.
+        Missing IDs are reported but do not abort the rest of the run.
+        In JSON mode, each issue is emitted as one line of NDJSON.
+        """
+        set_json(json_output)
+        storage = get_storage(dogcats_dir)
+
+        has_errors = False
+        shown = 0
+        for issue_id in issue_ids:
+            try:
+                issue = storage.get(issue_id)
+            except Exception as e:  # noqa: BLE001
+                echo_error(str(e))
+                has_errors = True
+                continue
 
             if issue is None:
                 echo_error(f"Issue {issue_id} not found")
-                raise typer.Exit(1)
+                has_errors = True
+                continue
 
             if is_json():
                 from dogcat.models import issue_to_dict
 
                 typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
             else:
+                if shown > 0:
+                    typer.echo()
+                    typer.echo(_issue_separator(issue.full_id))
+                    typer.echo()
                 typer.echo(_render_issue_show(issue, storage))
+            shown += 1
 
-        except typer.Exit:
-            raise
-        except Exception as e:
-            echo_error(str(e))
+        if has_errors:
             raise typer.Exit(1)
 
     @app.command("random")
@@ -819,6 +857,12 @@ def register(app: typer.Typer) -> None:
             "--type",
             "-t",
             help="Filter by type",
+            autocompletion=complete_types,
+        ),
+        exclude_type: list[str] = typer.Option(  # noqa: B008
+            [],
+            "--exclude-type",
+            help="Exclude issues of this type (repeatable)",
             autocompletion=complete_types,
         ),
         label: str | None = typer.Option(
@@ -927,6 +971,7 @@ def register(app: typer.Typer) -> None:
                 status=status,
                 priority=priority,
                 issue_type=issue_type,
+                exclude_types=exclude_type,
                 label=label,
                 owner=owner,
                 parent=parent,

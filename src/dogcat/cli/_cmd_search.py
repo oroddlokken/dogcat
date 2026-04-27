@@ -62,6 +62,12 @@ def register(app: typer.Typer) -> None:
             help="Filter by type",
             autocompletion=complete_types,
         ),
+        exclude_type: list[str] = typer.Option(  # noqa: B008
+            [],
+            "--exclude-type",
+            help="Exclude issues of this type (repeatable)",
+            autocompletion=complete_types,
+        ),
         priority: int | None = typer.Option(
             None,
             "--priority",
@@ -152,6 +158,7 @@ def register(app: typer.Typer) -> None:
             # Apply common filters (namespace, priority, label, owner, manual/agent)
             issues = apply_common_filters(
                 issues,
+                exclude_types=exclude_type,
                 priority=priority,
                 label=label,
                 owner=owner,

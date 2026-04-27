@@ -25,7 +25,7 @@ from dogcat.models import Issue, Proposal, is_manual_issue
 from dogcat.storage import JSONLStorage
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
     import click
 
@@ -404,6 +404,7 @@ def apply_common_filters(
     issues: list[Issue],
     *,
     issue_type: str | None = None,
+    exclude_types: Iterable[str] | None = None,
     priority: int | None = None,
     label: str | None = None,
     owner: str | None = None,
@@ -433,6 +434,9 @@ def apply_common_filters(
 
     if issue_type:
         issues = [i for i in issues if i.issue_type.value == issue_type]
+    if exclude_types:
+        excluded = set(exclude_types)
+        issues = [i for i in issues if i.issue_type.value not in excluded]
     if priority is not None:
         issues = [i for i in issues if i.priority == priority]
     if label:

@@ -53,6 +53,12 @@ def register(app: typer.Typer) -> None:
             help="Filter by type",
             autocompletion=complete_types,
         ),
+        exclude_type: list[str] = typer.Option(  # noqa: B008
+            [],
+            "--exclude-type",
+            help="Exclude issues of this type (repeatable)",
+            autocompletion=complete_types,
+        ),
         priority: int | None = typer.Option(
             None,
             "--priority",
@@ -145,6 +151,7 @@ def register(app: typer.Typer) -> None:
             ready_issues = apply_common_filters(
                 ready_issues,
                 issue_type=issue_type,
+                exclude_types=exclude_type,
                 priority=priority,
                 label=label,
                 owner=owner,
@@ -217,6 +224,12 @@ def register(app: typer.Typer) -> None:
             "--type",
             "-t",
             help="Filter by type",
+            autocompletion=complete_types,
+        ),
+        exclude_type: list[str] = typer.Option(  # noqa: B008
+            [],
+            "--exclude-type",
+            help="Exclude issues of this type (repeatable)",
             autocompletion=complete_types,
         ),
         priority: int | None = typer.Option(
@@ -303,6 +316,7 @@ def register(app: typer.Typer) -> None:
             filtered = apply_common_filters(
                 underlying,
                 issue_type=issue_type,
+                exclude_types=exclude_type,
                 priority=priority,
                 label=label,
                 owner=owner,
@@ -375,6 +389,12 @@ def register(app: typer.Typer) -> None:
             "--type",
             "-t",
             help="Filter by type",
+            autocompletion=complete_types,
+        ),
+        exclude_type: list[str] = typer.Option(  # noqa: B008
+            [],
+            "--exclude-type",
+            help="Exclude issues of this type (repeatable)",
             autocompletion=complete_types,
         ),
         priority: int | None = typer.Option(
@@ -456,6 +476,7 @@ def register(app: typer.Typer) -> None:
             limit_arg=limit_arg,
             limit=limit,
             issue_type=issue_type,
+            exclude_types=exclude_type,
             priority=priority,
             label=label,
             owner=owner,
@@ -482,6 +503,12 @@ def register(app: typer.Typer) -> None:
             "--type",
             "-t",
             help="Filter by type",
+            autocompletion=complete_types,
+        ),
+        exclude_type: list[str] = typer.Option(  # noqa: B008
+            [],
+            "--exclude-type",
+            help="Exclude issues of this type (repeatable)",
             autocompletion=complete_types,
         ),
         priority: int | None = typer.Option(
@@ -563,6 +590,7 @@ def register(app: typer.Typer) -> None:
             limit_arg=limit_arg,
             limit=limit,
             issue_type=issue_type,
+            exclude_types=exclude_type,
             priority=priority,
             label=label,
             owner=owner,
@@ -589,6 +617,12 @@ def register(app: typer.Typer) -> None:
             "--type",
             "-t",
             help="Filter by type",
+            autocompletion=complete_types,
+        ),
+        exclude_type: list[str] = typer.Option(  # noqa: B008
+            [],
+            "--exclude-type",
+            help="Exclude issues of this type (repeatable)",
             autocompletion=complete_types,
         ),
         priority: int | None = typer.Option(
@@ -670,6 +704,7 @@ def register(app: typer.Typer) -> None:
             limit_arg=limit_arg,
             limit=limit,
             issue_type=issue_type,
+            exclude_types=exclude_type,
             priority=priority,
             label=label,
             owner=owner,
@@ -731,6 +766,7 @@ def register(app: typer.Typer) -> None:
         limit_arg: int | None,
         limit: int | None,
         issue_type: str | None,
+        exclude_types: list[str] | None,
         priority: int | None,
         label: str | None,
         owner: str | None,
@@ -764,6 +800,7 @@ def register(app: typer.Typer) -> None:
             issues = apply_common_filters(
                 issues,
                 issue_type=issue_type,
+                exclude_types=exclude_types,
                 priority=priority,
                 label=label,
                 owner=owner,
@@ -814,6 +851,12 @@ def register(app: typer.Typer) -> None:
             "--type",
             "-t",
             help="Filter by type",
+            autocompletion=complete_types,
+        ),
+        exclude_type: list[str] = typer.Option(  # noqa: B008
+            [],
+            "--exclude-type",
+            help="Exclude issues of this type (repeatable)",
             autocompletion=complete_types,
         ),
         priority: int | None = typer.Option(
@@ -895,6 +938,7 @@ def register(app: typer.Typer) -> None:
             limit_arg=limit_arg,
             limit=limit,
             issue_type=issue_type,
+            exclude_types=exclude_type,
             priority=priority,
             label=label,
             owner=owner,
@@ -920,6 +964,12 @@ def register(app: typer.Typer) -> None:
             "--type",
             "-t",
             help="Filter by type",
+            autocompletion=complete_types,
+        ),
+        exclude_type: list[str] = typer.Option(  # noqa: B008
+            [],
+            "--exclude-type",
+            help="Exclude issues of this type (repeatable)",
             autocompletion=complete_types,
         ),
         priority: int | None = typer.Option(
@@ -1001,6 +1051,7 @@ def register(app: typer.Typer) -> None:
             limit_arg=limit_arg,
             limit=limit,
             issue_type=issue_type,
+            exclude_types=exclude_type,
             priority=priority,
             label=label,
             owner=owner,
@@ -1026,6 +1077,12 @@ def register(app: typer.Typer) -> None:
             "--type",
             "-t",
             help="Filter by type",
+            autocompletion=complete_types,
+        ),
+        exclude_type: list[str] = typer.Option(  # noqa: B008
+            [],
+            "--exclude-type",
+            help="Exclude issues of this type (repeatable)",
             autocompletion=complete_types,
         ),
         priority: int | None = typer.Option(
@@ -1107,6 +1164,7 @@ def register(app: typer.Typer) -> None:
             limit_arg=limit_arg,
             limit=limit,
             issue_type=issue_type,
+            exclude_types=exclude_type,
             priority=priority,
             label=label,
             owner=owner,
@@ -1158,6 +1216,12 @@ def register(app: typer.Typer) -> None:
             "--type",
             "-t",
             help="Filter by type",
+            autocompletion=complete_types,
+        ),
+        exclude_type: list[str] = typer.Option(  # noqa: B008
+            [],
+            "--exclude-type",
+            help="Exclude issues of this type (repeatable)",
             autocompletion=complete_types,
         ),
         priority: int | None = typer.Option(
@@ -1225,6 +1289,7 @@ def register(app: typer.Typer) -> None:
             issues = apply_common_filters(
                 issues,
                 issue_type=issue_type,
+                exclude_types=exclude_type,
                 priority=priority,
                 label=label,
                 owner=owner,
@@ -1543,6 +1608,12 @@ def register(app: typer.Typer) -> None:
 
     @app.command(name="pr")
     def progress_review(
+        exclude_type: list[str] = typer.Option(  # noqa: B008
+            [],
+            "--exclude-type",
+            help="Exclude issues of this type (repeatable)",
+            autocompletion=complete_types,
+        ),
         no_parent: bool = typer.Option(
             False,
             "--no-parent",
@@ -1577,6 +1648,7 @@ def register(app: typer.Typer) -> None:
             storage = get_storage(dogcats_dir)
             ip_issues = apply_common_filters(
                 storage.list({"status": Status.IN_PROGRESS.value}),
+                exclude_types=exclude_type,
                 no_parent=no_parent,
                 agent_only=agent_only,
                 manual_only=manual,
@@ -1586,6 +1658,7 @@ def register(app: typer.Typer) -> None:
             )
             ir_issues = apply_common_filters(
                 storage.list({"status": Status.IN_REVIEW.value}),
+                exclude_types=exclude_type,
                 no_parent=no_parent,
                 agent_only=agent_only,
                 manual_only=manual,
@@ -1750,6 +1823,12 @@ def register(app: typer.Typer) -> None:
             help="Filter by type",
             autocompletion=complete_types,
         ),
+        exclude_type: list[str] = typer.Option(  # noqa: B008
+            [],
+            "--exclude-type",
+            help="Exclude issues of this type (repeatable)",
+            autocompletion=complete_types,
+        ),
         priority: int | None = typer.Option(
             None,
             "--priority",
@@ -1842,6 +1921,7 @@ def register(app: typer.Typer) -> None:
             issues = apply_common_filters(
                 issues,
                 issue_type=issue_type,
+                exclude_types=exclude_type,
                 priority=priority,
                 label=label,
                 owner=owner,

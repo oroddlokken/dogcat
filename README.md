@@ -103,6 +103,7 @@ You can always run `dcat example-md` to get an example of what to put in your AG
 | `dcat list` | List all open issues |
 | `dcat list --tree` | List issues as a parent-child tree |
 | `dcat show $id` | Show full details about an issue |
+| `dcat show $id1 $id2` | Show several issues, separated by a rule (NDJSON with `--json`) |
 | `dcat search "login"` | Search issues across all fields |
 | `dcat search "bug" --type bug` | Search with type filter |
 | `dcat labels` | List all labels with counts |

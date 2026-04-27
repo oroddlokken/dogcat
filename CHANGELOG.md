@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`--exclude-type` filter for list-style commands** — repeatable flag that drops issues of the given type while keeping their children visible, so e.g. `dcat list --exclude-type epic` shows the actionable work without the epic containers. Wired through the shared `apply_common_filters` helper, so it applies to `list`, `random`, `ready`, `blocked`, `pr`, `search`, `in-progress` (and `ip`), `in-review` (and `ir`), `open`, `deferred`, `manual`, and `snoozed`. Tab-completes the same set of types as `--type` (closes dogcat-39ju).
+- **`dcat show` accepts multiple issue IDs** — pass any number of IDs and each issue's full block is rendered in argument order, separated by a horizontal rule labeled with the next ID. Single-ID output is unchanged. Missing IDs print an error and exit non-zero but do not abort the rest of the run. With `--json`, each issue is emitted as one line of NDJSON, matching the convention used by `dcat close` / `dcat reopen` (closes dogcat-1sac).
+
 ### Fixed
 
 - **TUI bindings no longer block typing or bypass delete confirmation** — the panel-level `p` (Parent) binding had `priority=True`, which intercepted the letter `p` even while a focused Input/TextArea was being typed in (so `apple` was unreachable in edit mode). Dropped the priority flag so focused widgets consume `p` first. The dashboard also carried a hidden `Shift+D` binding that called the soft-delete path *without* the confirmation modal — one stray Shift away from data loss, with no footer hint. The `D` binding and its `action_force_delete_issue` handler are removed entirely; `d` (with the confirmation modal) remains the only TUI delete path (closes dogcat-29l8).
