@@ -303,6 +303,221 @@ class TestCLIShow:
         titles = [json.loads(line)["title"] for line in lines]
         assert titles == ["Alpha", "Beta"]
 
+    def test_show_all_filters_and_renders_full_blocks(self, tmp_path: Path) -> None:
+        """show-all applies list filters and renders each match as a full block."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        kept_a = runner.invoke(
+            app,
+            [
+                "create",
+                "Kept alpha",
+                "-d",
+                "Body for alpha issue",
+                "--type",
+                "bug",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        kept_b = runner.invoke(
+            app,
+            [
+                "create",
+                "Kept beta",
+                "-d",
+                "Body for beta issue",
+                "--type",
+                "bug",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Filtered out",
+                "-d",
+                "Body of filtered issue",
+                "--type",
+                "feature",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        kept_a_data = json.loads(kept_a.stdout)
+        kept_b_data = json.loads(kept_b.stdout)
+        kept_a_full = f"{kept_a_data['namespace']}-{kept_a_data['id']}"
+        kept_b_full = f"{kept_b_data['namespace']}-{kept_b_data['id']}"
+
+        result = runner.invoke(
+            app,
+            [
+                "show-all",
+                "--type",
+                "bug",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Kept alpha" in result.stdout
+        assert "Kept beta" in result.stdout
+        assert "Body for alpha issue" in result.stdout
+        assert "Body for beta issue" in result.stdout
+        assert "Filtered out" not in result.stdout
+        # Separator labeled with the second issue's full ID
+        assert "─" in result.stdout
+        assert kept_a_full in result.stdout
+        assert kept_b_full in result.stdout
+
+    def test_show_all_empty_result_text(self, tmp_path: Path) -> None:
+        """Empty filter result prints 'No issues found' and exits 0."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            [
+                "show-all",
+                "--type",
+                "feature",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "No issues found" in result.stdout
+
+    def test_show_all_empty_result_json(self, tmp_path: Path) -> None:
+        """Empty filter result with --json emits no output and exits 0."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            [
+                "show-all",
+                "--type",
+                "feature",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert result.stdout.strip() == ""
+
+    def test_show_all_json_emits_ndjson(self, tmp_path: Path) -> None:
+        """--json emits one issue per line."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        runner.invoke(
+            app,
+            ["create", "First", "--dogcats-dir", str(dogcats_dir)],
+        )
+        runner.invoke(
+            app,
+            ["create", "Second", "--dogcats-dir", str(dogcats_dir)],
+        )
+        runner.invoke(
+            app,
+            ["create", "Third", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["show-all", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        lines = [line for line in result.stdout.splitlines() if line.strip()]
+        assert len(lines) == 3
+        titles = sorted(json.loads(line)["title"] for line in lines)
+        assert titles == ["First", "Second", "Third"]
+
+    def test_show_all_respects_limit(self, tmp_path: Path) -> None:
+        """--limit caps the number of rendered issues."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        for title in ("One", "Two", "Three", "Four"):
+            runner.invoke(
+                app,
+                ["create", title, "--dogcats-dir", str(dogcats_dir)],
+            )
+
+        result = runner.invoke(
+            app,
+            [
+                "show-all",
+                "--limit",
+                "2",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        lines = [line for line in result.stdout.splitlines() if line.strip()]
+        assert len(lines) == 2
+
+    def test_show_all_excludes_closed_by_default(self, tmp_path: Path) -> None:
+        """Closed issues are hidden unless --closed/--all is passed."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        kept = runner.invoke(
+            app,
+            ["create", "Open issue", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        gone = runner.invoke(
+            app,
+            ["create", "Closed issue", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        gone_full = (
+            f"{json.loads(gone.stdout)['namespace']}-{json.loads(gone.stdout)['id']}"
+        )
+        runner.invoke(
+            app,
+            ["close", gone_full, "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        result = runner.invoke(
+            app,
+            ["show-all", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Open issue" in result.stdout
+        assert "Closed issue" not in result.stdout
+        # And the kept issue's full body actually rendered
+        kept_full = (
+            f"{json.loads(kept.stdout)['namespace']}-{json.loads(kept.stdout)['id']}"
+        )
+        assert kept_full in result.stdout
+
+    def test_show_all_comments_flags_mutually_exclusive(self, tmp_path: Path) -> None:
+        """--has-comments and --without-comments cannot be combined."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            [
+                "show-all",
+                "--has-comments",
+                "--without-comments",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 1
+        assert "mutually exclusive" in result.output
+
     def test_show_displays_parent(self, tmp_path: Path) -> None:
         """Test that show displays parent for child issues."""
         dogcats_dir = tmp_path / ".dogcats"

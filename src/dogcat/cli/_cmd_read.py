@@ -831,6 +831,198 @@ def register(app: typer.Typer) -> None:
         if has_errors:
             raise typer.Exit(1)
 
+    @app.command("show-all")
+    def show_all(
+        parent_arg: str | None = typer.Argument(
+            None,
+            help="Parent issue ID (shorthand for --parent)",
+            autocompletion=complete_issue_ids,
+        ),
+        status: str | None = typer.Option(
+            None,
+            "--status",
+            "-s",
+            help="Filter by status",
+            autocompletion=complete_statuses,
+        ),
+        priority: int | None = typer.Option(
+            None,
+            "--priority",
+            "-p",
+            help="Filter by priority",
+            autocompletion=complete_priorities,
+        ),
+        issue_type: str | None = typer.Option(
+            None,
+            "--type",
+            "-t",
+            help="Filter by type",
+            autocompletion=complete_types,
+        ),
+        exclude_type: list[str] = typer.Option(  # noqa: B008
+            [],
+            "--exclude-type",
+            help="Exclude issues of this type (repeatable)",
+            autocompletion=complete_types,
+        ),
+        label: str | None = typer.Option(
+            None,
+            "--label",
+            "-l",
+            help="Filter by label (comma or space separated)",
+            autocompletion=complete_labels,
+        ),
+        owner: str | None = typer.Option(
+            None,
+            "--owner",
+            "-o",
+            help="Filter by owner",
+            autocompletion=complete_owners,
+        ),
+        parent: str | None = typer.Option(
+            None,
+            "--parent",
+            help="Filter by parent issue ID",
+            autocompletion=complete_issue_ids,
+        ),
+        no_parent: bool = typer.Option(
+            False,
+            "--no-parent",
+            help="Show only top-level issues (no parent)",
+        ),
+        closed: bool = typer.Option(False, "--closed", help="Show only closed issues"),
+        open_issues: bool = typer.Option(
+            False,
+            "--open",
+            help="Show only open/in-progress issues",
+        ),
+        all_issues: bool = typer.Option(
+            False,
+            "--all",
+            help="Include archived and deleted issues",
+        ),
+        closed_after: str | None = typer.Option(
+            None,
+            "--closed-after",
+            help="Issues closed after date (ISO8601)",
+            autocompletion=complete_dates,
+        ),
+        closed_before: str | None = typer.Option(
+            None,
+            "--closed-before",
+            help="Issues closed before date (ISO8601)",
+            autocompletion=complete_dates,
+        ),
+        limit: int | None = typer.Option(None, "--limit", help="Limit results"),
+        namespace: str | None = typer.Option(
+            None,
+            "--namespace",
+            help="Filter by namespace",
+            autocompletion=complete_namespaces,
+        ),
+        all_namespaces: bool = typer.Option(
+            False,
+            "--all-namespaces",
+            "--all-ns",
+            "-A",
+            help="Show issues from all namespaces",
+        ),
+        agent_only: bool = typer.Option(
+            False,
+            "--agent-only",
+            help="Only show issues available for agents",
+        ),
+        manual: bool = typer.Option(
+            False,
+            "--manual",
+            help="Only show issues marked as manual",
+        ),
+        has_comments: bool = typer.Option(
+            False,
+            "--has-comments",
+            help="Only show issues that have at least one comment",
+        ),
+        without_comments: bool = typer.Option(
+            False,
+            "--without-comments",
+            help="Only show issues that have no comments",
+        ),
+        include_snoozed: bool = typer.Option(
+            False,
+            "--include-snoozed",
+            help="Include snoozed issues in results",
+        ),
+        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+    ) -> None:
+        """Render the full `show` block for every issue matching the list filters.
+
+        Same filter surface as `dcat list`. Each issue is rendered with the
+        same body and separator `dcat show id1 id2` already uses; in JSON
+        mode each issue is emitted as one line of NDJSON.
+        """
+        set_json(json_output)
+        try:
+            if has_comments and without_comments:
+                echo_error(
+                    "--has-comments and --without-comments are mutually exclusive"
+                )
+                raise typer.Exit(1)
+
+            storage = get_storage(dogcats_dir)
+            issues = _filter_issues_for_list(
+                storage,
+                status=status,
+                priority=priority,
+                issue_type=issue_type,
+                exclude_types=exclude_type,
+                label=label,
+                owner=owner,
+                parent=parent,
+                parent_arg=parent_arg,
+                no_parent=no_parent,
+                closed=closed,
+                open_issues=open_issues,
+                all_issues=all_issues,
+                closed_after=closed_after,
+                closed_before=closed_before,
+                namespace=namespace,
+                all_namespaces=all_namespaces,
+                agent_only=agent_only,
+                manual=manual,
+                has_comments=has_comments,
+                without_comments=without_comments,
+                include_snoozed=include_snoozed,
+            )
+
+            final_limit = resolve_limit(None, limit)
+            if final_limit is not None:
+                issues = issues[:final_limit]
+
+            if is_json():
+                from dogcat.models import issue_to_dict
+
+                for issue in issues:
+                    typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
+                return
+
+            if not issues:
+                typer.echo("No issues found")
+                return
+
+            for index, issue in enumerate(issues):
+                if index > 0:
+                    typer.echo()
+                    typer.echo(_issue_separator(issue.full_id))
+                    typer.echo()
+                typer.echo(_render_issue_show(issue, storage))
+
+        except typer.Exit:
+            raise
+        except Exception as e:
+            echo_error(str(e))
+            raise typer.Exit(1)
+
     @app.command("random")
     def random_issue(
         parent_arg: str | None = typer.Argument(

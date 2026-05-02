@@ -561,6 +561,14 @@ def register(app: typer.Typer) -> None:
     dcat show <id1> <id2> <id3>           # rendered in order, separated by a rule
     dcat show <id1> <id2> --json          # one JSON object per line (NDJSON)
 
+  Render the full show block for every issue matching `dcat list` filters
+  (description, dependencies, links, children, metadata) — same separator,
+  same NDJSON behavior with --json:
+
+    dcat show-all --type bug --priority 1
+    dcat show-all --label cli --status in_progress
+    dcat show-all --agent-only --json     # NDJSON, one issue per line
+
   Search issues by keyword across all fields (title, description,
   notes, acceptance criteria, design, comments):
 
