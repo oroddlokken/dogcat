@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.12.1 (2026-05-02)
+
 ### Added
 
 - **`--exclude-type` filter for list-style commands** — repeatable flag that drops issues of the given type while keeping their children visible, so e.g. `dcat list --exclude-type epic` shows the actionable work without the epic containers. Wired through the shared `apply_common_filters` helper, so it applies to `list`, `random`, `ready`, `blocked`, `pr`, `search`, `in-progress` (and `ip`), `in-review` (and `ir`), `open`, `deferred`, `manual`, and `snoozed`. Tab-completes the same set of types as `--type` (closes dogcat-39ju).
