@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from rich.markup import escape
@@ -430,7 +431,8 @@ class DogcatTUI(App[None]):
         full_id = self._get_selected_issue_id()
         if full_id is not None:
             await self._show_issue_in_panel(full_id)
-        self.query_one("#issue-list", OptionList).focus()
+        with suppress(NoMatches):
+            self.query_one("#issue-list", OptionList).focus()
         self._reapply_split_mode_to_size()
 
     def on_issue_detail_panel_edit_mode_changed(self, event: Any) -> None:
