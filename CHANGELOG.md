@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Top-level `-C` / `--repo PATH` option** — mirrors `git -C`: resolve and validate the path, then chdir into it before command dispatch so `.dogcats/` discovery uses the target repo. Applies to all subcommands; errors clearly when the path does not exist or contains no discoverable `.dogcats/` (closes dogcat-4o4k).
+
+### Development
+
+- **`release-prep` refuses to re-release a published version** — exits early when `v${VERSION}` already exists as a tag, and when a release branch is already present but main has new commits since the previous RC it syncs the branch to main and force-pushes with lease instead of leaving the RC stale.
+
 ## 0.12.1 (2026-05-02)
 
 ### Added
