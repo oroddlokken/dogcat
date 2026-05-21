@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.12.2 (2026-05-21)
+
 ### Added
 
 - **Top-level `-C` / `--repo PATH` option** — mirrors `git -C`: resolve and validate the path, then chdir into it before command dispatch so `.dogcats/` discovery uses the target repo. Applies to all subcommands; errors clearly when the path does not exist or contains no discoverable `.dogcats/` (closes dogcat-4o4k).
