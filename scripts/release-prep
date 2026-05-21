@@ -56,6 +56,14 @@ BRANCH="release/v${VERSION}"
 TAG_PREFIX="v${VERSION}-rc"
 WORKTREE_DIR=".release-worktree"
 
+# Bail out if v${VERSION} has already been released. Without this guard,
+# re-running with a shipped version cuts a stray RC tag against already-
+# released code and can re-trigger the publish workflow.
+git fetch --tags --quiet 2>/dev/null || true
+if git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null; then
+    die "v${VERSION} is already released — pick a new version."
+fi
+
 # ── Phase 1: Local checks ────────────────────────────────────────────
 if [[ "$SKIP_CHECKS" == false ]]; then
     info "Running lint-all…"
@@ -88,8 +96,18 @@ if [[ -d "$WORKTREE_DIR" ]]; then
 fi
 
 # Create or reuse release branch in a temporary worktree
+NEEDS_FORCE_PUSH=false
 if git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
     git worktree add "$WORKTREE_DIR" "${BRANCH}"
+    # If main has new commits the release branch doesn't include, hard-reset
+    # the branch to main so any fixes that landed since the previous RC are
+    # picked up. The changelog stamp gets re-created below.
+    NEW_ON_MAIN=$(git -C "$WORKTREE_DIR" rev-list --count "HEAD..main")
+    if [[ "$NEW_ON_MAIN" -gt 0 ]]; then
+        info "Syncing ${BRANCH} to main (${NEW_ON_MAIN} new commit(s) since previous RC)"
+        git -C "$WORKTREE_DIR" reset --hard main
+        NEEDS_FORCE_PUSH=true
+    fi
 else
     git worktree add -b "${BRANCH}" "$WORKTREE_DIR"
 fi
@@ -114,7 +132,12 @@ if [[ -n "$EXISTING_TAG" ]]; then
 else
     # Tag and push
     git -C "$WORKTREE_DIR" tag -a "${RC_TAG}" -m "Release candidate ${RC_TAG}"
-    git push -u origin "${BRANCH}" --tags
+    if [[ "$NEEDS_FORCE_PUSH" == true ]]; then
+        git push --force-with-lease -u origin "${BRANCH}"
+        git push origin "${RC_TAG}"
+    else
+        git push -u origin "${BRANCH}" --tags
+    fi
     ok "RC tag ${RC_TAG} pushed"
 fi
 

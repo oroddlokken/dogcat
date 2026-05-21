@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 import typer
 
 from ._helpers import SortedGroup
@@ -22,11 +25,29 @@ def _global_options(
         "--json",
         help="Output as JSON for all commands",
     ),
+    repo: str | None = typer.Option(
+        None,
+        "-C",
+        "--repo",
+        metavar="PATH",
+        help="Run as if dcat was started in PATH.",
+    ),
 ) -> None:
     from ._json_state import reset_json, set_json
 
     reset_json()
     set_json(json_output)
+    if repo is not None:
+        target = Path(repo).expanduser()
+        try:
+            resolved = target.resolve(strict=True)
+        except FileNotFoundError:
+            typer.echo(f"Error: -C path does not exist: {target}", err=True)
+            raise typer.Exit(1) from None
+        if not resolved.is_dir():
+            typer.echo(f"Error: -C path is not a directory: {resolved}", err=True)
+            raise typer.Exit(1)
+        os.chdir(resolved)
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
         raise typer.Exit(0)
