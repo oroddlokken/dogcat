@@ -275,11 +275,30 @@ def find_dogcats_dir(start_dir: str | None = None) -> str:
         parent = current.parent
         if parent == current:
             # Reached filesystem root — try git worktree fallback
-            return _find_dogcats_via_worktree() or ".dogcats"
+            return _fallback_to_global_or_default()
         if boundary is not None and current == boundary:
             # Stop at the boundary; do not trust ancestors above it.
-            return _find_dogcats_via_worktree() or ".dogcats"
+            return _fallback_to_global_or_default()
         current = parent
+
+
+def _fallback_to_global_or_default() -> str:
+    """Try git worktree, then global config default_storage, then ``.dogcats``.
+
+    Returns the global ``default_storage`` only if the path exists.
+    Otherwise returns the literal ``.dogcats`` (current behavior).
+    """
+    from dogcat.global_config import load_global_config
+
+    worktree = _find_dogcats_via_worktree()
+    if worktree is not None:
+        return worktree
+
+    cfg = load_global_config()
+    if cfg.default_storage is not None and cfg.default_storage.is_dir():
+        return str(cfg.default_storage)
+
+    return ".dogcats"
 
 
 def _find_dogcats_via_worktree() -> str | None:

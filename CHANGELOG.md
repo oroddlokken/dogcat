@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Optional user-global config at `$XDG_CONFIG_HOME/dogcat/config.toml`**. Lets repos without a local `.dogcats/` or `.dogcatrc` fall back to a shared `.dogcats` directory configured once per machine. Set with `dcat config set --global default_storage <path>`. Namespace is derived from the cwd folder name via a slug function that handles Norwegian and German digraphs (e.g. `~/dev/læring/` becomes `laering`). Backwards compatible: behavior is unchanged unless you create the file. `dcat config set/get/unset --global` and `dcat config list` are new. `dcat doctor` and `dcat prime` report global config status.
+
 ## 0.12.2 (2026-05-21)
 
 ### Added

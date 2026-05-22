@@ -84,6 +84,12 @@ _KNOWN_KEYS: dict[str, dict[str, Any]] = {
         "default": "(none)",
         "local_only": True,
     },
+    "default_storage": {
+        "type": "str",
+        "description": "Path to .dogcats used as global fallback (global only)",
+        "default": "(unset)",
+        "global_only": True,
+    },
 }
 
 _TRUE_VALUES = frozenset({"true", "1", "yes", "on"})
@@ -128,13 +134,36 @@ def register(app: typer.Typer) -> None:
             "--local",
             help="Save to config.local.toml (gitignored, machine-specific)",
         ),
+        global_: bool = typer.Option(
+            False,
+            "--global",
+            help="Save to ~/.config/dogcat/config.toml (user-global)",
+        ),
     ) -> None:
         """Set a configuration value."""
-        dogcats_dir = find_dogcats_dir()
-        coerced = _coerce_value(key, value)
+        if local and global_:
+            echo_error("--local and --global are mutually exclusive")
+            raise typer.Exit(2)
 
-        # Check if key is local-only
+        coerced = _coerce_value(key, value)
         key_info = _KNOWN_KEYS.get(key, {})
+
+        if global_:
+            from dogcat.global_config import save_global_config_value
+
+            save_global_config_value(key, coerced)
+            typer.echo(f"Set {key} = {coerced} (global)")
+            return
+
+        if key_info.get("global_only"):
+            typer.echo(
+                f"Warning: '{key}' is a global-only setting. "
+                f"Use 'dcat config set --global {key} <value>' instead.",
+                err=True,
+            )
+
+        dogcats_dir = find_dogcats_dir()
+
         if key_info.get("local_only") and not local:
             typer.echo(
                 f"Note: '{key}' is a machine-specific setting. "
@@ -170,11 +199,33 @@ def register(app: typer.Typer) -> None:
             autocompletion=complete_config_keys,
         ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+        global_: bool = typer.Option(
+            False,
+            "--global",
+            help="Read from ~/.config/dogcat/config.toml",
+        ),
     ) -> None:
         """Get a configuration value."""
         import orjson
 
         set_json(json_output)
+
+        if global_:
+            from dogcat.global_config import _load_raw
+
+            data = _load_raw()
+            if key not in data:
+                echo_error(f"Key '{key}' not found in global config")
+                raise typer.Exit(1)
+            val = data[key]
+            if is_json():
+                typer.echo(orjson.dumps({key: val}).decode())
+            elif isinstance(val, list):
+                typer.echo(", ".join(str(i) for i in val))  # type: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+            else:
+                typer.echo(val)
+            return
+
         dogcats_dir = find_dogcats_dir()
         config = load_config(dogcats_dir)
         if key not in config:
@@ -188,6 +239,50 @@ def register(app: typer.Typer) -> None:
         else:
             typer.echo(val)
 
+    @config_app.command("unset")
+    def config_unset(
+        key: str = typer.Argument(
+            ...,
+            help="Configuration key to remove",
+            autocompletion=complete_config_keys,
+        ),
+        local: bool = typer.Option(
+            False,
+            "--local",
+            help="Remove from config.local.toml",
+        ),
+        global_: bool = typer.Option(
+            False,
+            "--global",
+            help="Remove from ~/.config/dogcat/config.toml",
+        ),
+    ) -> None:
+        """Remove a configuration value."""
+        if local and global_:
+            echo_error("--local and --global are mutually exclusive")
+            raise typer.Exit(2)
+
+        if global_:
+            from dogcat.global_config import unset_global_config_value
+
+            unset_global_config_value(key)
+            typer.echo(f"Unset {key} (global)")
+            return
+
+        dogcats_dir = find_dogcats_dir()
+        if local:
+            config = load_local_config(dogcats_dir)
+            if key in config:
+                del config[key]
+                save_local_config(dogcats_dir, config)
+            typer.echo(f"Unset {key} (local)")
+        else:
+            config = load_shared_config(dogcats_dir)
+            if key in config:
+                del config[key]
+                save_config(dogcats_dir, config)
+            typer.echo(f"Unset {key}")
+
     @config_app.command("list")
     def config_list(
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
@@ -196,17 +291,31 @@ def register(app: typer.Typer) -> None:
         set_json(json_output)
         import orjson
 
+        from dogcat.global_config import _load_raw
+
         dogcats_dir = find_dogcats_dir()
         config = load_config(dogcats_dir)
+        global_data = _load_raw()
+        # Local/shared config wins over global; merge for effective view.
+        effective = {**global_data, **config}
+        global_keys = set(global_data.keys())
+        local_keys = set(load_local_config(dogcats_dir).keys())
+
         if is_json():
-            typer.echo(orjson.dumps(config, option=orjson.OPT_INDENT_2).decode())
+            typer.echo(orjson.dumps(effective, option=orjson.OPT_INDENT_2).decode())
         else:
-            if not config:
+            if not effective:
                 typer.echo("No configuration values set.")
             else:
-                local_keys = set(load_local_config(dogcats_dir).keys())
-                for k, v in sorted(config.items()):
-                    suffix = " (local)" if k in local_keys else ""
+                for k, v in sorted(effective.items()):
+                    if k in local_keys:
+                        suffix = " (local)"
+                    elif k in global_keys and k not in config:
+                        suffix = " (global)"
+                    elif k in global_keys:
+                        suffix = " (shared, overrides global)"
+                    else:
+                        suffix = ""
                     if isinstance(v, list):
                         typer.echo(f"{k} = {', '.join(str(i) for i in v)}{suffix}")  # type: ignore[reportUnknownArgumentType, reportUnknownVariableType]
                     else:

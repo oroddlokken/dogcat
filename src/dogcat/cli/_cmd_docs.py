@@ -876,10 +876,21 @@ def register(app: typer.Typer) -> None:
         """
         dogcats_dir = find_dogcats_dir()
         if not Path(dogcats_dir).is_dir():
-            typer.echo(
-                "No .dogcats/ found — running in a project without"
-                " dogcat initialized, skipping instructions."
-            )
+            from dogcat.global_config import load_global_config
+
+            global_cfg = load_global_config()
+            if global_cfg.default_storage is not None:
+                typer.echo(
+                    "No .dogcats/ found here, and the global default_storage at "
+                    f"{global_cfg.default_storage} does not exist. "
+                    "Either create the directory or update your global config "
+                    "with `dcat config set --global default_storage <path>`."
+                )
+            else:
+                typer.echo(
+                    "No .dogcats/ found. Running in a project without"
+                    " dogcat initialized, skipping instructions."
+                )
             return
 
         # --replay: load saved flags from previous invocation

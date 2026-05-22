@@ -525,18 +525,49 @@ def _resolve_dogcats_path(dogcats_dir: str) -> str:
 
         parent = current.parent
         if parent == current:
-            return dogcats_dir  # Filesystem root — fall back to original
+            # Filesystem root reached. Try global config before falling back.
+            from dogcat.global_config import load_global_config
+
+            cfg = load_global_config()
+            if cfg.default_storage is not None and cfg.default_storage.is_dir():
+                return str(cfg.default_storage)
+            return dogcats_dir  # Filesystem root, fall back to original
         current = parent
+
+
+def _is_global_store(dogcats_dir: str) -> bool:
+    """Return True if ``dogcats_dir`` is the user-global default_storage.
+
+    Used to decide whether to apply cwd-based auto-namespace.
+    """
+    from dogcat.global_config import load_global_config
+
+    cfg = load_global_config()
+    if cfg.default_storage is None:
+        return False
+    try:
+        return Path(dogcats_dir).resolve() == cfg.default_storage.resolve()
+    except OSError:
+        return False
+
+
+def slug_from_cwd_name() -> str | None:
+    """Return the slug of ``Path.cwd().name``, or None if not sluggable."""
+    from dogcat.namespace_slug import slug_from_dir
+
+    return slug_from_dir(Path.cwd().name)
 
 
 def get_issue_prefix(dogcats_dir: str) -> str:
     """Get the issue prefix from config or return default.
 
     Precedence:
-    1. issue_prefix from config.toml
-    2. Auto-detect from existing issues (most common prefix)
-    3. Auto-detect from directory name
-    4. Default prefix ("dc")
+    1. Repo-local namespace (.dogcatrc walk-up to .dogcats/config.local.toml)
+    2. In global-store mode: slug of the cwd folder name
+    3. Namespace from local/shared config.toml in the storage dir
+    4. Auto-detect from existing issues (most common prefix)
+    5. Auto-detect from directory name
+    6. Default prefix ("dc")
 
     Args:
         dogcats_dir: Path to .dogcats directory
@@ -547,7 +578,22 @@ def get_issue_prefix(dogcats_dir: str) -> str:
     # Resolve the actual .dogcats path (handles subdirectory invocations)
     dogcats_dir = _resolve_dogcats_path(dogcats_dir)
 
-    # Try config file first ("namespace" key, with "issue_prefix" fallback)
+    # In global-store mode, prefer cwd-derived namespace over the shared
+    # store's primary prefix. Repo-local config.local.toml still wins.
+    if _is_global_store(dogcats_dir):
+        repo_local_path = _get_repo_local_config_path()
+        if repo_local_path is not None:
+            repo_local = _load_toml(repo_local_path)
+            if "namespace" in repo_local:
+                return repo_local["namespace"]
+            if "issue_prefix" in repo_local:
+                return repo_local["issue_prefix"]
+        slug = slug_from_cwd_name()
+        if slug:
+            return slug
+        # Fall through if cwd is not sluggable (CJK, emoji, etc.).
+
+    # Try config file ("namespace" key, with "issue_prefix" fallback)
     config = load_config(dogcats_dir)
     if "namespace" in config:
         return config["namespace"]
@@ -685,6 +731,19 @@ def get_namespace_filter(
     hidden: list[str] | None = config.get("hidden_namespaces")
 
     primary = get_issue_prefix(dogcats_dir)
+
+    # If we resolved via global config, layer global visible_namespaces
+    # under local config. When cwd has a slug (so namespace was cwd-derived),
+    # filter to that namespace alone.
+    if _is_global_store(dogcats_dir) and not visible and not hidden:
+        from dogcat.global_config import load_global_config
+
+        gcfg = load_global_config()
+        if gcfg.visible_namespaces:
+            allowed = set(gcfg.visible_namespaces)
+            allowed.add(primary)
+            return lambda ns: ns in allowed
+        return lambda ns: ns == primary
 
     if not visible and not hidden:
         # In .dogcatrc context (shared database), default to primary namespace

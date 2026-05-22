@@ -127,6 +127,46 @@ def register(app: typer.Typer) -> None:
         if dogcats_dir == ".dogcats" and not Path(dogcats_dir).exists():
             dogcats_dir = find_dogcats_dir()
 
+        # Check: global config status (~/.config/dogcat/config.toml)
+        from dogcat.global_config import (
+            get_global_config_path,
+            load_global_config,
+        )
+
+        global_cfg_path = get_global_config_path()
+        global_cfg = load_global_config()
+        if global_cfg_path.is_file():
+            global_storage_ok = (
+                global_cfg.default_storage is not None
+                and global_cfg.default_storage.is_dir()
+            )
+            description = (
+                f"global config at {global_cfg_path}: "
+                f"default_storage={global_cfg.default_storage}"
+            )
+            report.add(
+                "global_config",
+                DoctorCheck(
+                    description=description,
+                    passed=global_storage_ok,
+                    fix=(
+                        None
+                        if global_storage_ok
+                        else "Set or update default_storage with "
+                        "`dcat config set --global default_storage <path>`"
+                    ),
+                ),
+            )
+        else:
+            report.add(
+                "global_config",
+                DoctorCheck(
+                    description="global config: not configured",
+                    passed=True,
+                    optional=True,
+                ),
+            )
+
         # Check 1: .dogcats directory exists
         dogcats_path = Path(dogcats_dir)
         report.add(

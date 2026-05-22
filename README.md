@@ -42,9 +42,27 @@ Install `uv`, then run `./dcat.py`.
 Run `dcat init` to initialize the program. Then you can run `dcat prime` to see the information an AI agent should use.  
 For a guide more suited for humans, run `dcat guide`.
 
-Alternatively, you can run `dcat init --use-existing-folder /home/me/project/.dogcats` to use a shared dogcat database.
-
 If you don't want to store issues in git, use `dcat init --no-git`.
+
+### Sharing a dogcat database between multiple repos
+
+Three setups, in order of scope:
+
+1. **Per-repo:** `dcat init` creates a local `.dogcats/`. The default.
+
+2. **A few repos sharing one store:** `dcat init --use-existing-folder /path/to/.dogcats` writes a `.dogcatrc` in the repo pointing at the shared directory. Each repo can set its own namespace with `dcat config set --local namespace <name>`.
+
+3. **Machine-wide default:** Set a global default store that any new repo without its own `.dogcats/` or `.dogcatrc` will fall back to:
+
+   ```bash
+   dcat config set --global default_storage ~/dev/issues/.dogcats
+   ```
+
+   New repos will automatically resolve to the shared store, using a namespace derived from the repo's directory name. Existing per-repo setups continue to work; global config is only used as a last fallback.
+
+   The config lives at `$XDG_CONFIG_HOME/dogcat/config.toml` (or `~/.config/dogcat/config.toml`).
+
+See [docs/sharing-a-database.md](docs/sharing-a-database.md) for details, including how to migrate existing per-repo databases into a shared one.
 
 ### Telling your agent to use dogcat
 
