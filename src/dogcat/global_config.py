@@ -5,6 +5,10 @@ directory and an auto-namespace policy for repos that have no local
 .dogcats/, no walk-up .dogcatrc, and no other configuration.
 
 Without this file dogcat behaves exactly as before.
+
+Only the keys in :data:`GLOBAL_CONFIG_KEYS` are read from this file;
+`dcat config set --global` rejects anything else so the file can't
+accumulate settings that look configured but are never honored.
 """
 
 from __future__ import annotations
@@ -21,14 +25,14 @@ if sys.version_info >= (3, 11):
 else:
     import tomli as tomllib
 
-import contextlib
-
-import tomli_w
+from dogcat.constants import GLOBAL_CONFIG_DIRNAME, GLOBAL_CONFIG_FILENAME
 
 _logger = logging.getLogger(__name__)
 
-GLOBAL_CONFIG_DIRNAME = "dogcat"
-GLOBAL_CONFIG_FILENAME = "config.toml"
+# Keys the runtime actually reads from the global config file.
+GLOBAL_CONFIG_KEYS: frozenset[str] = frozenset(
+    {"default_storage", "visible_namespaces"}
+)
 
 
 @dataclass
@@ -55,8 +59,13 @@ def _expand_path(value: str) -> Path:
     return Path(os.path.expandvars(value)).expanduser()
 
 
-def _load_raw() -> dict[str, Any]:
-    """Load the raw TOML as a dict. Empty dict on missing/malformed file."""
+def load_global_config_raw() -> dict[str, Any]:
+    """Load the raw TOML as a dict. Empty dict on missing/malformed file.
+
+    Parse errors are logged rather than raised, matching
+    :func:`dogcat.config._load_toml`; ``dcat doctor`` surfaces them via
+    :func:`dogcat.config.check_toml_parseable`.
+    """
     path = get_global_config_path()
     if not path.is_file():
         return {}
@@ -70,7 +79,7 @@ def _load_raw() -> dict[str, Any]:
 
 def load_global_config() -> GlobalConfig:
     """Load the user-global config. Returns defaults if missing or malformed."""
-    data = _load_raw()
+    data = load_global_config_raw()
     if not data:
         return GlobalConfig()
 
@@ -90,41 +99,84 @@ def load_global_config() -> GlobalConfig:
     )
 
 
-def _atomic_write(path: Path, data: dict[str, Any]) -> None:
-    """Write TOML atomically via write-tmp + fsync + replace."""
-    import tempfile
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(
-        prefix=path.name + ".",
-        suffix=".tmp",
-        dir=str(path.parent),
-    )
-    try:
-        with os.fdopen(fd, "wb") as f:
-            tomli_w.dump(data, f)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_name, path)  # noqa: PTH105
-    except BaseException:
-        with contextlib.suppress(OSError):
-            Path(tmp_name).unlink()
-        raise
-
-
 def save_global_config_value(key: str, value: Any) -> None:
     """Set a single key in the global config. Creates dir + file if needed."""
-    data = _load_raw()
+    from dogcat.config import atomic_write_toml
+
+    data = load_global_config_raw()
     data[key] = value
-    _atomic_write(get_global_config_path(), data)
+    atomic_write_toml(get_global_config_path(), data)
 
 
 def unset_global_config_value(key: str) -> None:
     """Remove a key from the global config. No-op if file or key is missing."""
+    from dogcat.config import atomic_write_toml
+
     path = get_global_config_path()
     if not path.is_file():
         return
-    data = _load_raw()
+    data = load_global_config_raw()
     if key in data:
         del data[key]
-        _atomic_write(path, data)
+        atomic_write_toml(path, data)
+
+
+# --- Resolution state -------------------------------------------------
+#
+# Namespace derivation and default filtering behave differently when the
+# storage directory was reached via the global fallback (no local
+# .dogcats, no .dogcatrc). That fact is recorded here at the resolution
+# site instead of being re-derived later by path comparison — a repo
+# whose .dogcatrc points at the same store, or the store's own home
+# repo, must NOT get fallback semantics. Process-global state is fine
+# for a one-shot CLI (same pattern as cli._json_state).
+
+_global_fallback_path: Path | None = None
+
+
+def resolve_global_fallback() -> str | None:
+    """Return ``default_storage`` if configured and an existing directory.
+
+    Records that resolution went through the global fallback (see
+    :func:`was_resolved_via_global`) and prints a one-time stderr notice
+    so issue writes never land in the shared store silently.
+    """
+    global _global_fallback_path
+
+    cfg = load_global_config()
+    if cfg.default_storage is None or not cfg.default_storage.is_dir():
+        return None
+
+    if _global_fallback_path is None:
+        _global_fallback_path = cfg.default_storage.resolve()
+        from dogcat.namespace_slug import slug_from_dir
+
+        slug = slug_from_dir(Path.cwd().name)
+        namespace_note = (
+            f" (namespace '{slug}' from folder name)"
+            if slug
+            else " (namespace from store config)"
+        )
+        print(
+            f"dcat: no local .dogcats or .dogcatrc found, using global "
+            f"default_storage at {_global_fallback_path}{namespace_note}",
+            file=sys.stderr,
+        )
+
+    return str(cfg.default_storage)
+
+
+def was_resolved_via_global(dogcats_dir: str | Path) -> bool:
+    """Return True if ``dogcats_dir`` was resolved via the global fallback."""
+    if _global_fallback_path is None:
+        return False
+    try:
+        return Path(dogcats_dir).resolve() == _global_fallback_path
+    except OSError:
+        return False
+
+
+def reset_resolution_state() -> None:
+    """Forget any recorded global-fallback resolution (test isolation)."""
+    global _global_fallback_path
+    _global_fallback_path = None

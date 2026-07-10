@@ -148,6 +148,10 @@ ID_LENGTH_MAX = 7
 # Config file for external .dogcats directory
 DOGCATRC_FILENAME = ".dogcatrc"
 
+# User-global config: $XDG_CONFIG_HOME/dogcat/config.toml
+GLOBAL_CONFIG_DIRNAME = "dogcat"
+GLOBAL_CONFIG_FILENAME = "config.toml"
+
 # Git merge driver configuration
 MERGE_DRIVER_CMD = "dcat git merge-driver %O %A %B"
 MERGE_DRIVER_NAME = "dogcat JSONL merge driver"

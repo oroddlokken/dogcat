@@ -100,7 +100,7 @@ The `.dogcatrc` file should be committed; it tells everyone where the shared dat
 
 ## Migrating existing repos
 
-If you already have multiple repos each with their own `.dogcats/issues.jsonl`, the `migrate-dogcats.sh` script in this directory merges them into one shared database, backing up the originals first. Edit the `REPOS` array near the top of the script to match your layout, then run with `--dry-run` first to preview.
+There is no built-in command yet for merging existing per-repo databases into a shared one. Until there is, the safe approach is to keep old repos on their existing `.dogcats/` stores (local stores always win over the global fallback) and let the shared store grow from new repos. Avoid concatenating `issues.jsonl` files by hand — the append-only audit log depends on records being written in order by the CLI.
 
 ## Cross-repo issue creation
 
@@ -134,4 +134,6 @@ Within the chosen storage directory, config is merged in this order (later wins)
 
 Repo-local settings (namespace, visible_namespaces) always take precedence.
 
-When using global config, the namespace resolves as: repo-local `config.local.toml`, then the slug of the cwd folder name, then the shared store's `config.toml` namespace.
+When storage resolves via the global fallback (no local `.dogcats/`, no `.dogcatrc`), the namespace is the slug of the cwd folder name, falling back to the shared store's `config.toml` namespace when the folder name isn't sluggable. Repos that reach the same store through a `.dogcatrc` — or the store's own home directory — are *not* in fallback mode and use the normal config chain above. dcat prints a one-time notice on stderr whenever the global fallback is used, so writes to the shared store are never silent.
+
+Only two keys are read from the global config file: `default_storage` and `visible_namespaces`. `dcat config set --global` rejects anything else.

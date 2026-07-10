@@ -285,20 +285,18 @@ def find_dogcats_dir(start_dir: str | None = None) -> str:
 def _fallback_to_global_or_default() -> str:
     """Try git worktree, then global config default_storage, then ``.dogcats``.
 
-    Returns the global ``default_storage`` only if the path exists.
-    Otherwise returns the literal ``.dogcats`` (current behavior).
+    The global fallback (``resolve_global_fallback``) applies only when
+    the configured path exists, records that resolution went through it,
+    and prints a one-time stderr notice. Otherwise returns the literal
+    ``.dogcats`` (current behavior).
     """
-    from dogcat.global_config import load_global_config
+    from dogcat.global_config import resolve_global_fallback
 
     worktree = _find_dogcats_via_worktree()
     if worktree is not None:
         return worktree
 
-    cfg = load_global_config()
-    if cfg.default_storage is not None and cfg.default_storage.is_dir():
-        return str(cfg.default_storage)
-
-    return ".dogcats"
+    return resolve_global_fallback() or ".dogcats"
 
 
 def _find_dogcats_via_worktree() -> str | None:

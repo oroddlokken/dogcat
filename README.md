@@ -62,7 +62,7 @@ Three setups, in order of scope:
 
    The config lives at `$XDG_CONFIG_HOME/dogcat/config.toml` (or `~/.config/dogcat/config.toml`).
 
-See [docs/sharing-a-database.md](docs/sharing-a-database.md) for details, including how to migrate existing per-repo databases into a shared one.
+See [docs/sharing-a-database.md](docs/sharing-a-database.md) for details.
 
 ### Telling your agent to use dogcat
 

@@ -454,6 +454,14 @@ class TestDetectPrefixFromDirectory:
         prefix = _detect_prefix_from_directory(str(dogcats_dir))
         assert prefix is None
 
+    def test_detect_transliterates_non_ascii(self, tmp_path: Path) -> None:
+        """Non-ASCII names use the same slug policy as the global fallback."""
+        dogcats_dir = tmp_path / "læring" / ".dogcats"
+        dogcats_dir.mkdir(parents=True)
+
+        prefix = _detect_prefix_from_directory(str(dogcats_dir))
+        assert prefix == "laering"
+
 
 class TestDetectPrefixFromIssues:
     """Tests for _detect_prefix_from_issues function."""

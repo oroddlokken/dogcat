@@ -701,6 +701,69 @@ class TestConfigGlobalFlag:
         assert result.exit_code == 2
         assert "mutually exclusive" in result.output
 
+    def test_set_global_rejects_non_global_key(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Keys the runtime never reads globally are rejected by set --global."""
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".dogcats").mkdir()
+        monkeypatch.chdir(repo)
+
+        result = runner.invoke(
+            app,
+            ["config", "set", "--global", "git_tracking", "false"],
+        )
+        assert result.exit_code == 2
+        assert "not a global config key" in result.output
+        assert not (tmp_path / "xdg" / "dogcat" / "config.toml").exists()
+
+    def test_set_global_only_key_without_global_flag_errors(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """default_storage in repo config would never be read; refuse to save it."""
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".dogcats").mkdir()
+        monkeypatch.chdir(repo)
+
+        result = runner.invoke(
+            app,
+            ["config", "set", "default_storage", "/tmp/shared/.dogcats"],
+        )
+        assert result.exit_code == 2
+        assert "--global" in result.output
+        assert not (repo / ".dogcats" / "config.toml").exists()
+
+    def test_list_ignores_stray_global_keys(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Keys in the global file that the runtime never reads stay hidden."""
+        from dogcat.global_config import get_global_config_path
+
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        cfg_path = get_global_config_path()
+        cfg_path.parent.mkdir(parents=True)
+        cfg_path.write_text('git_tracking = false\nnamespace = "stray"\n')
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".dogcats").mkdir()
+        monkeypatch.chdir(repo)
+
+        result = runner.invoke(app, ["config", "list"])
+        assert result.exit_code == 0
+        assert "stray" not in result.output
+        assert "git_tracking" not in result.output
+
 
 class TestConfigUnsetLocalShared:
     """`dcat config unset` (without --global) removes keys from local/shared."""

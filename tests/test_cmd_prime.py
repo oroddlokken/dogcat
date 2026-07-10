@@ -49,7 +49,6 @@ class TestPrimeWithGlobalConfig:
         global_store = tmp_path / "shared" / ".dogcats"
         global_store.mkdir(parents=True)
         save_global_config_value("default_storage", str(global_store))
-        save_global_config_value("auto_namespace_from_dir", True)
 
         repo = tmp_path / "læring"
         repo.mkdir()

@@ -128,35 +128,61 @@ def register(app: typer.Typer) -> None:
             dogcats_dir = find_dogcats_dir()
 
         # Check: global config status (~/.config/dogcat/config.toml)
+        from dogcat.config import check_toml_parseable
         from dogcat.global_config import (
             get_global_config_path,
             load_global_config,
         )
 
         global_cfg_path = get_global_config_path()
+        global_parse_error = check_toml_parseable(global_cfg_path)
         global_cfg = load_global_config()
-        if global_cfg_path.is_file():
-            global_storage_ok = (
-                global_cfg.default_storage is not None
-                and global_cfg.default_storage.is_dir()
-            )
-            description = (
-                f"global config at {global_cfg_path}: "
-                f"default_storage={global_cfg.default_storage}"
-            )
+        if global_parse_error is not None:
+            # load_global_config degrades a malformed file to defaults;
+            # doctor is where the parse failure must become visible.
             report.add(
                 "global_config",
                 DoctorCheck(
-                    description=description,
-                    passed=global_storage_ok,
-                    fix=(
-                        None
-                        if global_storage_ok
-                        else "Set or update default_storage with "
-                        "`dcat config set --global default_storage <path>`"
+                    description=(
+                        f"global config at {global_cfg_path}: "
+                        f"parse error ({global_parse_error})"
                     ),
+                    passed=False,
+                    fix=f"Fix the TOML syntax in {global_cfg_path}",
                 ),
             )
+        elif global_cfg_path.is_file():
+            if global_cfg.default_storage is None:
+                report.add(
+                    "global_config",
+                    DoctorCheck(
+                        description=(
+                            f"global config at {global_cfg_path}: "
+                            "default_storage not set"
+                        ),
+                        passed=True,
+                        optional=True,
+                    ),
+                )
+            else:
+                global_storage_ok = global_cfg.default_storage.is_dir()
+                description = (
+                    f"global config at {global_cfg_path}: "
+                    f"default_storage={global_cfg.default_storage}"
+                )
+                report.add(
+                    "global_config",
+                    DoctorCheck(
+                        description=description,
+                        passed=global_storage_ok,
+                        fix=(
+                            None
+                            if global_storage_ok
+                            else "Set or update default_storage with "
+                            "`dcat config set --global default_storage <path>`"
+                        ),
+                    ),
+                )
         else:
             report.add(
                 "global_config",

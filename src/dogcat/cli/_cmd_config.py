@@ -149,18 +149,31 @@ def register(app: typer.Typer) -> None:
         key_info = _KNOWN_KEYS.get(key, {})
 
         if global_:
-            from dogcat.global_config import save_global_config_value
+            from dogcat.global_config import (
+                GLOBAL_CONFIG_KEYS,
+                save_global_config_value,
+            )
+
+            # Only keys the runtime reads globally may be set globally;
+            # anything else would sit in the file looking configured
+            # while never taking effect.
+            if key not in GLOBAL_CONFIG_KEYS:
+                echo_error(
+                    f"'{key}' is not a global config key. "
+                    f"Global keys: {', '.join(sorted(GLOBAL_CONFIG_KEYS))}"
+                )
+                raise typer.Exit(2)
 
             save_global_config_value(key, coerced)
             typer.echo(f"Set {key} = {coerced} (global)")
             return
 
         if key_info.get("global_only"):
-            typer.echo(
-                f"Warning: '{key}' is a global-only setting. "
-                f"Use 'dcat config set --global {key} <value>' instead.",
-                err=True,
+            echo_error(
+                f"'{key}' is a global-only setting and has no effect in "
+                f"repo config. Use 'dcat config set --global {key} <value>'."
             )
+            raise typer.Exit(2)
 
         dogcats_dir = find_dogcats_dir()
 
@@ -211,9 +224,9 @@ def register(app: typer.Typer) -> None:
         set_json(json_output)
 
         if global_:
-            from dogcat.global_config import _load_raw
+            from dogcat.global_config import load_global_config_raw
 
-            data = _load_raw()
+            data = load_global_config_raw()
             if key not in data:
                 echo_error(f"Key '{key}' not found in global config")
                 raise typer.Exit(1)
@@ -291,11 +304,15 @@ def register(app: typer.Typer) -> None:
         set_json(json_output)
         import orjson
 
-        from dogcat.global_config import _load_raw
+        from dogcat.global_config import GLOBAL_CONFIG_KEYS, load_global_config_raw
 
         dogcats_dir = find_dogcats_dir()
         config = load_config(dogcats_dir)
-        global_data = _load_raw()
+        # Only merge in the global keys the runtime actually reads;
+        # stray keys in the global file must not show up as effective.
+        global_data = {
+            k: v for k, v in load_global_config_raw().items() if k in GLOBAL_CONFIG_KEYS
+        }
         # Local/shared config wins over global; merge for effective view.
         effective = {**global_data, **config}
         global_keys = set(global_data.keys())
