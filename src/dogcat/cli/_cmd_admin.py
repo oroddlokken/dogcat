@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import orjson
 import typer
 
-from dogcat.config import get_issue_prefix
+from dogcat.config import get_namespace
 
 from ._completions import (
     complete_export_formats,
@@ -21,6 +21,44 @@ from ._completions import (
 )
 from ._helpers import apply_common_filters, get_storage
 from ._json_state import echo_error, is_json, set_json
+
+if TYPE_CHECKING:
+    from dogcat.storage import JSONLStorage
+
+
+def _filtered_inbox_proposals(
+    storage: JSONLStorage,
+    *,
+    namespace: str | None,
+    all_namespaces: bool,
+) -> list[dict[str, Any]]:
+    """Load inbox proposals for export, applying the namespace filter.
+
+    Returns proposal dicts (tombstones included), or ``[]`` when there is no
+    inbox file. Extracted from the export command body. (dogcat-2ix3)
+    """
+    from dogcat.inbox import InboxStorage
+    from dogcat.models import proposal_to_dict
+
+    try:
+        inbox = InboxStorage(dogcats_dir=str(storage.dogcats_dir))
+        proposals = inbox.list(include_tombstones=True)
+
+        if namespace:
+            proposals = [p for p in proposals if p.namespace == namespace]
+        elif not all_namespaces:
+            from dogcat.config import get_namespace_filter
+
+            ns_filter = get_namespace_filter(str(storage.dogcats_dir))
+            if ns_filter is not None:
+                proposals = [p for p in proposals if ns_filter(p.namespace)]
+            else:
+                primary = get_namespace(str(storage.dogcats_dir))
+                proposals = [p for p in proposals if p.namespace == primary]
+
+        return [proposal_to_dict(p) for p in proposals]
+    except (ValueError, RuntimeError):
+        return []  # No inbox file — skip silently
 
 
 def register(app: typer.Typer) -> None:
@@ -270,7 +308,7 @@ def register(app: typer.Typer) -> None:
                 storage=storage,
             )
 
-            from dogcat.models import issue_to_dict, proposal_to_dict
+            from dogcat.models import issue_to_dict
 
             # Get all deps and links (avoids per-issue iteration dups).
             # When filters are active, scope to exported issues.
@@ -286,55 +324,26 @@ def register(app: typer.Typer) -> None:
             )
 
             all_deps: list[dict[str, Any]] = [
-                {
-                    "issue_id": dep.issue_id,
-                    "depends_on_id": dep.depends_on_id,
-                    "type": dep.dep_type.value,
-                    "created_at": dep.created_at.isoformat(),
-                    "created_by": dep.created_by,
-                }
+                dep.to_export_dict()
                 for dep in storage.all_dependencies
                 if not has_filters
                 or (dep.issue_id in exported_ids or dep.depends_on_id in exported_ids)
             ]
             all_links: list[dict[str, Any]] = [
-                {
-                    "from_id": link.from_id,
-                    "to_id": link.to_id,
-                    "link_type": link.link_type,
-                    "created_at": link.created_at.isoformat(),
-                    "created_by": link.created_by,
-                }
+                link.to_export_dict()
                 for link in storage.all_links
                 if not has_filters
                 or (link.from_id in exported_ids or link.to_id in exported_ids)
             ]
 
-            # Load inbox proposals
+            # Load inbox proposals (namespace-filtered) for export.
             all_proposals: list[dict[str, Any]] = []
             if include_inbox:
-                try:
-                    from dogcat.inbox import InboxStorage
-
-                    inbox = InboxStorage(dogcats_dir=str(storage.dogcats_dir))
-                    proposals = inbox.list(include_tombstones=True)
-
-                    # Apply namespace filter
-                    if namespace:
-                        proposals = [p for p in proposals if p.namespace == namespace]
-                    elif not all_namespaces:
-                        from dogcat.config import get_issue_prefix, get_namespace_filter
-
-                        ns_filter = get_namespace_filter(str(storage.dogcats_dir))
-                        if ns_filter is not None:
-                            proposals = [p for p in proposals if ns_filter(p.namespace)]
-                        else:
-                            primary = get_issue_prefix(str(storage.dogcats_dir))
-                            proposals = [p for p in proposals if p.namespace == primary]
-
-                    all_proposals = [proposal_to_dict(p) for p in proposals]
-                except (ValueError, RuntimeError):
-                    pass  # No inbox file — skip silently
+                all_proposals = _filtered_inbox_proposals(
+                    storage,
+                    namespace=namespace,
+                    all_namespaces=all_namespaces,
+                )
 
             if format_type == "json":
                 # table-printed JSON object with all data
@@ -463,7 +472,7 @@ def register(app: typer.Typer) -> None:
             storage = get_storage(dogcats_dir)
             # Get the actual dogcats_dir from storage (in case it was found by search)
             actual_dogcats_dir = str(storage.dogcats_dir)
-            prefix = get_issue_prefix(actual_dogcats_dir)
+            prefix = get_namespace(actual_dogcats_dir)
 
             # Count issues by status and type
             all_issues = storage.list()

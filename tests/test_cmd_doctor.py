@@ -262,7 +262,7 @@ class TestCLIDoctor:
 
 
 class TestDoctorCheckDataclass:
-    """Unit tests for the DoctorCheck / DoctorReport refactor (dogcat-3gsn).
+    """Unit tests for the HealthCheck / HealthReport refactor (dogcat-3gsn).
 
     The dataclass exists to stop the "if not passed: all_passed = False"
     bookkeeping repeating after every check; this test pins down the
@@ -271,37 +271,37 @@ class TestDoctorCheckDataclass:
 
     def test_required_check_failure_flips_all_passed(self) -> None:
         """A non-optional failed check fails the overall report."""
-        from dogcat.cli._cmd_doctor import DoctorCheck, DoctorReport
+        from dogcat.cli._cmd_doctor import HealthCheck, HealthReport
 
-        report = DoctorReport()
-        report.add("ok", DoctorCheck(description="ok", passed=True))
+        report = HealthReport()
+        report.add("ok", HealthCheck(description="ok", passed=True))
         assert report.all_passed is True
-        report.add("bad", DoctorCheck(description="bad", passed=False))
+        report.add("bad", HealthCheck(description="bad", passed=False))
         assert report.all_passed is False
 
     def test_optional_check_failure_does_not_flip_all_passed(self) -> None:
         """An optional failed check is informational; doesn't fail the report."""
-        from dogcat.cli._cmd_doctor import DoctorCheck, DoctorReport
+        from dogcat.cli._cmd_doctor import HealthCheck, HealthReport
 
-        report = DoctorReport()
+        report = HealthReport()
         report.add(
             "warn",
-            DoctorCheck(description="warn", passed=False, optional=True),
+            HealthCheck(description="warn", passed=False, optional=True),
         )
         assert report.all_passed is True
 
     def test_to_dict_omits_unset_optional_fields(self) -> None:
         """Legacy serialization only emits keys that were actually populated."""
-        from dogcat.cli._cmd_doctor import DoctorCheck
+        from dogcat.cli._cmd_doctor import HealthCheck
 
-        check = DoctorCheck(description="just a check", passed=True)
+        check = HealthCheck(description="just a check", passed=True)
         assert check.to_dict() == {"description": "just a check", "passed": True}
 
     def test_to_dict_includes_all_set_fields(self) -> None:
         """All populated fields surface in the legacy dict shape."""
-        from dogcat.cli._cmd_doctor import DoctorCheck
+        from dogcat.cli._cmd_doctor import HealthCheck
 
-        check = DoctorCheck(
+        check = HealthCheck(
             description="d",
             passed=False,
             fix="run thing",
@@ -1222,3 +1222,97 @@ class TestDoctorGlobalConfig:
         result = runner.invoke(app, ["doctor"])
         assert "global config" in result.output.lower()
         assert "not configured" in result.output.lower()
+
+
+class TestExtractedDoctorHelpers:
+    """Unit tests for the extracted per-check + renderer functions (dogcat-671h)."""
+
+    def test_check_dogcats_dir_present(self, tmp_path: Path) -> None:
+        """The .dogcats existence check passes when the directory exists."""
+        from dogcat.cli._cmd_doctor import _check_dogcats_dir
+
+        d = tmp_path / ".dogcats"
+        d.mkdir()
+        check = _check_dogcats_dir(str(d))
+        assert check.passed is True
+
+    def test_check_dogcats_dir_missing(self, tmp_path: Path) -> None:
+        """The check fails (with an init fix hint) when the directory is absent."""
+        from dogcat.cli._cmd_doctor import _check_dogcats_dir
+
+        check = _check_dogcats_dir(str(tmp_path / "nope"))
+        assert check.passed is False
+        assert "dcat init" in (check.fix or "")
+
+    def test_check_dcat_in_path_found(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A dcat binary on PATH is a plain (non-optional) pass."""
+        from dogcat.cli import _cmd_doctor
+
+        def _which_found(_name: str) -> str:
+            return "/usr/bin/dcat"
+
+        monkeypatch.setattr(_cmd_doctor.shutil, "which", _which_found)
+        check = _cmd_doctor._check_dcat_in_path()
+        assert check.passed is True
+        assert check.optional is False
+
+    def test_check_dcat_in_path_missing_is_optional_warning(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Missing PATH binary is an optional warning with a completions note."""
+        from dogcat.cli import _cmd_doctor
+
+        def _which_missing(_name: str) -> str | None:
+            return None
+
+        monkeypatch.setattr(_cmd_doctor.shutil, "which", _which_missing)
+        check = _cmd_doctor._check_dcat_in_path()
+        assert check.passed is False
+        assert check.optional is True
+        assert check.note is not None
+
+    def test_render_doctor_json_shape(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """The JSON renderer emits status + per-check passed/fix fields."""
+        from dogcat.cli._cmd_doctor import _render_doctor_json
+        from dogcat.cli._health import HealthCheck
+
+        checks = {
+            "a": HealthCheck(description="A", passed=True),
+            "b": HealthCheck(description="B", passed=False, fix="do x"),
+        }
+        _render_doctor_json(
+            checks,
+            all_passed=False,
+            validation=[],
+            merge_warnings=[],
+            post_merge_skip_reason=None,
+            id_distribution=[],
+        )
+        data = json.loads(capsys.readouterr().out)
+        assert data["status"] == "issues_found"
+        assert data["checks"]["a"]["passed"] is True
+        assert data["checks"]["b"]["fix"] == "do x"
+
+    def test_render_doctor_text_marks_pass_and_fail(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The text renderer shows descriptions, the fix hint, and the summary."""
+        from dogcat.cli._cmd_doctor import _render_doctor_text
+        from dogcat.cli._health import HealthCheck
+
+        checks = {
+            "a": HealthCheck(description="A ok", passed=True),
+            "b": HealthCheck(description="B bad", passed=False, fix="fix b"),
+        }
+        _render_doctor_text(
+            checks,
+            all_passed=False,
+            validation=[],
+            merge_warnings=[],
+            id_distribution=[],
+        )
+        out = capsys.readouterr().out
+        assert "A ok" in out
+        assert "B bad" in out
+        assert "fix b" in out
+        assert "Some checks failed" in out

@@ -8,7 +8,7 @@ import pytest
 from typer.testing import CliRunner
 
 from dogcat.cli import app
-from dogcat.config import set_issue_prefix
+from dogcat.config import set_namespace
 from dogcat.models import Issue
 from dogcat.storage import JSONLStorage
 
@@ -197,7 +197,7 @@ def _init_workspace(tmp_path: Path, namespace: str = "dc") -> Path:
     dogcats_dir = tmp_path / ".dogcats"
     runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
     # Set a predictable namespace instead of the auto-detected temp dir name
-    set_issue_prefix(str(dogcats_dir), namespace)
+    set_namespace(str(dogcats_dir), namespace)
     return dogcats_dir
 
 
@@ -291,7 +291,7 @@ class TestRenameNamespaceCLI:
 
     def test_updates_primary_config(self, tmp_path: Path) -> None:
         """Renaming the primary namespace updates config."""
-        from dogcat.config import get_issue_prefix
+        from dogcat.config import get_namespace
 
         dogcats_dir = _init_workspace(tmp_path)
         runner.invoke(
@@ -311,7 +311,7 @@ class TestRenameNamespaceCLI:
         )
 
         assert result.exit_code == 0
-        assert get_issue_prefix(str(dogcats_dir)) == "proj"
+        assert get_namespace(str(dogcats_dir)) == "proj"
 
 
 class TestSaveReloadRace:

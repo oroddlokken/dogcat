@@ -7,6 +7,8 @@ from pathlib import Path
 import orjson
 import typer
 
+from dogcat.constants import DEFAULT_NAMESPACE
+
 from ._completions import complete_namespaces
 from ._helpers import find_dogcats_dir, get_default_operator
 from ._json_state import echo_error, is_json, set_json
@@ -104,9 +106,9 @@ def register(app: typer.Typer) -> None:
         else:
             try:
                 config = load_config(target_dir)
-                ns = str(config.get("namespace", "dc"))
+                ns = str(config.get("namespace", DEFAULT_NAMESPACE))
             except Exception:
-                ns = "dc"
+                ns = DEFAULT_NAMESPACE
 
         try:
             inbox = InboxStorage(dogcats_dir=target_dir)

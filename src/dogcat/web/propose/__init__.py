@@ -85,10 +85,10 @@ def create_app(
     Returns:
         Configured FastAPI application.
     """
-    from dogcat.config import get_issue_prefix
+    from dogcat.config import get_namespace
     from dogcat.storage import JSONLStorage, get_namespaces
 
-    resolved_namespace = namespace or get_issue_prefix(dogcats_dir)
+    resolved_namespace = namespace or get_namespace(dogcats_dir)
 
     # Collect all namespaces from existing issues and inbox, primary first
     try:

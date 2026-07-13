@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import logging
-import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any, cast
@@ -21,10 +20,10 @@ from dogcat._jsonl_io import (
     atomic_rewrite_jsonl,
     split_and_rewrite_jsonl,
 )
-from dogcat._schema import current_version_tuple, parse_version
+from dogcat._schema import warn_if_records_from_newer_version
 from dogcat._version import version as _dcat_version
 from dogcat.constants import (
-    DEFAULT_BRANCH_NAMES,
+    DEFAULT_NAMESPACE,
     DOGCATS_DIR_NAME,
     ISSUES_FILENAME,
     LOCK_FILENAME,
@@ -44,10 +43,11 @@ from dogcat.models import (
     dict_to_issue,
     issue_to_dict,
     link_type_value,
+    validate_priority,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Generator
     from contextlib import AbstractContextManager
 
 
@@ -67,6 +67,105 @@ class ArchiveStats:
     dependencies: int
     links: int
     archive_path: Path
+
+
+# ---------------------------------------------------------------------------
+# Per-field coercion table for JSONLStorage.update() (dogcat-2ix3)
+# ---------------------------------------------------------------------------
+def _coerce_priority(key: str, value: Any) -> Any:
+    # bool is an int subclass — exclude it so True/False don't slip through.
+    if isinstance(value, bool) or not isinstance(value, int):
+        msg = (
+            f"{key} must be an int between 0 and 4, "
+            f"got {type(value).__name__}: {value!r}"
+        )
+        raise TypeError(msg)
+    validate_priority(value)
+    return value
+
+
+def _coerce_status(key: str, value: Any) -> Any:
+    if isinstance(value, str):
+        return Status(value)
+    if isinstance(value, Status):
+        return value
+    msg = f"{key} must be a Status enum or string, got {type(value).__name__}"
+    raise TypeError(msg)
+
+
+def _coerce_issue_type(key: str, value: Any) -> Any:
+    if isinstance(value, str):
+        return IssueType(value)
+    if isinstance(value, IssueType):
+        return value
+    msg = f"{key} must be an IssueType enum or string, got {type(value).__name__}"
+    raise TypeError(msg)
+
+
+def _coerce_original_type(key: str, value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return IssueType(value)
+    if isinstance(value, IssueType):
+        return value
+    msg = f"{key} must be an IssueType, str, or None, got {type(value).__name__}"
+    raise TypeError(msg)
+
+
+def _coerce_labels(key: str, value: Any) -> Any:
+    if not isinstance(value, list):
+        msg = f"{key} must be a list of strings, got {type(value).__name__}"
+        raise TypeError(msg)
+    items = cast("list[Any]", value)
+    if not all(isinstance(item, str) for item in items):
+        msg = f"{key} must be a list of strings, got non-string items"
+        raise TypeError(msg)
+    return cast("list[str]", value)
+
+
+def _coerce_metadata(key: str, value: Any) -> Any:
+    if not isinstance(value, dict):
+        msg = f"{key} must be a dict, got {type(value).__name__}"
+        raise TypeError(msg)
+    return cast("dict[str, Any]", value)
+
+
+def _coerce_list(key: str, value: Any) -> Any:
+    if not isinstance(value, list):
+        msg = f"{key} must be a list, got {type(value).__name__}"
+        raise TypeError(msg)
+    return cast("list[Any]", value)
+
+
+_UPDATE_COERCERS: dict[str, Callable[[str, Any], Any]] = {
+    "priority": _coerce_priority,
+    "status": _coerce_status,
+    "issue_type": _coerce_issue_type,
+    "original_type": _coerce_original_type,
+    "labels": _coerce_labels,
+    "metadata": _coerce_metadata,
+    "comments": _coerce_list,
+}
+
+# Fields that must be a plain string or None.
+_STRING_OR_NONE_UPDATE_FIELDS: frozenset[str] = frozenset(
+    {
+        "title",
+        "description",
+        "owner",
+        "parent",
+        "notes",
+        "closed_reason",
+        "deleted_reason",
+        "design",
+        "acceptance",
+        "external_ref",
+        "updated_by",
+        "closed_by",
+        "deleted_by",
+    },
+)
 
 
 class JSONLStorage:
@@ -158,10 +257,10 @@ class JSONLStorage:
         dep_map: dict[tuple[str, str, str], Dependency] = {}
         link_map: dict[tuple[str, str, str], Link] = {}
         line_count = 0
-        # Track the highest dcat_version observed across all records so we
-        # can warn if the file was written by a newer tool than this one.
-        # See dogcat._schema for the version-comparison contract.
-        newest_record_version: tuple[tuple[int, int, int], str] | None = None
+        # Collect successfully-parsed records so the shared schema helper can
+        # warn (once) if any was written by a newer tool. Same approach as
+        # InboxStorage._load — one implementation of the check for both stores.
+        parsed_records: list[dict[str, Any]] = []
 
         try:
             with self.path.open("rb") as f:
@@ -195,14 +294,7 @@ class JSONLStorage:
                     msg = f"expected JSON object, got {type(raw_data).__name__}"
                     raise TypeError(msg)  # noqa: TRY301
                 data = cast("dict[str, Any]", raw_data)
-                raw_v = data.get("dcat_version")
-                if isinstance(raw_v, str):
-                    parsed_v = parse_version(raw_v)
-                    if parsed_v is not None and (
-                        newest_record_version is None
-                        or parsed_v > newest_record_version[0]
-                    ):
-                        newest_record_version = (parsed_v, raw_v)
+                parsed_records.append(data)
                 rtype = classify_record(data)
                 if rtype == "event":
                     continue
@@ -234,21 +326,10 @@ class JSONLStorage:
         self._appended_lines = 0
         self._rebuild_indexes()
 
-        # Warn (once per load) if any record was written by a newer tool
-        # than the one currently running — readers ignore unknown fields
-        # but new semantics may not be honored. See dogcat._schema.
-        current = current_version_tuple()
-        if current is not None and newest_record_version is not None:
-            newest_tuple, newest_raw = newest_record_version
-            if newest_tuple > current:
-                logging.getLogger(__name__).warning(
-                    "%s contains records written by dcat %s; "
-                    "running tool is %s. Older versions read newer records "
-                    "best-effort — upgrade dcat to silence this warning.",
-                    self.path,
-                    newest_raw,
-                    _dcat_version,
-                )
+        # Warn (once per load) if any record was written by a newer tool than
+        # the one currently running — readers ignore unknown fields but new
+        # semantics may not be honored. See dogcat._schema.
+        warn_if_records_from_newer_version(parsed_records, source=str(self.path))
 
     @staticmethod
     def _parse_link_record(
@@ -377,31 +458,17 @@ class JSONLStorage:
                 tmp_file.write(b"\n")
                 line_count += 1
 
+            # Reuse the canonical record serializers so a new persisted
+            # dependency/link field only has to be added in one place —
+            # missing this copy would silently drop the field on every
+            # compaction rewrite. (dogcat-e252)
             for dep in self._dependencies:
-                dep_data = {
-                    "record_type": "dependency",
-                    "dcat_version": _dcat_version,
-                    "issue_id": dep.issue_id,
-                    "depends_on_id": dep.depends_on_id,
-                    "type": dep.dep_type.value,
-                    "created_at": dep.created_at.isoformat(),
-                    "created_by": dep.created_by,
-                }
-                tmp_file.write(orjson.dumps(dep_data))
+                tmp_file.write(orjson.dumps(self._dep_record(dep)))
                 tmp_file.write(b"\n")
                 line_count += 1
 
             for link in self._links:
-                link_data = {
-                    "record_type": "link",
-                    "dcat_version": _dcat_version,
-                    "from_id": link.from_id,
-                    "to_id": link.to_id,
-                    "link_type": link.link_type,
-                    "created_at": link.created_at.isoformat(),
-                    "created_by": link.created_by,
-                }
-                tmp_file.write(orjson.dumps(link_data))
+                tmp_file.write(orjson.dumps(self._link_record(link)))
                 tmp_file.write(b"\n")
                 line_count += 1
 
@@ -501,8 +568,6 @@ class JSONLStorage:
             ):
                 self._save_locked()
 
-    _DEFAULT_BRANCHES = DEFAULT_BRANCH_NAMES
-
     @contextlib.contextmanager
     def batch(self) -> Generator[None]:
         """Defer file writes until the context exits.
@@ -534,102 +599,19 @@ class JSONLStorage:
                 self._append(pending)
 
     def _is_default_branch(self) -> bool:
-        """Return :meth:`_compute_default_branch`'s memoized result.
+        """Return whether the working tree is on a default branch (memoized).
 
         Each ``dcat`` invocation forks ``git rev-parse`` per compaction check,
         so a 26-id ``dcat close`` paid for 26 forks. The result can't change
         mid-command (we're not switching branches under our own feet), so we
-        memoize it on the instance — fresh storage per CLI invocation.
+        memoize it on the instance — fresh storage per CLI invocation. The
+        detection itself lives in :mod:`dogcat._branch`. (dogcat-5bk9)
         """
         if self._default_branch_cache is None:
-            self._default_branch_cache = self._compute_default_branch()
+            from dogcat._branch import is_default_branch
+
+            self._default_branch_cache = is_default_branch(self.dogcats_dir)
         return self._default_branch_cache
-
-    def _compute_default_branch(self) -> bool:
-        """Check whether the working tree is on a default branch (main/master).
-
-        ``True`` when there is genuinely no git repository (FileNotFoundError
-        on the binary or git reports "not a git repo"). Any other non-zero
-        return — permission denied, lock contention, internal git error —
-        returns ``False`` and logs the stderr so we don't silently lose the
-        feature-branch protection on a transient problem.
-
-        The known-default-branch set is :data:`DEFAULT_BRANCH_NAMES` plus
-        the user's ``init.defaultBranch`` git config when set, so projects
-        on ``develop``/``trunk``/etc. don't silently lose auto-compaction.
-        """
-        try:
-            # Force the C locale so stderr text matches the literal
-            # English match below. Under non-English LC_ALL git emits
-            # localized strings ("ce n'est pas un dépôt git", "Kein
-            # Git-Repository", etc.) and the substring check would fail,
-            # disabling auto-compaction silently. (dogcat-4tl1)
-            #
-            # Time-bound the call so a stalled HOME / credential helper
-            # / LFS smudge cannot wedge dcat indefinitely. (dogcat-1uq7)
-            from dogcat.git import _c_locale_env, _git_timeout
-
-            result = subprocess.run(
-                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                capture_output=True,
-                text=True,
-                check=False,
-                cwd=str(self.dogcats_dir),
-                env=_c_locale_env(),
-                timeout=_git_timeout(),
-            )
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            return True  # git not installed / hung — safe to compact
-        if result.returncode == 0:
-            branch = result.stdout.strip()
-            return branch in self._known_default_branches()
-        stderr = (result.stderr or "").strip().lower()
-        # "not a git repository" is the only non-zero outcome we treat as
-        # "no repo here, safe to compact". Permission denied / locked
-        # index / internal errors should NOT bypass the protection.
-        if "not a git repository" in stderr:
-            return True
-        logging.getLogger(__name__).warning(
-            "git rev-parse failed (rc=%s) under %s: %s. "
-            "Skipping compaction to be safe.",
-            result.returncode,
-            self.dogcats_dir,
-            result.stderr.strip() if result.stderr else "<no stderr>",
-        )
-        return False
-        # NOTE: kept inline here (not via dogcat.git.current_branch) because
-        # the storage path needs the stderr to distinguish "no repo" (safe)
-        # from "permission denied" (not safe). The git module's helper
-        # collapses both to None.
-
-    def _known_default_branches(self) -> frozenset[str]:
-        """Return the union of conventional default branches + ``init.defaultBranch``.
-
-        ``init.defaultBranch`` lets users opt their non-conventional default
-        branch (e.g. ``develop``) into auto-compaction without us having to
-        ship a config flag. The git lookup is best-effort: if the helper
-        can't reach git or the value isn't set, we fall back to the
-        compiled defaults.
-        """
-        from dogcat import git as git_helpers
-
-        configured = git_helpers.get_config("init.defaultBranch", cwd=self.dogcats_dir)
-        if configured:
-            # init.defaultBranch is per-repo and writable by any
-            # collaborator. If it points to a non-conventional name,
-            # log a one-line warning so the user notices before a
-            # noisy compaction lands on a feature branch. (dogcat-2wys)
-            if configured not in self._DEFAULT_BRANCHES:
-                logging.getLogger(__name__).warning(
-                    "init.defaultBranch=%r is not a conventional default "
-                    "(main/master); auto-compaction is enabled on this "
-                    "branch via the per-repo git config. Verify this is "
-                    "intentional — set the value in .dogcats/config.toml "
-                    "if you want it tracked in review.",
-                    configured,
-                )
-            return self._DEFAULT_BRANCHES | {configured}
-        return self._DEFAULT_BRANCHES
 
     # -- Event emission helpers ------------------------------------------
 
@@ -680,8 +662,9 @@ class JSONLStorage:
     ) -> None:
         """Append data records and (optionally) an event record in one call.
 
-        Equivalent to ``_append(records)`` followed by ``_event_log.emit(...)``
-        but covered by a single file lock and a single fsync — eliminates
+        Equivalent to ``_append(records)`` followed by
+        ``_event_log.try_emit(...)`` but covered by a single file lock and a
+        single fsync — eliminates
         the write amplification a 26-id ``dcat close`` batch otherwise pays.
         """
         if event_record is None:
@@ -821,7 +804,7 @@ class JSONLStorage:
         from dogcat.idgen import IDGenerator
 
         ts = timestamp or datetime.now().astimezone()
-        idgen = IDGenerator(existing_ids=self.get_issue_ids(), prefix=namespace)
+        idgen = IDGenerator(existing_ids=self.get_issue_ids(), namespace=namespace)
         issue_id = idgen.generate_issue_id(
             title,
             timestamp=ts,
@@ -1034,92 +1017,16 @@ class JSONLStorage:
         ``priority=True`` would pass ``isinstance(int)`` (bool is int);
         ``labels='bug'`` would iterate as ``{'b','u','g'}`` and break
         every label filter; ``status=42`` would store an int. (dogcat-3o3b)
-        """
-        from dogcat.models import (
-            IssueType,
-            Status,
-            validate_priority,
-        )
 
-        if key == "priority":
-            # bool is int subclass — exclude it explicitly so True/False
-            # don't slip through validate_priority.
-            if isinstance(value, bool) or not isinstance(value, int):
-                msg = (
-                    f"priority must be an int between 0 and 4, "
-                    f"got {type(value).__name__}: {value!r}"
-                )
-                raise TypeError(msg)
-            validate_priority(value)
-            return value
-        if key == "status":
-            if isinstance(value, str):
-                return Status(value)
-            if isinstance(value, Status):
-                return value
-            msg = f"status must be a Status enum or string, got {type(value).__name__}"
-            raise TypeError(msg)
-        if key == "issue_type":
-            if isinstance(value, str):
-                return IssueType(value)
-            if isinstance(value, IssueType):
-                return value
-            msg = (
-                f"issue_type must be an IssueType enum or string, "
-                f"got {type(value).__name__}"
-            )
-            raise TypeError(msg)
-        if key == "original_type":
-            if value is None:
-                return None
-            if isinstance(value, str):
-                return IssueType(value)
-            if isinstance(value, IssueType):
-                return value
-            msg = (
-                f"original_type must be an IssueType, str, or None, "
-                f"got {type(value).__name__}"
-            )
-            raise TypeError(msg)
-        if key == "labels":
-            if not isinstance(value, list):
-                type_name = type(value).__name__
-                msg = f"labels must be a list of strings, got {type_name}"
-                raise TypeError(msg)
-            items = cast("list[Any]", value)
-            if not all(isinstance(item, str) for item in items):
-                msg = "labels must be a list of strings, got non-string items"
-                raise TypeError(msg)
-            return cast("list[str]", value)
-        if key == "metadata":
-            if not isinstance(value, dict):
-                msg = f"metadata must be a dict, got {type(value).__name__}"
-                raise TypeError(msg)
-            return cast("dict[str, Any]", value)
-        if key == "comments":
-            if not isinstance(value, list):
-                msg = f"comments must be a list, got {type(value).__name__}"
-                raise TypeError(msg)
-            return cast("list[Any]", value)
-        # String-or-None fields (description, owner, parent, notes,
-        # closed_reason, deleted_reason, design, acceptance, external_ref,
-        # updated_by, closed_by, deleted_by).
-        string_or_none_fields = {
-            "title",
-            "description",
-            "owner",
-            "parent",
-            "notes",
-            "closed_reason",
-            "deleted_reason",
-            "design",
-            "acceptance",
-            "external_ref",
-            "updated_by",
-            "closed_by",
-            "deleted_by",
-        }
-        if key in string_or_none_fields:
+        Table-driven: each key with a special coercer looks up
+        ``_UPDATE_COERCERS``; the remaining string-or-none fields share one
+        rule; anything else (datetime fields) passes through for the
+        dataclass to validate. (dogcat-2ix3)
+        """
+        coercer = _UPDATE_COERCERS.get(key)
+        if coercer is not None:
+            return coercer(key, value)
+        if key in _STRING_OR_NONE_UPDATE_FIELDS:
             if value is not None and not isinstance(value, str):
                 msg = f"{key} must be a str or None, got {type(value).__name__}"
                 raise TypeError(msg)
@@ -1997,34 +1904,46 @@ class JSONLStorage:
             except orjson.JSONDecodeError:
                 return False
 
-            rtype = classify_record(data)
-            if rtype == "link":
-                if (
-                    data["from_id"] in archivable_ids
-                    and data["to_id"] in archivable_ids
-                ):
-                    link_count += 1
-                    return True
+            try:
+                rtype = classify_record(data)
+                if rtype == "link":
+                    result = (
+                        data["from_id"] in archivable_ids
+                        and data["to_id"] in archivable_ids
+                    )
+                    if result:
+                        link_count += 1
+                elif rtype == "dependency":
+                    result = (
+                        data["issue_id"] in archivable_ids
+                        and data["depends_on_id"] in archivable_ids
+                    )
+                    if result:
+                        dep_count += 1
+                elif rtype == "event":
+                    result = data.get("issue_id") in archivable_ids
+                else:
+                    # Issue record — resolve full_id from raw dict
+                    if "namespace" in data:
+                        full_id = f"{data['namespace']}-{data['id']}"
+                    elif "-" in str(data.get("id", "")):
+                        full_id = data["id"]
+                    else:
+                        full_id = f"{DEFAULT_NAMESPACE}-{data['id']}"
+                    result = full_id in archivable_ids
+            except (KeyError, TypeError):
+                # A parseable-but-malformed row (e.g. a record_type: link
+                # missing from_id, or an issue missing id) must not raise
+                # KeyError under the lock and abort the whole archive. Keep
+                # it in the source partition so no data is lost. (dogcat-4258)
+                logging.getLogger(__name__).warning(
+                    "Keeping malformed record during archive "
+                    "(missing expected key): %.200s",
+                    stripped,
+                )
                 return False
-            if rtype == "dependency":
-                if (
-                    data["issue_id"] in archivable_ids
-                    and data["depends_on_id"] in archivable_ids
-                ):
-                    dep_count += 1
-                    return True
-                return False
-            if rtype == "event":
-                return data.get("issue_id") in archivable_ids
-
-            # Issue record — resolve full_id from raw dict
-            if "namespace" in data:
-                full_id = f"{data['namespace']}-{data['id']}"
-            elif "-" in str(data.get("id", "")):
-                full_id = data["id"]
             else:
-                full_id = f"dc-{data['id']}"
-            return full_id in archivable_ids
+                return result
 
         with self._file_lock():
             archive_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2251,7 +2170,12 @@ def get_namespaces(
                 counts = ns_counts.setdefault(p.namespace, NamespaceCounts())
                 counts.inbox += 1
         except (OSError, ValueError, RuntimeError):
-            pass
+            # A corrupt/unreadable inbox.jsonl must not silently drop its
+            # namespaces from the counts — surface it. (dogcat-4258)
+            logging.getLogger(__name__).warning(
+                "Failed to load inbox proposals for namespace counts",
+                exc_info=True,
+            )
 
     # Include pinned namespaces from config (always present even if empty)
     try:
@@ -2263,6 +2187,11 @@ def get_namespaces(
         for ns in pinned:
             ns_counts.setdefault(ns, NamespaceCounts())
     except (OSError, ValueError):
-        pass
+        # A corrupt config.toml must not silently drop pinned namespaces
+        # from the counts — surface it. (dogcat-4258)
+        logging.getLogger(__name__).warning(
+            "Failed to load config for pinned namespaces in namespace counts",
+            exc_info=True,
+        )
 
     return ns_counts

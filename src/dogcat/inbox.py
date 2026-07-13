@@ -15,6 +15,7 @@ from dogcat._id_resolve import resolve_partial_id
 from dogcat._jsonl_io import append_jsonl_payload, atomic_rewrite_jsonl
 from dogcat._schema import warn_if_records_from_newer_version
 from dogcat.constants import (
+    DEFAULT_NAMESPACE,
     DOGCATS_DIR_NAME,
     INBOX_FILENAME,
     LOCK_FILENAME,
@@ -256,7 +257,7 @@ class InboxStorage:
         """Append data records and (optionally) an event record in one call.
 
         Single-lock equivalent of ``_append`` followed by
-        ``_event_log.emit``. Halves lock acquisitions and fsyncs per
+        ``_event_log.try_emit``. Halves lock acquisitions and fsyncs per
         mutation in batched flows like ``dcat inbox close A B C``.
         """
         if event_record is None:
@@ -322,7 +323,7 @@ class InboxStorage:
         self,
         *,
         title: str,
-        namespace: str = "dc",
+        namespace: str = DEFAULT_NAMESPACE,
         description: str | None = None,
         proposed_by: str | None = None,
         source_repo: str | None = None,
@@ -337,7 +338,7 @@ class InboxStorage:
 
         idgen = IDGenerator(
             existing_ids=self.get_proposal_ids(),
-            prefix=f"{namespace}-inbox",
+            namespace=f"{namespace}-inbox",
         )
         proposal_id = idgen.generate_proposal_id(
             title,

@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Event-log writes are now durable and corruption-safe.** `EventLog.append` — used by `dcat` namespace change/rename and `dcat admin backfill-history` — wrote change events to `issues.jsonl` / `inbox.jsonl` with a plain `flush()`, with no `os.fsync` and no trailing-newline guard, unlike every other append to those files. Events could be lost on power loss even after the issue record was durably written, and an event line could concatenate onto a truncated tail into one unparseable row. It now routes through the shared `append_jsonl_payload` (fsync + newline guard) (closes dogcat-61rd).
+- **`dcat init` derives the same namespace as the fallback resolvers for non-ASCII directory names.** `init` reimplemented the directory→namespace slug inline (accepting non-ASCII letters and skipping NFKD transliteration), so initializing in a folder like `Ærøprosjekt/` produced a namespace containing non-ASCII characters that disagreed with what the config and global-config resolvers compute for the same directory. `init` now uses the canonical `slug_from_dir`, so one directory always resolves to one namespace (e.g. `aeroeprosjekt`) (closes dogcat-2acd).
+- **`dcat archive` no longer aborts on a malformed-but-parseable record, and namespace counts surface load failures.** A syntactically valid JSONL record missing an expected key (e.g. a `record_type: link` without `from_id`) raised `KeyError` under the lock and aborted the whole archive; such rows are now kept in the source partition — no data loss, no crash. `get_namespaces` also logs a warning when a corrupt `inbox.jsonl` / `config.toml` can't be read instead of silently returning wrong counts (closes dogcat-4258).
+
+### Changed
+
+- **The TUI dashboard now hides snoozed issues,** matching `dcat list`. Both surfaces now share a new `issue_queries` module for the default-visibility, namespace-filter, and orphan-reparenting rules so they can no longer drift; previously the dashboard showed snoozed issues while `dcat list` hid them (closes dogcat-1bxq).
+- **`dogcat[web]` installs a smaller dependency set.** Replaced `uvicorn[standard]` with plain `uvicorn` — dropping uvloop, httptools, websockets/wsproto, watchfiles, python-dotenv, and PyYAML, none of which the propose server uses — and dropped the unconditional `typing_extensions` dependency (no longer imported). The propose form is unchanged (closes dogcat-1imc).
+
+### Deprecated
+
+- **The `dogcat.config` prefix-named helpers are renamed to `*_namespace`.** `get_issue_prefix` → `get_namespace`, `set_issue_prefix` → `set_namespace`, and `extract_prefix` → `extract_namespace`, with `IDGenerator`'s `prefix` parameter renamed to `namespace`. The old names remain as working shims for one release. Only affects code importing dogcat internals; CLI usage is unchanged (closes dogcat-38gk).
+
+### Development
+
+- **Landed the 2026-07 code-health review (epic dogcat-5vsg)** — a large internal refactoring pass with no intended change to CLI behavior or output, verified by the full test suite.
+- **Shared modules and deduplicated logic.** A canonical `DEFAULT_NAMESPACE` constant replaces re-typed `"dc"` literals across ~14 sites (closes dogcat-4qqa); a `status_display` module centralizes the blocked-status glyph rule that was copy-pasted across three renderers (closes dogcat-4gj6); a shared `HealthCheck` dataclass backs both the doctor report and the git-integration checks with typed attribute access (closes dogcat-483i); `_save_locked` and the `dcat admin export` path reuse the canonical dependency/link record serializers so a persisted field can't silently drop on compaction (closes dogcat-e252); and `storage._load` reuses the shared schema newer-version warning instead of an inline copy (closes dogcat-48yw).
+- **Oversized functions decomposed.** The ~600-line `doctor` command split its JSON/text rendering into `_render_doctor_*` helpers with extracted per-check functions (closes dogcat-671h); the `diff` command collapsed four repeated event-type ladders and two near-identical loops into `_classify_event_type` / `_diff_records` (closes dogcat-4r3c); the TUI detail panel `compose` split into row-generators and `_do_update` became table-driven (closes dogcat-271v); the export command's inbox filtering became `_filtered_inbox_proposals()` and `storage._coerce_update_value` became a per-field lookup table (closes dogcat-2ix3); and the first cohesive unit (git default-branch detection) was extracted from the `JSONLStorage` god class into a `_branch` module (closes dogcat-5bk9).
+- **Typed structures replace unlabeled tuples/dicts.** `ChartSeries`, `IdDistributionRow`, `ParsedCreateArgs`, and a `ValidationError` threaded through the validators + doctor renderers (closes dogcat-3s3h); a `DeferredView` dataclass bundles the deferred-subtree data clump (closes dogcat-1tja); and the `FieldChange` dict/dataclass duality in the event log was resolved (closes dogcat-nhlx).
+- **Dead code removed and sentinels simplified.** Deleted confirmed-dead `apply_comment_filter`, `get_dependency_chain`, and the `emit` alias (closes dogcat-350g), audited the remaining low-confidence candidates (closes dogcat-jh04), and dropped the redundant `_UnsetType` singleton machinery (closes dogcat-5bln).
+- **Test coverage for the cross-user `.dogcatrc` refusal** — the uid-mismatch raise, the `DCAT_UNSAFE_CROSS_USER` override, and the stat-error degrade path (closes dogcat-6b5l).
+
 ## 0.13.0 (2026-07-13)
 
 ### Added

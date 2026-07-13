@@ -7,7 +7,7 @@ from typing import Any
 import orjson
 import typer
 
-from dogcat.config import get_issue_prefix, load_config
+from dogcat.config import get_namespace, load_config
 
 from ._completions import complete_issue_ids, complete_labels, complete_subcommands
 from ._helpers import get_storage, with_ns_shim
@@ -169,7 +169,7 @@ def register(app: typer.Typer) -> None:
             ns_counts = get_namespaces(storage, dogcats_dir=actual_dogcats_dir)
 
             # Determine annotations
-            primary = get_issue_prefix(actual_dogcats_dir)
+            primary = get_namespace(actual_dogcats_dir)
             config = load_config(actual_dogcats_dir)
             visible: list[str] | None = config.get("visible_namespaces")
             hidden: list[str] | None = config.get("hidden_namespaces")

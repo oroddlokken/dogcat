@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import orjson
 import typer
@@ -130,6 +130,113 @@ from dogcat._diff import field_value as _field_value  # noqa: E402  (re-export)
 # Storage and ``_validate`` already share that implementation; the inline
 # duplicate here was the third copy.
 
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from dogcat.event_log import EventRecord
+
+
+def _classify_event_type(status_new: str | None, *, is_new: bool) -> str:
+    """Map a record's (new) status value to a diff event type.
+
+    Single source for the closed / tombstone / created-or-updated ladder
+    that the issue and proposal, new and updated paths each repeated inline.
+    (dogcat-4r3c)
+    """
+    if status_new == "closed":
+        return "closed"
+    if status_new == "tombstone":
+        return "deleted"
+    return "created" if is_new else "updated"
+
+
+def _diff_records(
+    old: dict[str, dict[str, Any]],
+    new: dict[str, dict[str, Any]],
+    tracked_fields: Iterable[str],
+    *,
+    created_by_field: str,
+    updated_by_field: str,
+    include_metadata: bool,
+) -> list[EventRecord]:
+    """Diff two record maps into created/updated/closed/deleted events.
+
+    Shared by the issue and proposal paths, which differ only in their
+    tracked-field set, the author field names (created_by/proposed_by,
+    updated_by/closed_by), and whether records carry metadata. (dogcat-4r3c)
+    """
+    from dogcat.event_log import EventRecord, diff_metadata
+
+    events: list[EventRecord] = []
+    for rec_id, new_state in new.items():
+        if rec_id not in old:
+            # New record.
+            changes: dict[str, dict[str, Any]] = {}
+            for field_name in tracked_fields:
+                value = new_state.get(field_name)
+                if value is not None and value != [] and value != "":
+                    changes[field_name] = {"old": None, "new": _field_value(value)}
+            if include_metadata:
+                changes.update(diff_metadata(None, new_state.get("metadata")))
+            event_type = _classify_event_type(
+                _field_value(new_state.get("status")),
+                is_new=True,
+            )
+            events.append(
+                EventRecord(
+                    event_type=event_type,
+                    issue_id=rec_id,
+                    timestamp=new_state.get("created_at", ""),
+                    by=new_state.get(created_by_field),
+                    title=new_state.get("title"),
+                    changes=changes,
+                ),
+            )
+        else:
+            # Existing record — field-level diff.
+            old_state = old[rec_id]
+            changes = {}
+            for field_name in tracked_fields:
+                old_val = _field_value(old_state.get(field_name))
+                new_val = _field_value(new_state.get(field_name))
+                if old_val != new_val:
+                    changes[field_name] = {"old": old_val, "new": new_val}
+            if include_metadata:
+                changes.update(
+                    diff_metadata(
+                        old_state.get("metadata"),
+                        new_state.get("metadata"),
+                    ),
+                )
+            if changes:
+                status_new = changes["status"]["new"] if "status" in changes else None
+                events.append(
+                    EventRecord(
+                        event_type=_classify_event_type(status_new, is_new=False),
+                        issue_id=rec_id,
+                        timestamp=new_state.get("updated_at", ""),
+                        by=new_state.get(updated_by_field),
+                        title=new_state.get("title"),
+                        changes=changes,
+                    ),
+                )
+
+    # Deleted records (in old but not in new).
+    events.extend(
+        EventRecord(
+            event_type="deleted",
+            issue_id=rec_id,
+            timestamp="",
+            title=old[rec_id].get("title"),
+            changes={
+                "status": {"old": old[rec_id].get("status"), "new": "removed"},
+            },
+        )
+        for rec_id in old
+        if rec_id not in new
+    )
+    return events
+
 
 def register(app: typer.Typer) -> None:
     """Register diff command."""
@@ -165,7 +272,7 @@ def register(app: typer.Typer) -> None:
         Use --unstaged to compare the working tree against the index.
         """
         try:
-            from dogcat.event_log import EventRecord, _serialize, diff_metadata
+            from dogcat.event_log import _serialize
 
             set_json(json_output)
             if staged and unstaged:
@@ -198,168 +305,25 @@ def register(app: typer.Typer) -> None:
                 new_proposals = _get_current_proposals(dogcats_dir)
 
             events: list[EventRecord] = []
-
-            # Check for new and updated issues
-            for issue_id, new_state in new.items():
-                if issue_id not in old:
-                    # New issue
-                    changes: dict[str, dict[str, Any]] = {}
-                    for field_name in TRACKED_FIELDS:
-                        value = new_state.get(field_name)
-                        if value is not None and value != [] and value != "":
-                            changes[field_name] = {
-                                "old": None,
-                                "new": _field_value(value),
-                            }
-                    changes.update(diff_metadata(None, new_state.get("metadata")))
-                    status = _field_value(new_state.get("status"))
-                    if status == "closed":
-                        event_type = "closed"
-                    elif status == "tombstone":
-                        event_type = "deleted"
-                    else:
-                        event_type = "created"
-                    events.append(
-                        EventRecord(
-                            event_type=event_type,
-                            issue_id=issue_id,
-                            timestamp=new_state.get("created_at", ""),
-                            by=new_state.get("created_by"),
-                            title=new_state.get("title"),
-                            changes=changes,
-                        ),
-                    )
-                else:
-                    # Existing issue - check for changes
-                    old_state = old[issue_id]
-                    changes = {}
-                    for field_name in TRACKED_FIELDS:
-                        old_val = _field_value(old_state.get(field_name))
-                        new_val = _field_value(new_state.get(field_name))
-                        if old_val != new_val:
-                            changes[field_name] = {
-                                "old": old_val,
-                                "new": new_val,
-                            }
-                    changes.update(
-                        diff_metadata(
-                            old_state.get("metadata"),
-                            new_state.get("metadata"),
-                        ),
-                    )
-                    if changes:
-                        event_type = "updated"
-                        if "status" in changes and changes["status"]["new"] == "closed":
-                            event_type = "closed"
-                        elif (
-                            "status" in changes
-                            and changes["status"]["new"] == "tombstone"
-                        ):
-                            event_type = "deleted"
-                        events.append(
-                            EventRecord(
-                                event_type=event_type,
-                                issue_id=issue_id,
-                                timestamp=new_state.get("updated_at", ""),
-                                by=new_state.get("updated_by"),
-                                title=new_state.get("title"),
-                                changes=changes,
-                            ),
-                        )
-
-            # Check for deleted issues (in old but not in new)
             events.extend(
-                EventRecord(
-                    event_type="deleted",
-                    issue_id=issue_id,
-                    timestamp="",
-                    title=old[issue_id].get("title"),
-                    changes={
-                        "status": {
-                            "old": old[issue_id].get("status"),
-                            "new": "removed",
-                        },
-                    },
-                )
-                for issue_id in old
-                if issue_id not in new
+                _diff_records(
+                    old,
+                    new,
+                    TRACKED_FIELDS,
+                    created_by_field="created_by",
+                    updated_by_field="updated_by",
+                    include_metadata=True,
+                ),
             )
-
-            # Check for new and updated proposals
-            for prop_id, new_state in new_proposals.items():
-                if prop_id not in old_proposals:
-                    changes = {}
-                    for field_name in TRACKED_PROPOSAL_FIELDS:
-                        value = new_state.get(field_name)
-                        if value is not None and value != "":
-                            changes[field_name] = {
-                                "old": None,
-                                "new": _field_value(value),
-                            }
-                    status = _field_value(new_state.get("status"))
-                    if status == "closed":
-                        event_type = "closed"
-                    elif status == "tombstone":
-                        event_type = "deleted"
-                    else:
-                        event_type = "created"
-                    events.append(
-                        EventRecord(
-                            event_type=event_type,
-                            issue_id=prop_id,
-                            timestamp=new_state.get("created_at", ""),
-                            by=new_state.get("proposed_by"),
-                            title=new_state.get("title"),
-                            changes=changes,
-                        ),
-                    )
-                else:
-                    old_state = old_proposals[prop_id]
-                    changes = {}
-                    for field_name in TRACKED_PROPOSAL_FIELDS:
-                        old_val = _field_value(old_state.get(field_name))
-                        new_val = _field_value(new_state.get(field_name))
-                        if old_val != new_val:
-                            changes[field_name] = {
-                                "old": old_val,
-                                "new": new_val,
-                            }
-                    if changes:
-                        event_type = "updated"
-                        if "status" in changes and changes["status"]["new"] == "closed":
-                            event_type = "closed"
-                        elif (
-                            "status" in changes
-                            and changes["status"]["new"] == "tombstone"
-                        ):
-                            event_type = "deleted"
-                        events.append(
-                            EventRecord(
-                                event_type=event_type,
-                                issue_id=prop_id,
-                                timestamp=new_state.get("updated_at", ""),
-                                by=new_state.get("closed_by"),
-                                title=new_state.get("title"),
-                                changes=changes,
-                            ),
-                        )
-
-            # Check for deleted proposals (in old but not in new)
             events.extend(
-                EventRecord(
-                    event_type="deleted",
-                    issue_id=prop_id,
-                    timestamp="",
-                    title=old_proposals[prop_id].get("title"),
-                    changes={
-                        "status": {
-                            "old": old_proposals[prop_id].get("status"),
-                            "new": "removed",
-                        },
-                    },
-                )
-                for prop_id in old_proposals
-                if prop_id not in new_proposals
+                _diff_records(
+                    old_proposals,
+                    new_proposals,
+                    TRACKED_PROPOSAL_FIELDS,
+                    created_by_field="proposed_by",
+                    updated_by_field="closed_by",
+                    include_metadata=False,
+                ),
             )
 
             # Sort oldest first (chronological)

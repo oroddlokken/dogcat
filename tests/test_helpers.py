@@ -216,3 +216,74 @@ class TestRcWalkupBoundary:
         warn_if_rc_target_foreign(rc, external)
         err = capsys.readouterr().err
         assert "outside the rc's directory" in err
+
+    @staticmethod
+    def _make_rc(tmp_path: Path) -> tuple[Path, Path]:
+        """Create an in-tree rc file + target so only the uid check matters."""
+        rc_dir = tmp_path / "rc_dir"
+        rc_dir.mkdir()
+        rc = rc_dir / ".dogcatrc"
+        rc.write_text("ignored")
+        # target is the rc's own directory → in-tree, no out-of-tree warning.
+        return rc, rc_dir
+
+    def test_cross_user_ownership_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A differing owner uid between rc and target raises ValueError.
+
+        This is the security boundary that stops a .dogcatrc planted by
+        another user from silently re-rooting all reads/writes to a foreign
+        store (dogcat-6b5l). Path.resolve() uses os.lstat, not Path.stat, so
+        patching Path.stat only affects the two uid reads.
+        """
+        from dogcat.config import warn_if_rc_target_foreign
+
+        rc, target = self._make_rc(tmp_path)
+
+        class _FakeStat:
+            def __init__(self, uid: int) -> None:
+                self.st_uid = uid
+
+        def fake_stat(self: Path, *_args: object, **_kwargs: object) -> _FakeStat:
+            return _FakeStat(1000 if self.name == ".dogcatrc" else 2000)
+
+        monkeypatch.setattr(Path, "stat", fake_stat)
+        with pytest.raises(ValueError, match="different uid"):
+            warn_if_rc_target_foreign(rc, target)
+
+    def test_cross_user_override_suppresses_refusal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """DCAT_UNSAFE_CROSS_USER=1 suppresses the cross-user raise."""
+        from dogcat.config import warn_if_rc_target_foreign
+
+        rc, target = self._make_rc(tmp_path)
+        monkeypatch.setenv("DCAT_UNSAFE_CROSS_USER", "1")
+
+        class _FakeStat:
+            def __init__(self, uid: int) -> None:
+                self.st_uid = uid
+
+        def fake_stat(self: Path, *_args: object, **_kwargs: object) -> _FakeStat:
+            return _FakeStat(1000 if self.name == ".dogcatrc" else 2000)
+
+        monkeypatch.setattr(Path, "stat", fake_stat)
+        # Differing uids, but the override returns before the check → no raise.
+        warn_if_rc_target_foreign(rc, target)
+
+    def test_stat_oserror_degrades_to_no_raise(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An OSError reading owner uid degrades to no-raise, not a crash."""
+        from dogcat.config import warn_if_rc_target_foreign
+
+        rc, target = self._make_rc(tmp_path)
+
+        def fake_stat(_self: Path, *_args: object, **_kwargs: object) -> object:
+            msg = "stat failed"
+            raise OSError(msg)
+
+        monkeypatch.setattr(Path, "stat", fake_stat)
+        # Must not propagate the OSError.
+        warn_if_rc_target_foreign(rc, target)

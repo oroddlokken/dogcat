@@ -148,6 +148,35 @@ class TestArchiveBasic:
             assert last_record["title"] == "Test issue"
             assert last_record["status"] == "closed"
 
+    def test_archive_survives_malformed_parseable_record(self, tmp_path: Path) -> None:
+        """A parseable-but-malformed row must not crash archive (dogcat-4258).
+
+        A ``record_type: link`` missing ``from_id`` classifies as a link but
+        raises KeyError on the key access. Before the fix that KeyError
+        escaped under the lock and aborted the whole command. It must now be
+        kept in the source partition (neither archived nor lost).
+        """
+        dogcats_dir = tmp_path / ".dogcats"
+        init_repo(dogcats_dir)
+        issue_id = create_issue(dogcats_dir, "Closed issue")
+        close_issue(dogcats_dir, issue_id)
+
+        # Append a syntactically valid record missing an expected key.
+        issues_file = dogcats_dir / "issues.jsonl"
+        malformed = orjson.dumps({"record_type": "link", "to_id": issue_id})
+        with issues_file.open("ab") as f:
+            f.write(malformed + b"\n")
+
+        result = runner.invoke(
+            app,
+            ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0, result.stdout
+        assert "Archived 1 issue(s)" in result.stdout
+
+        # The malformed row stayed in the source file (not lost, not archived).
+        assert b'"to_id"' in issues_file.read_bytes()
+
 
 class TestArchiveOlderThan:
     """Test --older-than filtering."""

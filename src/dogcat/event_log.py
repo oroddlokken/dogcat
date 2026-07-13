@@ -5,10 +5,11 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Any
 
 import orjson
 
+from dogcat._jsonl_io import append_jsonl_payload
 from dogcat._version import version as _dcat_version
 from dogcat.constants import INBOX_FILENAME, ISSUES_FILENAME, LOCK_FILENAME
 from dogcat.locking import advisory_file_lock
@@ -17,42 +18,24 @@ if TYPE_CHECKING:
     from contextlib import AbstractContextManager
 
 
-class FieldChangeDict(TypedDict):
-    """Documented dict shape for a single field change in the JSONL store.
-
-    Records on disk use this shape: ``{"old": ..., "new": ...}``. Keep this
-    TypedDict in sync with :class:`FieldChange` — they're the dict and
-    dataclass faces of the same value. The dict form is what crosses the
-    JSONL boundary; the dataclass form is what new code should prefer
-    in-memory because attribute access (``c.new``) reads better than
-    dict indexing (``c["new"]``).
-    """
-
-    old: Any
-    new: Any
-
-
 @dataclass
 class FieldChange:
     """An old/new value pair for a single tracked field on an issue.
 
-    Canonical in-memory representation of a per-field change record. The
-    JSONL store and most legacy callsites still pass the equivalent
-    :class:`FieldChangeDict` shape; use :meth:`to_dict` / :meth:`from_dict`
-    at the boundary.
+    Typed display form consumed by :class:`dogcat.stream.StreamEvent`.
+    Change records cross the JSONL boundary as the raw
+    ``{"old": ..., "new": ...}`` dict — the shape :attr:`EventRecord.changes`
+    stores and every on-disk reader parses. :meth:`to_dict` converts a
+    FieldChange back to that shape at the serialization edge; the dict is
+    canonical at the boundary, this dataclass is the in-memory convenience.
     """
 
     old: Any
     new: Any
 
-    def to_dict(self) -> FieldChangeDict:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to the on-disk ``{"old": ..., "new": ...}`` shape."""
         return {"old": self.old, "new": self.new}
-
-    @classmethod
-    def from_dict(cls, data: FieldChangeDict | dict[str, Any]) -> FieldChange:
-        """Build a FieldChange from a dict (forgiving of missing keys)."""
-        return cls(old=data.get("old"), new=data.get("new"))
 
 
 @dataclass
@@ -138,12 +121,18 @@ class _BaseEventLog:
         self._lock_path = self.dogcats_dir / LOCK_FILENAME
 
     def append(self, event: EventRecord) -> None:
-        """Append a single event record to the underlying JSONL file."""
-        data = _serialize(event)
-        with self._file_lock(), self.path.open("ab") as f:
-            f.write(orjson.dumps(data))
-            f.write(b"\n")
-            f.flush()
+        """Append a single event record to the underlying JSONL file.
+
+        Routes through :func:`append_jsonl_payload` so the write is
+        fsynced and guarded by the trailing-newline check, matching every
+        other append to ``issues.jsonl`` / ``inbox.jsonl``. Without this an
+        event could be lost on power loss even after the issue record was
+        fsynced, or concatenate onto a corrupt tail as one unparseable
+        line. (dogcat-61rd)
+        """
+        payload = orjson.dumps(_serialize(event)) + b"\n"
+        with self._file_lock():
+            append_jsonl_payload(self.path, payload)
 
     def try_emit(
         self,
@@ -179,10 +168,6 @@ class _BaseEventLog:
                 "Failed to write event for %s", full_id, exc_info=True
             )
 
-    # Back-compat alias: existing callers use ``emit``; remove once all
-    # in-tree call sites have migrated to the explicit ``try_emit`` name.
-    emit = try_emit
-
     @staticmethod
     def build_record(
         event_type: str,
@@ -197,7 +182,7 @@ class _BaseEventLog:
         Used by callers that want to bundle the event record with another
         record into a single locked append, halving lock acquisitions and
         fsyncs for each mutation. Returns ``None`` when there are no
-        changes to record (parity with :meth:`emit` no-op).
+        changes to record (parity with :meth:`try_emit` no-op).
         """
         if not changes:
             return None

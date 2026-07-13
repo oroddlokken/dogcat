@@ -23,6 +23,7 @@ from ._completions import (
     complete_types,
 )
 from ._formatting import (
+    DeferredView,
     format_issue_brief,
     format_issue_full,
     format_issue_table,
@@ -69,7 +70,7 @@ def _collect_descendants(storage: JSONLStorage, parent_id: str) -> set[str]:
 def _collapse_deferred_subtrees(
     issues: list[Issue],
     storage: JSONLStorage,
-) -> tuple[list[Issue], dict[str, int], dict[str, list[str]], dict[str, list[Issue]]]:
+) -> DeferredView:
     """Collapse children of deferred parents and annotate blocked externals.
 
     Args:
@@ -77,8 +78,8 @@ def _collapse_deferred_subtrees(
         storage: The storage instance
 
     Returns:
-        4-tuple of (filtered, hidden_counts, deferred_blocker_map, preview)
-        - filtered issues: children of deferred parents removed
+        A :class:`DeferredView` bundling:
+        - filtered: issues with children of deferred parents removed
         - hidden_counts: deferred parent full_id -> count of hidden descendants
         - deferred_blocker_map: issue full_id -> list of deferred blocker IDs
         - preview_subtasks: deferred parent full_id -> list of preview child issues
@@ -153,7 +154,12 @@ def _collapse_deferred_subtrees(
     # Filter out descendants of deferred parents
     filtered = [i for i in issues if i.full_id not in all_deferred_descendants]
 
-    return filtered, hidden_counts, deferred_blocker_map, preview_subtasks
+    return DeferredView(
+        filtered=filtered,
+        hidden_counts=hidden_counts,
+        deferred_blocker_map=deferred_blocker_map,
+        preview_subtasks=preview_subtasks,
+    )
 
 
 def _is_closed_excluded_by_default(
@@ -183,7 +189,7 @@ def _apply_default_visibility(
     include_snoozed: bool,
 ) -> list[Issue]:
     """Hide closed/tombstoned and snoozed issues unless the user opted in."""
-    from datetime import datetime as dt
+    from dogcat.issue_queries import hide_snoozed, hide_terminal
 
     if _is_closed_excluded_by_default(
         status=status,
@@ -192,13 +198,10 @@ def _apply_default_visibility(
         closed_after=closed_after,
         closed_before=closed_before,
     ):
-        issues = [i for i in issues if i.status.value not in ("closed", "tombstone")]
+        issues = hide_terminal(issues)
 
     if not include_snoozed and not all_issues:
-        now = dt.now().astimezone()
-        issues = [
-            i for i in issues if i.snoozed_until is None or i.snoozed_until <= now
-        ]
+        issues = hide_snoozed(issues)
     return issues
 
 
@@ -654,14 +657,14 @@ def register(app: typer.Typer) -> None:
                 typer.echo(orjson.dumps(output).decode())
             else:
                 # Collapse children of deferred parents (unless --expand)
-                preview_subtasks: dict[str, list[Issue]] = {}
                 if expand:
-                    hidden_counts: dict[str, int] = {}
-                    deferred_blocker_map: dict[str, list[str]] = {}
+                    deferred_view = DeferredView(filtered=issues)
                 else:
-                    issues, hidden_counts, deferred_blocker_map, preview_subtasks = (
-                        _collapse_deferred_subtrees(issues, storage)
-                    )
+                    deferred_view = _collapse_deferred_subtrees(issues, storage)
+                    issues = deferred_view.filtered
+                hidden_counts = deferred_view.hidden_counts
+                deferred_blocker_map = deferred_view.deferred_blocker_map
+                preview_subtasks = deferred_view.preview_subtasks
 
                 if final_limit is not None:
                     issues = issues[:final_limit]
@@ -689,9 +692,7 @@ def register(app: typer.Typer) -> None:
                                 issues,
                                 blocked_ids=blocked_ids,
                                 blocked_by_map=blocked_by_map,
-                                hidden_counts=hidden_counts,
-                                deferred_blocker_map=deferred_blocker_map,
-                                preview_subtasks=preview_subtasks,
+                                deferred=deferred_view,
                             ),
                         )
                     elif table:
@@ -700,9 +701,7 @@ def register(app: typer.Typer) -> None:
                                 issues,
                                 blocked_ids=blocked_ids,
                                 blocked_by_map=blocked_by_map,
-                                hidden_counts=hidden_counts,
-                                deferred_blocker_map=deferred_blocker_map,
-                                preview_subtasks=preview_subtasks,
+                                deferred=deferred_view,
                             ),
                         )
                     else:

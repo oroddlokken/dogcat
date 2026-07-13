@@ -61,7 +61,7 @@ import math
 import uuid
 from datetime import datetime
 
-from dogcat.constants import ID_LENGTH_MAX, ID_LENGTH_THRESHOLDS
+from dogcat.constants import DEFAULT_NAMESPACE, ID_LENGTH_MAX, ID_LENGTH_THRESHOLDS
 
 
 def get_id_length_for_count(issue_count: int) -> int:
@@ -248,16 +248,16 @@ class IDGenerator:
     def __init__(
         self,
         existing_ids: set[str] | None = None,
-        prefix: str = "dc",
+        namespace: str = DEFAULT_NAMESPACE,
     ) -> None:
         """Initialize the ID generator.
 
         Args:
             existing_ids: Set of already-used IDs to detect collisions
-            prefix: Default prefix for generated IDs (default: "dc")
+            namespace: Default namespace for generated IDs (default: "dc")
         """
         self.existing_ids = existing_ids or set()
-        self.prefix = prefix
+        self.namespace = namespace
         self.max_retries = 100
         self._counter = 0
 
@@ -267,7 +267,13 @@ class IDGenerator:
         return get_id_length_for_count(len(self.existing_ids))
 
     def add_existing_id(self, issue_id: str) -> None:
-        """Record an existing ID for collision detection."""
+        """Record an existing ID for collision detection.
+
+        Incremental-registration counterpart to the ``existing_ids``
+        constructor arg; exercised by tests, no production caller today —
+        kept as the public way to register an id after construction
+        (dogcat-jh04).
+        """
         self.existing_ids.add(issue_id)
 
     def generate(self) -> str:
@@ -277,11 +283,11 @@ class IDGenerator:
         based on content aren't needed.
 
         Returns:
-            Unique ID in format "{prefix}-{counter}"
+            Unique ID in format "{namespace}-{counter}"
         """
         while True:
             self._counter += 1
-            candidate_id = f"{self.prefix}-{self._counter:04d}"
+            candidate_id = f"{self.namespace}-{self._counter:04d}"
             if candidate_id not in self.existing_ids:
                 self.existing_ids.add(candidate_id)
                 return candidate_id
@@ -300,14 +306,14 @@ class IDGenerator:
         Args:
             title: Item title (issue or proposal)
             timestamp: Timestamp for creation
-            namespace: Namespace/prefix for collision checking
-                (defaults to instance prefix)
+            namespace: Namespace for collision checking
+                (defaults to instance namespace)
 
         Returns:
             Unique ID hash (without namespace prefix)
         """
         if namespace is None:
-            namespace = self.prefix
+            namespace = self.namespace
         if timestamp is None:
             timestamp = datetime.now().astimezone()
 

@@ -122,6 +122,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+from dogcat.constants import DEFAULT_NAMESPACE
 from dogcat.models import classify_record
 
 logger = logging.getLogger(__name__)
@@ -284,14 +285,14 @@ def _parse_iso_ts(value: str) -> datetime:
 
 def _issue_full_id(record: dict[str, Any]) -> str:
     """Extract the full issue ID from an issue record."""
-    ns = record.get("namespace", "dc")
+    ns = record.get("namespace", DEFAULT_NAMESPACE)
     hash_id = record.get("id", "")
     return f"{ns}-{hash_id}"
 
 
 def _proposal_full_id(record: dict[str, Any]) -> str:
     """Extract the full proposal ID from a proposal record."""
-    ns = record.get("namespace", "dc")
+    ns = record.get("namespace", DEFAULT_NAMESPACE)
     hash_id = record.get("id", "")
     return f"{ns}-inbox-{hash_id}"
 

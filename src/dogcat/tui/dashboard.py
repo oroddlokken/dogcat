@@ -258,29 +258,17 @@ class DogcatTUI(App[None]):
         """Load issues as a tree into the option list."""
         from dogcat.config import get_namespace_filter
         from dogcat.deps import get_blocked_issues
+        from dogcat.issue_queries import default_visible_issues, reparent_orphans
 
-        issues: list[Issue] = [
-            i
-            for i in self._storage.list()
-            if i.status.value not in ("closed", "tombstone")
-        ]
-
+        # Shared with `dcat list`: hide terminal + snoozed, apply namespace
+        # filter, then root orphaned children. (dogcat-1bxq)
         ns_filter = get_namespace_filter(str(self._storage.dogcats_dir))
-        if ns_filter is not None:
-            issues = [i for i in issues if ns_filter(i.namespace)]
+        issues = default_visible_issues(self._storage, ns_filter=ns_filter)
 
         blocked = get_blocked_issues(self._storage)
         self._blocked_ids: set[str] = {bi.issue_id for bi in blocked}
 
-        # Reparent orphans (parent tombstoned, closed, or namespace-filtered)
-        # to root so they stay reachable in the list. Without this the
-        # orphan sits under a missing parent_id key and never gets walked
-        # by _build_tree(parent_id=None).
-        visible_ids = {i.full_id for i in issues}
-        hierarchy: dict[str | None, list[Issue]] = {}
-        for issue in issues:
-            parent_key = issue.parent if issue.parent in visible_ids else None
-            hierarchy.setdefault(parent_key, []).append(issue)
+        hierarchy = reparent_orphans(issues)
         self._issues = []
         self._build_tree(hierarchy, parent_id=None, depth=0)
         # Dict for O(1) selected-label -> full_id resolution. Keyed by the
@@ -482,11 +470,11 @@ class DogcatTUI(App[None]):
     def action_new_issue(self) -> None:
         """Open the editor to create a new issue."""
         from dogcat.cli._helpers import get_default_operator
-        from dogcat.config import get_issue_prefix
+        from dogcat.config import get_namespace
         from dogcat.models import Issue
         from dogcat.tui.editor import IssueEditorScreen
 
-        namespace = get_issue_prefix(str(self._storage.dogcats_dir))
+        namespace = get_namespace(str(self._storage.dogcats_dir))
         owner = get_default_operator()
 
         skeleton = Issue(

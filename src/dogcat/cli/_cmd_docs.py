@@ -15,6 +15,7 @@ from dogcat.constants import (
     MERGE_DRIVER_NAME,
 )
 
+from ._health import HealthCheck
 from ._helpers import SortedGroup, find_dogcats_dir
 from ._json_state import echo_error, is_json, set_json
 
@@ -145,23 +146,25 @@ def _git_repo_root() -> Path | None:
     return git_helpers.repo_root()
 
 
-def _run_git_checks() -> tuple[bool, dict[str, dict[str, object]]]:
-    """Run git integration checks and return (all_passed, checks_dict).
+def _run_git_checks() -> tuple[bool, dict[str, HealthCheck]]:
+    """Run git integration checks and return (all_passed, checks).
 
     Shared logic used by both ``dcat git check`` and ``dcat prime --opinionated``.
+    Returns typed :class:`HealthCheck` rows so every renderer reads them by
+    attribute (pyright-checked) instead of untyped string keys. (dogcat-483i)
     """
-    checks: dict[str, dict[str, object]] = {}
+    checks: dict[str, HealthCheck] = {}
     all_passed = True
 
     # Check 1: Are we in a git repo?
     repo_root = _git_repo_root()
     in_git_repo = repo_root is not None
-    checks["git_repo"] = {
-        "description": "Inside a git repository",
-        "fail_description": "Not in a git repository",
-        "passed": in_git_repo,
-        "fix": "Run 'git init' to initialize a git repository",
-    }
+    checks["git_repo"] = HealthCheck(
+        description="Inside a git repository",
+        fail_description="Not in a git repository",
+        passed=in_git_repo,
+        fix="Run 'git init' to initialize a git repository",
+    )
     if not in_git_repo:
         all_passed = False
 
@@ -174,12 +177,12 @@ def _run_git_checks() -> tuple[bool, dict[str, dict[str, object]]]:
     if gitignore.exists():
         content = gitignore.read_text()
         lock_ignored = ".issues.lock" in content or ".dogcats/" in content
-    checks["lock_ignored"] = {
-        "description": ".gitignore covers .issues.lock",
-        "fail_description": ".gitignore does not include .issues.lock",
-        "passed": lock_ignored,
-        "fix": "Add '.dogcats/.issues.lock' to .gitignore",
-    }
+    checks["lock_ignored"] = HealthCheck(
+        description=".gitignore covers .issues.lock",
+        fail_description=".gitignore does not include .issues.lock",
+        passed=lock_ignored,
+        fix="Add '.dogcats/.issues.lock' to .gitignore",
+    )
     if not lock_ignored:
         all_passed = False
 
@@ -188,29 +191,29 @@ def _run_git_checks() -> tuple[bool, dict[str, dict[str, object]]]:
     if gitignore.exists():
         lines = gitignore.read_text().splitlines()
         dogcats_ignored = any(ln.strip() in (".dogcats/", ".dogcats") for ln in lines)
-    checks["dogcats_ignored"] = {
-        "description": ".dogcats/ is shared with team via git",
-        "fail_description": ".dogcats/ is in .gitignore (not shared with team)",
-        "passed": not dogcats_ignored,
-        "fix": "Remove '.dogcats/' from .gitignore to share issues with team",
-        "optional": True,
-    }
+    checks["dogcats_ignored"] = HealthCheck(
+        description=".dogcats/ is shared with team via git",
+        fail_description=".dogcats/ is in .gitignore (not shared with team)",
+        passed=not dogcats_ignored,
+        fix="Remove '.dogcats/' from .gitignore to share issues with team",
+        optional=True,
+    )
 
     # Check 4: Is the merge driver configured with the correct command?
     import dogcat.git as git_helpers
 
     driver_value = git_helpers.get_config(MERGE_DRIVER_GIT_KEY) or ""
     driver_correct = driver_value == MERGE_DRIVER_CMD
-    checks["merge_driver"] = {
-        "description": "JSONL merge driver is configured",
-        "fail_description": (
+    checks["merge_driver"] = HealthCheck(
+        description="JSONL merge driver is configured",
+        fail_description=(
             "JSONL merge driver is not configured"
             if not driver_value
             else f"JSONL merge driver has wrong command: {driver_value}"
         ),
-        "passed": driver_correct,
-        "fix": "Run 'dcat git setup' to install the merge driver",
-    }
+        passed=driver_correct,
+        fix="Run 'dcat git setup' to install the merge driver",
+    )
     if not driver_correct:
         all_passed = False
 
@@ -219,15 +222,15 @@ def _run_git_checks() -> tuple[bool, dict[str, dict[str, object]]]:
     has_gitattrs = False
     if gitattrs.exists():
         has_gitattrs = "merge=dcat-jsonl" in gitattrs.read_text()
-    checks["gitattributes"] = {
-        "description": ".gitattributes has JSONL merge driver entry",
-        "fail_description": ".gitattributes is missing JSONL merge driver entry",
-        "passed": has_gitattrs,
-        "fix": (
+    checks["gitattributes"] = HealthCheck(
+        description=".gitattributes has JSONL merge driver entry",
+        fail_description=".gitattributes is missing JSONL merge driver entry",
+        passed=has_gitattrs,
+        fix=(
             "Run 'dcat git setup' or add"
             " '.dogcats/*.jsonl merge=dcat-jsonl' to .gitattributes"
         ),
-    }
+    )
     if not has_gitattrs:
         all_passed = False
 
@@ -275,9 +278,9 @@ def register(app: typer.Typer) -> None:
                 "status": "ok" if all_passed else "issues_found",
                 "checks": {
                     name: {
-                        "passed": check["passed"],
-                        "description": check["description"],
-                        "fix": check["fix"] if not check["passed"] else None,
+                        "passed": check.passed,
+                        "description": check.description,
+                        "fix": check.fix if not check.passed else None,
                     }
                     for name, check in checks.items()
                 },
@@ -286,19 +289,18 @@ def register(app: typer.Typer) -> None:
         else:
             typer.echo("\nGit Integration Check\n")
             for check in checks.values():
-                is_optional = check.get("optional", False)
-                if check["passed"]:
-                    desc = check["description"]
-                    line = typer.style(f"✓ {desc}", fg="green")
+                is_optional = check.optional
+                if check.passed:
+                    line = typer.style(f"✓ {check.description}", fg="green")
                 elif is_optional:
-                    desc = check.get("fail_description", check["description"])
+                    desc = check.fail_description or check.description
                     line = typer.style(f"○ {desc}", fg="yellow")
                 else:
-                    desc = check.get("fail_description", check["description"])
+                    desc = check.fail_description or check.description
                     line = typer.style(f"✗ {desc}", fg="red")
                 typer.echo(line)
-                if not check["passed"] and not is_optional:
-                    typer.echo(typer.style(f"  Fix: {check['fix']}", fg="yellow"))
+                if not check.passed and not is_optional:
+                    typer.echo(typer.style(f"  Fix: {check.fix}", fg="yellow"))
                 typer.echo()
             if all_passed:
                 typer.echo(typer.style("\n✓ All checks passed!", fg="green"))
@@ -910,9 +912,9 @@ def register(app: typer.Typer) -> None:
 
         global_mode_section = ""
         if was_resolved_via_global(dogcats_dir):
-            from dogcat.config import get_issue_prefix
+            from dogcat.config import get_namespace
 
-            namespace = get_issue_prefix(dogcats_dir)
+            namespace = get_namespace(dogcats_dir)
             global_mode_section = f"""
 ## Active Storage (global fallback)
 
@@ -1134,24 +1136,17 @@ Proposals are lightweight (cross-repo) requests (accept, reject, or ignore).
                 all_passed, checks = _run_git_checks()
                 output_parts.append("## dogcat health check\n")
                 for check in checks.values():
-                    is_optional = check.get("optional", False)
-                    if check["passed"]:
-                        desc = check["description"]
-                        output_parts.append(f"  ✓ {desc}")
+                    is_optional = check.optional
+                    if check.passed:
+                        output_parts.append(f"  ✓ {check.description}")
                     elif is_optional:
-                        desc = check.get(
-                            "fail_description",
-                            check["description"],
-                        )
+                        desc = check.fail_description or check.description
                         output_parts.append(f"  ○ {desc}")
                     else:
-                        desc = check.get(
-                            "fail_description",
-                            check["description"],
-                        )
+                        desc = check.fail_description or check.description
                         output_parts.append(f"  ✗ {desc}")
                         output_parts.append(
-                            f"    Suggestion: {check['fix']}",
+                            f"    Suggestion: {check.fix}",
                         )
                 output_parts.append("")
                 if not all_passed:

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 from typer.testing import CliRunner
 
 from dogcat.cli import find_dogcats_dir
-from dogcat.config import get_issue_prefix, get_namespace_filter
+from dogcat.config import get_namespace, get_namespace_filter
 from dogcat.global_config import save_global_config_value
 
 if TYPE_CHECKING:
@@ -173,7 +173,7 @@ class TestGlobalConfigNamespace:
 
         resolved = find_dogcats_dir()
         assert resolved == str(global_store)
-        assert get_issue_prefix(resolved) == "laering"
+        assert get_namespace(resolved) == "laering"
 
     def test_cwd_slug_beats_shared_store_config_namespace(
         self,
@@ -190,7 +190,7 @@ class TestGlobalConfigNamespace:
         repo.mkdir()
         monkeypatch.chdir(repo)
 
-        assert get_issue_prefix(find_dogcats_dir()) == "laering"
+        assert get_namespace(find_dogcats_dir()) == "laering"
 
     def test_unsluggable_cwd_falls_back_to_shared_store_namespace(
         self,
@@ -207,7 +207,7 @@ class TestGlobalConfigNamespace:
         repo.mkdir()
         monkeypatch.chdir(repo)
 
-        assert get_issue_prefix(find_dogcats_dir()) == "shared"
+        assert get_namespace(find_dogcats_dir()) == "shared"
 
     def test_local_config_overrides_cwd_slug(
         self,
@@ -229,7 +229,7 @@ class TestGlobalConfigNamespace:
         (repo / ".dogcats" / "config.local.toml").write_text('namespace = "custom"\n')
 
         monkeypatch.chdir(repo)
-        assert get_issue_prefix(find_dogcats_dir()) == "custom"
+        assert get_namespace(find_dogcats_dir()) == "custom"
 
 
 class TestFallbackNamespaceUsesRepoRoot:
@@ -260,7 +260,7 @@ class TestFallbackNamespaceUsesRepoRoot:
         monkeypatch.chdir(repo / "src")
         resolved = find_dogcats_dir()
         assert resolved == str(global_store)
-        assert get_issue_prefix(resolved) == "myrepo"
+        assert get_namespace(resolved) == "myrepo"
 
     def test_repo_root_uses_own_name(
         self,
@@ -274,7 +274,7 @@ class TestFallbackNamespaceUsesRepoRoot:
         _git_init(repo)
 
         monkeypatch.chdir(repo)
-        assert get_issue_prefix(find_dogcats_dir()) == "myrepo"
+        assert get_namespace(find_dogcats_dir()) == "myrepo"
 
     def test_stderr_notice_names_repo_root_slug(
         self,
@@ -340,7 +340,7 @@ class TestGlobalFallbackDoesNotLeak:
         monkeypatch.chdir(repo)
         resolved = find_dogcats_dir()
         assert resolved == str(global_store)
-        assert get_issue_prefix(resolved) == "shared"
+        assert get_namespace(resolved) == "shared"
 
     def test_store_home_repo_keeps_own_namespace(
         self,
@@ -357,7 +357,7 @@ class TestGlobalFallbackDoesNotLeak:
         monkeypatch.chdir(home)
         resolved = find_dogcats_dir()
         assert resolved == str(store)
-        assert get_issue_prefix(resolved) == "issues"
+        assert get_namespace(resolved) == "issues"
         # No rc, no fallback, no visible/hidden config → unfiltered view.
         assert get_namespace_filter(resolved) is None
 

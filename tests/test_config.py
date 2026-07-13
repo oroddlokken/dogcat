@@ -9,13 +9,13 @@ from dogcat.config import (
     CONFIG_FILENAME,
     DEFAULT_PREFIX,
     LOCAL_CONFIG_FILENAME,
-    _detect_prefix_from_directory,
-    _detect_prefix_from_issues,
+    _detect_namespace_from_directory,
+    _detect_namespace_from_issues,
     _resolve_dogcats_path,
-    extract_prefix,
+    extract_namespace,
     get_config_path,
-    get_issue_prefix,
     get_local_config_path,
+    get_namespace,
     get_namespace_filter,
     load_config,
     load_local_config,
@@ -24,53 +24,53 @@ from dogcat.config import (
     parse_dogcatrc,
     save_config,
     save_local_config,
-    set_issue_prefix,
+    set_namespace,
 )
 from dogcat.constants import DOGCATRC_FILENAME
 
 
 class TestExtractPrefix:
-    """Tests for extract_prefix function."""
+    """Tests for extract_namespace function."""
 
     def test_extract_simple_prefix(self) -> None:
         """Extract prefix from standard issue ID."""
-        assert extract_prefix("search-8qx") == "search"
+        assert extract_namespace("search-8qx") == "search"
 
     def test_extract_prefix_with_numbers(self) -> None:
         """Extract prefix containing numbers."""
-        assert extract_prefix("proj123-abc") == "proj123"
+        assert extract_namespace("proj123-abc") == "proj123"
 
     def test_extract_multi_hyphen_prefix(self) -> None:
         """Extract prefix with multiple hyphens (before last hyphen)."""
-        assert extract_prefix("my-cool-project-xyz") == "my-cool-project"
+        assert extract_namespace("my-cool-project-xyz") == "my-cool-project"
 
     def test_extract_prefix_no_hyphen(self) -> None:
         """Return None if no hyphen in ID."""
-        assert extract_prefix("nohyphen") is None
+        assert extract_namespace("nohyphen") is None
 
     def test_extract_prefix_empty_string(self) -> None:
         """Return None for empty string."""
-        assert extract_prefix("") is None
+        assert extract_namespace("") is None
 
     def test_extract_prefix_single_char_prefix(self) -> None:
         """Extract single character prefix."""
-        assert extract_prefix("x-123") == "x"
+        assert extract_namespace("x-123") == "x"
 
     def test_extract_prefix_long_hash(self) -> None:
         """Extract prefix with longer hash portion."""
-        assert extract_prefix("myapp-a1b2c3d4") == "myapp"
+        assert extract_namespace("myapp-a1b2c3d4") == "myapp"
 
     def test_extract_prefix_hyphen_only(self) -> None:
         """Return None for hyphen-only string."""
-        assert extract_prefix("-") is None
+        assert extract_namespace("-") is None
 
     def test_extract_prefix_trailing_hyphen(self) -> None:
         """Handle trailing hyphen."""
-        assert extract_prefix("prefix-") == "prefix"
+        assert extract_namespace("prefix-") == "prefix"
 
     def test_extract_prefix_leading_hyphen(self) -> None:
         """Handle leading hyphen."""
-        assert extract_prefix("-suffix") is None  # Empty prefix before hyphen
+        assert extract_namespace("-suffix") is None  # Empty prefix before hyphen
 
 
 class TestGetConfigPath:
@@ -334,22 +334,22 @@ class TestLoadSaveConfig:
 
 
 class TestSetGetIssuePrefix:
-    """Tests for set_issue_prefix and get_issue_prefix functions."""
+    """Tests for set_namespace and get_namespace functions."""
 
     def test_set_and_get_prefix(self, tmp_path: Path) -> None:
         """Set and get prefix roundtrip."""
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
 
-        set_issue_prefix(str(dogcats_dir), "myprefix")
-        assert get_issue_prefix(str(dogcats_dir)) == "myprefix"
+        set_namespace(str(dogcats_dir), "myprefix")
+        assert get_namespace(str(dogcats_dir)) == "myprefix"
 
     def test_set_prefix_creates_config(self, tmp_path: Path) -> None:
         """Setting prefix creates config file if needed."""
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
 
-        set_issue_prefix(str(dogcats_dir), "newprefix")
+        set_namespace(str(dogcats_dir), "newprefix")
 
         assert (dogcats_dir / CONFIG_FILENAME).exists()
 
@@ -362,7 +362,7 @@ class TestSetGetIssuePrefix:
         save_config(str(dogcats_dir), {"namespace": "old", "other_key": "value"})
 
         # Update just the prefix
-        set_issue_prefix(str(dogcats_dir), "new")
+        set_namespace(str(dogcats_dir), "new")
 
         loaded = load_config(str(dogcats_dir))
         assert loaded["namespace"] == "new"
@@ -374,7 +374,7 @@ class TestSetGetIssuePrefix:
         dogcats_dir.mkdir()
 
         # Should detect from parent directory name
-        prefix = get_issue_prefix(str(dogcats_dir))
+        prefix = get_namespace(str(dogcats_dir))
         # The prefix should be a non-empty lowercase string derived from parent dir
         assert prefix is not None
         assert len(prefix) > 0
@@ -386,7 +386,7 @@ class TestSetGetIssuePrefix:
         dogcats_dir = tmp_path / "---" / ".dogcats"
         dogcats_dir.mkdir(parents=True)
 
-        prefix = get_issue_prefix(str(dogcats_dir))
+        prefix = get_namespace(str(dogcats_dir))
         # Should fall back to default since "---" sanitizes to empty
         assert prefix == DEFAULT_PREFIX
 
@@ -396,21 +396,21 @@ class TestSetGetIssuePrefix:
         dogcats_dir.mkdir(parents=True)
 
         # Set a different prefix than directory name
-        set_issue_prefix(str(dogcats_dir), "custom")
+        set_namespace(str(dogcats_dir), "custom")
 
-        prefix = get_issue_prefix(str(dogcats_dir))
+        prefix = get_namespace(str(dogcats_dir))
         assert prefix == "custom"  # Not "myproject"
 
 
 class TestDetectPrefixFromDirectory:
-    """Tests for _detect_prefix_from_directory function."""
+    """Tests for _detect_namespace_from_directory function."""
 
     def test_detect_from_simple_directory(self, tmp_path: Path) -> None:
         """Detect prefix from simple directory name."""
         dogcats_dir = tmp_path / "myproject" / ".dogcats"
         dogcats_dir.mkdir(parents=True)
 
-        prefix = _detect_prefix_from_directory(str(dogcats_dir))
+        prefix = _detect_namespace_from_directory(str(dogcats_dir))
         assert prefix == "myproject"
 
     def test_detect_sanitizes_special_chars(self, tmp_path: Path) -> None:
@@ -418,7 +418,7 @@ class TestDetectPrefixFromDirectory:
         dogcats_dir = tmp_path / "my project!" / ".dogcats"
         dogcats_dir.mkdir(parents=True)
 
-        prefix = _detect_prefix_from_directory(str(dogcats_dir))
+        prefix = _detect_namespace_from_directory(str(dogcats_dir))
         # Trailing hyphen is stripped
         assert prefix == "my-project"
 
@@ -427,7 +427,7 @@ class TestDetectPrefixFromDirectory:
         dogcats_dir = tmp_path / "my-cool-project" / ".dogcats"
         dogcats_dir.mkdir(parents=True)
 
-        prefix = _detect_prefix_from_directory(str(dogcats_dir))
+        prefix = _detect_namespace_from_directory(str(dogcats_dir))
         assert prefix == "my-cool-project"
 
     def test_detect_lowercases(self, tmp_path: Path) -> None:
@@ -435,7 +435,7 @@ class TestDetectPrefixFromDirectory:
         dogcats_dir = tmp_path / "MyProject" / ".dogcats"
         dogcats_dir.mkdir(parents=True)
 
-        prefix = _detect_prefix_from_directory(str(dogcats_dir))
+        prefix = _detect_namespace_from_directory(str(dogcats_dir))
         assert prefix == "myproject"
 
     def test_detect_strips_leading_trailing_hyphens(self, tmp_path: Path) -> None:
@@ -443,7 +443,7 @@ class TestDetectPrefixFromDirectory:
         dogcats_dir = tmp_path / "-project-" / ".dogcats"
         dogcats_dir.mkdir(parents=True)
 
-        prefix = _detect_prefix_from_directory(str(dogcats_dir))
+        prefix = _detect_namespace_from_directory(str(dogcats_dir))
         assert prefix == "project"
 
     def test_detect_returns_none_for_empty(self, tmp_path: Path) -> None:
@@ -451,7 +451,7 @@ class TestDetectPrefixFromDirectory:
         dogcats_dir = tmp_path / "!!!" / ".dogcats"
         dogcats_dir.mkdir(parents=True)
 
-        prefix = _detect_prefix_from_directory(str(dogcats_dir))
+        prefix = _detect_namespace_from_directory(str(dogcats_dir))
         assert prefix is None
 
     def test_detect_transliterates_non_ascii(self, tmp_path: Path) -> None:
@@ -459,12 +459,12 @@ class TestDetectPrefixFromDirectory:
         dogcats_dir = tmp_path / "læring" / ".dogcats"
         dogcats_dir.mkdir(parents=True)
 
-        prefix = _detect_prefix_from_directory(str(dogcats_dir))
+        prefix = _detect_namespace_from_directory(str(dogcats_dir))
         assert prefix == "laering"
 
 
 class TestDetectPrefixFromIssues:
-    """Tests for _detect_prefix_from_issues function."""
+    """Tests for _detect_namespace_from_issues function."""
 
     def test_detect_prefix_from_issues(self, tmp_path: Path) -> None:
         """Detect prefix from existing issues in storage."""
@@ -479,7 +479,7 @@ class TestDetectPrefixFromIssues:
             '{"id": "search-ghi", "title": "Issue 3"}\n',
         )
 
-        prefix = _detect_prefix_from_issues(str(dogcats_dir))
+        prefix = _detect_namespace_from_issues(str(dogcats_dir))
         assert prefix == "search"
 
     def test_detect_most_common_prefix(self, tmp_path: Path) -> None:
@@ -496,7 +496,7 @@ class TestDetectPrefixFromIssues:
             '{"id": "other-xyz", "title": "Issue 4"}\n',
         )
 
-        prefix = _detect_prefix_from_issues(str(dogcats_dir))
+        prefix = _detect_namespace_from_issues(str(dogcats_dir))
         assert prefix == "proj"
 
     def test_detect_no_issues_file(self, tmp_path: Path) -> None:
@@ -504,7 +504,7 @@ class TestDetectPrefixFromIssues:
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
 
-        prefix = _detect_prefix_from_issues(str(dogcats_dir))
+        prefix = _detect_namespace_from_issues(str(dogcats_dir))
         assert prefix is None
 
     def test_detect_empty_issues_file(self, tmp_path: Path) -> None:
@@ -513,7 +513,7 @@ class TestDetectPrefixFromIssues:
         dogcats_dir.mkdir()
         (dogcats_dir / "issues.jsonl").write_text("")
 
-        prefix = _detect_prefix_from_issues(str(dogcats_dir))
+        prefix = _detect_namespace_from_issues(str(dogcats_dir))
         assert prefix is None
 
     def test_detect_skips_invalid_json(self, tmp_path: Path) -> None:
@@ -528,7 +528,7 @@ class TestDetectPrefixFromIssues:
             '{"id": "valid-def", "title": "Issue 2"}\n',
         )
 
-        prefix = _detect_prefix_from_issues(str(dogcats_dir))
+        prefix = _detect_namespace_from_issues(str(dogcats_dir))
         assert prefix == "valid"
 
     def test_detect_skips_issues_without_id(self, tmp_path: Path) -> None:
@@ -543,7 +543,7 @@ class TestDetectPrefixFromIssues:
             '{"id": "myapp-def", "title": "Issue 2"}\n',
         )
 
-        prefix = _detect_prefix_from_issues(str(dogcats_dir))
+        prefix = _detect_namespace_from_issues(str(dogcats_dir))
         assert prefix == "myapp"
 
     def test_detect_skips_issues_without_hyphen(self, tmp_path: Path) -> None:
@@ -557,7 +557,7 @@ class TestDetectPrefixFromIssues:
             '{"id": "valid-abc", "title": "Issue 2"}\n',
         )
 
-        prefix = _detect_prefix_from_issues(str(dogcats_dir))
+        prefix = _detect_namespace_from_issues(str(dogcats_dir))
         assert prefix == "valid"
 
 
@@ -574,9 +574,9 @@ class TestPrefixPrecedence:
         issues_file.write_text('{"id": "issues-prefix-abc", "title": "Issue 1"}\n')
 
         # Set different prefix in config
-        set_issue_prefix(str(dogcats_dir), "config-prefix")
+        set_namespace(str(dogcats_dir), "config-prefix")
 
-        prefix = get_issue_prefix(str(dogcats_dir))
+        prefix = get_namespace(str(dogcats_dir))
         assert prefix == "config-prefix"
 
     def test_issues_over_directory(self, tmp_path: Path) -> None:
@@ -588,7 +588,7 @@ class TestPrefixPrecedence:
         issues_file = dogcats_dir / "issues.jsonl"
         issues_file.write_text('{"id": "from-issues-abc", "title": "Issue 1"}\n')
 
-        prefix = get_issue_prefix(str(dogcats_dir))
+        prefix = get_namespace(str(dogcats_dir))
         assert prefix == "from-issues"
 
     def test_directory_over_default(self, tmp_path: Path) -> None:
@@ -596,7 +596,7 @@ class TestPrefixPrecedence:
         dogcats_dir = tmp_path / "custom-dir" / ".dogcats"
         dogcats_dir.mkdir(parents=True)
 
-        prefix = get_issue_prefix(str(dogcats_dir))
+        prefix = get_namespace(str(dogcats_dir))
         assert prefix == "custom-dir"
         assert prefix != DEFAULT_PREFIX
 
@@ -606,16 +606,16 @@ class TestPrefixPrecedence:
         dogcats_dir.mkdir(parents=True)
 
         # Step 1: No config, no issues -> directory name
-        assert get_issue_prefix(str(dogcats_dir)) == "dir-prefix"
+        assert get_namespace(str(dogcats_dir)) == "dir-prefix"
 
         # Step 2: Add issues -> issues prefix
         issues_file = dogcats_dir / "issues.jsonl"
         issues_file.write_text('{"id": "issues-prefix-abc", "title": "Issue"}\n')
-        assert get_issue_prefix(str(dogcats_dir)) == "issues-prefix"
+        assert get_namespace(str(dogcats_dir)) == "issues-prefix"
 
         # Step 3: Add config -> config prefix
-        set_issue_prefix(str(dogcats_dir), "config-prefix")
-        assert get_issue_prefix(str(dogcats_dir)) == "config-prefix"
+        set_namespace(str(dogcats_dir), "config-prefix")
+        assert get_namespace(str(dogcats_dir)) == "config-prefix"
 
 
 class TestMigrateConfigKeys:
@@ -661,15 +661,15 @@ class TestMigrateConfigKeys:
 
 
 class TestGetIssuePrefixBackwardCompat:
-    """Tests for get_issue_prefix backward compatibility with issue_prefix key."""
+    """Tests for get_namespace backward compatibility with issue_prefix key."""
 
     def test_reads_legacy_issue_prefix(self, tmp_path: Path) -> None:
-        """get_issue_prefix reads legacy issue_prefix key."""
+        """get_namespace reads legacy issue_prefix key."""
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
         save_config(str(dogcats_dir), {"issue_prefix": "legacy"})
 
-        assert get_issue_prefix(str(dogcats_dir)) == "legacy"
+        assert get_namespace(str(dogcats_dir)) == "legacy"
 
     def test_namespace_takes_precedence_over_issue_prefix(self, tmp_path: Path) -> None:
         """Namespace key takes precedence over legacy issue_prefix."""
@@ -677,7 +677,28 @@ class TestGetIssuePrefixBackwardCompat:
         dogcats_dir.mkdir()
         save_config(str(dogcats_dir), {"namespace": "new", "issue_prefix": "old"})
 
-        assert get_issue_prefix(str(dogcats_dir)) == "new"
+        assert get_namespace(str(dogcats_dir)) == "new"
+
+
+class TestDeprecatedPrefixAliases:
+    """The old ``*_prefix`` names remain importable shims for one release."""
+
+    def test_shims_are_the_new_functions(self) -> None:
+        """get_issue_prefix/set_issue_prefix/extract_prefix alias the new names."""
+        from dogcat import config
+
+        assert config.get_issue_prefix is config.get_namespace
+        assert config.set_issue_prefix is config.set_namespace
+        assert config.extract_prefix is config.extract_namespace
+
+    def test_shim_still_resolves_namespace(self, tmp_path: Path) -> None:
+        """Calling the old name goes through the new implementation."""
+        from dogcat.config import get_issue_prefix, set_issue_prefix
+
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        set_issue_prefix(str(dogcats_dir), "legacyname")
+        assert get_issue_prefix(str(dogcats_dir)) == "legacyname"
 
 
 class TestParseDogcatrc:
@@ -1084,13 +1105,13 @@ class TestResolveDogcatsPath:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """get_issue_prefix from subfolder uses parent namespace."""
+        """get_namespace from subfolder uses parent namespace."""
         # Create project with configured namespace
         project_dir = tmp_path / "my-project"
         project_dir.mkdir()
         dogcats_dir = project_dir / ".dogcats"
         dogcats_dir.mkdir()
-        set_issue_prefix(str(dogcats_dir), "my-project")
+        set_namespace(str(dogcats_dir), "my-project")
 
         # Create a subfolder and cd into it
         subfolder = project_dir / "horse"
@@ -1098,7 +1119,7 @@ class TestResolveDogcatsPath:
         monkeypatch.chdir(subfolder)
 
         # Should resolve to parent's namespace, NOT "horse"
-        prefix = get_issue_prefix(".dogcats")
+        prefix = get_namespace(".dogcats")
         assert prefix == "my-project"
 
     def test_get_issue_prefix_from_subfolder_detects_dir_name(
@@ -1106,7 +1127,7 @@ class TestResolveDogcatsPath:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Without config, get_issue_prefix from subfolder uses parent dir name."""
+        """Without config, get_namespace from subfolder uses parent dir name."""
         project_dir = tmp_path / "cool-project"
         project_dir.mkdir()
         dogcats_dir = project_dir / ".dogcats"
@@ -1117,7 +1138,7 @@ class TestResolveDogcatsPath:
         monkeypatch.chdir(subfolder)
 
         # Should detect "cool-project" (parent of .dogcats), NOT "horse"
-        prefix = get_issue_prefix(".dogcats")
+        prefix = get_namespace(".dogcats")
         assert prefix == "cool-project"
 
     def test_get_issue_prefix_from_nested_subfolder(
@@ -1125,19 +1146,19 @@ class TestResolveDogcatsPath:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """get_issue_prefix works from deeply nested subfolders."""
+        """get_namespace works from deeply nested subfolders."""
         project_dir = tmp_path / "my-project"
         project_dir.mkdir()
         dogcats_dir = project_dir / ".dogcats"
         dogcats_dir.mkdir()
-        set_issue_prefix(str(dogcats_dir), "my-project")
+        set_namespace(str(dogcats_dir), "my-project")
 
         # Create nested subfolder structure
         nested = project_dir / "src" / "lib" / "deep"
         nested.mkdir(parents=True)
         monkeypatch.chdir(nested)
 
-        prefix = get_issue_prefix(".dogcats")
+        prefix = get_namespace(".dogcats")
         assert prefix == "my-project"
 
     def test_falls_back_to_cwd_name_when_no_dogcats_found(
@@ -1151,8 +1172,8 @@ class TestResolveDogcatsPath:
         isolated.mkdir(parents=True)
         monkeypatch.chdir(isolated)
 
-        # Falls through to _detect_prefix_from_directory which uses CWD name
-        prefix = get_issue_prefix(".dogcats")
+        # Falls through to _detect_namespace_from_directory which uses CWD name
+        prefix = get_namespace(".dogcats")
         assert prefix == "my-app"
 
 
@@ -1215,12 +1236,12 @@ class TestLocalConfig:
         assert "inbox_remote" not in config
 
     def test_set_issue_prefix_does_not_persist_local(self, tmp_path: Path) -> None:
-        """set_issue_prefix writes to config.toml without persisting local values."""
+        """set_namespace writes to config.toml without persisting local values."""
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
 
         save_local_config(str(dogcats_dir), {"inbox_remote": "~/git/inbox"})
-        set_issue_prefix(str(dogcats_dir), "myproject")
+        set_namespace(str(dogcats_dir), "myproject")
 
         # config.toml should NOT have inbox_remote
         shared = load_shared_config(str(dogcats_dir))

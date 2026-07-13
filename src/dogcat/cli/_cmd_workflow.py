@@ -5,7 +5,7 @@ from __future__ import annotations
 import orjson
 import typer
 
-from dogcat.config import extract_prefix, get_namespace_filter
+from dogcat.config import extract_namespace, get_namespace_filter
 from dogcat.constants import TERMINAL_STATUSES
 from dogcat.models import Status, is_manual_issue
 
@@ -1442,7 +1442,9 @@ def register(app: typer.Typer) -> None:
                 ns_filter = get_namespace_filter(actual_dogcats_dir)
                 if ns_filter is not None:
                     events = [
-                        e for e in events if ns_filter(extract_prefix(e.issue_id) or "")
+                        e
+                        for e in events
+                        if ns_filter(extract_namespace(e.issue_id) or "")
                     ]
 
             if agent_only or manual:

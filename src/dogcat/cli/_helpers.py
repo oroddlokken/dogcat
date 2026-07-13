@@ -7,7 +7,7 @@ import getpass
 import inspect
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import typer
 from typer.core import TyperGroup
@@ -417,27 +417,6 @@ def check_comments_exclusive(*, has_comments: bool, without_comments: bool) -> N
         )
 
 
-def apply_comment_filter(
-    issues: list[Issue],
-    *,
-    has_comments: bool = False,
-    without_comments: bool = False,
-) -> list[Issue]:
-    """Filter issues by presence/absence of comments.
-
-    Comments are hard-deleted from issue.comments, so 'has comments' is
-    just bool(issue.comments).
-    """
-    check_comments_exclusive(
-        has_comments=has_comments, without_comments=without_comments
-    )
-    if has_comments:
-        return [i for i in issues if i.comments]
-    if without_comments:
-        return [i for i in issues if not i.comments]
-    return issues
-
-
 def apply_common_filters(
     issues: list[Issue],
     *,
@@ -650,11 +629,24 @@ def _is_invalid_single_char(value: str) -> bool:
     return len(value) == 1 and value.lower() not in ALL_SHORTHANDS
 
 
+class ParsedCreateArgs(NamedTuple):
+    """Positional create-args parsed into title + optional shorthands.
+
+    A NamedTuple so existing ``title, priority, ... = _parse_args_for_create``
+    unpacking still works while giving the fields names. (dogcat-3s3h)
+    """
+
+    title: str
+    priority: int | None
+    issue_type: str | None
+    status: str | None
+
+
 def _parse_args_for_create(
     args: list[str | None],
     *,
     allow_shorthands: bool = True,
-) -> tuple[str, int | None, str | None, str | None]:
+) -> ParsedCreateArgs:
     """Parse positional args for title, priority, type, and status.
 
     Args:
@@ -663,7 +655,7 @@ def _parse_args_for_create(
             the user to ``dcat c``.
 
     Returns:
-        (title, priority_shorthand, type_shorthand, status_shorthand)
+        A :class:`ParsedCreateArgs` (title, priority, issue_type, status).
     Raises: ValueError if arguments are ambiguous or invalid.
     """
     title_parts: list[str] = []
@@ -713,7 +705,7 @@ def _parse_args_for_create(
         )
         raise ValueError(msg)
 
-    return title, priority_sh, type_sh, status_sh
+    return ParsedCreateArgs(title, priority_sh, type_sh, status_sh)
 
 
 def load_open_inbox_proposals(
@@ -729,7 +721,7 @@ def load_open_inbox_proposals(
     Returns an empty list if the inbox file is missing or unreadable so
     callers can call this unconditionally inside list-style commands.
     """
-    from dogcat.config import get_issue_prefix, get_namespace_filter
+    from dogcat.config import get_namespace, get_namespace_filter
     from dogcat.inbox import InboxStorage
 
     try:
@@ -744,7 +736,7 @@ def load_open_inbox_proposals(
     ns_filter = get_namespace_filter(dogcats_dir, namespace)
     if ns_filter is not None:
         return [p for p in proposals if ns_filter(p.namespace)]
-    primary = get_issue_prefix(dogcats_dir)
+    primary = get_namespace(dogcats_dir)
     return [p for p in proposals if p.namespace == primary]
 
 
@@ -763,7 +755,7 @@ def load_remote_inbox_proposals(
     """
     from pathlib import Path
 
-    from dogcat.config import get_issue_prefix, load_config
+    from dogcat.config import get_namespace, load_config
     from dogcat.inbox import InboxStorage
     from dogcat.models import ProposalStatus
 
@@ -784,7 +776,7 @@ def load_remote_inbox_proposals(
         return [], remote_path
 
     ns_filter_value = (
-        None if all_namespaces else (namespace or get_issue_prefix(dogcats_dir))
+        None if all_namespaces else (namespace or get_namespace(dogcats_dir))
     )
     try:
         remote_inbox = InboxStorage(dogcats_dir=str(remote_dogcats))

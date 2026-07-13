@@ -130,6 +130,36 @@ class TestEventLogAppendAndRead:
         assert data["event_type"] == "created"
         assert data["issue_id"] == "dc-abcd"
 
+    def test_append_newline_guard_after_truncated_tail(
+        self, event_log: EventLog
+    ) -> None:
+        """Append prepends a newline when the file's last byte isn't one.
+
+        A prior truncated write can leave issues.jsonl / inbox.jsonl
+        without a trailing newline. ``append`` routes through
+        ``append_jsonl_payload`` so the new event starts on its own line
+        instead of concatenating onto the corrupt tail as one unparseable
+        line. (dogcat-61rd)
+        """
+        # Simulate a truncated prior write: no trailing newline.
+        corrupt_tail = b'{"record_type": "event", "truncat'
+        event_log.path.write_bytes(corrupt_tail)
+
+        event_log.append(
+            EventRecord(
+                event_type="created",
+                issue_id="dc-abcd",
+                timestamp="2026-02-10T14:00:00+01:00",
+            ),
+        )
+
+        lines = event_log.path.read_bytes().split(b"\n")
+        # The corrupt tail and the new record land on separate lines.
+        assert lines[0] == corrupt_tail
+        assert orjson.loads(lines[1])["issue_id"] == "dc-abcd"
+        # read() tolerates the corrupt first line and yields the new event.
+        assert [e.issue_id for e in event_log.read()] == ["dc-abcd"]
+
     def test_read_empty(self, event_log: EventLog) -> None:
         """Test read empty."""
         assert event_log.read() == []

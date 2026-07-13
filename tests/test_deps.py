@@ -7,7 +7,6 @@ import pytest
 from dogcat.deps import (
     detect_cycles,
     get_blocked_issues,
-    get_dependency_chain,
     get_ready_work,
     has_blockers,
     would_create_cycle,
@@ -366,54 +365,6 @@ class TestHasBlockers:
         assert not has_blockers(storage_with_issues, "t-i1")
 
 
-class TestGetDependencyChain:
-    """Test dependency chain extraction."""
-
-    def test_simple_chain(self, storage_with_issues: JSONLStorage) -> None:
-        """Test extracting a simple dependency chain."""
-        storage_with_issues.add_dependency("t-i0", "t-i1", "blocks")
-        storage_with_issues.add_dependency("t-i1", "t-i2", "blocks")
-
-        chain = get_dependency_chain(storage_with_issues, "t-i0")
-
-        assert chain[0] == "t-i0"
-        assert "t-i1" in chain
-        assert "t-i2" in chain
-
-    def test_no_dependencies_chain(self, storage_with_issues: JSONLStorage) -> None:
-        """Test chain for issue with no dependencies."""
-        chain = get_dependency_chain(storage_with_issues, "t-i0")
-
-        assert chain == ["t-i0"]
-
-    def test_branching_chain(self, storage_with_issues: JSONLStorage) -> None:
-        """Test chain with branching dependencies."""
-        storage_with_issues.add_dependency("t-i0", "t-i1", "blocks")
-        storage_with_issues.add_dependency("t-i0", "t-i2", "blocks")
-
-        chain = get_dependency_chain(storage_with_issues, "t-i0")
-
-        assert chain[0] == "t-i0"
-        assert "t-i1" in chain
-        assert "t-i2" in chain
-
-    def test_chain_with_cycle_does_not_recurse_infinitely(
-        self,
-        storage_with_issues: JSONLStorage,
-    ) -> None:
-        """Dependency chain with a cycle terminates instead of infinite recursion."""
-        storage_with_issues = _inject_cycle_via_jsonl(
-            storage_with_issues,
-            [("t-i0", "t-i1"), ("t-i1", "t-i0")],
-        )
-
-        # Should terminate without RecursionError
-        chain = get_dependency_chain(storage_with_issues, "t-i0")
-
-        assert "t-i0" in chain
-        assert "t-i1" in chain
-
-
 class TestIntegrationDeps:
     """Integration tests for dependencies."""
 
@@ -506,12 +457,3 @@ class TestDeepDependencyChain:
             Issue(id="other", namespace="t", title="Other"),
         )
         assert would_create_cycle(storage, "t-other", "t-i0") is False
-
-    def test_get_dependency_chain_handles_deep_chain(
-        self, temp_dogcats_dir: Path
-    ) -> None:
-        """get_dependency_chain walks a 5k-deep chain without recursion."""
-        storage = JSONLStorage(str(temp_dogcats_dir / "issues.jsonl"))
-        storage = self._build_deep_chain(storage, 5000)
-        chain = get_dependency_chain(storage, "t-i0")
-        assert len(chain) == 5000

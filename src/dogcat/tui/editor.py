@@ -9,6 +9,7 @@ from textual.binding import Binding
 from textual.screen import Screen
 from textual.widgets import Footer, Header
 
+from dogcat.constants import DEFAULT_NAMESPACE
 from dogcat.tui.detail_panel import IssueDetailPanel
 from dogcat.tui.shared import SHARED_CSS
 
@@ -68,7 +69,7 @@ class IssueEditorScreen(Screen["Issue | None"]):
         *,
         create_mode: bool = False,
         view_mode: bool = False,
-        namespace: str = "dc",
+        namespace: str = DEFAULT_NAMESPACE,
         existing_ids: set[str] | None = None,
         **kwargs: Any,
     ) -> None:
@@ -181,7 +182,7 @@ class IssueEditorApp(App["Issue | None"]):
         storage: JSONLStorage,
         *,
         create_mode: bool = False,
-        namespace: str = "dc",
+        namespace: str = DEFAULT_NAMESPACE,
         existing_ids: set[str] | None = None,
         **kwargs: Any,
     ) -> None:

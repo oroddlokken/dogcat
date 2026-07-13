@@ -19,13 +19,14 @@ else:
 
 import tomli_w
 
-from dogcat.constants import DOGCATRC_FILENAME
+from dogcat.constants import DEFAULT_NAMESPACE, DOGCATRC_FILENAME
 from dogcat.models import classify_record
 
 _logger = logging.getLogger(__name__)
 
-# Default prefix for issue IDs
-DEFAULT_PREFIX = "dc"
+# Default prefix for issue IDs. Canonical value lives in constants as
+# DEFAULT_NAMESPACE; this module-level name is kept as a back-compat alias.
+DEFAULT_PREFIX = DEFAULT_NAMESPACE
 
 # Config filename
 CONFIG_FILENAME = "config.toml"
@@ -533,7 +534,7 @@ def _resolve_dogcats_path(dogcats_dir: str) -> str:
         current = parent
 
 
-def get_issue_prefix(dogcats_dir: str) -> str:
+def get_namespace(dogcats_dir: str) -> str:
     """Get the issue prefix from config or return default.
 
     Precedence:
@@ -576,32 +577,32 @@ def get_issue_prefix(dogcats_dir: str) -> str:
         return config["issue_prefix"]
 
     # Try to auto-detect from existing issues
-    prefix = _detect_prefix_from_issues(dogcats_dir)
+    prefix = _detect_namespace_from_issues(dogcats_dir)
     if prefix:
         return prefix
 
     # Try directory name (parent of .dogcats)
-    prefix = _detect_prefix_from_directory(dogcats_dir)
+    prefix = _detect_namespace_from_directory(dogcats_dir)
     if prefix:
         return prefix
 
     return DEFAULT_PREFIX
 
 
-def set_issue_prefix(dogcats_dir: str, prefix: str) -> None:
-    """Set the issue prefix in config.
+def set_namespace(dogcats_dir: str, namespace: str) -> None:
+    """Set the issue namespace in config.
 
     Args:
         dogcats_dir: Path to .dogcats directory
-        prefix: Prefix to set
+        namespace: Namespace to set
     """
     config = load_shared_config(dogcats_dir)
-    config["namespace"] = prefix
+    config["namespace"] = namespace
     config.pop("issue_prefix", None)
     save_config(dogcats_dir, config)
 
 
-def _detect_prefix_from_issues(dogcats_dir: str) -> str | None:
+def _detect_namespace_from_issues(dogcats_dir: str) -> str | None:
     """Detect prefix from existing issues in storage.
 
     Args:
@@ -627,7 +628,7 @@ def _detect_prefix_from_issues(dogcats_dir: str) -> str | None:
                     if classify_record(data) != "issue":
                         continue
                     issue_id = data.get("id", "")
-                    prefix = extract_prefix(issue_id)
+                    prefix = extract_namespace(issue_id)
                     if prefix:
                         prefix_counts[prefix] = prefix_counts.get(prefix, 0) + 1
                 except orjson.JSONDecodeError:
@@ -643,7 +644,7 @@ def _detect_prefix_from_issues(dogcats_dir: str) -> str | None:
         return None
 
 
-def _detect_prefix_from_directory(dogcats_dir: str) -> str | None:
+def _detect_namespace_from_directory(dogcats_dir: str) -> str | None:
     """Detect prefix from directory name.
 
     Args:
@@ -664,14 +665,14 @@ def _detect_prefix_from_directory(dogcats_dir: str) -> str | None:
     return slug_from_dir(project_dir.name)
 
 
-def extract_prefix(issue_id: str) -> str | None:
-    """Extract prefix from an issue ID.
+def extract_namespace(issue_id: str) -> str | None:
+    """Extract the namespace from an issue ID.
 
     Args:
         issue_id: Issue ID like "search-8qx" or "dc-abc"
 
     Returns:
-        Prefix part, or None if no hyphen found
+        Namespace part, or None if no hyphen found
     """
     if "-" not in issue_id:
         return None
@@ -679,6 +680,16 @@ def extract_prefix(issue_id: str) -> str | None:
     # Find the last hyphen and take everything before it
     last_hyphen = issue_id.rfind("-")
     return issue_id[:last_hyphen] if last_hyphen > 0 else None
+
+
+# ---------------------------------------------------------------------------
+# Deprecated aliases — the canonical names are the ``*_namespace`` helpers
+# above. These shims keep the old ``*_prefix`` names importable for one
+# release for any out-of-tree callers; remove them the release after.
+# (dogcat-38gk)
+get_issue_prefix = get_namespace
+set_issue_prefix = set_namespace
+extract_prefix = extract_namespace
 
 
 def get_namespace_filter(
@@ -704,7 +715,7 @@ def get_namespace_filter(
     visible: list[str] | None = config.get("visible_namespaces")
     hidden: list[str] | None = config.get("hidden_namespaces")
 
-    primary = get_issue_prefix(dogcats_dir)
+    primary = get_namespace(dogcats_dir)
 
     # If we resolved via the global fallback, layer global
     # visible_namespaces under local config. When cwd has a slug (so

@@ -7,9 +7,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, TypedDict, TypeVar
 
-from typing_extensions import Self
-
 from dogcat._version import version as _dcat_version
+from dogcat.constants import DEFAULT_NAMESPACE
 
 
 class IssueMetadata(TypedDict, total=False):
@@ -173,6 +172,22 @@ class Dependency:
     created_at: datetime = field(default_factory=lambda: datetime.now().astimezone())
     created_by: str | None = None
 
+    def to_export_dict(self) -> dict[str, Any]:
+        """Serialize to the ``dcat admin export`` shape.
+
+        Same field set as the JSONL record but without the storage-only
+        ``record_type`` / ``dcat_version`` envelope, so the export path and
+        the store never drift on which fields a dependency carries.
+        (dogcat-e252)
+        """
+        return {
+            "issue_id": self.issue_id,
+            "depends_on_id": self.depends_on_id,
+            "type": self.dep_type.value,
+            "created_at": self.created_at.isoformat(),
+            "created_by": self.created_by,
+        }
+
 
 @dataclass
 class Link:
@@ -187,6 +202,19 @@ class Link:
     created_at: datetime = field(default_factory=lambda: datetime.now().astimezone())
     created_by: str | None = None
 
+    def to_export_dict(self) -> dict[str, Any]:
+        """Serialize to the ``dcat admin export`` shape.
+
+        Mirror of :meth:`Dependency.to_export_dict` for links. (dogcat-e252)
+        """
+        return {
+            "from_id": self.from_id,
+            "to_id": self.to_id,
+            "link_type": self.link_type,
+            "created_at": self.created_at.isoformat(),
+            "created_by": self.created_by,
+        }
+
 
 @dataclass
 class Issue:
@@ -194,7 +222,7 @@ class Issue:
 
     id: str  # The hash part only (e.g., "4kzj")
     title: str
-    namespace: str = "dc"  # The namespace/prefix (e.g., "dc")
+    namespace: str = DEFAULT_NAMESPACE  # The namespace/prefix (e.g., "dc")
     description: str | None = None
     status: Status = Status.OPEN
     priority: int = 2  # 0-4 range, lower is higher priority
@@ -233,7 +261,13 @@ class Issue:
         return self.status == Status.TOMBSTONE
 
     def is_duplicate(self) -> bool:
-        """Check if this issue is marked as a duplicate."""
+        """Check if this issue is marked as a duplicate.
+
+        Kept for parity with :meth:`is_closed` / :meth:`is_tombstone`; no
+        production caller today (live sites compare ``duplicate_of`` to a
+        specific id rather than test presence), retained as the
+        predicate-family member (dogcat-jh04).
+        """
         return self.duplicate_of is not None
 
     @property
@@ -268,7 +302,7 @@ class Proposal:
 
     id: str  # The hash part only (e.g., "4kzj")
     title: str
-    namespace: str = "dc"  # The namespace/prefix (e.g., "dogcat")
+    namespace: str = DEFAULT_NAMESPACE  # The namespace/prefix (e.g., "dogcat")
     description: str | None = None
     proposed_by: str | None = None
     source_repo: str | None = None
@@ -304,14 +338,12 @@ class Proposal:
 # clearing a field (e.g. removing a parent or unsnoozing) requires explicitly
 # passing ``None`` as the new value.
 class _UnsetType:
-    """Sentinel type so unset fields are distinguishable from explicit ``None``."""
+    """Sentinel type so unset fields are distinguishable from explicit ``None``.
 
-    _instance: "_UnsetType | None" = None
-
-    def __new__(cls) -> Self:
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance  # type: ignore[return-value]
+    The module constructs exactly one instance (``UNSET``) below, so the old
+    ``__new__``/``_instance`` singleton guard could never fire — identity
+    checks (``is UNSET``) already hold against that single instance.
+    """
 
     def __repr__(self) -> str:
         return "UNSET"
@@ -672,7 +704,7 @@ def _migrate_namespace(data: dict[str, Any]) -> tuple[str, str]:
         # Split on last hyphen to handle multi-part namespaces
         namespace, issue_id = full_id.rsplit("-", 1)
         return namespace, issue_id
-    return "dc", full_id
+    return DEFAULT_NAMESPACE, full_id
 
 
 def _migrate_issue_type(data: dict[str, Any]) -> tuple[str, str]:
@@ -816,7 +848,7 @@ def dict_to_proposal(data: dict[str, Any]) -> Proposal:
     proposal = Proposal(
         id=data["id"],
         title=data["title"],
-        namespace=data.get("namespace", "dc"),
+        namespace=data.get("namespace", DEFAULT_NAMESPACE),
         description=data.get("description"),
         proposed_by=data.get("proposed_by"),
         source_repo=data.get("source_repo"),

@@ -191,6 +191,12 @@ def was_resolved_via_global(dogcats_dir: str | Path) -> bool:
 
 
 def reset_resolution_state() -> None:
-    """Forget any recorded global-fallback resolution (test isolation)."""
+    """Forget any recorded global-fallback resolution.
+
+    Test-isolation hook. Lives here rather than in a conftest fixture
+    because it resets this module's process-global ``_global_fallback_path``;
+    called from tests/conftest.py between tests so resolution state never
+    leaks across them (dogcat-jh04).
+    """
     global _global_fallback_path
     _global_fallback_path = None

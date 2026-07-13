@@ -465,7 +465,7 @@ def register(app: typer.Typer) -> None:
         ),
     ) -> None:
         """Accept a remote proposal and create a local issue from it."""
-        from dogcat.config import get_issue_prefix
+        from dogcat.config import get_namespace
         from dogcat.constants import DEFAULT_PRIORITY, DEFAULT_TYPE, parse_labels
         from dogcat.models import IssueType, Status, issue_to_dict
 
@@ -501,7 +501,7 @@ def register(app: typer.Typer) -> None:
             from ._helpers import get_storage
 
             storage = get_storage(actual_dir)
-            namespace = get_issue_prefix(actual_dir)
+            namespace = get_namespace(actual_dir)
 
             issue_labels = parse_labels(labels) if labels else []
             final_priority = priority if priority is not None else DEFAULT_PRIORITY

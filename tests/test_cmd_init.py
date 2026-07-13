@@ -110,6 +110,45 @@ class TestCLIInitPrefix:
         assert result.exit_code == 0
         assert "Set namespace: my-cool-project" in result.stdout
 
+    def test_init_auto_detect_non_ascii_matches_canonical_slug(
+        self,
+        tmp_path: Path,
+        monkeypatch: "pytest.MonkeyPatch",
+    ) -> None:
+        """Non-ASCII dir names slug identically for init and both resolvers.
+
+        Regression for dogcat-2acd: init used an inline isalnum()/strip
+        sanitizer that kept non-ASCII letters and skipped NFKD
+        transliteration, so a directory like "Ærøprosjekt" resolved to a
+        different namespace than the config / global-config fallback
+        resolvers (which delegate to slug_from_dir) computed for the same
+        folder — one directory, two namespaces depending on code path.
+        """
+        from dogcat.config import _detect_namespace_from_directory, get_namespace
+        from dogcat.global_config import derive_fallback_namespace
+        from dogcat.namespace_slug import slug_from_dir
+
+        project_dir = tmp_path / "Ærøprosjekt"
+        project_dir.mkdir()
+        dogcats_dir = project_dir / ".dogcats"
+
+        result = runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        assert result.exit_code == 0
+
+        expected = slug_from_dir(project_dir.name)
+        assert expected == "aeroeprosjekt"  # transliterated, pure ASCII
+        assert expected is not None
+        assert expected.isascii()
+
+        # init persists the canonical slug ...
+        assert f"Set namespace: {expected}" in result.stdout
+        assert get_namespace(str(dogcats_dir)) == expected
+
+        # ... and both fallback resolvers agree on it for the same folder.
+        assert _detect_namespace_from_directory(str(dogcats_dir)) == expected
+        monkeypatch.chdir(project_dir)
+        assert derive_fallback_namespace() == expected
+
     def test_init_prefix_strips_trailing_hyphens(self, tmp_path: Path) -> None:
         """Test init strips trailing hyphens from prefix."""
         dogcats_dir = tmp_path / ".dogcats"

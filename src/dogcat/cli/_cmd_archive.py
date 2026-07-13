@@ -9,6 +9,7 @@ import orjson
 import typer
 
 from dogcat._jsonl_io import split_and_rewrite_jsonl
+from dogcat.constants import DEFAULT_NAMESPACE
 from dogcat.models import Status
 
 from ._completions import complete_durations, complete_namespaces
@@ -63,7 +64,7 @@ def _archive_inbox(
             data = orjson.loads(stripped)
         except orjson.JSONDecodeError:
             return False
-        ns = data.get("namespace", "dc")
+        ns = data.get("namespace", DEFAULT_NAMESPACE)
         pid = data.get("id", "")
         return f"{ns}-inbox-{pid}" in closed_ids
 

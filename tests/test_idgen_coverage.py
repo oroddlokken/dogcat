@@ -10,13 +10,13 @@ class TestIDGeneratorGenerate:
 
     def test_generate_returns_formatted_id(self) -> None:
         """Test that generate() returns IDs in prefix-NNNN format."""
-        gen = IDGenerator(prefix="dc")
+        gen = IDGenerator(namespace="dc")
         id1 = gen.generate()
         assert id1 == "dc-0001"
 
     def test_generate_increments_counter(self) -> None:
         """Test that generate() increments the counter."""
-        gen = IDGenerator(prefix="dc")
+        gen = IDGenerator(namespace="dc")
         id1 = gen.generate()
         id2 = gen.generate()
         id3 = gen.generate()
@@ -28,7 +28,7 @@ class TestIDGeneratorGenerate:
         """Test that generate() skips existing IDs."""
         gen = IDGenerator(
             existing_ids={"dc-0001", "dc-0002"},
-            prefix="dc",
+            namespace="dc",
         )
         id1 = gen.generate()
         assert id1 == "dc-0003"
@@ -36,7 +36,7 @@ class TestIDGeneratorGenerate:
 
     def test_generate_tracks_ids(self) -> None:
         """Test that generate() adds new IDs to existing_ids."""
-        gen = IDGenerator(prefix="test")
+        gen = IDGenerator(namespace="test")
         id1 = gen.generate()
         assert id1 in gen.existing_ids
 
@@ -46,7 +46,7 @@ class TestIDGeneratorIssueFallback:
 
     def test_fallback_to_longer_id_on_exhaustion(self) -> None:
         """Test that generate_issue_id falls back to longer ID after max retries."""
-        gen = IDGenerator(prefix="dc")
+        gen = IDGenerator(namespace="dc")
         gen.max_retries = 2  # Small retry count to force fallback quickly
         timestamp = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -64,7 +64,7 @@ class TestIDGeneratorIssueFallback:
 
     def test_last_resort_timestamp_nonce(self) -> None:
         """Test last-resort fallback using timestamp as nonce."""
-        gen = IDGenerator(prefix="dc")
+        gen = IDGenerator(namespace="dc")
         gen.max_retries = 1
         timestamp = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -88,7 +88,7 @@ class TestIDGeneratorDependencyFallback:
 
     def test_dependency_fallback_to_longer_id(self) -> None:
         """Test dependency ID falls back to longer hash on collision."""
-        gen = IDGenerator(prefix="dc")
+        gen = IDGenerator(namespace="dc")
         gen.max_retries = 1
 
         # Pre-fill with the first candidate

@@ -634,3 +634,86 @@ class TestDiffInbox:
         proposal_events = [e for e in data if "inbox" in e["issue_id"]]
         assert len(issue_events) >= 1
         assert len(proposal_events) >= 1
+
+
+class TestDiffRecordsUnit:
+    """Unit tests for the shared _diff_records / _classify_event_type (dogcat-4r3c)."""
+
+    def test_classify_event_type_new_vs_updated(self) -> None:
+        """The status ladder maps closed/tombstone first, then new-vs-update."""
+        from dogcat.cli._cmd_diff import _classify_event_type
+
+        assert _classify_event_type("closed", is_new=True) == "closed"
+        assert _classify_event_type("closed", is_new=False) == "closed"
+        assert _classify_event_type("tombstone", is_new=True) == "deleted"
+        assert _classify_event_type("tombstone", is_new=False) == "deleted"
+        assert _classify_event_type("open", is_new=True) == "created"
+        assert _classify_event_type(None, is_new=False) == "updated"
+
+    def test_diff_records_created(self) -> None:
+        """A record present only in ``new`` yields a created event with changes."""
+        from dogcat.cli._cmd_diff import _diff_records
+
+        new = {"dc-a": {"title": "T", "status": "open", "created_by": "u"}}
+        events = _diff_records(
+            {},
+            new,
+            frozenset({"title", "status"}),
+            created_by_field="created_by",
+            updated_by_field="updated_by",
+            include_metadata=False,
+        )
+        assert len(events) == 1
+        assert events[0].event_type == "created"
+        assert events[0].by == "u"
+        assert events[0].changes["title"] == {"old": None, "new": "T"}
+
+    def test_diff_records_updated_and_closed(self) -> None:
+        """A status change to closed yields a closed event with the field diff."""
+        from dogcat.cli._cmd_diff import _diff_records
+
+        old = {"dc-a": {"title": "T", "status": "open"}}
+        new = {"dc-a": {"title": "T", "status": "closed", "updated_by": "u"}}
+        events = _diff_records(
+            old,
+            new,
+            frozenset({"title", "status"}),
+            created_by_field="created_by",
+            updated_by_field="updated_by",
+            include_metadata=False,
+        )
+        assert len(events) == 1
+        assert events[0].event_type == "closed"
+        assert events[0].changes["status"] == {"old": "open", "new": "closed"}
+
+    def test_diff_records_deleted(self) -> None:
+        """A record dropped from ``new`` yields a deleted event."""
+        from dogcat.cli._cmd_diff import _diff_records
+
+        old = {"dc-a": {"title": "T", "status": "open"}}
+        events = _diff_records(
+            old,
+            {},
+            frozenset({"title", "status"}),
+            created_by_field="created_by",
+            updated_by_field="updated_by",
+            include_metadata=False,
+        )
+        assert len(events) == 1
+        assert events[0].event_type == "deleted"
+        assert events[0].changes["status"]["new"] == "removed"
+
+    def test_diff_records_unchanged_yields_nothing(self) -> None:
+        """Identical old/new states produce no event."""
+        from dogcat.cli._cmd_diff import _diff_records
+
+        state = {"dc-a": {"title": "T", "status": "open"}}
+        events = _diff_records(
+            dict(state),
+            dict(state),
+            frozenset({"title", "status"}),
+            created_by_field="created_by",
+            updated_by_field="updated_by",
+            include_metadata=False,
+        )
+        assert events == []

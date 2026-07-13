@@ -102,7 +102,7 @@ def complete_proposal_ids(
     try:
         from pathlib import Path
 
-        from dogcat.config import get_issue_prefix, load_config
+        from dogcat.config import get_namespace, load_config
         from dogcat.inbox import InboxStorage
 
         from ._helpers import find_dogcats_dir
@@ -136,7 +136,7 @@ def complete_proposal_ids(
                 if candidate.is_dir():
                     remote_dogcats = candidate
             if remote_dogcats.is_dir():
-                current_ns = get_issue_prefix(dogcats_dir)
+                current_ns = get_namespace(dogcats_dir)
                 remote_inbox = InboxStorage(dogcats_dir=str(remote_dogcats))
                 for p in remote_inbox.list(
                     include_tombstones=False,

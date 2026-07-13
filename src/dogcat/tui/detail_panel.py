@@ -24,6 +24,7 @@ from textual.widgets import (
 )
 
 from dogcat.constants import (
+    DEFAULT_NAMESPACE,
     MAX_DESC_LEN,
     MAX_TITLE_LEN,
     PRIORITY_OPTIONS,
@@ -252,7 +253,7 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
         *,
         create_mode: bool = False,
         view_mode: bool = False,
-        namespace: str = "dc",
+        namespace: str = DEFAULT_NAMESPACE,
         existing_ids: set[str] | None = None,
         **kwargs: Any,
     ) -> None:
@@ -332,9 +333,21 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
         return options
 
     def compose(self) -> ComposeResult:
-        """Compose the detail/edit form (no Header/Footer)."""
-        ro = self._view_mode
+        """Compose the detail/edit form (no Header/Footer).
 
+        The form is split into row-generators so each region reads on its
+        own; compose() just orders them. (dogcat-271v)
+        """
+        ro = self._view_mode
+        yield from self._compose_title_bar(ro=ro)
+        with VerticalScroll(id="editor-form"):
+            yield from self._compose_meta_row(ro=ro)
+            yield from self._compose_owner_row(ro=ro)
+            yield from self._compose_deps_row()
+            yield from self._compose_body_sections(ro=ro)
+
+    def _compose_title_bar(self, *, ro: bool) -> ComposeResult:
+        """Title bar: id display, title input, cancel/save buttons."""
         with Horizontal(id="title-bar"):
             id_text = "New Issue" if self._create_mode else self._issue.full_id
             yield Static(id_text, id="id-display")
@@ -347,127 +360,132 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
             yield Button("Cancel", id="cancel-btn", variant="default")
             yield Button("Save", id="save-btn", variant="primary")
 
-        with VerticalScroll(id="editor-form"):
-            with Horizontal(classes="field-row"):
-                yield Select(
-                    options=[(label, val) for label, val in TYPE_OPTIONS],
-                    value=self._issue.issue_type.value,
-                    id="type-input",
-                    allow_blank=False,
-                    disabled=ro,
-                )
-                yield Select(
-                    options=[(label, val) for label, val in STATUS_OPTIONS],
-                    value=self._issue.status.value,
-                    id="status-input",
-                    allow_blank=False,
-                    disabled=ro,
-                )
-                yield Select(
-                    options=[(label, val) for label, val in PRIORITY_OPTIONS],
-                    value=self._issue.priority,
-                    id="priority-input",
-                    allow_blank=False,
-                    disabled=ro,
-                )
-                yield Checkbox(
-                    "Manual",
-                    value=is_manual_issue(self._issue.metadata),
-                    id="manual-input",
-                    disabled=ro,
-                )
+    def _compose_meta_row(self, *, ro: bool) -> ComposeResult:
+        """Type / status / priority selects plus the manual checkbox."""
+        with Horizontal(classes="field-row"):
+            yield Select(
+                options=[(label, val) for label, val in TYPE_OPTIONS],
+                value=self._issue.issue_type.value,
+                id="type-input",
+                allow_blank=False,
+                disabled=ro,
+            )
+            yield Select(
+                options=[(label, val) for label, val in STATUS_OPTIONS],
+                value=self._issue.status.value,
+                id="status-input",
+                allow_blank=False,
+                disabled=ro,
+            )
+            yield Select(
+                options=[(label, val) for label, val in PRIORITY_OPTIONS],
+                value=self._issue.priority,
+                id="priority-input",
+                allow_blank=False,
+                disabled=ro,
+            )
+            yield Checkbox(
+                "Manual",
+                value=is_manual_issue(self._issue.metadata),
+                id="manual-input",
+                disabled=ro,
+            )
 
-            with Horizontal(classes="info-row"):
-                yield Input(
-                    value=self._issue.owner or "",
-                    placeholder="Owner",
-                    id="owner-input",
-                    disabled=ro,
-                )
-                yield Input(
-                    value=self._issue.external_ref or "",
-                    placeholder="External ref",
-                    id="external-ref-input",
-                    disabled=ro,
-                )
-                yield Input(
-                    value=", ".join(self._issue.labels) if self._issue.labels else "",
-                    placeholder="Labels (comma or space separated)",
-                    id="labels-input",
-                    disabled=ro,
-                )
+    def _compose_owner_row(self, *, ro: bool) -> ComposeResult:
+        """Owner / external-ref / labels inputs."""
+        with Horizontal(classes="info-row"):
+            yield Input(
+                value=self._issue.owner or "",
+                placeholder="Owner",
+                id="owner-input",
+                disabled=ro,
+            )
+            yield Input(
+                value=self._issue.external_ref or "",
+                placeholder="External ref",
+                id="external-ref-input",
+                disabled=ro,
+            )
+            yield Input(
+                value=", ".join(self._issue.labels) if self._issue.labels else "",
+                placeholder="Labels (comma or space separated)",
+                id="labels-input",
+                disabled=ro,
+            )
 
-            with Horizontal(classes="deps-row"):
-                yield Button(
-                    self._issue.parent or _PARENT_PLACEHOLDER,
-                    id="parent-input",
-                    variant="default",
-                    classes="parent-field"
-                    + (" parent-placeholder" if not self._issue.parent else ""),
-                )
-                depends_on_ids = self._get_depends_on_ids()
-                yield Input(
-                    value=(
-                        "blocked by: " + ", ".join(depends_on_ids)
-                        if depends_on_ids
-                        else ""
-                    ),
-                    placeholder="Blocked by (no blockers)",
-                    id="depends-on-input",
-                    disabled=True,
-                )
-                blocks_ids = self._get_blocks_ids()
-                yield Input(
-                    value=("blocking: " + ", ".join(blocks_ids) if blocks_ids else ""),
-                    placeholder="Blocks (none)",
-                    id="blocks-input",
-                    disabled=True,
-                )
+    def _compose_deps_row(self) -> ComposeResult:
+        """Parent picker plus the read-only blocked-by / blocks summaries."""
+        with Horizontal(classes="deps-row"):
+            yield Button(
+                self._issue.parent or _PARENT_PLACEHOLDER,
+                id="parent-input",
+                variant="default",
+                classes="parent-field"
+                + (" parent-placeholder" if not self._issue.parent else ""),
+            )
+            depends_on_ids = self._get_depends_on_ids()
+            yield Input(
+                value=(
+                    "blocked by: " + ", ".join(depends_on_ids) if depends_on_ids else ""
+                ),
+                placeholder="Blocked by (no blockers)",
+                id="depends-on-input",
+                disabled=True,
+            )
+            blocks_ids = self._get_blocks_ids()
+            yield Input(
+                value=("blocking: " + ", ".join(blocks_ids) if blocks_ids else ""),
+                placeholder="Blocks (none)",
+                id="blocks-input",
+                disabled=True,
+            )
 
-            yield Label("Description", classes="field-label")
+    def _compose_body_sections(self, *, ro: bool) -> ComposeResult:
+        """Yield description plus the collapsible notes/acceptance/design sections."""
+        yield Label("Description", classes="field-label")
+        yield TextArea(
+            self._issue.description or "",
+            id="description-input",
+            read_only=ro,
+        )
+
+        with Collapsible(
+            title="Notes",
+            collapsed=not self._issue.notes,
+        ):
             yield TextArea(
-                self._issue.description or "",
-                id="description-input",
+                self._issue.notes or "",
+                id="notes-input",
+                classes="collapsible-textarea",
                 read_only=ro,
             )
 
-            with Collapsible(
-                title="Notes",
-                collapsed=not self._issue.notes,
-            ):
-                yield TextArea(
-                    self._issue.notes or "",
-                    id="notes-input",
-                    classes="collapsible-textarea",
-                    read_only=ro,
-                )
+        with Collapsible(
+            title="Acceptance Criteria",
+            collapsed=not self._issue.acceptance,
+        ):
+            yield TextArea(
+                self._issue.acceptance or "",
+                id="acceptance-input",
+                classes="collapsible-textarea",
+                read_only=ro,
+            )
 
-            with Collapsible(
-                title="Acceptance Criteria",
-                collapsed=not self._issue.acceptance,
-            ):
-                yield TextArea(
-                    self._issue.acceptance or "",
-                    id="acceptance-input",
-                    classes="collapsible-textarea",
-                    read_only=ro,
-                )
+        with Collapsible(
+            title="Design",
+            collapsed=not self._issue.design,
+        ):
+            yield TextArea(
+                self._issue.design or "",
+                id="design-input",
+                classes="collapsible-textarea",
+                read_only=ro,
+            )
 
-            with Collapsible(
-                title="Design",
-                collapsed=not self._issue.design,
-            ):
-                yield TextArea(
-                    self._issue.design or "",
-                    id="design-input",
-                    classes="collapsible-textarea",
-                    read_only=ro,
-                )
-
-            if ro:
-                yield from self._compose_view_sections()
-            elif self._issue.comments:
-                yield from self._compose_comments_section()
+        if ro:
+            yield from self._compose_view_sections()
+        elif self._issue.comments:
+            yield from self._compose_comments_section()
 
     def _compose_view_sections(self) -> ComposeResult:
         """Yield read-only dependency/children/comment sections."""
@@ -861,6 +879,8 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
         """Update an existing issue with changed fields."""
         updates: dict[str, Any] = {}
 
+        # Enum/typed fields keep their isinstance guards (a Select can hold a
+        # non-str sentinel while the picker is blank).
         if title != self._issue.title:
             updates["title"] = title
         if isinstance(type_val, str) and type_val != self._issue.issue_type.value:
@@ -870,39 +890,49 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
         if isinstance(priority_val, int) and priority_val != self._issue.priority:
             updates["priority"] = priority_val
 
-        new_owner = self.query_one("#owner-input", Input).value.strip() or None
-        if new_owner != self._issue.owner:
-            updates["owner"] = new_owner
-
-        new_ref = self.query_one("#external-ref-input", Input).value.strip() or None
-        if new_ref != self._issue.external_ref:
-            updates["external_ref"] = new_ref
-
-        new_parent = self._get_selected_parent()
-        if new_parent != self._issue.parent:
-            updates["parent"] = new_parent
-
-        new_labels = parse_labels(self.query_one("#labels-input", Input).value)
-        if new_labels != self._issue.labels:
-            updates["labels"] = new_labels
-
-        new_desc = description or None
-        if new_desc != self._issue.description:
-            updates["description"] = new_desc
-
-        new_notes = self.query_one("#notes-input", TextArea).text.strip() or None
-        if new_notes != self._issue.notes:
-            updates["notes"] = new_notes
-
-        new_acceptance = (
-            self.query_one("#acceptance-input", TextArea).text.strip() or None
+        # Plain "read widget → compare to current → record if changed" fields,
+        # table-driven so a new field is one row, not another if-block.
+        diffable: list[tuple[str, Any, Any]] = [
+            (
+                "owner",
+                self.query_one("#owner-input", Input).value.strip() or None,
+                self._issue.owner,
+            ),
+            (
+                "external_ref",
+                self.query_one("#external-ref-input", Input).value.strip() or None,
+                self._issue.external_ref,
+            ),
+            ("parent", self._get_selected_parent(), self._issue.parent),
+            (
+                "labels",
+                parse_labels(self.query_one("#labels-input", Input).value),
+                self._issue.labels,
+            ),
+            ("description", description or None, self._issue.description),
+            (
+                "notes",
+                self.query_one("#notes-input", TextArea).text.strip() or None,
+                self._issue.notes,
+            ),
+            (
+                "acceptance",
+                self.query_one("#acceptance-input", TextArea).text.strip() or None,
+                self._issue.acceptance,
+            ),
+            (
+                "design",
+                self.query_one("#design-input", TextArea).text.strip() or None,
+                self._issue.design,
+            ),
+        ]
+        updates.update(
+            {
+                key: new_value
+                for key, new_value, current in diffable
+                if new_value != current
+            },
         )
-        if new_acceptance != self._issue.acceptance:
-            updates["acceptance"] = new_acceptance
-
-        new_design = self.query_one("#design-input", TextArea).text.strip() or None
-        if new_design != self._issue.design:
-            updates["design"] = new_design
 
         manual_val = self.query_one("#manual-input", Checkbox).value
         was_manual = is_manual_issue(self._issue.metadata)

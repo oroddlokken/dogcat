@@ -208,6 +208,12 @@ def detect_cycles(storage: JSONLStorage) -> list[list[str]]:
 def has_blockers(storage: JSONLStorage, issue_id: str) -> bool:
     """Check if an issue has any open blockers.
 
+    Public single-issue predicate — the per-issue counterpart to
+    :func:`get_blocked_issues` / :func:`get_ready_work`. No production
+    caller today; retained deliberately because the codehealth review
+    (dogcat-jh04) flagged its absence from status-transition guards as a
+    likely feature gap rather than dead code.
+
     Args:
         storage: The storage instance
         issue_id: The issue to check
@@ -260,41 +266,3 @@ def would_create_cycle(
                 visited.add(nxt)
                 stack.append(nxt)
     return False
-
-
-def get_dependency_chain(
-    storage: JSONLStorage,
-    issue_id: str,
-    _visited: set[str] | None = None,
-) -> list[str]:
-    """Get the dependency chain for an issue (iterative DFS).
-
-    Args:
-        storage: The storage instance
-        issue_id: The issue to trace
-        _visited: Internal set to prevent infinite recursion on cycles
-
-    Returns:
-        List of issue IDs in the dependency chain
-
-    Iterative — see :func:`detect_cycles` for the depth-limit context
-    (dogcat-1r7h). The argument ``_visited`` is preserved for source
-    compatibility with callers that pre-populate the set.
-    """
-    visited: set[str] = _visited if _visited is not None else set()
-    chain: list[str] = []
-    stack: list[str] = [issue_id]
-    while stack:
-        node = stack.pop()
-        if node in visited:
-            continue
-        visited.add(node)
-        chain.append(node)
-        # Reverse so the order matches the recursive form (dep iteration).
-        deps = storage.get_dependencies(node)
-        stack.extend(
-            dep.depends_on_id
-            for dep in reversed(list(deps))
-            if dep.depends_on_id not in visited
-        )
-    return list(dict.fromkeys(chain))

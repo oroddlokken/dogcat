@@ -161,7 +161,7 @@ class TestDashboardNewAction:
 
         async with app.run_test() as pilot:
             with (
-                patch("dogcat.config.get_issue_prefix", return_value="dc"),
+                patch("dogcat.config.get_namespace", return_value="dc"),
                 patch(
                     "dogcat.cli._helpers.get_default_operator",
                     return_value="test@example.com",
@@ -187,7 +187,7 @@ class TestDashboardNewAction:
 
         async with app.run_test() as pilot:
             with (
-                patch("dogcat.config.get_issue_prefix", return_value="myns"),
+                patch("dogcat.config.get_namespace", return_value="myns"),
                 patch(
                     "dogcat.cli._helpers.get_default_operator",
                     return_value="alice@test.com",

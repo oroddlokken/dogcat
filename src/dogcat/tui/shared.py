@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING
 from rich.text import Text
 
 from dogcat.constants import PRIORITY_COLORS, STATUS_COLORS, TYPE_COLORS
-from dogcat.models import Status, is_manual_issue
+from dogcat.models import is_manual_issue
+from dogcat.status_display import resolve_status_glyph
 
 if TYPE_CHECKING:
     from dogcat.models import Issue
@@ -91,19 +92,9 @@ def make_issue_label(
     type_color = TYPE_COLORS.get(issue.issue_type.value, "white")
     priority_color = PRIORITY_COLORS.get(issue.priority, "white")
 
-    # Override status icon/color for dependency-blocked issues, but let
-    # advanced statuses (in_review, deferred, closed) take precedence
-    _blocked_override_exempt = {Status.IN_REVIEW, Status.DEFERRED, Status.CLOSED}
-    if (
-        blocked_ids
-        and issue.full_id in blocked_ids
-        and issue.status not in _blocked_override_exempt
-    ):
-        status_emoji = "\u25a0"  # ■
-        status_color = STATUS_COLORS.get("blocked", "white")
-    else:
-        status_emoji = issue.get_status_emoji()
-        status_color = STATUS_COLORS.get(issue.status.value, "white")
+    # Shared glyph rule (blocked override, exempting advanced statuses).
+    status_emoji, color_key = resolve_status_glyph(issue, blocked_ids)
+    status_color = STATUS_COLORS.get(color_key, "white")
 
     label = Text()
     label.append(f"{status_emoji} ", style=f"bold {status_color}")

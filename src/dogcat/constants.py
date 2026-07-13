@@ -21,6 +21,11 @@ def parse_labels(raw: str) -> list[str]:
 DEFAULT_TYPE = "task"
 DEFAULT_PRIORITY = 2
 
+# Fallback namespace used when a store has no configured namespace and none
+# can be derived from the directory name. Single source of truth — import
+# this everywhere instead of re-typing the "dc" literal as a default.
+DEFAULT_NAMESPACE = "dc"
+
 # Maximum number of preview subtasks shown under deferred parents in list view
 MAX_PREVIEW_SUBTASKS = 3
 
@@ -202,6 +207,14 @@ EVENT_SYMBOLS: dict[str, str] = {
 # Statuses that mean "this issue won't move" — used by listing commands
 # that filter out closed/tombstoned issues from "active" views.
 TERMINAL_STATUSES: frozenset[str] = frozenset({"closed", "tombstone"})
+
+# Statuses where a dependency-blocked issue keeps its natural status glyph
+# instead of the blocked "■" — these advanced states take display
+# precedence over the blocked override. Shared by every issue renderer
+# (dcat list, the Rich table, the TUI) so they never disagree. (dogcat-4gj6)
+BLOCKED_DISPLAY_EXEMPT_STATUSES: frozenset[str] = frozenset(
+    {"in_review", "deferred", "closed"},
+)
 
 
 # Status symbols for at-a-glance display

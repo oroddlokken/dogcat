@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import typer
@@ -13,13 +14,35 @@ from dogcat.constants import (
     STATUS_SYMBOLS,
     TYPE_COLORS,
 )
-from dogcat.models import Status, is_manual_issue, sanitize_for_terminal
+from dogcat.models import is_manual_issue, sanitize_for_terminal
+from dogcat.status_display import resolve_status_glyph
 
 if TYPE_CHECKING:
     from rich.table import Table
 
     from dogcat.event_log import EventRecord
     from dogcat.models import Issue, Proposal
+
+
+@dataclass
+class DeferredView:
+    """The deferred-subtree collapse result, bundled so it threads as one arg.
+
+    Before this existed the four members travelled as a bare 4-tuple out of
+    ``_collapse_deferred_subtrees`` and then as separate positional/keyword
+    params through the tree/table/list renderers — and because
+    ``deferred_blocker_map`` and ``preview_subtasks`` are both dicts keyed by
+    full_id, a transposed argument produced no type error. (dogcat-1tja)
+    """
+
+    filtered: list[Issue] = field(default_factory=list["Issue"])
+    hidden_counts: dict[str, int] = field(default_factory=dict[str, int])
+    deferred_blocker_map: dict[str, list[str]] = field(
+        default_factory=dict[str, "list[str]"],
+    )
+    preview_subtasks: dict[str, list[Issue]] = field(
+        default_factory=dict[str, "list[Issue]"],
+    )
 
 
 def get_legend(hidden_count: int = 0, *, color: bool = True) -> str:
@@ -123,25 +146,11 @@ def format_issue_brief(
     # Dim entire line for closed issues
     is_closed = issue.closed_at is not None
 
-    # Use blocked symbol if issue has open dependencies, but let advanced
-    # statuses (in_review, deferred, closed) take precedence over blocked display
-    _blocked_override_exempt = {Status.IN_REVIEW, Status.DEFERRED, Status.CLOSED}
-    if (
-        blocked_ids
-        and issue.full_id in blocked_ids
-        and issue.status not in _blocked_override_exempt
-    ):
-        status_emoji = "■"
-        status_color = (
-            "bright_black" if is_closed else STATUS_COLORS.get("blocked", "white")
-        )
-    else:
-        status_emoji = issue.get_status_emoji()
-        status_color = (
-            "bright_black"
-            if is_closed
-            else STATUS_COLORS.get(issue.status.value, "white")
-        )
+    # Shared glyph rule (blocked override, exempting advanced statuses).
+    status_emoji, color_key = resolve_status_glyph(issue, blocked_ids)
+    status_color = (
+        "bright_black" if is_closed else STATUS_COLORS.get(color_key, "white")
+    )
     status_emoji = typer.style(status_emoji, fg=status_color)
 
     priority_color = (
@@ -337,9 +346,7 @@ def format_issue_tree(
     _indent: int = 0,
     blocked_ids: set[str] | None = None,
     blocked_by_map: dict[str, list[str]] | None = None,
-    hidden_counts: dict[str, int] | None = None,
-    deferred_blocker_map: dict[str, list[str]] | None = None,
-    preview_subtasks: dict[str, list[Issue]] | None = None,
+    deferred: DeferredView | None = None,
 ) -> str:
     """Format issues as a tree based on parent-child relationships.
 
@@ -348,13 +355,15 @@ def format_issue_tree(
         _indent: Current indentation level (unused, kept for compatibility)
         blocked_ids: Set of issue IDs that are blocked by dependencies
         blocked_by_map: Mapping of issue ID to list of blocking issue IDs
-        hidden_counts: Deferred parent full_id -> count of hidden descendants
-        deferred_blocker_map: Issue full_id -> list of deferred blocker IDs
-        preview_subtasks: Deferred parent full_id -> list of preview child issues
+        deferred: Bundled deferred-subtree collapse result (hidden counts,
+            deferred-blocker map, preview subtasks)
 
     Returns:
         Formatted tree string
     """
+    hidden_counts = deferred.hidden_counts if deferred else None
+    deferred_blocker_map = deferred.deferred_blocker_map if deferred else None
+    preview_subtasks = deferred.preview_subtasks if deferred else None
     hierarchy = build_hierarchy(issues)
 
     # Collect all issue IDs in the filtered set
@@ -453,8 +462,6 @@ _ISSUE_TABLE_BASE_COLUMNS: tuple[tuple[str, dict[str, Any]], ...] = (
     ("Title", {"overflow": "fold"}),  # Wrap long titles
     ("Labels", {"no_wrap": False}),
 )
-# Status values where the open-blocker symbol must NOT replace the natural emoji.
-_BLOCKED_DISPLAY_EXEMPT = {Status.IN_REVIEW, Status.DEFERRED, Status.CLOSED}
 
 
 def _build_issue_table(*, has_ext_ref: bool, has_blocked: bool) -> Table:
@@ -482,15 +489,8 @@ def _row_status(
     issue: Issue, blocked_ids: set[str] | None, *, dimmed: bool
 ) -> tuple[str, str]:
     """Pick the status emoji and color for an issue row."""
-    if (
-        blocked_ids
-        and issue.full_id in blocked_ids
-        and issue.status not in _BLOCKED_DISPLAY_EXEMPT
-    ):
-        emoji, status_color = "■", STATUS_COLORS.get("blocked", "white")
-    else:
-        emoji = issue.get_status_emoji()
-        status_color = STATUS_COLORS.get(issue.status.value, "white")
+    emoji, color_key = resolve_status_glyph(issue, blocked_ids)
+    status_color = STATUS_COLORS.get(color_key, "white")
     if dimmed:
         status_color = "bright_black"
     return emoji, status_color
@@ -538,14 +538,16 @@ def _add_issue_row(
     dimmed: bool = False,
     blocked_ids: set[str] | None = None,
     blocked_by_map: dict[str, list[str]] | None = None,
-    hidden_counts: dict[str, int] | None = None,
-    deferred_blocker_map: dict[str, list[str]] | None = None,
-    preview_subtasks: dict[str, list[Issue]] | None = None,
+    deferred: DeferredView | None = None,
     has_ext_ref: bool = False,
     has_blocked: bool = False,
 ) -> None:
     """Add a single issue as a row to the table."""
     from rich.markup import escape
+
+    hidden_counts = deferred.hidden_counts if deferred else None
+    deferred_blocker_map = deferred.deferred_blocker_map if deferred else None
+    preview_subtasks = deferred.preview_subtasks if deferred else None
 
     emoji, status_color = _row_status(issue, blocked_ids, dimmed=dimmed)
     priority_color = (
@@ -610,9 +612,7 @@ def format_issue_table(
     issues: list[Issue],
     blocked_ids: set[str] | None = None,
     blocked_by_map: dict[str, list[str]] | None = None,
-    hidden_counts: dict[str, int] | None = None,
-    deferred_blocker_map: dict[str, list[str]] | None = None,
-    preview_subtasks: dict[str, list[Issue]] | None = None,
+    deferred: DeferredView | None = None,
 ) -> str:
     """Format issues as an aligned table with columns using Rich.
 
@@ -620,9 +620,8 @@ def format_issue_table(
         issues: List of issues to format
         blocked_ids: Set of issue IDs that are blocked by dependencies
         blocked_by_map: Mapping of issue ID to list of blocking issue IDs
-        hidden_counts: Deferred parent full_id -> count of hidden descendants
-        deferred_blocker_map: Issue full_id -> list of deferred blocker IDs
-        preview_subtasks: Deferred parent full_id -> list of preview child issues
+        deferred: Bundled deferred-subtree collapse result (hidden counts,
+            deferred-blocker map, preview subtasks)
 
     Returns:
         Formatted table string (rendered by Rich)
@@ -633,6 +632,9 @@ def format_issue_table(
 
     if not issues:
         return ""
+
+    hidden_counts = deferred.hidden_counts if deferred else None
+    preview_subtasks = deferred.preview_subtasks if deferred else None
 
     has_ext_ref = any(issue.external_ref for issue in issues)
     has_blocked = bool(
@@ -648,9 +650,7 @@ def format_issue_table(
             dimmed=dimmed,
             blocked_ids=blocked_ids,
             blocked_by_map=blocked_by_map,
-            hidden_counts=hidden_counts,
-            deferred_blocker_map=deferred_blocker_map,
-            preview_subtasks=preview_subtasks,
+            deferred=deferred,
             has_ext_ref=has_ext_ref,
             has_blocked=has_blocked,
         )

@@ -7,7 +7,7 @@ from typing import Any
 import orjson
 import typer
 
-from dogcat.config import get_issue_prefix
+from dogcat.config import get_namespace
 from dogcat.constants import DEFAULT_PRIORITY, DEFAULT_TYPE, parse_labels
 from dogcat.models import IssueType, Status
 
@@ -347,7 +347,7 @@ def register(app: typer.Typer) -> None:
             namespace = (
                 namespace_opt
                 if namespace_opt is not None
-                else get_issue_prefix(dogcats_dir)
+                else get_namespace(dogcats_dir)
             )
 
             # Parse labels
@@ -514,7 +514,7 @@ def register(app: typer.Typer) -> None:
                 )
 
             storage = get_storage(dogcats_dir)
-            namespace = get_issue_prefix(dogcats_dir)
+            namespace = get_namespace(dogcats_dir)
             owner = get_default_operator()
 
             from dogcat.tui.editor import new_issue

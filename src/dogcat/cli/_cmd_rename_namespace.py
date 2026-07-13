@@ -6,10 +6,10 @@ import orjson
 import typer
 
 from dogcat.config import (
-    get_issue_prefix,
+    get_namespace,
     load_config,
     save_config,
-    set_issue_prefix,
+    set_namespace,
 )
 
 from ._completions import complete_namespaces
@@ -81,10 +81,10 @@ def register(app: typer.Typer) -> None:
             config_changed = False
 
             # Update primary namespace
-            primary = get_issue_prefix(actual_dir)
+            primary = get_namespace(actual_dir)
             if primary == old_namespace:
-                set_issue_prefix(actual_dir, new_namespace)
-                config = load_config(actual_dir)  # reload after set_issue_prefix
+                set_namespace(actual_dir, new_namespace)
+                config = load_config(actual_dir)  # reload after set_namespace
                 config_changed = True
 
             # Update visible_namespaces

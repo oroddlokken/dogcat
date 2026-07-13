@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import orjson
@@ -96,19 +97,36 @@ def _render_chart(
 _ALL_BY_VALUES = ("status", "type", "priority", "label")
 
 
+@dataclass
+class ChartSeries:
+    """One grouping dimension's chart data (counts + display metadata).
+
+    Replaces the unlabeled 5-tuple ``_chart_data`` used to return, which was
+    unpacked positionally at two call sites. (dogcat-3s3h)
+    """
+
+    counts: dict[str, int]
+    order: list[str]
+    colors: dict[str, str]
+    symbols: dict[str, str] | None
+    title: str
+
+
 def _chart_data(
     by: str,
     issues: list[Issue],
-) -> tuple[dict[str, int], list[str], dict[str, str], dict[str, str] | None, str]:
+) -> ChartSeries:
     """Build chart data for a single grouping dimension."""
     if by == "status":
         counts: dict[str, int] = Counter(i.status.value for i in issues)
         order = [str(k) for k in _STATUS_ORDER]
-        return counts, order, STATUS_COLORS, STATUS_SYMBOLS, "Status Distribution"
+        return ChartSeries(
+            counts, order, STATUS_COLORS, STATUS_SYMBOLS, "Status Distribution"
+        )
     if by == "type":
         counts = Counter(i.issue_type.value for i in issues)
         order = [str(k) for k in _TYPE_ORDER]
-        return counts, order, TYPE_COLORS, None, "Type Distribution"
+        return ChartSeries(counts, order, TYPE_COLORS, None, "Type Distribution")
     if by == "label":
         label_counter: Counter[str] = Counter()
         for i in issues:
@@ -117,12 +135,12 @@ def _chart_data(
         counts = dict(label_counter)
         order = sorted(counts, key=lambda k: (-counts[k], k))
         colors = dict.fromkeys(order, "cyan")
-        return counts, order, colors, None, "Label Distribution"
+        return ChartSeries(counts, order, colors, None, "Label Distribution")
     # priority
     counts = Counter(str(i.priority) for i in issues)
     order = [str(k) for k in _PRIORITY_ORDER]
     colors = {str(k): v for k, v in PRIORITY_COLORS.items()}
-    return counts, order, colors, None, "Priority Distribution"
+    return ChartSeries(counts, order, colors, None, "Priority Distribution")
 
 
 def _complete_by_values(incomplete: str) -> list[tuple[str, str]]:
@@ -255,7 +273,8 @@ def register(app: typer.Typer) -> None:
             if is_json():
                 results: dict[str, dict[str, int]] = {}
                 for cat in categories:
-                    counts, order, _, _, _ = _chart_data(cat, issues)
+                    series = _chart_data(cat, issues)
+                    counts, order = series.counts, series.order
                     results[cat] = {
                         k: counts.get(k, 0) for k in order if counts.get(k, 0) > 0
                     }
@@ -272,7 +291,14 @@ def register(app: typer.Typer) -> None:
 
             console = Console()
             for cat in categories:
-                counts, order, colors, symbols, title = _chart_data(cat, issues)
+                series = _chart_data(cat, issues)
+                counts, order, colors, symbols, title = (
+                    series.counts,
+                    series.order,
+                    series.colors,
+                    series.symbols,
+                    series.title,
+                )
                 if cat == "priority":
                     display_counts: dict[str, int] = {}
                     display_colors: dict[str, str] = {}

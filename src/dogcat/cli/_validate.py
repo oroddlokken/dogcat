@@ -14,7 +14,7 @@ from typing import Any, Literal, cast
 
 import orjson
 
-from dogcat.constants import TRACKED_FIELDS
+from dogcat.constants import DEFAULT_NAMESPACE, TRACKED_FIELDS
 from dogcat.models import IssueType, ProposalStatus, Status, classify_record
 
 
@@ -22,12 +22,11 @@ from dogcat.models import IssueType, ProposalStatus, Status, classify_record
 class ValidationError:
     """A typed validation error for a JSONL line.
 
-    Canonical shape for issue / proposal validation results. Existing
-    helpers still return the legacy ``list[dict[str, str]]`` shape (with
-    ``"level"`` and ``"message"`` keys) to avoid touching every caller in
-    one pass; new code should construct ``ValidationError`` and call
-    :meth:`to_dict` at the JSON-output boundary so the shape is
-    documented and Pyright catches typos.
+    Canonical shape for issue / proposal validation results — every
+    ``validate_*`` helper returns ``list[ValidationError]`` so Pyright
+    catches field typos. :meth:`to_dict` serializes to the legacy
+    ``{"level": ..., "message": ...}`` shape at the JSON-output boundary
+    (``dcat doctor --json``). (dogcat-3s3h)
     """
 
     level: Literal["error", "warning"]
@@ -105,12 +104,12 @@ _MAX_PRIORITY = 4
 
 def parse_raw_records(
     path: Path,
-) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+) -> tuple[list[dict[str, Any]], list[ValidationError]]:
     """Parse a JSONL file, returning records and per-line errors."""
     records: list[dict[str, Any]] = []
-    errors: list[dict[str, str]] = []
+    errors: list[ValidationError] = []
     if not path.exists():
-        errors.append({"level": "error", "message": f"{path} does not exist"})
+        errors.append(ValidationError(level="error", message=f"{path} does not exist"))
         return records, errors
 
     for lineno, raw in enumerate(path.read_bytes().splitlines(), start=1):
@@ -121,22 +120,19 @@ def parse_raw_records(
             data = orjson.loads(raw)
         except orjson.JSONDecodeError as exc:
             errors.append(
-                {
-                    "level": "error",
-                    "message": f"Line {lineno}: invalid JSON — {exc}",
-                },
+                ValidationError(
+                    level="error", message=f"Line {lineno}: invalid JSON — {exc}"
+                ),
             )
             continue
 
         if not isinstance(data, dict):
             errors.append(
-                {
-                    "level": "error",
-                    "message": (
-                        f"Line {lineno}: expected JSON object,"
-                        f" got {type(data).__name__}"
-                    ),
-                },
+                ValidationError(
+                    level="error",
+                    message=f"Line {lineno}: expected JSON object,"
+                    f" got {type(data).__name__}",
+                ),
             )
             continue
 
@@ -144,10 +140,9 @@ def parse_raw_records(
 
         if "record_type" not in record:
             errors.append(
-                {
-                    "level": "warning",
-                    "message": f"Line {lineno}: missing record_type field",
-                },
+                ValidationError(
+                    level="warning", message=f"Line {lineno}: missing record_type field"
+                ),
             )
 
         records.append(record)
@@ -157,7 +152,7 @@ def parse_raw_records(
 def validate_issue_record(
     record: dict[str, Any],
     lineno: int,
-) -> list[dict[str, str]]:
+) -> list[ValidationError]:
     """Validate a single issue record from the JSONL log.
 
     Mirrors :func:`validate_proposal_record` in this module — the
@@ -166,17 +161,15 @@ def validate_issue_record(
     ``Issue`` dataclass instead of a raw dict, and would otherwise
     collide on import.
     """
-    errors: list[dict[str, str]] = []
+    errors: list[ValidationError] = []
     full_id = f"{record.get('namespace', '?')}-{record.get('id', '?')}"
 
     # Required fields
     errors.extend(
-        {
-            "level": "error",
-            "message": (
-                f"Line {lineno}: issue {full_id} missing required field '{field}'"
-            ),
-        }
+        ValidationError(
+            level="error",
+            message=f"Line {lineno}: issue {full_id} missing required field '{field}'",
+        )
         for field in _REQUIRED_ISSUE_FIELDS
         if field not in record
     )
@@ -185,25 +178,21 @@ def validate_issue_record(
     status = record.get("status")
     if status is not None and status not in _VALID_STATUSES:
         errors.append(
-            {
-                "level": "error",
-                "message": (
-                    f"Line {lineno}: issue {full_id} has invalid status '{status}'"
-                ),
-            },
+            ValidationError(
+                level="error",
+                message=f"Line {lineno}: issue {full_id} has invalid status '{status}'",
+            ),
         )
 
     # Issue type validation
     issue_type = record.get("issue_type")
     if issue_type is not None and issue_type not in _VALID_TYPES:
         errors.append(
-            {
-                "level": "error",
-                "message": (
-                    f"Line {lineno}: issue {full_id} has invalid"
-                    f" issue_type '{issue_type}'"
-                ),
-            },
+            ValidationError(
+                level="error",
+                message=f"Line {lineno}: issue {full_id} has invalid"
+                f" issue_type '{issue_type}'",
+            ),
         )
 
     # Priority validation
@@ -214,14 +203,12 @@ def validate_issue_record(
         or priority > _MAX_PRIORITY
     ):
         errors.append(
-            {
-                "level": "error",
-                "message": (
-                    f"Line {lineno}: issue {full_id} has invalid"
-                    f" priority '{priority}'"
-                    f" (must be {_MIN_PRIORITY}-{_MAX_PRIORITY})"
-                ),
-            },
+            ValidationError(
+                level="error",
+                message=f"Line {lineno}: issue {full_id} has invalid"
+                f" priority '{priority}'"
+                f" (must be {_MIN_PRIORITY}-{_MAX_PRIORITY})",
+            ),
         )
 
     errors.extend(
@@ -242,13 +229,13 @@ def _validate_timestamps(
     *,
     context: str,
     lineno: int,
-) -> list[dict[str, str]]:
+) -> list[ValidationError]:
     """Validate ISO8601 timestamp fields on a record.
 
     ``context`` is the human-readable subject (e.g. ``"issue dc-abc1"`` or
     ``"proposal dc-inbox-4kzj"``) used in error messages.
     """
-    errors: list[dict[str, str]] = []
+    errors: list[ValidationError] = []
     for ts_field in timestamp_fields:
         ts = record.get(ts_field)
         if ts is None:
@@ -257,28 +244,26 @@ def _validate_timestamps(
             datetime.fromisoformat(ts)
         except (ValueError, TypeError):
             errors.append(
-                {
-                    "level": "error",
-                    "message": (
-                        f"Line {lineno}: {context} has invalid"
-                        f" timestamp in '{ts_field}': {ts}"
-                    ),
-                },
+                ValidationError(
+                    level="error",
+                    message=f"Line {lineno}: {context} has invalid"
+                    f" timestamp in '{ts_field}': {ts}",
+                ),
             )
     return errors
 
 
 def validate_references(
     records: list[dict[str, Any]],
-) -> list[dict[str, str]]:
+) -> list[ValidationError]:
     """Validate referential integrity across all records."""
-    errors: list[dict[str, str]] = []
+    errors: list[ValidationError] = []
 
     # Build set of known issue full IDs (last-write-wins)
     known_issues: set[str] = set()
     for record in records:
         if classify_record(record) == "issue":
-            ns = record.get("namespace", "dc")
+            ns = record.get("namespace", DEFAULT_NAMESPACE)
             rid = record.get("id", "")
             known_issues.add(f"{ns}-{rid}")
 
@@ -290,12 +275,12 @@ def validate_references(
         if parent and parent not in known_issues:
             full_id = f"{record.get('namespace', '?')}-{record.get('id', '?')}"
             errors.append(
-                {
-                    "level": "error",
-                    "message": (
+                ValidationError(
+                    level="error",
+                    message=(
                         f"Issue {full_id} references non-existent parent '{parent}'"
                     ),
-                },
+                ),
             )
 
     # Check dependency references
@@ -315,21 +300,19 @@ def validate_references(
 
         if issue_id and issue_id not in known_issues:
             errors.append(
-                {
-                    "level": "error",
-                    "message": (
-                        f"Dependency references non-existent issue '{issue_id}'"
-                    ),
-                },
+                ValidationError(
+                    level="error",
+                    message=f"Dependency references non-existent issue '{issue_id}'",
+                ),
             )
         if depends_on and depends_on not in known_issues:
             errors.append(
-                {
-                    "level": "error",
-                    "message": (
+                ValidationError(
+                    level="error",
+                    message=(
                         f"Dependency references non-existent depends_on '{depends_on}'"
                     ),
-                },
+                ),
             )
 
         # Build graph for cycle detection
@@ -346,16 +329,16 @@ def validate_references(
         issue_id = record.get("issue_id", "")
         if issue_id and issue_id not in known_issues:
             errors.append(
-                {
-                    "level": "warning",
-                    "message": (f"Event references non-existent issue '{issue_id}'"),
-                },
+                ValidationError(
+                    level="warning",
+                    message=f"Event references non-existent issue '{issue_id}'",
+                ),
             )
 
     return errors
 
 
-def validate_jsonl(path: Path) -> list[dict[str, str]]:
+def validate_jsonl(path: Path) -> list[ValidationError]:
     """Run all validation checks on a JSONL file.
 
     Returns a list of error/warning dicts with 'level' and 'message' keys.
@@ -373,19 +356,19 @@ def validate_jsonl(path: Path) -> list[dict[str, str]]:
 def validate_proposal_record(
     record: dict[str, Any],
     lineno: int,
-) -> list[dict[str, str]]:
+) -> list[ValidationError]:
     """Validate a single proposal record."""
-    errors: list[dict[str, str]] = []
+    errors: list[ValidationError] = []
     full_id = f"{record.get('namespace', '?')}-inbox-{record.get('id', '?')}"
 
     # Required fields
     errors.extend(
-        {
-            "level": "error",
-            "message": (
+        ValidationError(
+            level="error",
+            message=(
                 f"Line {lineno}: proposal {full_id} missing required field '{field}'"
             ),
-        }
+        )
         for field in _REQUIRED_PROPOSAL_FIELDS
         if field not in record
     )
@@ -394,12 +377,12 @@ def validate_proposal_record(
     status = record.get("status")
     if status is not None and status not in _VALID_PROPOSAL_STATUSES:
         errors.append(
-            {
-                "level": "error",
-                "message": (
+            ValidationError(
+                level="error",
+                message=(
                     f"Line {lineno}: proposal {full_id} has invalid status '{status}'"
                 ),
-            },
+            ),
         )
 
     errors.extend(
@@ -414,7 +397,7 @@ def validate_proposal_record(
     return errors
 
 
-def validate_inbox_jsonl(path: Path) -> list[dict[str, str]]:
+def validate_inbox_jsonl(path: Path) -> list[ValidationError]:
     """Run validation checks on an inbox.jsonl file.
 
     Returns a list of error/warning dicts with 'level' and 'message' keys.
@@ -430,13 +413,13 @@ def validate_inbox_jsonl(path: Path) -> list[dict[str, str]]:
 
 def _detect_cycles(
     graph: dict[str, set[str]],
-) -> list[dict[str, str]]:
+) -> list[ValidationError]:
     """Detect circular dependencies using iterative DFS.
 
     Iterative — recursive form blew Python's frame limit on a 1001-deep
     chain (dogcat-1r7h). Uses explicit ``(node, neighbor_iter)`` frames.
     """
-    errors: list[dict[str, str]] = []
+    errors: list[ValidationError] = []
     visited: set[str] = set()
     in_stack: set[str] = set()
 
@@ -461,12 +444,10 @@ def _detect_cycles(
                 cycle_start = path.index(neighbor)
                 cycle = [*path[cycle_start:], neighbor]
                 errors.append(
-                    {
-                        "level": "error",
-                        "message": (
-                            f"Circular dependency detected: {' -> '.join(cycle)}"
-                        ),
-                    },
+                    ValidationError(
+                        level="error",
+                        message=f"Circular dependency detected: {' -> '.join(cycle)}",
+                    ),
                 )
             elif neighbor not in visited:
                 visited.add(neighbor)
@@ -508,7 +489,7 @@ def _load_issues_at_ref(
         try:
             data = orjson.loads(line)
             if classify_record(data) == "issue":
-                ns = data.get("namespace", "dc")
+                ns = data.get("namespace", DEFAULT_NAMESPACE)
                 rid = data.get("id", "")
                 issues[f"{ns}-{rid}"] = data
         except (orjson.JSONDecodeError, ValueError, KeyError):

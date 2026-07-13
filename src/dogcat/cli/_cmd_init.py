@@ -7,8 +7,9 @@ from pathlib import Path
 import orjson
 import typer
 
-from dogcat.config import load_shared_config, save_config, set_issue_prefix
-from dogcat.constants import DOGCATRC_FILENAME
+from dogcat.config import load_shared_config, save_config, set_namespace
+from dogcat.constants import DEFAULT_NAMESPACE, DOGCATRC_FILENAME
+from dogcat.namespace_slug import slug_from_dir
 
 from ._helpers import get_storage
 from ._json_state import echo_error, is_json, set_json
@@ -168,22 +169,20 @@ def register(app: typer.Typer) -> None:
 
         # Determine and save the namespace
         if namespace is None:
-            # Auto-detect from directory name
+            # Auto-detect from directory name using the canonical slug
+            # resolver, so init and the config / global-config fallback
+            # resolvers never derive two different namespaces from the same
+            # directory (e.g. a non-ASCII name like "Aeroprosjekt"). The
+            # inline isalnum()/strip sanitizer skipped NFKD transliteration
+            # and accepted non-ASCII letters. (dogcat-2acd)
             project_dir = dogcats_path.resolve().parent
-            namespace = project_dir.name
-            # Sanitize: only allow alphanumeric and hyphens
-            namespace = "".join(
-                c if c.isalnum() or c == "-" else "-" for c in namespace.lower()
-            )
-            namespace = namespace.strip("-")
-            if not namespace:
-                namespace = "dc"  # Fallback to default
+            namespace = slug_from_dir(project_dir.name) or DEFAULT_NAMESPACE
 
         # Strip trailing hyphens (the hyphen is added during ID generation)
         namespace = namespace.rstrip("-")
 
         # Save namespace to config
-        set_issue_prefix(dogcats_dir, namespace)
+        set_namespace(dogcats_dir, namespace)
         typer.echo(f"✓ Set namespace: {namespace}")
 
         # Always add config.local.toml to .gitignore (machine-specific settings)

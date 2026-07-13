@@ -24,7 +24,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
-from dogcat.config import get_issue_prefix
+from dogcat.config import get_namespace
 from dogcat.idgen import IDGenerator
 from dogcat.models import Comment, Issue, IssueType, Status
 
@@ -78,8 +78,8 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
     Returns:
         List of created full issue IDs
     """
-    namespace = get_issue_prefix(dogcats_dir)
-    idgen = IDGenerator(existing_ids=storage.get_issue_ids(), prefix=namespace)
+    namespace = get_namespace(dogcats_dir)
+    idgen = IDGenerator(existing_ids=storage.get_issue_ids(), namespace=namespace)
     created_ids: list[str] = []
 
     def _create(title: str, **kwargs: Any) -> str:
@@ -1409,7 +1409,7 @@ def generate_demo_inbox(dogcats_dir: str) -> int:
     from dogcat.models import Proposal
 
     inbox = InboxStorage(dogcats_dir=dogcats_dir)
-    namespace = get_issue_prefix(dogcats_dir)
+    namespace = get_namespace(dogcats_dir)
 
     def _propose(title: str, **kwargs: Any) -> Proposal:
         return inbox.create_proposal(title=title, namespace=namespace, **kwargs)

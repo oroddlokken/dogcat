@@ -6,7 +6,7 @@ from pathlib import Path
 import orjson
 import pytest
 
-from dogcat.models import DependencyType, Issue, IssueType, Status
+from dogcat.models import DependencyType, Issue, IssueType, LinkType, Status
 from dogcat.storage import JSONLStorage
 
 
@@ -2704,3 +2704,47 @@ class TestIsDefaultBranch:
         joined = " ".join(rec.getMessage() for rec in caplog.records)
         assert "git rev-parse failed" in joined
         assert "Permission denied" in joined
+
+
+class TestCompactionPreservesRelationFields:
+    """Full-rewrite compaction must not drop dependency/link fields.
+
+    Regression guard for dogcat-e252: the ``_save_locked`` write closure now
+    reuses ``_dep_record`` / ``_link_record`` instead of re-typing the record
+    dicts inline, so a persisted field can't be silently dropped on rewrite.
+    """
+
+    def test_compaction_preserves_dependency_and_link_fields(
+        self, storage: JSONLStorage
+    ) -> None:
+        """Every dependency/link field survives a compaction round-trip."""
+        storage.create(Issue(id="a", title="A"))
+        storage.create(Issue(id="b", title="B"))
+        dep = storage.add_dependency(
+            "dc-a", "dc-b", "blocks", created_by="alice@example.com"
+        )
+        link = storage.add_link(
+            "dc-a", "dc-b", LinkType.RELATES_TO, created_by="bob@example.com"
+        )
+
+        # Force a full rewrite (compaction), then reload from disk.
+        storage._save()
+        reloaded = JSONLStorage(str(storage.path))
+
+        deps = reloaded.all_dependencies
+        assert len(deps) == 1
+        rd = deps[0]
+        assert rd.issue_id == "dc-a"
+        assert rd.depends_on_id == "dc-b"
+        assert getattr(rd.dep_type, "value", rd.dep_type) == "blocks"
+        assert rd.created_by == "alice@example.com"
+        assert rd.created_at.isoformat() == dep.created_at.isoformat()
+
+        links = reloaded.all_links
+        assert len(links) == 1
+        rl = links[0]
+        assert rl.from_id == "dc-a"
+        assert rl.to_id == "dc-b"
+        assert getattr(rl.link_type, "value", rl.link_type) == "relates_to"
+        assert rl.created_by == "bob@example.com"
+        assert rl.created_at.isoformat() == link.created_at.isoformat()

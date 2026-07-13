@@ -1,6 +1,7 @@
 """Tests for display and formatting functions."""
 
 from dogcat.cli._formatting import (
+    DeferredView,
     format_event,
     format_issue_brief,
     format_issue_full,
@@ -330,7 +331,7 @@ class TestDeferredAnnotations:
         )
         output = format_issue_tree(
             [parent],
-            hidden_counts={"dc-dp1": 5},
+            deferred=DeferredView(hidden_counts={"dc-dp1": 5}),
         )
         assert "5 hidden subtasks" in output
 
@@ -344,7 +345,7 @@ class TestDeferredAnnotations:
         )
         output = format_issue_table(
             [issue],
-            hidden_counts={"dc-dp2": 2},
+            deferred=DeferredView(hidden_counts={"dc-dp2": 2}),
         )
         assert "2 hidden subtasks" in output
 
@@ -399,8 +400,9 @@ class TestPreviewSubtasks:
         children = self._make_children("dp1", 2)
         output = format_issue_tree(
             [parent],
-            hidden_counts={"dc-dp1": 2},
-            preview_subtasks={"dc-dp1": children},
+            deferred=DeferredView(
+                hidden_counts={"dc-dp1": 2}, preview_subtasks={"dc-dp1": children}
+            ),
         )
         assert "Child 0" in output
         assert "Child 1" in output
@@ -413,8 +415,9 @@ class TestPreviewSubtasks:
         children = self._make_children("dp1", 3)
         output = format_issue_tree(
             [parent],
-            hidden_counts={"dc-dp1": 5},
-            preview_subtasks={"dc-dp1": children},
+            deferred=DeferredView(
+                hidden_counts={"dc-dp1": 5}, preview_subtasks={"dc-dp1": children}
+            ),
         )
         assert "Child 0" in output
         assert "Child 1" in output
@@ -427,8 +430,9 @@ class TestPreviewSubtasks:
         children = self._make_children("dp1", 2)
         output = format_issue_tree(
             [parent],
-            hidden_counts={"dc-dp1": 2},
-            preview_subtasks={"dc-dp1": children},
+            deferred=DeferredView(
+                hidden_counts={"dc-dp1": 2}, preview_subtasks={"dc-dp1": children}
+            ),
         )
         assert "more hidden subtasks" not in output
 
@@ -454,8 +458,9 @@ class TestPreviewSubtasks:
         ]
         output = format_issue_tree(
             [parent],
-            hidden_counts={"dc-dp1": 2},
-            preview_subtasks={"dc-dp1": children},
+            deferred=DeferredView(
+                hidden_counts={"dc-dp1": 2}, preview_subtasks={"dc-dp1": children}
+            ),
         )
         lines = output.splitlines()
         hi_idx = next(i for i, line in enumerate(lines) if "High priority" in line)
@@ -468,8 +473,9 @@ class TestPreviewSubtasks:
         children = self._make_children("dp1", 1)
         output = format_issue_tree(
             [parent],
-            hidden_counts={"dc-dp1": 5},
-            preview_subtasks={"dc-dp1": children},
+            deferred=DeferredView(
+                hidden_counts={"dc-dp1": 5}, preview_subtasks={"dc-dp1": children}
+            ),
         )
         # The parent line should NOT have "5 hidden subtasks"
         parent_line = next(ln for ln in output.splitlines() if "Deferred parent" in ln)
@@ -483,8 +489,9 @@ class TestPreviewSubtasks:
         children = self._make_children("dp1", 2)
         output = format_issue_table(
             [parent],
-            hidden_counts={"dc-dp1": 2},
-            preview_subtasks={"dc-dp1": children},
+            deferred=DeferredView(
+                hidden_counts={"dc-dp1": 2}, preview_subtasks={"dc-dp1": children}
+            ),
         )
         assert "Child 0" in output
         assert "Child 1" in output
@@ -497,8 +504,9 @@ class TestPreviewSubtasks:
         children = self._make_children("dp1", 3)
         output = format_issue_table(
             [parent],
-            hidden_counts={"dc-dp1": 5},
-            preview_subtasks={"dc-dp1": children},
+            deferred=DeferredView(
+                hidden_counts={"dc-dp1": 5}, preview_subtasks={"dc-dp1": children}
+            ),
         )
         assert "Child 0" in output
         assert "...and 2 more hidden subtasks" in output
@@ -509,8 +517,9 @@ class TestPreviewSubtasks:
         children = self._make_children("dp1", 2)
         output = format_issue_table(
             [parent],
-            hidden_counts={"dc-dp1": 2},
-            preview_subtasks={"dc-dp1": children},
+            deferred=DeferredView(
+                hidden_counts={"dc-dp1": 2}, preview_subtasks={"dc-dp1": children}
+            ),
         )
         assert "more hidden subtasks" not in output
 
@@ -520,8 +529,9 @@ class TestPreviewSubtasks:
         children = self._make_children("dp1", 1)
         output = format_issue_table(
             [parent],
-            hidden_counts={"dc-dp1": 3},
-            preview_subtasks={"dc-dp1": children},
+            deferred=DeferredView(
+                hidden_counts={"dc-dp1": 3}, preview_subtasks={"dc-dp1": children}
+            ),
         )
         assert "3 hidden subtasks" not in output
 

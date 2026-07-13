@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -11,7 +12,7 @@ import typer
 
 from dogcat.config import (
     get_config_path,
-    get_issue_prefix,
+    get_namespace,
     load_config,
     migrate_config_keys,
     save_config,
@@ -22,68 +23,15 @@ from dogcat.idgen import (
     get_id_length_for_count,
 )
 
+from ._health import HealthCheck, HealthReport
 from ._helpers import find_dogcats_dir, get_storage, is_gitignored
 from ._json_state import is_json, set_json
-from ._validate import detect_concurrent_edits, validate_inbox_jsonl, validate_jsonl
-
-
-@dataclass
-class DoctorCheck:
-    """One row in the doctor report.
-
-    The legacy serialized form is a flat dict (`{"description", "passed",
-    "fix", "fail_description", "optional", "note"}`) — :meth:`to_dict`
-    returns exactly that shape so JSON output and report-rendering code
-    don't have to change. The dataclass exists so the writer side has
-    typed attribute access and so the "if not passed: all_passed = False"
-    bookkeeping happens in one place via :class:`DoctorReport.add`.
-    """
-
-    description: str
-    passed: bool
-    fix: str | None = None
-    fail_description: str | None = None
-    optional: bool = False
-    note: str | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to the legacy flat-dict shape consumed by the renderer."""
-        out: dict[str, Any] = {
-            "description": self.description,
-            "passed": self.passed,
-        }
-        if self.fix is not None:
-            out["fix"] = self.fix
-        if self.fail_description is not None:
-            out["fail_description"] = self.fail_description
-        if self.optional:
-            out["optional"] = True
-        if self.note is not None:
-            out["note"] = self.note
-        return out
-
-
-@dataclass
-class DoctorReport:
-    """Accumulator for doctor checks plus the all-passed roll-up."""
-
-    checks: dict[str, DoctorCheck] = field(default_factory=dict[str, "DoctorCheck"])
-    all_passed: bool = True
-
-    def add(self, name: str, check: DoctorCheck) -> None:
-        """Record a check and roll up its pass state.
-
-        Optional checks never fail the overall report (they render as a
-        warning instead of an error), matching the legacy behavior — the
-        roll-up only flips when a non-optional check fails.
-        """
-        self.checks[name] = check
-        if not check.passed and not check.optional:
-            self.all_passed = False
-
-    def as_legacy_dict(self) -> dict[str, dict[str, Any]]:
-        """Return the flat-dict view the renderer/JSON output expect."""
-        return {name: check.to_dict() for name, check in self.checks.items()}
+from ._validate import (
+    ValidationError,
+    detect_concurrent_edits,
+    validate_inbox_jsonl,
+    validate_jsonl,
+)
 
 
 def register(app: typer.Typer) -> None:
@@ -118,10 +66,9 @@ def register(app: typer.Typer) -> None:
         Exit code 0 = all OK, 1 = issues found.
         """
         set_json(json_output)
-        import shutil
 
-        report = DoctorReport()
-        validation_details: list[dict[str, str]] = []
+        report = HealthReport()
+        validation_details: list[ValidationError] = []
 
         # Resolve dogcats_dir via directory walk when using the default
         if dogcats_dir == ".dogcats" and not Path(dogcats_dir).exists():
@@ -142,7 +89,7 @@ def register(app: typer.Typer) -> None:
             # doctor is where the parse failure must become visible.
             report.add(
                 "global_config",
-                DoctorCheck(
+                HealthCheck(
                     description=(
                         f"global config at {global_cfg_path}: "
                         f"parse error ({global_parse_error})"
@@ -155,7 +102,7 @@ def register(app: typer.Typer) -> None:
             if global_cfg.default_storage is None:
                 report.add(
                     "global_config",
-                    DoctorCheck(
+                    HealthCheck(
                         description=(
                             f"global config at {global_cfg_path}: "
                             "default_storage not set"
@@ -172,7 +119,7 @@ def register(app: typer.Typer) -> None:
                 )
                 report.add(
                     "global_config",
-                    DoctorCheck(
+                    HealthCheck(
                         description=description,
                         passed=global_storage_ok,
                         fix=(
@@ -186,7 +133,7 @@ def register(app: typer.Typer) -> None:
         else:
             report.add(
                 "global_config",
-                DoctorCheck(
+                HealthCheck(
                     description="global config: not configured",
                     passed=True,
                     optional=True,
@@ -195,14 +142,7 @@ def register(app: typer.Typer) -> None:
 
         # Check 1: .dogcats directory exists
         dogcats_path = Path(dogcats_dir)
-        report.add(
-            "dogcats_dir",
-            DoctorCheck(
-                description=f"{dogcats_dir}/ directory exists",
-                passed=dogcats_path.exists(),
-                fix=f"Run 'dcat init' to create {dogcats_dir}",
-            ),
-        )
+        report.add("dogcats_dir", _check_dogcats_dir(dogcats_dir))
 
         # Check 2: issues.jsonl exists and is valid JSON
         issues_file = dogcats_path / "issues.jsonl"
@@ -228,7 +168,7 @@ def register(app: typer.Typer) -> None:
 
         report.add(
             "issues_jsonl",
-            DoctorCheck(
+            HealthCheck(
                 description=f"{dogcats_dir}/issues.jsonl is valid JSON",
                 fail_description=(
                     f"{dogcats_dir}/issues.jsonl is valid JSON "
@@ -272,7 +212,7 @@ def register(app: typer.Typer) -> None:
         if inbox_exists:
             report.add(
                 "inbox_jsonl",
-                DoctorCheck(
+                HealthCheck(
                     description=f"{dogcats_dir}/inbox.jsonl is valid JSON",
                     fail_description=(
                         f"{dogcats_dir}/inbox.jsonl is valid JSON "
@@ -291,7 +231,7 @@ def register(app: typer.Typer) -> None:
         config_exists = config_path.exists()
 
         if fix and not config_exists and dogcats_path.exists():
-            detected_prefix = get_issue_prefix(dogcats_dir)
+            detected_prefix = get_namespace(dogcats_dir)
             save_config(dogcats_dir, {"namespace": detected_prefix})
             config_exists = True
             typer.echo(
@@ -300,7 +240,7 @@ def register(app: typer.Typer) -> None:
 
         report.add(
             "config_toml",
-            DoctorCheck(
+            HealthCheck(
                 description=f"{dogcats_dir}/config.toml exists",
                 fail_description=f"{dogcats_dir}/config.toml not found",
                 passed=config_exists,
@@ -318,7 +258,7 @@ def register(app: typer.Typer) -> None:
             config_parse_error = check_toml_parseable(config_path)
             report.add(
                 "config_toml_parseable",
-                DoctorCheck(
+                HealthCheck(
                     description=f"{dogcats_dir}/config.toml is valid TOML",
                     fail_description=(
                         f"{dogcats_dir}/config.toml has a TOML parse error: "
@@ -337,7 +277,7 @@ def register(app: typer.Typer) -> None:
             prefix_ok = bool(prefix_value)
 
             if fix and not prefix_ok:
-                detected_prefix = get_issue_prefix(dogcats_dir)
+                detected_prefix = get_namespace(dogcats_dir)
                 config["namespace"] = detected_prefix
                 save_config(dogcats_dir, config)
                 prefix_ok = True
@@ -347,7 +287,7 @@ def register(app: typer.Typer) -> None:
 
             report.add(
                 "config_namespace",
-                DoctorCheck(
+                HealthCheck(
                     description="namespace is configured in config.toml",
                     fail_description="namespace is not configured in config.toml",
                     passed=prefix_ok,
@@ -371,7 +311,7 @@ def register(app: typer.Typer) -> None:
 
             report.add(
                 "config_deprecated_keys",
-                DoctorCheck(
+                HealthCheck(
                     description="No deprecated config keys",
                     fail_description=(
                         "Config uses deprecated 'issue_prefix' key "
@@ -401,7 +341,7 @@ def register(app: typer.Typer) -> None:
 
             report.add(
                 "namespace_config_mutual",
-                DoctorCheck(
+                HealthCheck(
                     description="Namespace visibility config is not contradictory",
                     fail_description=(
                         "Both 'visible_namespaces' and 'hidden_namespaces' are set"
@@ -418,7 +358,7 @@ def register(app: typer.Typer) -> None:
             local_gitignored = is_gitignored(str(local_config_file))
             report.add(
                 "local_config_gitignored",
-                DoctorCheck(
+                HealthCheck(
                     description="config.local.toml is gitignored",
                     fail_description=(
                         "config.local.toml exists but is not in .gitignore"
@@ -437,15 +377,13 @@ def register(app: typer.Typer) -> None:
         data_error_count = 0
         if issues_file.exists() and issues_valid:
             validation_details = validate_jsonl(issues_file)
-            data_error_count = sum(
-                1 for e in validation_details if e["level"] == "error"
-            )
+            data_error_count = sum(1 for e in validation_details if e.level == "error")
             if data_error_count > 0:
                 data_valid = False
 
         report.add(
             "data_integrity",
-            DoctorCheck(
+            HealthCheck(
                 description="Data integrity (fields, references, cycles)",
                 fail_description=(f"Data integrity: {data_error_count} error(s) found"),
                 passed=data_valid,
@@ -456,11 +394,11 @@ def register(app: typer.Typer) -> None:
         # Check 3b: Inbox data integrity
         inbox_data_valid = True
         inbox_error_count = 0
-        inbox_validation_details: list[dict[str, str]] = []
+        inbox_validation_details: list[ValidationError] = []
         if inbox_exists and inbox_valid:
             inbox_validation_details = validate_inbox_jsonl(inbox_file)
             inbox_error_count = sum(
-                1 for e in inbox_validation_details if e["level"] == "error"
+                1 for e in inbox_validation_details if e.level == "error"
             )
             if inbox_error_count > 0:
                 inbox_data_valid = False
@@ -468,7 +406,7 @@ def register(app: typer.Typer) -> None:
         if inbox_exists:
             report.add(
                 "inbox_data_integrity",
-                DoctorCheck(
+                HealthCheck(
                     description="Inbox data integrity (proposal fields)",
                     fail_description=(
                         f"Inbox data integrity: {inbox_error_count} error(s) found"
@@ -479,31 +417,7 @@ def register(app: typer.Typer) -> None:
             )
 
         # Check 4: dcat in PATH
-        dogcat_in_path = bool(shutil.which("dcat"))
-        if dogcat_in_path:
-            report.add(
-                "dogcat_in_path",
-                DoctorCheck(
-                    description="dcat command is available in PATH",
-                    passed=True,
-                ),
-            )
-        else:
-            # dcat doctor is running, so dcat works — just not as a PATH binary.
-            # It's likely a shell function or alias.
-            report.add(
-                "dogcat_in_path",
-                DoctorCheck(
-                    description="dcat command is available in PATH",
-                    fail_description=(
-                        "dcat is available as a shell function/alias,"
-                        " not as a binary in PATH"
-                    ),
-                    passed=False,
-                    optional=True,
-                    note="Tab completions may not work",
-                ),
-            )
+        report.add("dogcat_in_path", _check_dcat_in_path())
 
         # Check 6: Issue ID uniqueness
         issue_ids_unique = True
@@ -516,7 +430,7 @@ def register(app: typer.Typer) -> None:
 
         report.add(
             "issue_ids",
-            DoctorCheck(
+            HealthCheck(
                 description="All issue IDs are unique",
                 passed=issue_ids_unique,
                 fix="Review and fix duplicate IDs in issues.jsonl",
@@ -524,14 +438,14 @@ def register(app: typer.Typer) -> None:
         )
 
         # Check 6b: ID distribution / collision probability (opt-in)
-        id_distribution: list[dict[str, Any]] = []
+        id_distribution: list[IdDistributionRow] = []
         if check_id_distribution and issues_file.exists() and issues_valid:
             id_distribution = _collect_id_distribution(dogcats_dir)
             warn_threshold = 0.05  # 5% cumulative collision probability
-            warn = any(row["p_cumulative"] >= warn_threshold for row in id_distribution)
+            warn = any(row.p_cumulative >= warn_threshold for row in id_distribution)
             report.add(
                 "id_distribution",
-                DoctorCheck(
+                HealthCheck(
                     description=(
                         "ID collision probability is below "
                         f"{warn_threshold * 100:.0f}% in every namespace"
@@ -578,7 +492,7 @@ def register(app: typer.Typer) -> None:
 
         report.add(
             "dependencies",
-            DoctorCheck(
+            HealthCheck(
                 description="Dependency references are valid",
                 fail_description="Found dangling dependency references",
                 passed=deps_ok,
@@ -603,7 +517,7 @@ def register(app: typer.Typer) -> None:
             if hook_status == "missing":
                 report.add(
                     "claude_precompact",
-                    DoctorCheck(
+                    HealthCheck(
                         description="Claude Code PreCompact hook is configured",
                         fail_description=(
                             "Claude Code PreCompact hook not found"
@@ -621,7 +535,7 @@ def register(app: typer.Typer) -> None:
             elif hook_status == "old":
                 report.add(
                     "claude_precompact",
-                    DoctorCheck(
+                    HealthCheck(
                         description="Claude Code PreCompact hook uses --replay",
                         fail_description=(
                             "PreCompact hook uses 'dcat prime' without --replay"
@@ -639,16 +553,15 @@ def register(app: typer.Typer) -> None:
             else:
                 report.add(
                     "claude_precompact",
-                    DoctorCheck(
+                    HealthCheck(
                         description="Claude Code PreCompact hook is configured",
                         passed=True,
                     ),
                 )
 
-        # Materialize the legacy flat-dict view that the renderer + JSON
-        # output already speak. Doing this once here keeps the rest of
-        # the doctor body unchanged.
-        checks: dict[str, dict[str, Any]] = report.as_legacy_dict()
+        # Render straight from the typed HealthCheck objects — no flatten
+        # to dicts, so pyright catches field typos in the renderers below.
+        checks: dict[str, HealthCheck] = report.checks
         all_passed = report.all_passed
 
         # Post-merge concurrent edit detection
@@ -687,115 +600,198 @@ def register(app: typer.Typer) -> None:
             typer.echo(post_merge_skip_reason, err=True)
 
         # Output results
+        all_validation = validation_details + inbox_validation_details
         if is_json():
-            output_data: dict[str, Any] = {
-                "status": "ok" if all_passed else "issues_found",
-                "checks": {
-                    name: {
-                        "passed": check["passed"],
-                        "description": check["description"],
-                        **({"optional": True} if check.get("optional") else {}),
-                        "fix": (check.get("fix") if not check["passed"] else None),
-                        **({"note": check["note"]} if "note" in check else {}),
-                    }
-                    for name, check in checks.items()
-                },
-            }
-            all_validation = validation_details + inbox_validation_details
-            if all_validation:
-                output_data["validation_details"] = all_validation
-            if merge_warnings:
-                output_data["concurrent_edits"] = merge_warnings
-            if post_merge_skip_reason:
-                output_data["post_merge_skipped"] = post_merge_skip_reason
-            if id_distribution:
-                output_data["id_distribution"] = id_distribution
-            typer.echo(
-                orjson.dumps(output_data, option=orjson.OPT_INDENT_2).decode(),
+            _render_doctor_json(
+                checks,
+                all_passed=all_passed,
+                validation=all_validation,
+                merge_warnings=merge_warnings,
+                post_merge_skip_reason=post_merge_skip_reason,
+                id_distribution=id_distribution,
             )
         else:
-            # Print validation detail errors first
-            all_validation = validation_details + inbox_validation_details
-            if all_validation:
-                for entry in all_validation:
-                    lvl = entry["level"].upper()
-                    typer.echo(f"  [{lvl}] {entry['message']}")
-                typer.echo()
-
-            # Summary checks
-            typer.echo("Dogcat Health Check\n")
-            for check in checks.values():
-                is_optional = check.get("optional", False)
-                if check["passed"]:
-                    desc = check["description"]
-                    line = typer.style(f"✓ {desc}", fg="green")
-                elif is_optional:
-                    desc = check.get("fail_description", check["description"])
-                    line = typer.style(f"○ {desc}", fg="yellow")
-                else:
-                    desc = check.get("fail_description", check["description"])
-                    line = typer.style(f"✗ {desc}", fg="red")
-                typer.echo(line)
-                if not check["passed"] and not is_optional:
-                    typer.echo(typer.style(f"  Fix: {check['fix']}", fg="yellow"))
-                if not check["passed"] and is_optional and "note" in check:
-                    typer.echo(typer.style(f"  Note: {check['note']}", fg="yellow"))
-                typer.echo()
-
-            # ID distribution table
-            if id_distribution:
-                typer.echo("ID distribution:")
-                typer.echo(
-                    f"  {'namespace':<14} {'count':>6} {'L':>2}  "
-                    f"{'p_step':>10} {'p_all':>10}",
-                )
-                for row in id_distribution:
-                    typer.echo(
-                        f"  {row['namespace']:<14} {row['count']:>6} "
-                        f"{row['length']:>2}  "
-                        f"{row['p_step'] * 100:>9.4f}% "
-                        f"{row['p_cumulative'] * 100:>9.4f}%",
-                    )
-                typer.echo()
-
-            # Post-merge concurrent edit warnings
-            if merge_warnings:
-                typer.echo(
-                    f"\nConcurrent edits detected ({len(merge_warnings)} issue(s)):",
-                )
-                for warn in merge_warnings:
-                    typer.echo(f"  ⚠ {warn['message']}")
-                    fields = warn.get("fields", {})
-                    for fname, diff in fields.items():
-                        typer.echo(
-                            f"    {fname}:"
-                            f" branch_1={diff['branch_1']!r}"
-                            f"  branch_2={diff['branch_2']!r}",
-                        )
-
-            if all_passed:
-                typer.echo(typer.style("\n✓ All checks passed!", fg="green"))
-            else:
-                typer.echo(
-                    typer.style(
-                        "\n✗ Some checks failed. See above for fixes.",
-                        fg="red",
-                    ),
-                )
+            _render_doctor_text(
+                checks,
+                all_passed=all_passed,
+                validation=all_validation,
+                merge_warnings=merge_warnings,
+                id_distribution=id_distribution,
+            )
 
         raise typer.Exit(0 if all_passed else 1)
 
 
-def _collect_id_distribution(dogcats_dir: str) -> list[dict[str, Any]]:
+def _check_dogcats_dir(dogcats_dir: str) -> HealthCheck:
+    """Check that the ``.dogcats`` store directory exists."""
+    return HealthCheck(
+        description=f"{dogcats_dir}/ directory exists",
+        passed=Path(dogcats_dir).exists(),
+        fix=f"Run 'dcat init' to create {dogcats_dir}",
+    )
+
+
+def _check_dcat_in_path() -> HealthCheck:
+    """Check that ``dcat`` resolves as a PATH binary (tab-completion needs it)."""
+    if shutil.which("dcat"):
+        return HealthCheck(
+            description="dcat command is available in PATH",
+            passed=True,
+        )
+    # dcat doctor is running, so dcat works — just not as a PATH binary.
+    # It's likely a shell function or alias.
+    return HealthCheck(
+        description="dcat command is available in PATH",
+        fail_description=(
+            "dcat is available as a shell function/alias, not as a binary in PATH"
+        ),
+        passed=False,
+        optional=True,
+        note="Tab completions may not work",
+    )
+
+
+def _render_doctor_json(
+    checks: dict[str, HealthCheck],
+    *,
+    all_passed: bool,
+    validation: list[ValidationError],
+    merge_warnings: list[dict[str, Any]],
+    post_merge_skip_reason: str | None,
+    id_distribution: list[IdDistributionRow],
+) -> None:
+    """Emit the ``dcat doctor --json`` report."""
+    output_data: dict[str, Any] = {
+        "status": "ok" if all_passed else "issues_found",
+        "checks": {
+            name: {
+                "passed": check.passed,
+                "description": check.description,
+                **({"optional": True} if check.optional else {}),
+                "fix": (check.fix if not check.passed else None),
+                **({"note": check.note} if check.note is not None else {}),
+            }
+            for name, check in checks.items()
+        },
+    }
+    if validation:
+        output_data["validation_details"] = [e.to_dict() for e in validation]
+    if merge_warnings:
+        output_data["concurrent_edits"] = merge_warnings
+    if post_merge_skip_reason:
+        output_data["post_merge_skipped"] = post_merge_skip_reason
+    if id_distribution:
+        output_data["id_distribution"] = [r.to_dict() for r in id_distribution]
+    typer.echo(orjson.dumps(output_data, option=orjson.OPT_INDENT_2).decode())
+
+
+def _render_doctor_text(
+    checks: dict[str, HealthCheck],
+    *,
+    all_passed: bool,
+    validation: list[ValidationError],
+    merge_warnings: list[dict[str, Any]],
+    id_distribution: list[IdDistributionRow],
+) -> None:
+    """Emit the human-readable ``dcat doctor`` report."""
+    # Print validation detail errors first
+    if validation:
+        for entry in validation:
+            lvl = entry.level.upper()
+            typer.echo(f"  [{lvl}] {entry.message}")
+        typer.echo()
+
+    # Summary checks
+    typer.echo("Dogcat Health Check\n")
+    for check in checks.values():
+        is_optional = check.optional
+        if check.passed:
+            line = typer.style(f"✓ {check.description}", fg="green")
+        elif is_optional:
+            desc = check.fail_description or check.description
+            line = typer.style(f"○ {desc}", fg="yellow")
+        else:
+            desc = check.fail_description or check.description
+            line = typer.style(f"✗ {desc}", fg="red")
+        typer.echo(line)
+        if not check.passed and not is_optional:
+            typer.echo(typer.style(f"  Fix: {check.fix}", fg="yellow"))
+        if not check.passed and is_optional and check.note is not None:
+            typer.echo(typer.style(f"  Note: {check.note}", fg="yellow"))
+        typer.echo()
+
+    # ID distribution table
+    if id_distribution:
+        typer.echo("ID distribution:")
+        typer.echo(
+            f"  {'namespace':<14} {'count':>6} {'L':>2}  {'p_step':>10} {'p_all':>10}",
+        )
+        for row in id_distribution:
+            typer.echo(
+                f"  {row.namespace:<14} {row.count:>6} "
+                f"{row.length:>2}  "
+                f"{row.p_step * 100:>9.4f}% "
+                f"{row.p_cumulative * 100:>9.4f}%",
+            )
+        typer.echo()
+
+    # Post-merge concurrent edit warnings
+    if merge_warnings:
+        typer.echo(
+            f"\nConcurrent edits detected ({len(merge_warnings)} issue(s)):",
+        )
+        for warn in merge_warnings:
+            typer.echo(f"  ⚠ {warn['message']}")
+            fields = warn.get("fields", {})
+            for fname, diff in fields.items():
+                typer.echo(
+                    f"    {fname}:"
+                    f" branch_1={diff['branch_1']!r}"
+                    f"  branch_2={diff['branch_2']!r}",
+                )
+
+    if all_passed:
+        typer.echo(typer.style("\n✓ All checks passed!", fg="green"))
+    else:
+        typer.echo(
+            typer.style(
+                "\n✗ Some checks failed. See above for fixes.",
+                fg="red",
+            ),
+        )
+
+
+@dataclass
+class IdDistributionRow:
+    """One namespace's ID-collision statistics row. (dogcat-3s3h).
+
+    ``length`` is the ID length the generator would currently use for a
+    database of that size; ``p_step`` is the per-generation collision
+    probability for the next ID; ``p_cumulative`` is the birthday-paradox
+    probability that any collision has already occurred.
+    """
+
+    namespace: str
+    count: int
+    length: int
+    p_step: float
+    p_cumulative: float
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to the flat dict the doctor JSON output emits."""
+        return {
+            "namespace": self.namespace,
+            "count": self.count,
+            "length": self.length,
+            "p_step": self.p_step,
+            "p_cumulative": self.p_cumulative,
+        }
+
+
+def _collect_id_distribution(dogcats_dir: str) -> list[IdDistributionRow]:
     """Compute per-namespace ID-collision statistics for the current database.
 
-    Returns a list of rows ``{namespace, count, length, p_step,
-    p_cumulative}`` sorted by namespace name. ``length`` is the ID
-    length the generator would currently use for a database of that
-    size (per ``ID_LENGTH_THRESHOLDS``); ``p_step`` is the
-    per-generation collision probability for the next ID, and
-    ``p_cumulative`` is the birthday-paradox probability that any
-    collision has already occurred.
+    Returns rows sorted by namespace name.
     """
     from dogcat.storage import JSONLStorage
 
@@ -810,18 +806,18 @@ def _collect_id_distribution(dogcats_dir: str) -> list[dict[str, Any]]:
             continue
         counts[issue.namespace] = counts.get(issue.namespace, 0) + 1
 
-    rows: list[dict[str, Any]] = []
+    rows: list[IdDistributionRow] = []
     for namespace in sorted(counts):
         count = counts[namespace]
         length = get_id_length_for_count(count)
         rows.append(
-            {
-                "namespace": namespace,
-                "count": count,
-                "length": length,
-                "p_step": collision_probability(count, length),
-                "p_cumulative": cumulative_collision_probability(count, length),
-            }
+            IdDistributionRow(
+                namespace=namespace,
+                count=count,
+                length=length,
+                p_step=collision_probability(count, length),
+                p_cumulative=cumulative_collision_probability(count, length),
+            ),
         )
     return rows
 

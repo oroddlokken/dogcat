@@ -16,6 +16,7 @@ from typer.testing import CliRunner
 
 from dogcat.cli import app
 from dogcat.cli._validate import (
+    ValidationError,
     detect_concurrent_edits,
     parse_raw_records,
     validate_inbox_jsonl,
@@ -123,14 +124,14 @@ def _proposal(
     return defaults
 
 
-def _errors(results: list[dict[str, str]]) -> list[dict[str, str]]:
+def _errors(results: list[ValidationError]) -> list[ValidationError]:
     """Filter only error-level results."""
-    return [r for r in results if r["level"] == "error"]
+    return [r for r in results if r.level == "error"]
 
 
-def _warnings(results: list[dict[str, str]]) -> list[dict[str, str]]:
+def _warnings(results: list[ValidationError]) -> list[ValidationError]:
     """Filter only warning-level results."""
-    return [r for r in results if r["level"] == "warning"]
+    return [r for r in results if r.level == "warning"]
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +157,7 @@ class TestParseRawRecords:
         records, errors = parse_raw_records(path)
         assert len(records) == 0
         assert len(_errors(errors)) == 1
-        assert "invalid JSON" in errors[0]["message"]
+        assert "invalid JSON" in errors[0].message
 
     def test_non_object_json(self, tmp_path: Path) -> None:
         """Detect JSON arrays instead of objects."""
@@ -164,7 +165,7 @@ class TestParseRawRecords:
         path.write_text("[1, 2, 3]\n")
         records, errors = parse_raw_records(path)
         assert len(records) == 0
-        assert "expected JSON object" in errors[0]["message"]
+        assert "expected JSON object" in errors[0].message
 
     def test_missing_record_type(self, tmp_path: Path) -> None:
         """Warn when record_type is missing."""
@@ -175,7 +176,7 @@ class TestParseRawRecords:
         records, errors = parse_raw_records(path)
         assert len(records) == 1  # Still parsed
         assert len(_warnings(errors)) == 1
-        assert "missing record_type" in errors[0]["message"]
+        assert "missing record_type" in errors[0].message
 
     def test_missing_file(self, tmp_path: Path) -> None:
         """Report error for non-existent file."""
@@ -183,7 +184,7 @@ class TestParseRawRecords:
         records, errors = parse_raw_records(path)
         assert len(records) == 0
         assert len(_errors(errors)) == 1
-        assert "does not exist" in errors[0]["message"]
+        assert "does not exist" in errors[0].message
 
     def test_empty_file(self, tmp_path: Path) -> None:
         """An empty file produces no records and no errors."""
@@ -212,19 +213,19 @@ class TestValidateIssue:
         del record["title"]
         errors = validate_issue_record(record, lineno=1)
         assert len(errors) == 1
-        assert "missing required field 'title'" in errors[0]["message"]
+        assert "missing required field 'title'" in errors[0].message
 
     def test_invalid_status(self) -> None:
         """Detect invalid status values."""
         errors = validate_issue_record(_issue(status="bogus"), lineno=1)
         assert len(errors) == 1
-        assert "invalid status" in errors[0]["message"]
+        assert "invalid status" in errors[0].message
 
     def test_invalid_issue_type(self) -> None:
         """Detect invalid issue_type values."""
         errors = validate_issue_record(_issue(issue_type="unicorn"), lineno=1)
         assert len(errors) == 1
-        assert "invalid issue_type" in errors[0]["message"]
+        assert "invalid issue_type" in errors[0].message
 
     def test_legacy_draft_issue_type_accepted(self) -> None:
         """Legacy issue_type='draft' is accepted (migrated on load)."""
@@ -240,7 +241,7 @@ class TestValidateIssue:
         """Detect priority values outside 0-4."""
         errors = validate_issue_record(_issue(priority=99), lineno=1)
         assert len(errors) == 1
-        assert "invalid priority" in errors[0]["message"]
+        assert "invalid priority" in errors[0].message
 
     def test_invalid_timestamp(self) -> None:
         """Detect invalid ISO 8601 timestamps."""
@@ -249,7 +250,7 @@ class TestValidateIssue:
             lineno=1,
         )
         assert len(errors) == 1
-        assert "invalid timestamp" in errors[0]["message"]
+        assert "invalid timestamp" in errors[0].message
 
 
 # ---------------------------------------------------------------------------
@@ -265,7 +266,7 @@ class TestValidateReferences:
         records = [_issue(issue_id="child", parent="test-nonexistent")]
         errors = _errors(validate_references(records))
         assert len(errors) == 1
-        assert "non-existent parent" in errors[0]["message"]
+        assert "non-existent parent" in errors[0].message
 
     def test_valid_parent(self) -> None:
         """Valid parent reference produces no errors."""
@@ -283,7 +284,7 @@ class TestValidateReferences:
             _dep(issue_id="test-a", depends_on_id="test-missing"),
         ]
         errors = _errors(validate_references(records))
-        assert any("non-existent" in e["message"] for e in errors)
+        assert any("non-existent" in e.message for e in errors)
 
     def test_circular_dependency(self) -> None:
         """Detect circular dependency chains."""
@@ -296,7 +297,7 @@ class TestValidateReferences:
             _dep(issue_id="test-c", depends_on_id="test-a"),
         ]
         errors = _errors(validate_references(records))
-        assert any("Circular dependency" in e["message"] for e in errors)
+        assert any("Circular dependency" in e.message for e in errors)
 
     def test_event_nonexistent_issue_is_warning(self) -> None:
         """Event referencing non-existent issue is a warning, not error."""
@@ -772,13 +773,13 @@ class TestValidateProposalRecord:
         del record["title"]
         errors = validate_proposal_record(record, lineno=1)
         assert len(errors) == 1
-        assert "missing required field 'title'" in errors[0]["message"]
+        assert "missing required field 'title'" in errors[0].message
 
     def test_invalid_status(self) -> None:
         """Detect invalid proposal status values."""
         errors = validate_proposal_record(_proposal(status="bogus"), lineno=1)
         assert len(errors) == 1
-        assert "invalid status 'bogus'" in errors[0]["message"]
+        assert "invalid status 'bogus'" in errors[0].message
 
     def test_tombstone_status_accepted(self) -> None:
         """Proposal status 'tombstone' is a valid value."""
@@ -790,12 +791,12 @@ class TestValidateProposalRecord:
             _proposal(closed_at="not-a-timestamp"), lineno=1
         )
         assert len(errors) == 1
-        assert "invalid timestamp" in errors[0]["message"]
+        assert "invalid timestamp" in errors[0].message
 
     def test_lineno_appears_in_message(self) -> None:
         """Errors include the line number for diagnostics."""
         errors = validate_proposal_record(_proposal(status="bogus"), lineno=42)
-        assert "Line 42" in errors[0]["message"]
+        assert "Line 42" in errors[0].message
 
 
 class TestValidateInboxJsonl:
@@ -812,7 +813,7 @@ class TestValidateInboxJsonl:
         path = tmp_path / "inbox.jsonl"
         _write_jsonl(path, [_proposal(status="bogus")])
         errors = validate_inbox_jsonl(path)
-        messages = [e["message"] for e in errors]
+        messages = [e.message for e in errors]
         assert any("invalid status 'bogus'" in m for m in messages)
 
     def test_non_proposal_records_ignored(self, tmp_path: Path) -> None:

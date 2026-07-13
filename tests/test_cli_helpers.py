@@ -395,7 +395,7 @@ class TestApplyCommonFilters:
 
 
 # ---------------------------------------------------------------------------
-# Smaller cross-cuts: the mutually-exclusive checks and apply_comment_filter.
+# Smaller cross-cuts: the mutually-exclusive checks.
 # ---------------------------------------------------------------------------
 
 
@@ -448,43 +448,6 @@ class TestMutuallyExclusiveChecks:
             check_comments_exclusive(has_comments=has_c, without_comments=without_c)
             is None
         )
-
-
-class TestApplyCommentFilter:
-    """Comment-presence filter handles both directions plus the no-op default."""
-
-    def test_no_flags_passes_through(self) -> None:
-        """No flags passes through."""
-        from dogcat.cli._helpers import apply_comment_filter
-
-        a = _issue("a")
-        b = _issue("b", comments=["x"])
-        assert apply_comment_filter([a, b]) == [a, b]
-
-    def test_has_comments_keeps_only_with(self) -> None:
-        """Has comments keeps only with."""
-        from dogcat.cli._helpers import apply_comment_filter
-
-        a = _issue("a")
-        b = _issue("b", comments=["x"])
-        assert apply_comment_filter([a, b], has_comments=True) == [b]
-
-    def test_without_comments_keeps_only_empty(self) -> None:
-        """Without comments keeps only empty."""
-        from dogcat.cli._helpers import apply_comment_filter
-
-        a = _issue("a")
-        b = _issue("b", comments=["x"])
-        assert apply_comment_filter([a, b], without_comments=True) == [a]
-
-    def test_both_flags_raise(self) -> None:
-        """Both flags raise."""
-        import typer
-
-        from dogcat.cli._helpers import apply_comment_filter
-
-        with pytest.raises(typer.BadParameter):
-            apply_comment_filter([], has_comments=True, without_comments=True)
 
 
 # ---------------------------------------------------------------------------
