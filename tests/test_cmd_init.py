@@ -423,3 +423,86 @@ class TestCLIInitNoGit:
         )
         assert result.exit_code == 0
         assert "already in .gitignore" in result.stdout
+
+
+class TestInitShadowWarning:
+    """init warns when a new local store shadows the global fallback.
+
+    (dogcat-mbk1) Without the warning, `dcat init` in a directory that
+    resolves to the global default_storage silently re-roots every
+    command: `dcat list` shows an empty database while the issues stay
+    in the shared store.
+    """
+
+    def _setup_global_store(self, tmp_path: Path) -> Path:
+        from dogcat.global_config import save_global_config_value
+
+        global_store = tmp_path / "shared" / ".dogcats"
+        global_store.mkdir(parents=True)
+        (global_store / "issues.jsonl").touch()
+        save_global_config_value("default_storage", str(global_store))
+        return global_store
+
+    def test_warns_when_dir_resolves_to_global_store(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Plain init in a fallback-resolved directory warns but completes."""
+        global_store = self._setup_global_store(tmp_path)
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        monkeypatch.chdir(repo)
+
+        result = runner.invoke(app, ["init"])
+        assert result.exit_code == 0
+        combined = result.stdout + result.stderr
+        assert "Warning" in combined
+        assert str(global_store) in combined
+        assert (repo / ".dogcats" / "issues.jsonl").exists()
+
+    def test_dir_flag_also_warns(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Init --dir writes a .dogcatrc in cwd, shadowing the fallback too."""
+        self._setup_global_store(tmp_path)
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        monkeypatch.chdir(repo)
+
+        result = runner.invoke(
+            app, ["init", "--dir", str(tmp_path / "ext" / ".dogcats")]
+        )
+        assert result.exit_code == 0
+        assert "Warning" in result.stdout + result.stderr
+
+    def test_no_warning_without_global_config(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Plain init with no global config stays quiet."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        monkeypatch.chdir(repo)
+
+        result = runner.invoke(app, ["init"])
+        assert result.exit_code == 0
+        assert "Warning" not in result.stdout + result.stderr
+
+    def test_no_warning_when_store_already_resolves_locally(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Re-running init where a local store already resolves stays quiet."""
+        self._setup_global_store(tmp_path)
+        repo = tmp_path / "repo"
+        (repo / ".dogcats").mkdir(parents=True)
+        monkeypatch.chdir(repo)
+
+        result = runner.invoke(app, ["init"])
+        assert result.exit_code == 0
+        assert "Warning" not in result.stdout + result.stderr

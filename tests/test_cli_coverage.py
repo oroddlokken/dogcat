@@ -1442,22 +1442,25 @@ class TestLinkRemoveSubcommand:
 class TestPrimeCommand:
     """Test prime command (guide output)."""
 
-    def test_prime_outputs_guide(self) -> None:
+    def test_prime_outputs_guide(self, tmp_path: Path) -> None:
         """Test that prime command outputs the workflow guide."""
+        (tmp_path / ".dogcats").mkdir()
         result = runner.invoke(app, ["prime"])
         assert result.exit_code == 0
         assert "DOGCAT WORKFLOW GUIDE" in result.stdout
         assert "Quick Start" in result.stdout
 
-    def test_prime_includes_label_commands(self) -> None:
+    def test_prime_includes_label_commands(self, tmp_path: Path) -> None:
         """Test that prime includes label commands in Essential Commands."""
+        (tmp_path / ".dogcats").mkdir()
         result = runner.invoke(app, ["prime"])
         assert result.exit_code == 0
         assert "dcat label <id> add -l <label>" in result.stdout
         assert "dcat label <id> remove -l <label>" in result.stdout
 
-    def test_prime_includes_labels_section(self) -> None:
+    def test_prime_includes_labels_section(self, tmp_path: Path) -> None:
         """Test that prime includes the Labels section."""
+        (tmp_path / ".dogcats").mkdir()
         result = runner.invoke(app, ["prime"])
         assert result.exit_code == 0
         assert "## Labels" in result.stdout

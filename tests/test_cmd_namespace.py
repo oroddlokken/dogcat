@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from cli_test_helpers import (
     _create_issue,
     _create_multi_ns_issues,
@@ -248,3 +249,59 @@ class TestRecentlyNamespaceFilter:
         events = json.loads(result.stdout)
         for event in events:
             assert not event["issue_id"].startswith("proj-b-")
+
+
+class TestNamespacesGlobalFallback:
+    """namespaces annotations honor global visibility in fallback mode.
+
+    (dogcat-mbk1) Mirrors get_namespace_filter: with no local lists,
+    global visible_namespaces (plus the derived primary) decides what
+    `dcat list` shows, so the annotations must say the same.
+    """
+
+    def _fallback_store_with_issues(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> Path:
+        from dogcat.global_config import save_global_config_value
+
+        global_store = tmp_path / "shared" / ".dogcats"
+        _create_multi_ns_issues(global_store)
+        save_global_config_value("default_storage", str(global_store))
+
+        repo = tmp_path / "myrepo"
+        repo.mkdir()
+        monkeypatch.chdir(repo)
+        return global_store
+
+    def test_fallback_hides_other_namespaces_by_default(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """No global visible_namespaces → only the derived primary is visible."""
+        self._fallback_store_with_issues(tmp_path, monkeypatch)
+
+        result = runner.invoke(app, ["namespaces", "--json"])
+        assert result.exit_code == 0
+        ns_map = {i["namespace"]: i["visibility"] for i in json.loads(result.stdout)}
+        assert ns_map["proj-a"] == "hidden"
+        assert ns_map["proj-b"] == "hidden"
+
+    def test_fallback_layers_global_visible_namespaces(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Global visible_namespaces are annotated visible, the rest hidden."""
+        from dogcat.global_config import save_global_config_value
+
+        self._fallback_store_with_issues(tmp_path, monkeypatch)
+        save_global_config_value("visible_namespaces", ["proj-b"])
+
+        result = runner.invoke(app, ["namespaces", "--json"])
+        assert result.exit_code == 0
+        ns_map = {i["namespace"]: i["visibility"] for i in json.loads(result.stdout)}
+        assert ns_map["proj-b"] == "visible"
+        assert ns_map["proj-a"] == "hidden"

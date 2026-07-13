@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from dogcat import global_config
 from dogcat.storage import JSONLStorage
 
 # Environment variables that eliminate per-repo git config calls and skip
@@ -25,9 +26,37 @@ _GIT_TEST_ENV = {
 
 
 @pytest.fixture(autouse=True)
+def _isolate_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run every test from a pristine temp cwd.
+
+    Storage and config resolution walk up from the current directory,
+    so tests run from the checkout inherit the developer's real
+    filesystem context: an untracked .dogcatrc above (or at) the
+    checkout root redirects every walk-up, failing 66 tests and — via
+    the repo-local config overlay — making tests WRITE to the real
+    .dogcats/config.local.toml. Tests that need a specific cwd chdir
+    themselves. (dogcat-mbk1)
+    """
+    monkeypatch.chdir(tmp_path)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_xdg_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Prevent tests from writing to the real ~/.cache/dogcat/."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg-cache"))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_global_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep tests away from the developer's real ~/.config/dogcat/config.toml.
+
+    Without this, a machine with ``default_storage`` configured would
+    make tests resolve to — and write issues into — the real shared
+    store. Also resets the process-global "resolved via global
+    fallback" marker between tests.
+    """
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    global_config.reset_resolution_state()
 
 
 @pytest.fixture

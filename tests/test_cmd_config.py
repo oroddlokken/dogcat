@@ -578,3 +578,227 @@ class TestConfigKeys:
         assert "description" in data["namespace"]
         assert "default" in data["git_tracking"]
         assert "values" in data["git_tracking"]
+
+
+class TestConfigGlobalFlag:
+    """`dcat config --global` writes to the user-global config file."""
+
+    def test_set_global_writes_xdg_file(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify set global writes xdg file."""
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".dogcats").mkdir()
+        monkeypatch.chdir(repo)
+
+        result = runner.invoke(
+            app,
+            [
+                "config",
+                "set",
+                "--global",
+                "default_storage",
+                str(tmp_path / "shared" / ".dogcats"),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        cfg_path = tmp_path / "xdg" / "dogcat" / "config.toml"
+        assert cfg_path.is_file()
+        assert "default_storage" in cfg_path.read_text()
+
+    def test_get_global_reads_xdg_file(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify get global reads xdg file."""
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".dogcats").mkdir()
+        monkeypatch.chdir(repo)
+
+        runner.invoke(
+            app,
+            ["config", "set", "--global", "default_storage", "/tmp/shared/.dogcats"],
+        )
+        result = runner.invoke(
+            app,
+            ["config", "get", "--global", "default_storage"],
+        )
+        assert result.exit_code == 0
+        assert result.output.strip() == "/tmp/shared/.dogcats"
+
+    def test_unset_global(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify unset global."""
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".dogcats").mkdir()
+        monkeypatch.chdir(repo)
+
+        runner.invoke(
+            app,
+            ["config", "set", "--global", "default_storage", "/tmp/shared/.dogcats"],
+        )
+        result = runner.invoke(app, ["config", "unset", "--global", "default_storage"])
+        assert result.exit_code == 0
+        result = runner.invoke(app, ["config", "get", "--global", "default_storage"])
+        assert result.exit_code != 0
+
+    def test_list_shows_global_source(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify list shows global source."""
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".dogcats").mkdir()
+        monkeypatch.chdir(repo)
+
+        runner.invoke(
+            app,
+            ["config", "set", "--global", "default_storage", "/tmp/shared/.dogcats"],
+        )
+        result = runner.invoke(app, ["config", "list"])
+        assert result.exit_code == 0
+        assert "(global)" in result.output
+        assert "default_storage" in result.output
+
+    def test_set_local_and_global_are_mutually_exclusive(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify set local and global are mutually exclusive."""
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".dogcats").mkdir()
+        monkeypatch.chdir(repo)
+
+        result = runner.invoke(
+            app,
+            [
+                "config",
+                "set",
+                "--local",
+                "--global",
+                "default_storage",
+                "/tmp/shared/.dogcats",
+            ],
+        )
+        assert result.exit_code == 2
+        assert "mutually exclusive" in result.output
+
+    def test_set_global_rejects_non_global_key(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Keys the runtime never reads globally are rejected by set --global."""
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".dogcats").mkdir()
+        monkeypatch.chdir(repo)
+
+        result = runner.invoke(
+            app,
+            ["config", "set", "--global", "git_tracking", "false"],
+        )
+        assert result.exit_code == 2
+        assert "not a global config key" in result.output
+        assert not (tmp_path / "xdg" / "dogcat" / "config.toml").exists()
+
+    def test_set_global_only_key_without_global_flag_errors(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """default_storage in repo config would never be read; refuse to save it."""
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".dogcats").mkdir()
+        monkeypatch.chdir(repo)
+
+        result = runner.invoke(
+            app,
+            ["config", "set", "default_storage", "/tmp/shared/.dogcats"],
+        )
+        assert result.exit_code == 2
+        assert "--global" in result.output
+        assert not (repo / ".dogcats" / "config.toml").exists()
+
+    def test_list_ignores_stray_global_keys(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Keys in the global file that the runtime never reads stay hidden."""
+        from dogcat.global_config import get_global_config_path
+
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        cfg_path = get_global_config_path()
+        cfg_path.parent.mkdir(parents=True)
+        cfg_path.write_text('git_tracking = false\nnamespace = "stray"\n')
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".dogcats").mkdir()
+        monkeypatch.chdir(repo)
+
+        result = runner.invoke(app, ["config", "list"])
+        assert result.exit_code == 0
+        assert "stray" not in result.output
+        assert "git_tracking" not in result.output
+
+
+class TestConfigUnsetLocalShared:
+    """`dcat config unset` (without --global) removes keys from local/shared."""
+
+    def test_unset_shared_removes_key(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify unset shared removes key from config.toml."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        runner.invoke(app, ["config", "set", "git_tracking", "false"])
+
+        result = runner.invoke(app, ["config", "unset", "git_tracking"])
+        assert result.exit_code == 0
+
+        result = runner.invoke(app, ["config", "get", "git_tracking"])
+        assert result.exit_code != 0
+
+    def test_unset_local_removes_key(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify unset --local removes key from config.local.toml."""
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        runner.invoke(app, ["config", "set", "--local", "namespace", "mylocal"])
+
+        result = runner.invoke(app, ["config", "unset", "--local", "namespace"])
+        assert result.exit_code == 0
+
+        local_file = dogcats_dir / "config.local.toml"
+        if local_file.exists():
+            assert "mylocal" not in local_file.read_text()

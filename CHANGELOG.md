@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Optional user-global config at `$XDG_CONFIG_HOME/dogcat/config.toml`**. Lets repos without a local `.dogcats/` or `.dogcatrc` fall back to a shared `.dogcats` directory configured once per machine. Set with `dcat config set --global default_storage <path>`. Namespace is derived from the project root name — the git repo toplevel when inside a repo (so `myrepo/src/` yields `myrepo`, never `src`), else the cwd folder name — via a slug function that handles Norwegian and German digraphs (e.g. `~/dev/læring/` becomes `laering`). When the fallback is used, dcat prints a one-time stderr notice naming the store and derived namespace, and `dcat prime` opens with an Active Storage section naming the store path, namespace, and how to opt out (`dcat init` / `dcat init --use-existing-folder`). `dcat init` warns when a new local store would shadow the global store's issues; `dcat rename-namespace` refuses to run in fallback mode (the derived namespace is not the store's to rename); `dcat namespaces` annotations follow the same visibility rules as `dcat list`. Only `default_storage` and `visible_namespaces` are read globally; `dcat config set --global` rejects other keys. Backwards compatible: behavior is unchanged unless you create the file — repos reaching the same store via `.dogcatrc` (or the store's own home directory) keep their configured namespace. `dcat config set/get/unset --global` is new, and `dcat config unset` also works for shared/local config. `dcat doctor` and `dcat prime` report global config status, including TOML parse errors.
+
+### Changed
+
+- **Namespaces auto-detected from directory names are now ASCII slugs.** Non-ASCII folder names are transliterated (`æ`→`ae`, `ø`→`oe`, `å`→`aa`, `ü`→`ue`, `ß`→`ss`; other accents stripped via NFKD), so `~/dev/læring/` auto-detects as `laering` where it previously stayed `læring`. Explicitly configured namespaces are unaffected.
+- `dcat config list` now includes user-global keys (`default_storage`, `visible_namespaces`) in the effective view, annotated with their source (`local`, `global`, or `shared, overrides global`); the `--json` output includes the merged keys as well.
+- `dcat config set default_storage` without `--global` is now an error instead of writing an inert key into repo config.
+
+### Development
+
+- **Test suite is hermetic to the developer's dogcat setup.** Every test now runs from a pristine temporary cwd. Previously an untracked `.dogcatrc` at the checkout root redirected storage/config walk-ups for tests running from the checkout: 66 tests failed and — via the repo-local config overlay — some tests wrote test data into the real `.dogcats/config.local.toml`. Also replaced a `monkeypatch.undo()` in the web-propose tests that reverted the isolation fixtures mid-test.
+
 ## 0.12.2 (2026-05-21)
 
 ### Added

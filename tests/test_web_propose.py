@@ -740,7 +740,7 @@ class TestNewNamespacePersistence:
         assert pinned.count("once") == 1
 
     def test_persist_failure_rolls_back_in_process_state(
-        self, web_dogcats: Path, monkeypatch: pytest.MonkeyPatch
+        self, web_dogcats: Path
     ) -> None:
         """A failing ``_persist_pinned_namespace`` rolls back ``valid_namespaces``.
 
@@ -757,35 +757,38 @@ class TestNewNamespacePersistence:
 
         # Force the persist step to fail — the proposal write itself
         # should still have succeeded so this tests the rollback path,
-        # not the proposal-failure path.
+        # not the proposal-failure path. Scoped patch: a bare
+        # monkeypatch.undo() would also revert the autouse isolation
+        # fixtures (cwd, XDG dirs) registered on the same MonkeyPatch
+        # instance, letting the second submit write into the real repo.
         def fail_persist(_dogcats_dir: str, _namespace: str) -> None:
             msg = "simulated pinned-namespace persist failure"
             raise RuntimeError(msg)
 
-        monkeypatch.setattr(propose_routes, "_persist_pinned_namespace", fail_persist)
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(propose_routes, "_persist_pinned_namespace", fail_persist)
 
-        first = client.post(
-            "/",
-            data={
-                "csrf_token": _csrf(client),
-                "namespace": "rollback_me",
-                "title": "first",
-                "description": "",
-            },
-        )
-        # The route catches the RuntimeError and renders the generic
-        # error response (form re-rendered, status 200).
-        assert first.status_code == 200
-        assert "Failed to submit proposal" in first.text
+            first = client.post(
+                "/",
+                data={
+                    "csrf_token": _csrf(client),
+                    "namespace": "rollback_me",
+                    "title": "first",
+                    "description": "",
+                },
+            )
+            # The route catches the RuntimeError and renders the generic
+            # error response (form re-rendered, status 200).
+            assert first.status_code == 200
+            assert "Failed to submit proposal" in first.text
 
         # Submitting to the same namespace again must STILL look "new"
         # — that is the whole point of the rollback. Without it, the
         # second submit would pass `is_new_namespace=False`, skip the
         # pinned-namespace persistence path entirely, and the namespace
         # would never make it to disk.
-        # We exercise this by un-patching persist and confirming the
-        # second submit successfully pins the namespace.
-        monkeypatch.undo()
+        # We exercise this with persist un-patched (context exited) and
+        # confirm the second submit successfully pins the namespace.
         second = client.post(
             "/",
             data={

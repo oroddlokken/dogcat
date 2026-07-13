@@ -1180,3 +1180,45 @@ class TestDoctorPostMergeSkipReasons:
             )
         data = json.loads(result.stdout)
         assert "outside the git repo" in data["post_merge_skipped"]
+
+
+class TestDoctorGlobalConfig:
+    """Tests for testdoctorglobalconfig."""
+
+    def test_doctor_reports_global_config_present(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify doctor reports global config present."""
+        from dogcat.global_config import save_global_config_value
+
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        global_store = tmp_path / "shared" / ".dogcats"
+        global_store.mkdir(parents=True)
+        save_global_config_value("default_storage", str(global_store))
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        runner.invoke(app, ["init", "--dogcats-dir", str(repo / ".dogcats")])
+        monkeypatch.chdir(repo)
+
+        result = runner.invoke(app, ["doctor"])
+        assert "global config" in result.output.lower()
+        assert str(global_store) in result.output
+
+    def test_doctor_no_global_config_section(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify doctor no global config section."""
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        runner.invoke(app, ["init", "--dogcats-dir", str(repo / ".dogcats")])
+        monkeypatch.chdir(repo)
+
+        result = runner.invoke(app, ["doctor"])
+        assert "global config" in result.output.lower()
+        assert "not configured" in result.output.lower()
