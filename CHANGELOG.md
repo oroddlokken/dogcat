@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.13.0 (2026-07-13)
+
 ### Added
 
 - **Optional user-global config at `$XDG_CONFIG_HOME/dogcat/config.toml`**. Lets repos without a local `.dogcats/` or `.dogcatrc` fall back to a shared `.dogcats` directory configured once per machine. Set with `dcat config set --global default_storage <path>`. Namespace is derived from the project root name — the git repo toplevel when inside a repo (so `myrepo/src/` yields `myrepo`, never `src`), else the cwd folder name — via a slug function that handles Norwegian and German digraphs (e.g. `~/dev/læring/` becomes `laering`). When the fallback is used, dcat prints a one-time stderr notice naming the store and derived namespace, and `dcat prime` opens with an Active Storage section naming the store path, namespace, and how to opt out (`dcat init` / `dcat init --use-existing-folder`). `dcat init` warns when a new local store would shadow the global store's issues; `dcat rename-namespace` refuses to run in fallback mode (the derived namespace is not the store's to rename); `dcat namespaces` annotations follow the same visibility rules as `dcat list`. Only `default_storage` and `visible_namespaces` are read globally; `dcat config set --global` rejects other keys. Backwards compatible: behavior is unchanged unless you create the file — repos reaching the same store via `.dogcatrc` (or the store's own home directory) keep their configured namespace. `dcat config set/get/unset --global` is new, and `dcat config unset` also works for shared/local config. `dcat doctor` and `dcat prime` report global config status, including TOML parse errors.
