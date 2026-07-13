@@ -6,6 +6,8 @@ fixture in conftest.py; ``save_global_config_value`` writes there.
 
 from __future__ import annotations
 
+import os
+import subprocess
 from typing import TYPE_CHECKING
 
 from typer.testing import CliRunner
@@ -20,6 +22,17 @@ if TYPE_CHECKING:
     import pytest
 
 runner = CliRunner()
+
+
+def _git_init(path: Path) -> None:
+    """Minimal git init; enough for rev-parse --show-toplevel to answer."""
+    subprocess.run(
+        ["git", "init", "-q"],
+        cwd=path,
+        check=True,
+        capture_output=True,
+        env={**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "HOME": "/dev/null"},
+    )
 
 
 class TestGlobalConfigStorageFallback:
@@ -217,6 +230,86 @@ class TestGlobalConfigNamespace:
 
         monkeypatch.chdir(repo)
         assert get_issue_prefix(find_dogcats_dir()) == "custom"
+
+
+class TestFallbackNamespaceUsesRepoRoot:
+    """Inside a git repo the fallback namespace comes from the repo root.
+
+    dcat from myrepo/src/ must not mint a 'src' namespace — generic
+    subdirectory names would become magnet namespaces collecting issues
+    across unrelated repos. (dogcat-mbk1)
+    """
+
+    def _setup_store(self, tmp_path: Path) -> Path:
+        global_store = tmp_path / "shared" / ".dogcats"
+        global_store.mkdir(parents=True)
+        save_global_config_value("default_storage", str(global_store))
+        return global_store
+
+    def test_subdir_uses_repo_root_name(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """From myrepo/src the namespace is 'myrepo', not 'src'."""
+        global_store = self._setup_store(tmp_path)
+        repo = tmp_path / "myrepo"
+        (repo / "src").mkdir(parents=True)
+        _git_init(repo)
+
+        monkeypatch.chdir(repo / "src")
+        resolved = find_dogcats_dir()
+        assert resolved == str(global_store)
+        assert get_issue_prefix(resolved) == "myrepo"
+
+    def test_repo_root_uses_own_name(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """From the repo root itself the namespace is the root's name."""
+        self._setup_store(tmp_path)
+        repo = tmp_path / "myrepo"
+        repo.mkdir()
+        _git_init(repo)
+
+        monkeypatch.chdir(repo)
+        assert get_issue_prefix(find_dogcats_dir()) == "myrepo"
+
+    def test_stderr_notice_names_repo_root_slug(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """The fallback notice announces the repo-root namespace."""
+        self._setup_store(tmp_path)
+        repo = tmp_path / "myrepo"
+        (repo / "src").mkdir(parents=True)
+        _git_init(repo)
+
+        monkeypatch.chdir(repo / "src")
+        find_dogcats_dir()
+        err = capsys.readouterr().err
+        assert "'myrepo'" in err
+        assert "'src'" not in err
+
+    def test_namespace_filter_uses_repo_root_slug(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Default filtering follows the repo-root namespace, not the subdir."""
+        self._setup_store(tmp_path)
+        repo = tmp_path / "myrepo"
+        (repo / "tests").mkdir(parents=True)
+        _git_init(repo)
+
+        monkeypatch.chdir(repo / "tests")
+        ns_filter = get_namespace_filter(find_dogcats_dir())
+        assert ns_filter is not None
+        assert ns_filter("myrepo")
+        assert not ns_filter("tests")
 
 
 class TestGlobalFallbackDoesNotLeak:

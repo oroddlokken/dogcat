@@ -75,3 +75,50 @@ class TestPrimeWithGlobalConfig:
         assert result.exit_code == 0
         assert "global" in result.output.lower()
         assert "default_storage" in result.output
+
+
+class TestPrimeGlobalFallbackSection:
+    """prime names the active store and namespace in global-fallback mode.
+
+    (dogcat-mbk1) An agent primed in a directory with no visible store
+    must learn where its issues actually go and how to opt out.
+    """
+
+    def test_names_store_and_namespace(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Fallback mode: guide opens with store path, namespace, overrides."""
+        global_store = tmp_path / "shared" / ".dogcats"
+        global_store.mkdir(parents=True)
+        save_global_config_value("default_storage", str(global_store))
+
+        repo = tmp_path / "myrepo"
+        repo.mkdir()
+        monkeypatch.chdir(repo)
+
+        result = runner.invoke(app, ["prime"])
+        assert result.exit_code == 0
+        assert "Active Storage (global fallback)" in result.output
+        assert str(global_store.resolve()) in result.output
+        assert "Namespace: myrepo" in result.output
+        assert "dcat init --use-existing-folder" in result.output
+
+    def test_absent_with_local_store(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A locally resolved store keeps the guide unchanged."""
+        global_store = tmp_path / "shared" / ".dogcats"
+        global_store.mkdir(parents=True)
+        save_global_config_value("default_storage", str(global_store))
+
+        repo = tmp_path / "repo"
+        (repo / ".dogcats").mkdir(parents=True)
+        monkeypatch.chdir(repo)
+
+        result = runner.invoke(app, ["prime"])
+        assert result.exit_code == 0
+        assert "Active Storage" not in result.output

@@ -220,13 +220,8 @@ def is_gitignored(path: str) -> bool:
     return git_helpers.is_path_ignored(path)
 
 
-def find_dogcats_dir(start_dir: str | None = None) -> str:
-    """Find .dogcats directory by searching upward from start_dir.
-
-    Checks for .dogcatrc first (external directory reference), then falls back
-    to searching for .dogcats/ directly. If the upward walk fails, checks the
-    main git worktree root (via ``git rev-parse --git-common-dir``) so that
-    linked worktrees transparently share the main tree's .dogcats directory.
+def walkup_find_store(start_dir: str | None = None) -> str | None:
+    """Walk upward from start_dir looking for a .dogcatrc or .dogcats/.
 
     The walk is bounded by :func:`dogcat.config.get_rc_walkup_boundary`
     (git toplevel by default, or ``$HOME``) to prevent a planted
@@ -234,11 +229,16 @@ def find_dogcats_dir(start_dir: str | None = None) -> str:
     ``DCAT_RC_WALKUP_UNRESTRICTED=1`` to fall back to legacy behavior.
     (dogcat-4107)
 
+    Unlike :func:`find_dogcats_dir` this applies no fallback: it returns
+    None when the walk exhausts without finding a store, so callers can
+    test "would this directory resolve locally?" without triggering the
+    global-fallback side effects (stderr notice, resolution marker).
+
     Args:
         start_dir: Directory to start searching from (default: current directory)
 
     Returns:
-        Path to .dogcats directory, or ".dogcats" if not found
+        Path to the store directory, or None if the walk found nothing.
     """
     from dogcat.config import (
         get_rc_walkup_boundary,
@@ -274,12 +274,33 @@ def find_dogcats_dir(start_dir: str | None = None) -> str:
 
         parent = current.parent
         if parent == current:
-            # Reached filesystem root — try git worktree fallback
-            return _fallback_to_global_or_default()
+            # Reached filesystem root without finding a store.
+            return None
         if boundary is not None and current == boundary:
             # Stop at the boundary; do not trust ancestors above it.
-            return _fallback_to_global_or_default()
+            return None
         current = parent
+
+
+def find_dogcats_dir(start_dir: str | None = None) -> str:
+    """Find .dogcats directory by searching upward from start_dir.
+
+    Checks for .dogcatrc first (external directory reference), then falls back
+    to searching for .dogcats/ directly. If the upward walk fails, checks the
+    main git worktree root (via ``git rev-parse --git-common-dir``) so that
+    linked worktrees transparently share the main tree's .dogcats directory,
+    then the global default_storage fallback.
+
+    Args:
+        start_dir: Directory to start searching from (default: current directory)
+
+    Returns:
+        Path to .dogcats directory, or ".dogcats" if not found
+    """
+    found = walkup_find_store(start_dir)
+    if found is not None:
+        return found
+    return _fallback_to_global_or_default()
 
 
 def _fallback_to_global_or_default() -> str:

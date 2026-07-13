@@ -46,6 +46,21 @@ def register(app: typer.Typer) -> None:
             storage = get_storage(dogcats_dir)
             actual_dir = str(storage.dogcats_dir)
 
+            # In global-fallback mode the "current" namespace is derived
+            # from the project root, not the store's config: a rename here
+            # would rewrite the shared store's primary namespace and orphan
+            # the renamed issues from this project's derived view. (dogcat-mbk1)
+            from dogcat.global_config import was_resolved_via_global
+
+            if was_resolved_via_global(actual_dir):
+                echo_error(
+                    "rename-namespace is not supported when storage is "
+                    "resolved via the global default_storage fallback. "
+                    "Run it from the repository that owns the store, or "
+                    "from a checkout with a .dogcatrc pointing at it."
+                )
+                raise typer.Exit(1)
+
             # Rename issues
             renamed_issues = storage.rename_namespace(
                 old_namespace, new_namespace, updated_by=by

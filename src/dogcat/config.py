@@ -533,20 +533,14 @@ def _resolve_dogcats_path(dogcats_dir: str) -> str:
         current = parent
 
 
-def slug_from_cwd_name() -> str | None:
-    """Return the slug of ``Path.cwd().name``, or None if not sluggable."""
-    from dogcat.namespace_slug import slug_from_dir
-
-    return slug_from_dir(Path.cwd().name)
-
-
 def get_issue_prefix(dogcats_dir: str) -> str:
     """Get the issue prefix from config or return default.
 
     Precedence:
     1. When storage was resolved via the global fallback: slug of the
-       cwd folder name (a .dogcatrc or local .dogcats would have
-       resolved first, so repo-level config cannot apply here)
+       project root name — git toplevel when inside a repo, else cwd
+       (a .dogcatrc or local .dogcats would have resolved first, so
+       repo-level config cannot apply here)
     2. Namespace from local/shared config.toml in the storage dir
     3. Auto-detect from existing issues (most common prefix)
     4. Auto-detect from directory name
@@ -558,18 +552,21 @@ def get_issue_prefix(dogcats_dir: str) -> str:
     Returns:
         Issue prefix string
     """
-    from dogcat.global_config import was_resolved_via_global
+    from dogcat.global_config import (
+        derive_fallback_namespace,
+        was_resolved_via_global,
+    )
 
     # Resolve the actual .dogcats path (handles subdirectory invocations)
     dogcats_dir = _resolve_dogcats_path(dogcats_dir)
 
     # When the store was reached via the global fallback, prefer the
-    # cwd-derived namespace over the shared store's primary prefix.
+    # project-root-derived namespace over the shared store's primary prefix.
     if was_resolved_via_global(dogcats_dir):
-        slug = slug_from_cwd_name()
+        slug = derive_fallback_namespace()
         if slug:
             return slug
-        # Fall through if cwd is not sluggable (CJK, emoji, etc.).
+        # Fall through if the project root is not sluggable (CJK, emoji, etc.).
 
     # Try config file ("namespace" key, with "issue_prefix" fallback)
     config = load_config(dogcats_dir)

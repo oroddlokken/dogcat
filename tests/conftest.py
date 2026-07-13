@@ -26,6 +26,21 @@ _GIT_TEST_ENV = {
 
 
 @pytest.fixture(autouse=True)
+def _isolate_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run every test from a pristine temp cwd.
+
+    Storage and config resolution walk up from the current directory,
+    so tests run from the checkout inherit the developer's real
+    filesystem context: an untracked .dogcatrc above (or at) the
+    checkout root redirects every walk-up, failing 66 tests and — via
+    the repo-local config overlay — making tests WRITE to the real
+    .dogcats/config.local.toml. Tests that need a specific cwd chdir
+    themselves. (dogcat-mbk1)
+    """
+    monkeypatch.chdir(tmp_path)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_xdg_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Prevent tests from writing to the real ~/.cache/dogcat/."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg-cache"))

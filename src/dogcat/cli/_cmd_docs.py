@@ -903,6 +903,28 @@ def register(app: typer.Typer) -> None:
         if not replay:
             _save_prime_flags(dogcats_dir, opinionated=opinionated, inbox=inbox)
 
+        # In global-fallback mode the store and namespace are invisible
+        # from the filesystem; name them so agents know where issues go
+        # and how to opt out. (dogcat-mbk1)
+        from dogcat.global_config import was_resolved_via_global
+
+        global_mode_section = ""
+        if was_resolved_via_global(dogcats_dir):
+            from dogcat.config import get_issue_prefix
+
+            namespace = get_issue_prefix(dogcats_dir)
+            global_mode_section = f"""
+## Active Storage (global fallback)
+
+  No .dogcats/ or .dogcatrc found here; issues read from and write to
+  the user-global default_storage.
+  Store: {Path(dogcats_dir).resolve()}
+  Namespace: {namespace} (derived from the project root name)
+  Lists default to this namespace plus any global visible_namespaces.
+  To give this project its own database: dcat init
+  To point it at an existing shared store: dcat init --use-existing-folder <path>
+"""
+
         opinionated_rules = ""
         if opinionated:
             opinionated_rules = (
@@ -940,7 +962,7 @@ def register(app: typer.Typer) -> None:
 
         guide = f"""
 DOGCAT WORKFLOW GUIDE
-
+{global_mode_section}
 ## Rules
   Run `dcat prime` after compaction, clear, or new session
 {opinionated_rules}

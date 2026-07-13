@@ -196,15 +196,18 @@ class TestCLIGit:
 class TestCLIPrime:
     """Test prime command."""
 
-    def test_prime_hides_inbox_by_default(self) -> None:
+    def test_prime_hides_inbox_by_default(self, tmp_path: Path) -> None:
         """Test that prime hides inbox section by default."""
+        (tmp_path / ".dogcats").mkdir()
         result = runner.invoke(app, ["prime"])
         assert result.exit_code == 0
+        assert "DOGCAT WORKFLOW GUIDE" in result.stdout
         assert "## Inbox" not in result.stdout
         assert "dcat propose" not in result.stdout
 
-    def test_prime_shows_inbox_with_flag(self) -> None:
+    def test_prime_shows_inbox_with_flag(self, tmp_path: Path) -> None:
         """Test that prime --inbox shows inbox section."""
+        (tmp_path / ".dogcats").mkdir()
         result = runner.invoke(app, ["prime", "--inbox"])
         assert result.exit_code == 0
         assert "## Inbox" in result.stdout

@@ -83,7 +83,13 @@ So each repo only shows its own issues by default:
 
 ```bash
 cd ~/dev/backend-app
-dcat config set visible_namespaces '["backend"]' --local
+dcat config set visible_namespaces backend --local
+```
+
+For multiple namespaces, separate them with commas:
+
+```bash
+dcat config set visible_namespaces backend,shared --local
 ```
 
 You can always see all issues with `--all-namespaces` or a specific namespace with `--namespace frontend`.

@@ -134,6 +134,22 @@ def unset_global_config_value(key: str) -> None:
 _global_fallback_path: Path | None = None
 
 
+def derive_fallback_namespace() -> str | None:
+    """Namespace slug for global-fallback mode.
+
+    Derived from the git worktree root name when cwd is inside a repo —
+    running dcat from myrepo/src/ must yield 'myrepo', never 'src', or
+    generic folder names (src, tests, lib) become magnet namespaces
+    collecting issues across unrelated repos. Outside a repo the cwd
+    name itself is used.
+    """
+    from dogcat.git import repo_root
+    from dogcat.namespace_slug import slug_from_dir
+
+    root = repo_root(Path.cwd()) or Path.cwd()
+    return slug_from_dir(root.name)
+
+
 def resolve_global_fallback() -> str | None:
     """Return ``default_storage`` if configured and an existing directory.
 
@@ -149,11 +165,9 @@ def resolve_global_fallback() -> str | None:
 
     if _global_fallback_path is None:
         _global_fallback_path = cfg.default_storage.resolve()
-        from dogcat.namespace_slug import slug_from_dir
-
-        slug = slug_from_dir(Path.cwd().name)
+        slug = derive_fallback_namespace()
         namespace_note = (
-            f" (namespace '{slug}' from folder name)"
+            f" (namespace '{slug}' from project root name)"
             if slug
             else " (namespace from store config)"
         )

@@ -174,6 +174,23 @@ def register(app: typer.Typer) -> None:
             visible: list[str] | None = config.get("visible_namespaces")
             hidden: list[str] | None = config.get("hidden_namespaces")
 
+            # Mirror get_namespace_filter: in global-fallback mode with
+            # no local lists, global visible_namespaces (plus the derived
+            # primary) drives visibility; without it only the derived
+            # primary is visible. (dogcat-mbk1)
+            from dogcat.global_config import (
+                load_global_config,
+                was_resolved_via_global,
+            )
+
+            if (
+                was_resolved_via_global(actual_dogcats_dir)
+                and not visible
+                and not hidden
+            ):
+                gcfg = load_global_config()
+                visible = gcfg.visible_namespaces or [primary]
+
             def _annotation(ns: str) -> str:
                 if ns == primary:
                     return "primary"

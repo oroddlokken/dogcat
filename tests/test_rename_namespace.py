@@ -397,3 +397,36 @@ class TestSaveReloadRace:
         ids = {i.full_id for i in s3.list()}
         assert "dc-live" in ids, "concurrent append was lost during prune"
         assert "dc-dead" not in ids, "tombstone was not pruned"
+
+
+class TestRenameNamespaceGlobalFallbackGuard:
+    """rename-namespace refuses to run via the global fallback. (dogcat-mbk1).
+
+    The "current" namespace in fallback mode is derived from the project
+    root, not the store's config: renaming would rewrite the shared
+    store's primary namespace and orphan the issues from this project's
+    derived view.
+    """
+
+    def test_refuses_in_fallback_mode(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Exit 1 with a pointer at the store's home repo; store untouched."""
+        from dogcat.global_config import save_global_config_value
+
+        global_store = tmp_path / "shared" / ".dogcats"
+        global_store.mkdir(parents=True)
+        (global_store / "issues.jsonl").touch()
+        save_global_config_value("default_storage", str(global_store))
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        monkeypatch.chdir(repo)
+
+        result = runner.invoke(app, ["rename-namespace", "repo", "newname"])
+        assert result.exit_code == 1
+        assert "global default_storage fallback" in result.stdout + result.stderr
+        # The shared store's config must not have been rewritten.
+        assert not (global_store / "config.toml").exists()

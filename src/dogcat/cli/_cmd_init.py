@@ -14,6 +14,35 @@ from ._helpers import get_storage
 from ._json_state import echo_error, is_json, set_json
 
 
+def _warn_if_shadowing_global_store() -> None:
+    """Warn when creating a store here would shadow the global fallback.
+
+    A directory with no walk-up store resolves to the global
+    ``default_storage``; its issues live there. A new local store takes
+    precedence for every dcat command in this subtree, so ``dcat list``
+    suddenly shows an empty database while the issues stay in the
+    shared store. (dogcat-mbk1)
+    """
+    from dogcat.global_config import load_global_config
+
+    from ._helpers import walkup_find_store
+
+    cfg = load_global_config()
+    if cfg.default_storage is None or not cfg.default_storage.is_dir():
+        return
+    if walkup_find_store() is not None:
+        return
+    typer.echo(
+        f"Warning: this directory currently resolves to the global "
+        f"default_storage at {cfg.default_storage}. The new local store "
+        f"will take precedence here, and issues in the global store will "
+        f"no longer be visible from this directory. To keep using the "
+        f"shared store instead, run: "
+        f"dcat init --use-existing-folder {cfg.default_storage}",
+        err=True,
+    )
+
+
 def _ensure_gitignore_entry(entry: str, *, quiet: bool = False) -> None:
     """Add an entry to .gitignore if not already present.
 
@@ -107,6 +136,15 @@ def register(app: typer.Typer) -> None:
             typer.echo(f"✓ Created {rc_path} -> {use_existing}")
             typer.echo(f"\n✓ Linked to existing dogcat repository at {use_existing}")
             return
+
+        # Both the default .dogcats and a --dir .dogcatrc land in cwd's
+        # resolution path; check before anything is written, while the
+        # walk-up still reflects the pre-init state.
+        creates_store_here = (
+            external_dir is not None or Path(dogcats_dir).resolve().parent == Path.cwd()
+        )
+        if creates_store_here:
+            _warn_if_shadowing_global_store()
 
         if external_dir is not None:
             dogcats_dir = external_dir
