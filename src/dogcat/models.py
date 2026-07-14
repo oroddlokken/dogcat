@@ -105,8 +105,9 @@ def _safe_enum(enum_cls: type[_E], raw_value: object, field_name: str) -> _E:
 
     Forward-compatibility hook: a record from a newer dcat version may carry
     an enum value this reader does not recognize. Rather than aborting the
-    entire load (CLAUDE.md forbids hand-editing the JSONL), log a warning
-    and return the ``UNKNOWN`` sentinel so the rest of the file parses.
+    entire load (the JSONL is written only through the CLI, never hand-edited),
+    log a warning and return the ``UNKNOWN`` sentinel so the rest of the file
+    parses.
     """
     value_map = _ENUM_VALUE_MAPS.get(enum_cls)
     if value_map is None:
