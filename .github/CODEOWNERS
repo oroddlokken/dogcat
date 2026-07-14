@@ -1,0 +1,9 @@
+# Code owners for oroddlokken/dogcat
+#
+# Every PR into a protected branch requires review from an owner listed here.
+# Paired with the "Require review from Code Owners" branch-protection rule on
+# main, this makes @oroddlokken's approval mandatory regardless of who else
+# reviews — even as more contributors gain write access.
+
+# Default owner for everything in the repo.
+* @oroddlokken
