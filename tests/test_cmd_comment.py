@@ -49,6 +49,42 @@ class TestCLIComments:
         assert result.exit_code == 0
         assert "Added comment" in result.stdout
 
+    def test_comment_add_accepts_m_flag(self, tmp_path: Path) -> None:
+        """`-m` works as an alias for --text on comment add.
+
+        git/gh/hg all use -m for messages, so callers reach for it by reflex;
+        rejecting it silently lost comments before (dogcat-3qt2).
+        """
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create_result = runner.invoke(
+            app,
+            ["create", "Test issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+
+        result = runner.invoke(
+            app,
+            [
+                "comment",
+                issue_id,
+                "add",
+                "-m",
+                "Comment via -m",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Added comment" in result.stdout
+
+        list_result = runner.invoke(
+            app,
+            ["comment", issue_id, "list", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert "Comment via -m" in list_result.stdout
+
     def test_comment_stores_full_issue_id(self, tmp_path: Path) -> None:
         """Test that comment stores full issue ID, not partial."""
         dogcats_dir = tmp_path / ".dogcats"

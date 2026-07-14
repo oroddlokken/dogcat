@@ -26,7 +26,13 @@ def register(app: typer.Typer) -> None:
             help="Action: add, list, or delete",
             autocompletion=complete_comment_actions,
         ),
-        text: str = typer.Option(None, "--text", "-t", help="Comment text (for add)"),
+        text: str = typer.Option(
+            None,
+            "--text",
+            "-t",
+            "-m",
+            help="Comment text (for add). -m is accepted as a git-style alias.",
+        ),
         comment_id: str = typer.Option(
             None,
             "--comment-id",
