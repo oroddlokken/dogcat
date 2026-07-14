@@ -199,11 +199,17 @@ class TestRcWalkupBoundary:
         monkeypatch.setenv("DCAT_RC_WALKUP_UNRESTRICTED", "1")
         assert get_rc_walkup_boundary(tmp_path) is None
 
-    def test_warn_if_rc_target_outside_rc_dir(
+    def test_out_of_tree_target_emits_no_warning(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """An rc target outside its own directory emits a stderr warning."""
-        from dogcat.config import warn_if_rc_target_foreign
+        """A same-user rc target outside its own directory is silent.
+
+        The documented shared-store setup commits a .dogcatrc pointing at a
+        sibling .dogcats/, so an out-of-tree target is the happy path, not a
+        warning-worthy event (dogcat-4w2b). The walk-up boundary and the
+        cross-user refusal remain the real guards.
+        """
+        from dogcat.config import refuse_if_rc_target_cross_user
 
         rc_dir = tmp_path / "rc_dir"
         rc_dir.mkdir()
@@ -213,9 +219,8 @@ class TestRcWalkupBoundary:
         external = tmp_path / "elsewhere"
         external.mkdir()
 
-        warn_if_rc_target_foreign(rc, external)
-        err = capsys.readouterr().err
-        assert "outside the rc's directory" in err
+        refuse_if_rc_target_cross_user(rc, external)
+        assert capsys.readouterr().err == ""
 
     @staticmethod
     def _make_rc(tmp_path: Path) -> tuple[Path, Path]:
@@ -224,7 +229,7 @@ class TestRcWalkupBoundary:
         rc_dir.mkdir()
         rc = rc_dir / ".dogcatrc"
         rc.write_text("ignored")
-        # target is the rc's own directory → in-tree, no out-of-tree warning.
+        # target is the rc's own directory, so only the uid check applies.
         return rc, rc_dir
 
     def test_cross_user_ownership_is_refused(
@@ -237,7 +242,7 @@ class TestRcWalkupBoundary:
         store (dogcat-6b5l). Path.resolve() uses os.lstat, not Path.stat, so
         patching Path.stat only affects the two uid reads.
         """
-        from dogcat.config import warn_if_rc_target_foreign
+        from dogcat.config import refuse_if_rc_target_cross_user
 
         rc, target = self._make_rc(tmp_path)
 
@@ -250,13 +255,13 @@ class TestRcWalkupBoundary:
 
         monkeypatch.setattr(Path, "stat", fake_stat)
         with pytest.raises(ValueError, match="different uid"):
-            warn_if_rc_target_foreign(rc, target)
+            refuse_if_rc_target_cross_user(rc, target)
 
     def test_cross_user_override_suppresses_refusal(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """DCAT_UNSAFE_CROSS_USER=1 suppresses the cross-user raise."""
-        from dogcat.config import warn_if_rc_target_foreign
+        from dogcat.config import refuse_if_rc_target_cross_user
 
         rc, target = self._make_rc(tmp_path)
         monkeypatch.setenv("DCAT_UNSAFE_CROSS_USER", "1")
@@ -270,13 +275,13 @@ class TestRcWalkupBoundary:
 
         monkeypatch.setattr(Path, "stat", fake_stat)
         # Differing uids, but the override returns before the check → no raise.
-        warn_if_rc_target_foreign(rc, target)
+        refuse_if_rc_target_cross_user(rc, target)
 
     def test_stat_oserror_degrades_to_no_raise(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """An OSError reading owner uid degrades to no-raise, not a crash."""
-        from dogcat.config import warn_if_rc_target_foreign
+        from dogcat.config import refuse_if_rc_target_cross_user
 
         rc, target = self._make_rc(tmp_path)
 
@@ -286,4 +291,4 @@ class TestRcWalkupBoundary:
 
         monkeypatch.setattr(Path, "stat", fake_stat)
         # Must not propagate the OSError.
-        warn_if_rc_target_foreign(rc, target)
+        refuse_if_rc_target_cross_user(rc, target)

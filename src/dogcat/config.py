@@ -132,39 +132,23 @@ def get_rc_walkup_boundary(start: Path | None = None) -> Path | None:
     return None
 
 
-def is_within(path: Path, boundary: Path) -> bool:
-    """Return True if ``path`` is at or below ``boundary``."""
-    try:
-        path.resolve().relative_to(boundary.resolve())
-    except ValueError:
-        return False
-    return True
+def refuse_if_rc_target_cross_user(rc_path: Path, target: Path) -> None:
+    """Refuse the rc when its target is owned by a different user.
 
+    Raises ``ValueError`` when the rc file's owner uid and the target's
+    owner uid differ (a cross-user re-root, e.g. a ``.dogcatrc`` planted by
+    another account silently redirecting reads and writes). Set
+    ``DCAT_UNSAFE_CROSS_USER=1`` to override (e.g. shared CI).
 
-def warn_if_rc_target_foreign(rc_path: Path, target: Path) -> None:
-    """Warn (or refuse) when the rc target is unsafe.
-
-    - Logs a stderr warning when the target is outside the rc file's
-      ancestor chain (e.g. ``/tmp`` re-rooting your repo to ``$HOME``).
-    - Refuses the rc with a clear error when the rc file's owner and the
-      target's owner differ (cross-user re-root). Set
-      ``DCAT_UNSAFE_CROSS_USER=1`` to override (e.g. shared CI).
+    A same-user target outside the rc's own directory is allowed silently:
+    it is the documented shared-store setup (see docs/sharing-a-database.md).
+    The walk-up boundary (``get_rc_walkup_boundary``) still bounds which
+    ancestors are trusted.
     """
     import os
-    import sys as _sys
 
     rc_resolved = rc_path.resolve()
     target_resolved = target.resolve()
-
-    # Out-of-tree warning.
-    rc_parent = rc_resolved.parent
-    if not is_within(target_resolved, rc_parent):
-        print(
-            f"warning: {DOGCATRC_FILENAME} at {rc_resolved} points to "
-            f"{target_resolved} which is outside the rc's directory; "
-            f"set DCAT_RC_WALKUP_UNRESTRICTED=1 to silence this warning.",
-            file=_sys.stderr,
-        )
 
     if os.environ.get("DCAT_UNSAFE_CROSS_USER"):
         return

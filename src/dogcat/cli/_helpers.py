@@ -258,7 +258,7 @@ def walkup_find_store(start_dir: str | None = None) -> str | None:
     """
     from dogcat.config import (
         get_rc_walkup_boundary,
-        warn_if_rc_target_foreign,
+        refuse_if_rc_target_cross_user,
     )
 
     current = Path.cwd() if start_dir is None else Path(start_dir).resolve()
@@ -270,7 +270,7 @@ def walkup_find_store(start_dir: str | None = None) -> str | None:
         if rc_candidate.is_file():
             try:
                 target = parse_dogcatrc(rc_candidate)
-                warn_if_rc_target_foreign(rc_candidate, target)
+                refuse_if_rc_target_cross_user(rc_candidate, target)
             except ValueError as e:
                 typer.echo(f"Error: {e}", err=True)
                 raise SystemExit(1) from e
