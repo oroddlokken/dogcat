@@ -65,6 +65,7 @@ from __future__ import annotations
 
 import logging
 import re
+from functools import lru_cache
 from typing import TYPE_CHECKING
 
 from dogcat._version import version as _dcat_version
@@ -85,11 +86,16 @@ SCHEMA_BREAKING_THRESHOLD: VersionTuple | None = None
 _VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)")
 
 
+@lru_cache(maxsize=1024)
 def parse_version(version: str | None) -> VersionTuple | None:
     """Extract the leading ``(MAJOR, MINOR, PATCH)`` triple from a version.
 
     Returns ``None`` for empty or unparseable inputs so callers can
     treat malformed records as "unknown / ignore".
+
+    Cached: :func:`find_newest_record_version` calls this once per loaded
+    record, but a store rarely holds more than a handful of distinct
+    ``dcat_version`` strings (dogcat-3nkp).
     """
     if not version:
         return None

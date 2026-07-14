@@ -15,9 +15,11 @@ import tempfile
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 import orjson
 
+from dogcat._version import version as _dcat_version
 from dogcat.models import (
     Comment,
     Dependency,
@@ -657,6 +659,67 @@ class DeterministicIssueGenerator:
 
         return dependencies
 
+    def _event_record(
+        self,
+        event_type: str,
+        issue_id: str,
+        timestamp: datetime,
+        changes: dict[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Build one raw event record in the writer's key order."""
+        return {
+            "record_type": "event",
+            "dcat_version": _dcat_version,
+            "event_type": event_type,
+            "issue_id": issue_id,
+            "timestamp": timestamp.isoformat(),
+            "by": self.rng.choice([o for o in OWNERS if o is not None]),
+            "changes": changes,
+        }
+
+    def generate_events(self, issues: list[Issue]) -> list[dict[str, Any]]:
+        """Generate raw audit-log event records for the given issues.
+
+        Real stores append one event per mutation, so event lines routinely
+        match or outnumber issue records — a benchmark without them
+        understates load time. Key order matches
+        :func:`dogcat.event_log._serialize` (``record_type`` first) so the
+        storage load fast path sees realistic bytes.
+
+        Returns:
+            List of raw event dicts (one "created" per issue plus 0-3
+            "updated" events, weighted toward fewer)
+        """
+        events: list[dict[str, Any]] = []
+        for issue in issues:
+            events.append(
+                self._event_record(
+                    "created",
+                    issue.id,
+                    issue.created_at,
+                    {"title": {"old": None, "new": issue.title}},
+                ),
+            )
+            num_updates = self.rng.choices(
+                [0, 1, 2, 3],
+                weights=[0.5, 0.25, 0.15, 0.1],
+            )[0]
+            events.extend(
+                self._event_record(
+                    "updated",
+                    issue.id,
+                    issue.created_at + timedelta(hours=6 * (i + 1)),
+                    {
+                        "status": {
+                            "old": Status.OPEN.value,
+                            "new": issue.status.value,
+                        },
+                    },
+                )
+                for i in range(num_updates)
+            )
+        return events
+
     def generate_links(
         self,
         issues: list[Issue],
@@ -703,16 +766,20 @@ def generate_test_data(
     count: int,
     seed: int = DEFAULT_SEED,
     prefix: str = "dc",
-) -> tuple[list[Issue], list[Dependency], list[Link]]:
-    """Generate test issues, dependencies, and links.
+    *,
+    include_events: bool = True,
+) -> tuple[list[Issue], list[Dependency], list[Link], list[dict[str, Any]]]:
+    """Generate test issues, dependencies, links, and audit-log events.
 
     Args:
         count: Number of issues to generate
         seed: Random seed for determinism
         prefix: ID prefix to use
+        include_events: Also generate raw event records (realistic stores
+            carry roughly as many event lines as issue lines)
 
     Returns:
-        Tuple of (issues, dependencies, links)
+        Tuple of (issues, dependencies, links, events)
     """
     generator = DeterministicIssueGenerator(seed=seed, prefix=prefix)
     issues = generator.generate_issues(count)
@@ -720,7 +787,8 @@ def generate_test_data(
     generator.generate_duplicate_relations(issues)
     dependencies = generator.generate_dependencies(issues)
     links = generator.generate_links(issues)
-    return issues, dependencies, links
+    events = generator.generate_events(issues) if include_events else []
+    return issues, dependencies, links, events
 
 
 def write_test_jsonl(
@@ -728,14 +796,16 @@ def write_test_jsonl(
     dependencies: list[Dependency],
     links: list[Link],
     path: Path,
+    events: list[dict[str, Any]] | None = None,
 ) -> None:
-    """Write issues, dependencies, and links to a JSONL file.
+    """Write issues, dependencies, links, and events to a JSONL file.
 
     Args:
         issues: List of issues to write
         dependencies: List of dependencies to write
         links: List of links to write
         path: Path to write to
+        events: Raw event records to write (already serialized dicts)
     """
     with path.open("wb") as f:
         # Write issues
@@ -768,6 +838,11 @@ def write_test_jsonl(
             f.write(orjson.dumps(link_data))
             f.write(b"\n")
 
+        # Write audit-log events
+        for event in events or []:
+            f.write(orjson.dumps(event))
+            f.write(b"\n")
+
 
 def benchmark_load(
     storage_path: Path,
@@ -775,26 +850,33 @@ def benchmark_load(
 ) -> dict[str, float]:
     """Benchmark loading issues from storage.
 
+    Measures two phases per iteration: *startup* (the JSONLStorage
+    constructor — what every dcat command pays; with lazy materialization
+    this is raw parse + validation) and *list* (``storage.list()`` — full
+    Issue materialization, what full-scan commands additionally pay).
+
     Args:
         storage_path: Path to the JSONL file
         iterations: Number of times to run the benchmark
 
     Returns:
-        Dictionary with timing statistics
+        Dictionary with timing statistics; the ``*_ms`` keys describe
+        startup, ``list_avg_ms`` the materializing full scan.
     """
     times: list[float] = []
+    list_times: list[float] = []
 
     for _ in range(iterations):
         # Create storage instance (triggers _load in __init__)
         start = time.perf_counter()
         storage = JSONLStorage(path=str(storage_path), create_dir=False)
+        mid = time.perf_counter()
+        # Full scan: materializes every issue
+        _ = len(storage.list())
         end = time.perf_counter()
 
-        elapsed = (end - start) * 1000  # Convert to milliseconds
-        times.append(elapsed)
-
-        # Verify issues loaded
-        _ = len(storage.list())
+        times.append((mid - start) * 1000)  # Convert to milliseconds
+        list_times.append((end - mid) * 1000)
 
     return {
         "min_ms": min(times),
@@ -802,6 +884,7 @@ def benchmark_load(
         "avg_ms": statistics.mean(times),
         "median_ms": statistics.median(times),
         "stdev_ms": statistics.stdev(times) if len(times) > 1 else 0.0,
+        "list_avg_ms": statistics.mean(list_times),
     }
 
 
@@ -821,7 +904,8 @@ def format_results(count: int, stats: dict[str, float]) -> str:
         f"median={stats['median_ms']:>8.2f}ms  "
         f"min={stats['min_ms']:>8.2f}ms  "
         f"max={stats['max_ms']:>8.2f}ms  "
-        f"stdev={stats['stdev_ms']:>6.2f}ms"
+        f"stdev={stats['stdev_ms']:>6.2f}ms  "
+        f"list={stats['list_avg_ms']:>8.2f}ms"
     )
 
 
@@ -830,6 +914,8 @@ def run_benchmarks(
     iterations: int = ITERATIONS,
     seed: int = DEFAULT_SEED,
     verbose: bool = True,
+    *,
+    include_events: bool = True,
 ) -> dict[int, dict[str, float]]:
     """Run benchmarks for different issue counts.
 
@@ -838,6 +924,8 @@ def run_benchmarks(
         iterations: Number of iterations per benchmark
         seed: Random seed for deterministic generation
         verbose: Whether to print progress
+        include_events: Generate audit-log event records alongside issues
+            (matches real stores; disable to isolate issue-parsing cost)
 
     Returns:
         Dictionary mapping issue count to timing statistics
@@ -865,8 +953,12 @@ def run_benchmarks(
                 print(f"Generating {count} test issues...", end=" ", flush=True)
 
             # Generate test data
-            issues, dependencies, links = generate_test_data(count, seed=seed)
-            write_test_jsonl(issues, dependencies, links, storage_path)
+            issues, dependencies, links, events = generate_test_data(
+                count,
+                seed=seed,
+                include_events=include_events,
+            )
+            write_test_jsonl(issues, dependencies, links, storage_path, events=events)
 
             # Count relationships for reporting
             num_with_parent = sum(1 for i in issues if i.parent is not None)
@@ -881,7 +973,7 @@ def run_benchmarks(
                 print(f"({file_size / 1024:.1f} KB)")
                 print(
                     f"  {num_with_parent} parents, {num_deps} deps, {num_links} links, "
-                    f"{num_duplicates} duplicates",
+                    f"{num_duplicates} duplicates, {len(events)} events",
                 )
                 print(
                     f"  {num_with_comments} issues with comments "
@@ -911,9 +1003,9 @@ def run_benchmarks(
 
         # Calculate issues per second for each count
         print()
-        print("Throughput (issues loaded per second):")
+        print("Throughput (issues fully loaded per second, startup + list):")
         for count, stats in sorted(results.items()):
-            ips = (count / stats["avg_ms"]) * 1000
+            ips = (count / (stats["avg_ms"] + stats["list_avg_ms"])) * 1000
             print(f"  {count:>6} issues: {ips:>12,.0f} issues/sec")
 
     return results
@@ -948,6 +1040,12 @@ def main() -> None:
         help=f"Random seed for deterministic generation (default: {DEFAULT_SEED})",
     )
     parser.add_argument(
+        "--no-events",
+        action="store_true",
+        help="Skip audit-log event records (real stores contain them; "
+        "disable to isolate issue-parsing cost)",
+    )
+    parser.add_argument(
         "--quiet",
         "-q",
         action="store_true",
@@ -966,6 +1064,7 @@ def main() -> None:
         iterations=args.iterations,
         seed=args.seed,
         verbose=not args.quiet and not args.json,
+        include_events=not args.no_events,
     )
 
     if args.json:

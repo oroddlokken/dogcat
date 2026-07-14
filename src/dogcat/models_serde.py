@@ -225,6 +225,50 @@ def dict_to_issue(data: dict[str, Any]) -> Issue:
     )
 
 
+def precheck_issue_record(data: dict[str, Any]) -> str:
+    """Verify ``data`` can be materialized by :func:`dict_to_issue`; return its full id.
+
+    Performs every operation in ``dict_to_issue`` that can raise — required
+    keys, datetime parses, the legacy-notes migration — WITHOUT constructing
+    Issue/Comment objects. ``JSONLStorage._load`` runs this eagerly so
+    malformed records are rejected at load time (landing in ``_bad_lines``
+    exactly as before), while the expensive construction is deferred to
+    first access via :class:`~dogcat._lazy_issues.LazyIssueMap`
+    (dogcat-4g8d).
+
+    Must stay in sync with ``dict_to_issue``'s failure modes —
+    ``tests/test_models.py`` has a consistency test asserting both raise on
+    the same corrupt records.
+
+    Returns:
+        The record's full id (``namespace-id``), the replay map key.
+
+    Raises:
+        KeyError, ValueError, TypeError, AttributeError: the same failure
+            modes ``dict_to_issue`` would hit on this record.
+    """
+    namespace, issue_id = _migrate_namespace(data)
+    _ = data["title"]
+
+    datetime.fromisoformat(data["created_at"])
+    datetime.fromisoformat(data["updated_at"])
+    for key in ("closed_at", "deleted_at", "snoozed_until"):
+        if data.get(key):
+            datetime.fromisoformat(data[key])
+
+    # _migrate_notes / _migrate_close_reason do `"..." in notes`
+    notes = data.get("notes")
+    if notes is not None and not isinstance(notes, str):
+        msg = f"notes must be a string, got {type(notes).__name__}"
+        raise TypeError(msg)
+
+    for cd in data.get("comments", []):
+        _ = cd["id"], cd["issue_id"], cd["author"], cd["text"]
+        datetime.fromisoformat(cd["created_at"])
+
+    return f"{namespace}-{issue_id}"
+
+
 def proposal_to_dict(proposal: Proposal) -> dict[str, Any]:
     """Convert a Proposal to a dictionary, serializing datetimes."""
     return {

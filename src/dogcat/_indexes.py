@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from dogcat.models import Dependency, Issue, Link
+from dogcat.models import Dependency, Link
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -46,11 +46,20 @@ class IssueIndexes:
 
 
 def rebuild_indexes(
-    issues: Iterable[Issue],
+    issues: Iterable[tuple[str, str | None]],
     dependencies: Iterable[Dependency],
     links: Iterable[Link],
 ) -> IssueIndexes:
-    """Compute a fresh :class:`IssueIndexes` from the given source lists."""
+    """Compute a fresh :class:`IssueIndexes` from the given source lists.
+
+    Args:
+        issues: ``(full_id, parent)`` pairs — only these two fields feed the
+            indexes, and taking pairs instead of Issue objects lets the
+            store's lazy map (dogcat-4g8d) rebuild without materializing
+            every record (see ``LazyIssueMap.iter_id_parent``).
+        dependencies: Current dependency edges.
+        links: Current link edges.
+    """
     indexes = IssueIndexes()
     for dep in dependencies:
         indexes.deps_by_issue.setdefault(dep.issue_id, []).append(dep)
@@ -58,9 +67,7 @@ def rebuild_indexes(
     for link in links:
         indexes.links_by_from.setdefault(link.from_id, []).append(link)
         indexes.links_by_to.setdefault(link.to_id, []).append(link)
-    for issue in issues:
-        if issue.parent:
-            indexes.children_by_parent.setdefault(issue.parent, []).append(
-                issue.full_id,
-            )
+    for full_id, parent in issues:
+        if parent:
+            indexes.children_by_parent.setdefault(parent, []).append(full_id)
     return indexes

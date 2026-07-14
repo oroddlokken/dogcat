@@ -446,6 +446,150 @@ class TestAtomicWrites:
         assert retrieved.title == "Test"
 
 
+class TestEventLineFastPath:
+    """_load skips event lines via byte prefix without JSON parsing (dogcat-4mfq)."""
+
+    @staticmethod
+    def _event_line(**overrides: object) -> str:
+        """One event line in the writer's key order (record_type first)."""
+        import orjson
+
+        record: dict[str, object] = {
+            "record_type": "event",
+            "dcat_version": "0.1.0",
+            "event_type": "created",
+            "issue_id": "evt-target",
+            "timestamp": "2024-01-01T00:00:00+00:00",
+            "by": "alice@example.com",
+            "changes": {},
+        }
+        record.update(overrides)
+        return orjson.dumps(record).decode()
+
+    def _storage_path(self, temp_workspace: Path) -> Path:
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage_path.parent.mkdir(parents=True, exist_ok=True)
+        return storage_path
+
+    def test_event_lines_skipped_but_still_read_by_event_log(
+        self, temp_workspace: Path
+    ) -> None:
+        """Events don't load as issues, count as lines, and stay readable."""
+        import orjson
+
+        from dogcat.models import issue_to_dict
+
+        storage_path = self._storage_path(temp_workspace)
+        valid = orjson.dumps(issue_to_dict(Issue(id="aaa", title="A"))).decode()
+        storage_path.write_text(f"{valid}\n{self._event_line()}\n")
+
+        s = JSONLStorage(str(storage_path))
+        assert [i.id for i in s.list()] == ["aaa"]
+        assert s._bad_lines == []
+        # Event lines still count toward compaction decisions
+        assert s._base_lines == 2
+        # EventLog reads the file independently of the fast path
+        events = s._event_log.read()
+        assert len(events) == 1
+        assert events[0].issue_id == "evt-target"
+
+    def test_issue_with_nested_event_marker_loads_as_issue(
+        self, temp_workspace: Path
+    ) -> None:
+        """A nested {"record_type": "event"} in metadata must not skip the issue.
+
+        Guards against a substring-based prefilter: the serialized issue
+        contains the exact event marker bytes, but not at the start of the
+        line.
+        """
+        import orjson
+
+        from dogcat.event_log import EVENT_LINE_PREFIX
+        from dogcat.models import issue_to_dict
+
+        storage_path = self._storage_path(temp_workspace)
+        issue = Issue(id="aaa", title="A", metadata={"record_type": "event"})
+        line = orjson.dumps(issue_to_dict(issue))
+        assert EVENT_LINE_PREFIX[1:] in line  # marker bytes present mid-line
+        storage_path.write_bytes(line + b"\n")
+
+        s = JSONLStorage(str(storage_path))
+        assert [i.id for i in s.list()] == ["aaa"]
+
+    def test_event_with_other_key_order_still_skipped(
+        self, temp_workspace: Path
+    ) -> None:
+        """Events not matching the prefix fall through to the slow path."""
+        import orjson
+
+        storage_path = self._storage_path(temp_workspace)
+        # record_type deliberately NOT the first key
+        event = {
+            "dcat_version": "0.1.0",
+            "record_type": "event",
+            "event_type": "created",
+            "issue_id": "evt-target",
+            "timestamp": "2024-01-01T00:00:00+00:00",
+        }
+        storage_path.write_bytes(orjson.dumps(event) + b"\n")
+
+        s = JSONLStorage(str(storage_path))
+        assert s.list() == []
+        assert s._bad_lines == []
+
+    def test_truncated_event_line_still_detected_as_corrupt(
+        self, temp_workspace: Path
+    ) -> None:
+        """A crash mid-append of an event must keep triggering repair.
+
+        The truncated line matches the event prefix but lacks the closing
+        brace, so it takes the slow path and lands in _bad_lines.
+        """
+        import orjson
+
+        from dogcat.models import issue_to_dict
+
+        storage_path = self._storage_path(temp_workspace)
+        valid = orjson.dumps(issue_to_dict(Issue(id="aaa", title="A"))).decode()
+        truncated = self._event_line()[:40]
+        assert not truncated.endswith("}")
+        storage_path.write_text(f"{valid}\n{truncated}")
+
+        s = JSONLStorage(str(storage_path))
+        assert [i.id for i in s.list()] == ["aaa"]
+        assert len(s._bad_lines) == 1
+        assert s._needs_compaction is True
+
+    def test_newer_version_check_excludes_events(
+        self, temp_workspace: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Documented trade-off: skipped events don't feed the version check.
+
+        Issue records still do — every dcat mutation writes both, so
+        coverage is preserved in practice.
+        """
+        import logging
+
+        import orjson
+
+        from dogcat.models import issue_to_dict
+
+        storage_path = self._storage_path(temp_workspace)
+        event_only = self._event_line(dcat_version="999.0.0")
+        storage_path.write_text(f"{event_only}\n")
+        with caplog.at_level(logging.WARNING, logger="dogcat._schema"):
+            JSONLStorage(str(storage_path))
+        assert "newer" not in caplog.text.lower()
+
+        caplog.clear()
+        issue_data = issue_to_dict(Issue(id="aaa", title="A"))
+        issue_data["dcat_version"] = "999.0.0"
+        storage_path.write_text(orjson.dumps(issue_data).decode() + "\n")
+        with caplog.at_level(logging.WARNING, logger="dogcat._schema"):
+            JSONLStorage(str(storage_path))
+        assert "999.0.0" in caplog.text
+
+
 class TestErrorHandling:
     """Test error handling."""
 
@@ -498,6 +642,33 @@ class TestErrorHandling:
         # Single corrupt line is the last line — tolerated
         s = JSONLStorage(str(storage_path))
         assert len(s.list()) == 0
+
+    def test_schema_invalid_issue_record_rejected_at_load(
+        self, temp_workspace: Path
+    ) -> None:
+        """A JSON-valid record dict_to_issue would choke on is caught at load.
+
+        With lazy materialization (dogcat-4g8d), validation must stay eager:
+        the malformed record lands in _bad_lines during _load, not as an
+        exception at some later access.
+        """
+        import orjson
+
+        from dogcat.models import issue_to_dict
+
+        storage_path = temp_workspace / ".dogcats" / "issues.jsonl"
+        storage_path.parent.mkdir(parents=True, exist_ok=True)
+
+        valid = orjson.dumps(issue_to_dict(Issue(id="aaa", title="A"))).decode()
+        bad = issue_to_dict(Issue(id="bbb", title="B"))
+        bad["created_at"] = "not-a-date"
+        storage_path.write_text(f"{valid}\n{orjson.dumps(bad).decode()}\n")
+
+        s = JSONLStorage(str(storage_path))
+        assert [i.id for i in s.list()] == ["aaa"]
+        assert len(s._bad_lines) == 1
+        assert s._bad_lines[0][0] == 2
+        assert s._needs_compaction is True
 
     def test_empty_jsonl_file_ok(self, temp_workspace: Path) -> None:
         """Test that empty JSONL file is handled gracefully."""

@@ -281,22 +281,32 @@ class TestDependencies:
 class TestGenerateTestData:
     """Tests for the generate_test_data function."""
 
-    def test_returns_issues_dependencies_and_links(self) -> None:
-        """Returns tuple of issues, dependencies, and links."""
-        issues, deps, links = generate_test_data(50, seed=42)
+    def test_returns_issues_dependencies_links_and_events(self) -> None:
+        """Returns tuple of issues, dependencies, links, and events."""
+        issues, deps, links, events = generate_test_data(50, seed=42)
 
         assert len(issues) == 50
         assert len(deps) > 0
         assert len(links) > 0
+        # At least one "created" event per issue
+        assert len(events) >= 50
+
+    def test_include_events_false_returns_no_events(self) -> None:
+        """include_events=False produces an empty event list."""
+        _issues, _deps, _links, events = generate_test_data(
+            10, seed=42, include_events=False
+        )
+        assert events == []
 
     def test_deterministic(self) -> None:
         """Same seed produces same results."""
-        issues1, deps1, links1 = generate_test_data(50, seed=42)
-        issues2, deps2, links2 = generate_test_data(50, seed=42)
+        issues1, deps1, links1, events1 = generate_test_data(50, seed=42)
+        issues2, deps2, links2, events2 = generate_test_data(50, seed=42)
 
         assert [i.id for i in issues1] == [i.id for i in issues2]
         assert len(deps1) == len(deps2)
         assert len(links1) == len(links2)
+        assert events1 == events2
 
 
 class TestWriteTestJsonl:
@@ -304,16 +314,48 @@ class TestWriteTestJsonl:
 
     def test_writes_file(self) -> None:
         """Writes a valid JSONL file."""
-        issues, deps, links = generate_test_data(10, seed=42)
+        issues, deps, links, events = generate_test_data(10, seed=42)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "test.jsonl"
-            write_test_jsonl(issues, deps, links, path)
+            write_test_jsonl(issues, deps, links, path, events=events)
 
             assert path.exists()
             lines = path.read_text().strip().split("\n")
-            # Issues + dependencies + links
-            assert len(lines) == len(issues) + len(deps) + len(links)
+            # Issues + dependencies + links + events
+            assert len(lines) == len(issues) + len(deps) + len(links) + len(events)
+
+
+class TestEvents:
+    """Tests for audit-log event generation."""
+
+    def test_every_issue_gets_a_created_event(self) -> None:
+        """Each issue has exactly one 'created' event."""
+        gen = DeterministicIssueGenerator(seed=42)
+        issues = gen.generate_issues(50)
+        events = gen.generate_events(issues)
+
+        created = [e for e in events if e["event_type"] == "created"]
+        assert len(created) == 50
+        assert {e["issue_id"] for e in created} == {i.id for i in issues}
+
+    def test_events_serialize_with_record_type_first(self) -> None:
+        """Serialized events match the writer's byte prefix.
+
+        JSONLStorage._load's fast path (dogcat-4mfq) keys on this prefix;
+        the benchmark must generate the same bytes as the real writer.
+        """
+        import orjson
+
+        from dogcat.event_log import EVENT_LINE_PREFIX
+
+        gen = DeterministicIssueGenerator(seed=42)
+        issues = gen.generate_issues(10)
+        events = gen.generate_events(issues)
+
+        assert events
+        for event in events:
+            assert orjson.dumps(event).startswith(EVENT_LINE_PREFIX)
 
 
 class TestRunBenchmarks:

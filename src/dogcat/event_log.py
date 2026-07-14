@@ -52,8 +52,19 @@ class EventRecord:
     )
 
 
+# First bytes of every event line orjson-serialized from _serialize below.
+# JSONLStorage._load uses this to skip event records without JSON-parsing
+# them (dogcat-4mfq); "record_type" must therefore stay the FIRST key in
+# _serialize. A prefix match on the top-level first key cannot be spoofed
+# by nested content, unlike a substring check.
+EVENT_LINE_PREFIX = b'{"record_type":"event"'
+
+
 def _serialize(event: EventRecord) -> dict[str, Any]:
-    """Serialize an EventRecord to a dict for JSONL storage."""
+    """Serialize an EventRecord to a dict for JSONL storage.
+
+    ``record_type`` must remain the first key — see EVENT_LINE_PREFIX.
+    """
     data: dict[str, Any] = {
         "record_type": "event",
         "dcat_version": _dcat_version,

@@ -5,7 +5,7 @@ import re as _re
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Any, TypedDict, TypeVar, cast
 
 from dogcat.constants import DEFAULT_NAMESPACE
 
@@ -94,6 +94,11 @@ class DependencyType(str, Enum):
 
 _E = TypeVar("_E", bound=Enum)
 
+# value -> member maps, built once per enum class. ``dict_to_issue`` runs
+# _safe_enum for every record in the store, and ``Enum.__call__`` is an
+# order of magnitude slower than a dict hit (dogcat-3nkp).
+_ENUM_VALUE_MAPS: dict[type[Enum], dict[object, Enum]] = {}
+
 
 def _safe_enum(enum_cls: type[_E], raw_value: object, field_name: str) -> _E:
     """Coerce ``raw_value`` to a member of ``enum_cls``, falling back to UNKNOWN.
@@ -103,6 +108,17 @@ def _safe_enum(enum_cls: type[_E], raw_value: object, field_name: str) -> _E:
     entire load (CLAUDE.md forbids hand-editing the JSONL), log a warning
     and return the ``UNKNOWN`` sentinel so the rest of the file parses.
     """
+    value_map = _ENUM_VALUE_MAPS.get(enum_cls)
+    if value_map is None:
+        value_map = {member.value: member for member in enum_cls}
+        _ENUM_VALUE_MAPS[enum_cls] = value_map
+    try:
+        member = value_map.get(raw_value)
+    except TypeError:
+        # Unhashable raw_value — let Enum.__call__ produce the ValueError.
+        member = None
+    if member is not None:
+        return cast("_E", member)
     try:
         return enum_cls(raw_value)
     except ValueError:

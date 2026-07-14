@@ -256,24 +256,32 @@ def _validate_timestamps(
 def validate_references(
     records: list[dict[str, Any]],
 ) -> list[ValidationError]:
-    """Validate referential integrity across all records."""
+    """Validate referential integrity of the resolved store state.
+
+    The log is append-only: issue records supersede earlier ones
+    (last-write-wins by full id) and dependency records replay
+    ``add``/``remove`` ops. Reference checks therefore run on the
+    *resolved* state only — a superseded record's parent legitimately goes
+    stale when the referenced issue is later pruned or renamed, and the
+    next compaction drops the record entirely (dogcat-5hcu). Event
+    references stay per-record (events are never superseded) and are
+    warnings, not errors.
+    """
     errors: list[ValidationError] = []
 
-    # Build set of known issue full IDs (last-write-wins)
-    known_issues: set[str] = set()
+    # Resolve issue records last-write-wins, mirroring JSONLStorage._load
+    resolved_issues: dict[str, dict[str, Any]] = {}
     for record in records:
         if classify_record(record) == "issue":
             ns = record.get("namespace", DEFAULT_NAMESPACE)
             rid = record.get("id", "")
-            known_issues.add(f"{ns}-{rid}")
+            resolved_issues[f"{ns}-{rid}"] = record
+    known_issues = frozenset(resolved_issues)
 
-    # Check parent references
-    for record in records:
-        if classify_record(record) != "issue":
-            continue
+    # Check parent references on the resolved records only
+    for full_id, record in resolved_issues.items():
         parent = record.get("parent")
         if parent and parent not in known_issues:
-            full_id = f"{record.get('namespace', '?')}-{record.get('id', '?')}"
             errors.append(
                 ValidationError(
                     level="error",
@@ -283,21 +291,24 @@ def validate_references(
                 ),
             )
 
-    # Check dependency references
-    dep_graph: dict[str, set[str]] = {}
+    # Replay dependency ops; keyed like storage's parse_dependency_record
+    # so a ``remove`` cancels the matching ``add``
+    resolved_deps: dict[tuple[str, str, Any], dict[str, Any]] = {}
     for record in records:
         if classify_record(record) != "dependency":
             continue
-        op = record.get("op", "add")
-        issue_id = record.get("issue_id", "")
-        depends_on = record.get("depends_on_id", "")
+        key = (
+            record.get("issue_id", ""),
+            record.get("depends_on_id", ""),
+            record.get("type"),
+        )
+        if record.get("op", "add") == "remove":
+            resolved_deps.pop(key, None)
+        else:
+            resolved_deps[key] = record
 
-        if op == "remove":
-            # Remove edge from graph when dependency is removed
-            if issue_id and depends_on and issue_id in dep_graph:
-                dep_graph[issue_id].discard(depends_on)
-            continue
-
+    dep_graph: dict[str, set[str]] = {}
+    for issue_id, depends_on, _dep_type in resolved_deps:
         if issue_id and issue_id not in known_issues:
             errors.append(
                 ValidationError(

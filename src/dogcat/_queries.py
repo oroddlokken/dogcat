@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING
 from dogcat.models import Status
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from dogcat.models import Dependency, FilterSpec, Issue
 
 
@@ -54,7 +56,7 @@ def filter_issues(issues: list[Issue], spec: FilterSpec) -> list[Issue]:
 
 def children_of(
     children_by_parent: dict[str, list[str]],
-    issues: dict[str, Issue],
+    issues: Mapping[str, Issue],
     parent_id: str,
 ) -> list[Issue]:
     """Return the issues whose parent is ``parent_id`` (existing issues only)."""
@@ -64,7 +66,7 @@ def children_of(
 
 
 def dangling_dependencies(
-    dependencies: list[Dependency], issues: dict[str, Issue]
+    dependencies: list[Dependency], issues: Mapping[str, Issue]
 ) -> list[Dependency]:
     """Return dependencies whose endpoint issue no longer exists."""
     return [

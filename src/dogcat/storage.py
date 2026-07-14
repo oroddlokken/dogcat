@@ -22,6 +22,7 @@ from dogcat._jsonl_io import (
     atomic_rewrite_jsonl,
     split_and_rewrite_jsonl,
 )
+from dogcat._lazy_issues import LazyIssueMap
 from dogcat._persistence import compact_snapshot
 from dogcat._queries import children_of, dangling_dependencies, filter_issues
 from dogcat._records import (
@@ -38,6 +39,7 @@ from dogcat.constants import (
     LOCK_FILENAME,
     TRACKED_FIELDS,
 )
+from dogcat.event_log import EVENT_LINE_PREFIX
 from dogcat.locking import advisory_file_lock
 from dogcat.models import (
     Dependency,
@@ -50,11 +52,11 @@ from dogcat.models import (
     Status,
     UpdateRequest,
     classify_record,
-    dict_to_issue,
     issue_to_dict,
     link_type_value,
     validate_priority,
 )
+from dogcat.models_serde import precheck_issue_record
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
@@ -187,7 +189,10 @@ class JSONLStorage(EventEmitterMixin):
         """
         self.path = Path(path)
         self.dogcats_dir = self.path.parent
-        self._issues: dict[str, Issue] = {}
+        # Lazy map: raw record dicts materialize to Issue on first access
+        # (dogcat-4g8d), so ID-targeted commands don't construct the whole
+        # store. Records are validated at load; see _parse_issue_record.
+        self._issues: LazyIssueMap = LazyIssueMap()
         self._dependencies: list[Dependency] = []
         self._links: list[Link] = []
         # Indexes for O(1) dependency/link lookups
@@ -282,6 +287,19 @@ class JSONLStorage(EventEmitterMixin):
 
             line_count += 1
 
+            # Fast path: event records are read lazily by EventLog and only
+            # skipped here, yet they make up half or more of a mature store's
+            # lines — don't pay orjson for them (dogcat-4mfq). The endswith
+            # guard keeps a truncated event line (crash mid-append) on the
+            # slow path so it still lands in _bad_lines / _needs_compaction.
+            # Trade-offs: event lines written with a different key order fall
+            # through to the (correct) slow path, and skipped events are
+            # excluded from the newer-version check below — acceptable, since
+            # every dcat mutation that appends an event also appends an
+            # issue/dependency/link record carrying the same dcat_version.
+            if line.startswith(EVENT_LINE_PREFIX) and line.endswith(b"}"):
+                continue
+
             try:
                 raw_data = orjson.loads(line)
                 if not isinstance(raw_data, dict):
@@ -329,9 +347,14 @@ class JSONLStorage(EventEmitterMixin):
         warn_if_records_from_newer_version(parsed_records, source=str(self.path))
 
     def _parse_issue_record(self, data: dict[str, Any]) -> None:
-        """Apply one issue record under last-write-wins semantics."""
-        issue = dict_to_issue(data)
-        self._issues[issue.full_id] = issue
+        """Apply one issue record under last-write-wins semantics.
+
+        Validates eagerly — so malformed records still land in
+        ``_bad_lines`` at load time via the caller's except clause — but
+        defers Issue construction to first access (dogcat-4g8d).
+        """
+        full_id = precheck_issue_record(data)
+        self._issues.set_raw(full_id, data)
 
     def _rebuild_indexes(self) -> None:
         """Rebuild dependency, link, and parent indexes from the source lists.
@@ -341,7 +364,7 @@ class JSONLStorage(EventEmitterMixin):
         ``self`` so existing attribute-style access keeps working.
         """
         indexes = rebuild_indexes(
-            self._issues.values(), self._dependencies, self._links
+            self._issues.iter_id_parent(), self._dependencies, self._links
         )
         self._deps_by_issue = indexes.deps_by_issue
         self._deps_by_depends_on = indexes.deps_by_depends_on

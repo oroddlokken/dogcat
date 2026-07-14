@@ -1,6 +1,8 @@
 """Tests for Dogcat models."""
 
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
+from typing import Any, ClassVar
 
 import pytest
 
@@ -19,6 +21,7 @@ from dogcat.models import (
     validate_priority,
     validate_status,
 )
+from dogcat.models_serde import precheck_issue_record
 
 
 class TestStatusEnum:
@@ -1050,3 +1053,93 @@ class TestClassifyRecord:
         issue = Issue(id="issue-1", title="Test")
         data = issue_to_dict(issue)
         assert data["record_type"] == "issue"
+
+
+class TestValidateIssueRecordConsistency:
+    """precheck_issue_record must fail exactly when dict_to_issue fails.
+
+    The lazy issue map (dogcat-4g8d) relies on this: records that pass
+    validation at load time must materialize without raising later, and
+    records that would crash materialization must be rejected at load time
+    (so they land in ``_bad_lines``). Any drift between the two functions
+    breaks one of those guarantees.
+    """
+
+    _EXCEPTIONS = (KeyError, ValueError, TypeError, AttributeError)
+
+    @staticmethod
+    def _base_record() -> dict[str, Any]:
+        issue = Issue(
+            id="x1",
+            namespace="t",
+            title="Consistency",
+            notes="some notes",
+            comments=[
+                Comment(
+                    id="c1",
+                    issue_id="t-x1",
+                    author="a@example.com",
+                    text="hello",
+                    created_at=datetime(2024, 1, 2, tzinfo=timezone.utc),
+                ),
+            ],
+            snoozed_until=datetime(2024, 6, 1, tzinfo=timezone.utc),
+        )
+        return issue_to_dict(issue)
+
+    _CORRUPTIONS: ClassVar[list[tuple[str, Callable[[dict[str, Any]], object]]]] = [
+        ("missing id", lambda d: d.pop("id")),
+        ("missing title", lambda d: d.pop("title")),
+        ("missing created_at", lambda d: d.pop("created_at")),
+        ("missing updated_at", lambda d: d.pop("updated_at")),
+        ("garbage created_at", lambda d: d.update(created_at="not-a-date")),
+        ("non-str created_at", lambda d: d.update(created_at=42)),
+        ("garbage snoozed_until", lambda d: d.update(snoozed_until="nope")),
+        ("non-str notes", lambda d: d.update(notes=42)),
+        ("comments not a list", lambda d: d.update(comments="nope")),
+        ("comments is None", lambda d: d.update(comments=None)),
+        ("comment missing text", lambda d: d["comments"][0].pop("text")),
+        (
+            "comment garbage created_at",
+            lambda d: d["comments"][0].update(created_at="nope"),
+        ),
+    ]
+
+    @pytest.mark.parametrize(("label", "corrupt"), _CORRUPTIONS)
+    def test_corrupt_records_fail_in_both(
+        self, label: str, corrupt: Callable[[dict[str, Any]], object]
+    ) -> None:
+        """Each corruption raises from both functions (or neither)."""
+        record = self._base_record()
+        corrupt(record)
+
+        validate_raised = False
+        try:
+            precheck_issue_record(record)
+        except self._EXCEPTIONS:
+            validate_raised = True
+
+        materialize_raised = False
+        try:
+            dict_to_issue(record)
+        except self._EXCEPTIONS:
+            materialize_raised = True
+
+        assert validate_raised, f"{label}: precheck_issue_record did not reject"
+        assert materialize_raised == validate_raised, (
+            f"{label}: precheck_issue_record and dict_to_issue disagree"
+        )
+
+    def test_valid_record_passes_and_full_ids_match(self) -> None:
+        """A well-formed record validates and yields the same full id."""
+        record = self._base_record()
+        full_id = precheck_issue_record(record)
+        assert full_id == dict_to_issue(record).full_id == "t-x1"
+
+    def test_legacy_record_without_namespace_field(self) -> None:
+        """Legacy ids (namespace embedded in id) resolve identically."""
+        record = self._base_record()
+        del record["namespace"]
+        record["id"] = "legacy-ns-x1"
+        full_id = precheck_issue_record(record)
+        assert full_id == dict_to_issue(record).full_id == "legacy-ns-x1"

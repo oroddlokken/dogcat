@@ -319,6 +319,39 @@ class TestValidateReferences:
         errors = _errors(validate_references(records))
         assert len(errors) == 0
 
+    def test_superseded_dangling_parent_not_flagged(self) -> None:
+        """A stale parent in a superseded record is not an error.
+
+        Last-write-wins: only the resolved record's references matter — the
+        superseded one goes away at the next compaction (dogcat-5hcu).
+        """
+        records = [
+            _issue(issue_id="child", parent="test-gone"),
+            _issue(issue_id="child", parent=None),
+        ]
+        errors = _errors(validate_references(records))
+        assert errors == []
+
+    def test_resolved_dangling_parent_still_flagged(self) -> None:
+        """A dangling parent on the RESOLVED record is still an error."""
+        records = [
+            _issue(issue_id="child", parent=None),
+            _issue(issue_id="child", parent="test-gone"),
+        ]
+        errors = _errors(validate_references(records))
+        assert len(errors) == 1
+        assert "non-existent parent 'test-gone'" in errors[0].message
+
+    def test_added_then_removed_dangling_dep_not_flagged(self) -> None:
+        """An add/remove pair whose endpoint vanished is not an error."""
+        records = [
+            _issue(issue_id="a"),
+            _dep(issue_id="test-a", depends_on_id="test-gone"),
+            _dep(issue_id="test-a", depends_on_id="test-gone", op="remove"),
+        ]
+        errors = _errors(validate_references(records))
+        assert errors == []
+
 
 # ---------------------------------------------------------------------------
 # Integration: validate_jsonl (full pipeline)

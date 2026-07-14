@@ -66,5 +66,6 @@ class TestRebuildIndexes:
         """Only issues with a parent appear in children_by_parent."""
         i1 = Issue(id="root", namespace="t", title="root")
         i2 = Issue(id="child", namespace="t", title="child", parent="t-root")
-        idx = rebuild_indexes(issues=[i1, i2], dependencies=[], links=[])
+        pairs = [(i.full_id, i.parent) for i in (i1, i2)]
+        idx = rebuild_indexes(issues=pairs, dependencies=[], links=[])
         assert idx.children_by_parent == {"t-root": ["t-child"]}
