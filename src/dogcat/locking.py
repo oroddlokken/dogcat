@@ -18,6 +18,9 @@ if TYPE_CHECKING:
 DEFAULT_LOCK_TIMEOUT_SECS: float = 30.0
 LOCK_TIMEOUT_ENV_VAR = "DCAT_LOCK_TIMEOUT_SECS"
 
+# Poll interval while waiting to acquire the advisory lock: 50ms is snappy
+# enough to grab the lock soon after the holder releases, yet coarse enough
+# not to busy-spin the CPU across a wait that can run up to the lock timeout.
 _RETRY_INTERVAL_SECS = 0.05
 
 
@@ -27,7 +30,7 @@ def _resolve_timeout() -> float:
     Non-finite values (``inf``, ``-inf``, ``nan``) and non-positive
     values fall back to :data:`DEFAULT_LOCK_TIMEOUT_SECS`. Without the
     isfinite guard, ``inf`` slipped past the ``> 0`` check and the
-    stale-lock-holder remediation was silently disabled. (dogcat-1z5u)
+    stale-lock-holder remediation was silently disabled.
     """
     import math
 

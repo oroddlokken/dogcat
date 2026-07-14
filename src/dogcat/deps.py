@@ -12,6 +12,11 @@ if TYPE_CHECKING:
     from dogcat.storage import JSONLStorage
 
 
+# A blocker holds up its dependents only while it is actively unfinished:
+# open, in_progress, or blocked. in_review, deferred, draft, closed and
+# tombstone are intentionally excluded — a blocker in review or deferred must
+# not stall dependents, a draft is not a committed blocker yet, and
+# closed/tombstone are already done.
 _BLOCKING_STATUSES = (Status.OPEN, Status.IN_PROGRESS, Status.BLOCKED)
 
 
@@ -155,11 +160,10 @@ def detect_cycles(storage: JSONLStorage) -> list[list[str]]:
     Returns:
         List of cycles (each cycle is a list of issue IDs)
 
-    Iterative implementation (regression for dogcat-1r7h): a recursive
-    DFS hit Python's default 1000-frame limit on a 1001-deep dependency
-    chain and crashed the entire CLI with RecursionError. The iterative
-    walk uses an explicit stack of ``(node, neighbor_iter)`` so depth
-    is bounded only by available memory.
+    Iterative implementation: a recursive DFS hit Python's default
+    1000-frame limit on a 1001-deep dependency chain and crashed the entire
+    CLI with RecursionError. The iterative walk uses an explicit stack of
+    ``(node, neighbor_iter)`` so depth is bounded only by available memory.
     """
     dep_map = _build_dep_map(storage)
     all_issue_ids = [i.full_id for i in storage.list()]
@@ -209,10 +213,9 @@ def has_blockers(storage: JSONLStorage, issue_id: str) -> bool:
     """Check if an issue has any open blockers.
 
     Public single-issue predicate — the per-issue counterpart to
-    :func:`get_blocked_issues` / :func:`get_ready_work`. No production
-    caller today; retained deliberately because the codehealth review
-    (dogcat-jh04) flagged its absence from status-transition guards as a
-    likely feature gap rather than dead code.
+    :func:`get_blocked_issues` / :func:`get_ready_work`. Retained
+    deliberately: its absence from the status-transition guards is a likely
+    feature gap rather than dead code.
 
     Args:
         storage: The storage instance
@@ -252,7 +255,7 @@ def would_create_cycle(
 
     # Iterative reachability: from depends_on_id, can we reach issue_id
     # through existing dependencies? Walking 10000+ deep chains used to
-    # blow Python's recursion limit. (dogcat-1r7h)
+    # blow Python's recursion limit.
     dep_map = _build_dep_map(storage)
     visited: set[str] = {depends_on_id}
     stack: list[str] = [depends_on_id]

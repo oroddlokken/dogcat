@@ -140,6 +140,6 @@ Within the chosen storage directory, config is merged in this order (later wins)
 
 Repo-local settings (namespace, visible_namespaces) always take precedence.
 
-When storage resolves via the global fallback (no local `.dogcats/`, no `.dogcatrc`), the namespace is the slug of the cwd folder name, falling back to the shared store's `config.toml` namespace when the folder name isn't sluggable. Repos that reach the same store through a `.dogcatrc` — or the store's own home directory — are *not* in fallback mode and use the normal config chain above. dcat prints a one-time notice on stderr whenever the global fallback is used, so writes to the shared store are never silent.
+When storage resolves via the global fallback (no local `.dogcats/`, no `.dogcatrc`), the namespace is the slug of the git repo-root directory name when the cwd is inside a repo (so `myrepo/src/` yields `myrepo`, never `src`), or the slug of the cwd folder name when outside any repo — falling back to the shared store's `config.toml` namespace when that name isn't sluggable. Repos that reach the same store through a `.dogcatrc` — or the store's own home directory — are *not* in fallback mode and use the normal config chain above. dcat prints a one-time notice on stderr whenever the global fallback is used, so writes to the shared store are never silent.
 
 Only two keys are read from the global config file: `default_storage` and `visible_namespaces`. `dcat config set --global` rejects anything else.

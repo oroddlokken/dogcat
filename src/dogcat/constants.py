@@ -29,7 +29,9 @@ DEFAULT_NAMESPACE = "dc"
 # Maximum number of preview subtasks shown under deferred parents in list view
 MAX_PREVIEW_SUBTASKS = 3
 
-# Split-pane TUI thresholds
+# Split-pane TUI thresholds: below these terminal dimensions the two panes
+# get too cramped to read (each side would fall under ~100 cols / a usable
+# row count), so the TUI falls back to a single pane.
 SPLIT_PANE_MIN_COLS = 200
 SPLIT_PANE_MIN_ROWS = 40
 
@@ -211,7 +213,7 @@ TERMINAL_STATUSES: frozenset[str] = frozenset({"closed", "tombstone"})
 # Statuses where a dependency-blocked issue keeps its natural status glyph
 # instead of the blocked "■" — these advanced states take display
 # precedence over the blocked override. Shared by every issue renderer
-# (dcat list, the Rich table, the TUI) so they never disagree. (dogcat-4gj6)
+# (dcat list, the Rich table, the TUI) so they never disagree.
 BLOCKED_DISPLAY_EXEMPT_STATUSES: frozenset[str] = frozenset(
     {"in_review", "deferred", "closed"},
 )
@@ -237,9 +239,7 @@ WEB_HOST_ENV_VAR = "DCAT_WEB_HOST"
 WEB_PORT_ENV_VAR = "DCAT_WEB_PORT"
 
 
-# ---------------------------------------------------------------------------
 # JSONL filenames + .dogcats directory layout
-# ---------------------------------------------------------------------------
 # Single source of truth for the on-disk layout. JSONLStorage / InboxStorage /
 # event_log default arguments compose paths from these constants instead of
 # repeating the literals; the merge driver, doctor, init, etc. read from here
@@ -250,9 +250,7 @@ INBOX_FILENAME = "inbox.jsonl"
 LOCK_FILENAME = ".issues.lock"
 
 
-# ---------------------------------------------------------------------------
 # Default branch names for compaction safety
-# ---------------------------------------------------------------------------
 # Storage avoids compacting on feature branches because that would create
 # noisy diffs. The hardcoded fallback covers the conventional defaults; the
 # `_is_default_branch` reader also unions in the user's
@@ -261,9 +259,7 @@ LOCK_FILENAME = ".issues.lock"
 DEFAULT_BRANCH_NAMES: frozenset[str] = frozenset({"main", "master"})
 
 
-# ---------------------------------------------------------------------------
 # Web propose validation limits + namespace rule
-# ---------------------------------------------------------------------------
 # These are the only namespace shape rules in the codebase. Promoted out of
 # the route module so the CLI / IDGenerator / config can reuse the same
 # regex when we extend strict-namespace enforcement to other surfaces.
@@ -287,9 +283,7 @@ def is_valid_namespace(value: str) -> bool:
     )
 
 
-# ---------------------------------------------------------------------------
 # Web propose security headers + CSRF cookie
-# ---------------------------------------------------------------------------
 # Security policies belong in one auditable location, not buried inside
 # inner-class dispatch handlers. CSRF_COOKIE_NAME stays where it is (the
 # route module) since it's only referenced there.
@@ -297,9 +291,7 @@ CSRF_COOKIE_MAX_AGE_SECONDS = 60 * 60  # 1h — limits the leaked-token window
 WEB_CSP_HEADER = "default-src 'none'; style-src 'self'; script-src 'self'"
 
 
-# ---------------------------------------------------------------------------
 # Claude Code PreCompact hook
-# ---------------------------------------------------------------------------
 # The hook command and its surrounding settings.json shape live here so the
 # doctor's install + upgrade paths and any future ``dcat hook ...`` command
 # all read from one place. The previous string-replace in

@@ -4,7 +4,7 @@
 every Issue dataclass (plus comments, enums, datetimes) accounts for ~40%
 of ``JSONLStorage._load`` wall time at scale, yet most CLI invocations touch
 a handful of issues. This map lets ``_load`` store the raw parsed dicts and
-defer construction to first access (dogcat-4g8d).
+defer construction to first access.
 
 Entries live in a single dict whose values are either a raw record dict or
 a materialized :class:`~dogcat.models.Issue`. ``__getitem__`` replaces the

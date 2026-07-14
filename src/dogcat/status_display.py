@@ -5,7 +5,7 @@ issue displays the blocked "■" glyph, UNLESS its status is one of the
 advanced states (in_review / deferred / closed), which take display
 precedence. That rule was copy-pasted into ``dcat list``, the Rich table,
 and the TUI — this module makes it a single source of truth so the three
-surfaces can never disagree. (dogcat-4gj6)
+surfaces can never disagree.
 """
 
 from __future__ import annotations

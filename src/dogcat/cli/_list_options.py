@@ -11,7 +11,7 @@ Typer resolves these aliases through ``get_type_hints(..., include_extras=True)`
 just like an inline ``typer.Option``, so signature introspection, ``--help``
 output, and shell completion are unchanged. Callers supply the *default* on the
 parameter (``= None`` / ``= False`` / ``= []``); per Typer's Annotated rules the
-default must not live inside the ``typer.Option`` call. (dogcat-5bhv)
+default must not live inside the ``typer.Option`` call.
 """
 
 from __future__ import annotations

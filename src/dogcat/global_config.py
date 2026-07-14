@@ -121,7 +121,7 @@ def unset_global_config_value(key: str) -> None:
         atomic_write_toml(path, data)
 
 
-# --- Resolution state -------------------------------------------------
+# Resolution state
 #
 # Namespace derivation and default filtering behave differently when the
 # storage directory was reached via the global fallback (no local
@@ -196,7 +196,7 @@ def reset_resolution_state() -> None:
     Test-isolation hook. Lives here rather than in a conftest fixture
     because it resets this module's process-global ``_global_fallback_path``;
     called from tests/conftest.py between tests so resolution state never
-    leaks across them (dogcat-jh04).
+    leaks across them.
     """
     global _global_fallback_path
     _global_fallback_path = None

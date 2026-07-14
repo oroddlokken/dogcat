@@ -1,6 +1,6 @@
 """JSONL (de)serialization for the domain models.
 
-Split out of :mod:`dogcat.models` (dogcat-4yq2) so the dataclass definitions and
+Split out of :mod:`dogcat.models` so the dataclass definitions and
 the serialization helpers live in separate modules. This holds the issue /
 proposal dict<->object converters, the ``_migrate_*`` backward-compat helpers,
 and ``classify_record``.
@@ -41,7 +41,6 @@ _KNOWN_RECORD_TYPES = frozenset(
 
 def issue_to_dict(issue: Issue) -> dict[str, Any]:
     """Convert an Issue to a dictionary, serializing datetimes."""
-    # Get the status and issue_type values
     status_value = issue.status.value
     issue_type_value = issue.issue_type.value
 
@@ -233,8 +232,7 @@ def precheck_issue_record(data: dict[str, Any]) -> str:
     Issue/Comment objects. ``JSONLStorage._load`` runs this eagerly so
     malformed records are rejected at load time (landing in ``_bad_lines``
     exactly as before), while the expensive construction is deferred to
-    first access via :class:`~dogcat._lazy_issues.LazyIssueMap`
-    (dogcat-4g8d).
+    first access via :class:`~dogcat._lazy_issues.LazyIssueMap`.
 
     Must stay in sync with ``dict_to_issue``'s failure modes —
     ``tests/test_models.py`` has a consistency test asserting both raise on

@@ -8,7 +8,6 @@ classes; :class:`EventEmitterMixin` provides the one implementation. Each store
 supplies ``_event_log`` (its ``EventLog`` / ``InboxEventLog``) and ``_append``
 (its buffered writer). The per-store field selection for tracked-change diffs
 stays in each class — it is configuration, not shared logic.
-(dogcat-m5e6, continues dogcat-4cza)
 """
 
 from __future__ import annotations

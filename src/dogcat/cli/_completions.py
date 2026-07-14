@@ -291,7 +291,7 @@ def complete_durations(incomplete: str) -> list[tuple[str, str]]:
     """Complete common duration values for --older-than."""
     # The ``m`` suffix means 30 days, not a calendar month, so the
     # human-readable label says "~1 month (30d)" to match what
-    # ``parse_duration`` actually computes. (dogcat-dfn9)
+    # ``parse_duration`` actually computes.
     options = [
         ("7d", "1 week"),
         ("14d", "2 weeks"),

@@ -32,7 +32,7 @@ class DeferredView:
     ``_collapse_deferred_subtrees`` and then as separate positional/keyword
     params through the tree/table/list renderers — and because
     ``deferred_blocker_map`` and ``preview_subtasks`` are both dicts keyed by
-    full_id, a transposed argument produced no type error. (dogcat-1tja)
+    full_id, a transposed argument produced no type error.
     """
 
     filtered: list[Issue] = field(default_factory=list["Issue"])
@@ -366,7 +366,6 @@ def format_issue_tree(
     preview_subtasks = deferred.preview_subtasks if deferred else None
     hierarchy = build_hierarchy(issues)
 
-    # Collect all issue IDs in the filtered set
     issue_ids = {issue.full_id for issue in issues}
 
     # Determine root issues: those with no parent, OR whose parent is not
@@ -713,7 +712,6 @@ def format_event(event: EventRecord, *, verbose: bool = False) -> str:
         styled_status = typer.style(status_sym, fg=status_color, bold=True)
         styled_symbol = f"{styled_symbol} {styled_status}"
 
-    # Parse and format the timestamp
     from datetime import datetime
 
     try:
@@ -737,7 +735,6 @@ def format_event(event: EventRecord, *, verbose: bool = False) -> str:
     # Long-form fields: show summary instead of full content unless verbose
     _long_fields = {"description", "notes", "acceptance", "design"}
 
-    # Format field changes on the next line
     change_parts: list[str] = []
     if event.by:
         by_label = typer.style("by", fg="cyan")

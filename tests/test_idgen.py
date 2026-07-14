@@ -73,48 +73,48 @@ class TestCollisionMath:
 
 
 class TestProgressiveIdLength:
-    """Test progressive ID length scaling based on issue count."""
+    """ID length scales up in bands as the issue count grows."""
 
     def test_length_for_small_database(self) -> None:
-        """Test that small databases (0-500) use 4-char IDs."""
+        """Counts 0-500 map to 4-char IDs."""
         assert get_id_length_for_count(0) == 4
         assert get_id_length_for_count(100) == 4
         assert get_id_length_for_count(500) == 4
 
     def test_length_for_medium_database(self) -> None:
-        """Test that medium databases (501-1500) use 5-char IDs."""
+        """Counts 501-1500 map to 5-char IDs."""
         assert get_id_length_for_count(501) == 5
         assert get_id_length_for_count(1000) == 5
         assert get_id_length_for_count(1500) == 5
 
     def test_length_for_large_database(self) -> None:
-        """Test that large databases (1501-5000) use 6-char IDs."""
+        """Counts 1501-5000 map to 6-char IDs."""
         assert get_id_length_for_count(1501) == 6
         assert get_id_length_for_count(3000) == 6
         assert get_id_length_for_count(5000) == 6
 
     def test_length_for_very_large_database(self) -> None:
-        """Test that very large databases (>5000) use 7-char IDs."""
+        """Counts above 5000 map to 7-char IDs."""
         assert get_id_length_for_count(5001) == 7
         assert get_id_length_for_count(10000) == 7
         assert get_id_length_for_count(100000) == 7
 
 
 class TestBase36Encoding:
-    """Test base36 encoding utility."""
+    """_base36_encode maps bytes to lowercase base36 digits."""
 
     def test_base36_encode_zero(self) -> None:
-        """Test encoding zero."""
+        """A zero byte encodes to the single digit '0', not empty."""
         result = _base36_encode(b"\x00")
         assert result == "0"
 
     def test_base36_encode_small_value(self) -> None:
-        """Test encoding small values."""
+        """A small byte encodes to a single valid base36 digit."""
         result = _base36_encode(b"\x01")
         assert result in "0123456789abcdefghijklmnopqrstuvwxyz"
 
     def test_base36_encode_deterministic(self) -> None:
-        """Test that encoding is deterministic."""
+        """The same bytes always encode to the same string."""
         data = b"test"
         result1 = _base36_encode(data)
         result2 = _base36_encode(data)
@@ -122,10 +122,10 @@ class TestBase36Encoding:
 
 
 class TestGenerateHashId:
-    """Test basic hash ID generation."""
+    """generate_hash_id returns a bare base36 hash with no prefix."""
 
     def test_basic_generation(self) -> None:
-        """Test generating a basic hash (no prefix)."""
+        """A hash is a 4-char string carrying no namespace prefix."""
         hash_value = generate_hash_id("test input")
         assert isinstance(hash_value, str)
         # Should be just the hash, no prefix
@@ -133,67 +133,67 @@ class TestGenerateHashId:
         assert len(hash_value) == 4  # Default length
 
     def test_hash_length(self) -> None:
-        """Test that hash has correct length."""
+        """length=4 yields a 4-character hash."""
         hash_value = generate_hash_id("test", length=4)
         assert len(hash_value) == 4
 
     @pytest.mark.parametrize("length", [2, 4, 6, 8])
     def test_custom_length(self, length: int) -> None:
-        """Test custom hash length."""
+        """The output length matches the requested length."""
         hash_value = generate_hash_id("test", length=length)
         assert len(hash_value) == length
 
     def test_deterministic(self) -> None:
-        """Test that same input produces same hash."""
+        """The same input always hashes to the same value."""
         input_data = "issue title"
         hash1 = generate_hash_id(input_data)
         hash2 = generate_hash_id(input_data)
         assert hash1 == hash2
 
     def test_different_input_different_id(self) -> None:
-        """Test that different inputs produce different IDs."""
+        """Different inputs hash to different IDs."""
         id1 = generate_hash_id("input1")
         id2 = generate_hash_id("input2")
         assert id1 != id2
 
     def test_nonce_changes_id(self) -> None:
-        """Test that nonce affects the ID."""
+        """Changing the nonce changes the hash for identical input."""
         id1 = generate_hash_id("test", nonce="")
         id2 = generate_hash_id("test", nonce="1")
         assert id1 != id2
 
     def test_unicode_input(self) -> None:
-        """Test handling of unicode characters."""
+        """Non-ASCII input hashes without error to a bare hash."""
         hash_value = generate_hash_id("测试 тест مرحبا")
         assert isinstance(hash_value, str)
         assert "-" not in hash_value  # Just hash, no prefix
 
     def test_special_characters(self) -> None:
-        """Test handling of special characters."""
+        """Punctuation-heavy input hashes without error to a bare hash."""
         hash_value = generate_hash_id("test!@#$%^&*()")
         assert isinstance(hash_value, str)
         assert "-" not in hash_value  # Just hash, no prefix
 
 
 class TestGenerateIssueId:
-    """Test issue-specific ID generation."""
+    """generate_issue_id derives a hash from title and timestamp."""
 
     def test_basic_issue_generation(self) -> None:
-        """Test generating an issue ID hash (no prefix)."""
+        """An issue hash is a bare string with no namespace prefix."""
         hash_value = generate_issue_id("Fix login bug")
         # Returns just the hash, no prefix
         assert isinstance(hash_value, str)
         assert "-" not in hash_value
 
     def test_issue_id_deterministic(self) -> None:
-        """Test that issue ID is deterministic with same timestamp."""
+        """The same title and timestamp yield the same hash."""
         timestamp = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
         hash1 = generate_issue_id("Test issue", timestamp=timestamp)
         hash2 = generate_issue_id("Test issue", timestamp=timestamp)
         assert hash1 == hash2
 
     def test_different_timestamps_different_ids(self) -> None:
-        """Test that different timestamps produce different IDs."""
+        """A one-second timestamp difference changes the hash."""
         t1 = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
         t2 = datetime(2026, 1, 1, 12, 0, 1, tzinfo=timezone.utc)
         hash1 = generate_issue_id("Test issue", timestamp=t1)
@@ -201,7 +201,7 @@ class TestGenerateIssueId:
         assert hash1 != hash2
 
     def test_issue_id_with_nonce(self) -> None:
-        """Test issue ID generation with nonce for collisions."""
+        """A nonce changes the hash so collisions can be broken."""
         timestamp = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
         hash1 = generate_issue_id("Test", timestamp=timestamp, nonce="")
         hash2 = generate_issue_id("Test", timestamp=timestamp, nonce="1")
@@ -209,49 +209,49 @@ class TestGenerateIssueId:
 
 
 class TestGenerateDependencyId:
-    """Test dependency-specific ID generation."""
+    """generate_dependency_id derives a dep- ID from endpoints and type."""
 
     def test_basic_dependency_generation(self) -> None:
-        """Test generating a dependency ID."""
+        """A dependency ID carries the 'dep-' prefix."""
         id_value = generate_dependency_id("issue1", "issue2", "blocks")
         assert id_value.startswith("dep-")
 
     def test_dependency_id_deterministic(self) -> None:
-        """Test that dependency ID is deterministic."""
+        """The same endpoints and type yield the same ID."""
         id1 = generate_dependency_id("issue1", "issue2", "blocks")
         id2 = generate_dependency_id("issue1", "issue2", "blocks")
         assert id1 == id2
 
     def test_different_params_different_ids(self) -> None:
-        """Test that different parameters produce different IDs."""
+        """A different target endpoint yields a different ID."""
         id1 = generate_dependency_id("issue1", "issue2", "blocks")
         id2 = generate_dependency_id("issue1", "issue3", "blocks")
         assert id1 != id2
 
     def test_different_dep_type_different_ids(self) -> None:
-        """Test that different dependency types produce different IDs."""
+        """The dependency type is part of the ID's identity."""
         id1 = generate_dependency_id("issue1", "issue2", "blocks")
         id2 = generate_dependency_id("issue1", "issue2", "parent-child")
         assert id1 != id2
 
     def test_dependency_id_custom_prefix(self) -> None:
-        """Test dependency ID with custom prefix."""
+        """A custom prefix replaces the default 'dep-'."""
         id_value = generate_dependency_id("issue1", "issue2", "blocks", prefix="link")
         assert id_value.startswith("link-")
 
 
 class TestGenerateCommentId:
-    """Test comment ID generation."""
+    """generate_comment_id returns a unique UUID-style id."""
 
     def test_comment_id_generation(self) -> None:
-        """Test generating a comment ID."""
+        """A comment ID is a non-empty string."""
         id_value = generate_comment_id()
         assert isinstance(id_value, str)
         # Should be UUID format (with dashes)
         assert len(id_value) > 0
 
     def test_comment_ids_unique(self) -> None:
-        """Test that generated comment IDs are unique."""
+        """Two generated comment IDs are never equal."""
         id1 = generate_comment_id()
         id2 = generate_comment_id()
         assert id1 != id2
@@ -261,24 +261,24 @@ class TestIDGenerator:
     """Test the IDGenerator class with collision handling."""
 
     def test_generator_initialization(self) -> None:
-        """Test creating an IDGenerator."""
+        """A fresh generator starts with no known IDs."""
         gen = IDGenerator()
         assert len(gen.existing_ids) == 0
 
     def test_generator_with_existing_ids(self) -> None:
-        """Test initializing with existing IDs."""
+        """Seeded IDs are present in existing_ids."""
         existing = {"dc-aaaa", "dc-bbbb"}
         gen = IDGenerator(existing_ids=existing)
         assert "dc-aaaa" in gen.existing_ids
         assert "dc-bbbb" in gen.existing_ids
 
     def test_id_length_property_empty(self) -> None:
-        """Test id_length property with empty database."""
+        """An empty generator reports a 4-char id_length."""
         gen = IDGenerator()
         assert gen.id_length == 4
 
     def test_id_length_property_scales_with_count(self) -> None:
-        """Test that id_length scales based on existing_ids count."""
+        """id_length grows to 5 then 6 as existing_ids crosses each band."""
         # Small database: 4 chars
         gen_small = IDGenerator(existing_ids={f"dc-{i:04d}" for i in range(100)})
         assert gen_small.id_length == 4
@@ -292,7 +292,7 @@ class TestIDGenerator:
         assert gen_large.id_length == 6
 
     def test_generated_id_uses_scaled_length(self) -> None:
-        """Test that generated IDs use the appropriate length."""
+        """A generated hash's length matches the current count band."""
         timestamp = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
         # Small database: 4 chars
@@ -307,13 +307,13 @@ class TestIDGenerator:
         assert len(hash_medium) == 5
 
     def test_add_existing_id(self) -> None:
-        """Test adding an existing ID."""
+        """add_existing_id registers the id for collision checks."""
         gen = IDGenerator()
         gen.add_existing_id("dc-test")
         assert "dc-test" in gen.existing_ids
 
     def test_generate_unique_issue_id(self) -> None:
-        """Test that generator produces unique IDs."""
+        """Repeat titles get distinct hashes via collision retry."""
         gen = IDGenerator()
         timestamp = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -328,7 +328,7 @@ class TestIDGenerator:
         assert hash1 != hash2
 
     def test_collision_handling_with_nonce(self) -> None:
-        """Test that collision handling uses nonce."""
+        """A pre-seeded collision forces a different hash."""
         gen = IDGenerator()
         # Add a collision manually
         gen.add_existing_id("dc-aaaa")
@@ -342,14 +342,14 @@ class TestIDGenerator:
         assert f"dc-{new_hash}" in gen.existing_ids
 
     def test_generate_dependency_id(self) -> None:
-        """Test generating dependency IDs."""
+        """The generated dep- ID is registered in existing_ids."""
         gen = IDGenerator()
         id1 = gen.generate_dependency_id("issue1", "issue2", "blocks")
         assert id1 in gen.existing_ids
         assert id1.startswith("dep-")
 
     def test_generate_dependency_id_unique(self) -> None:
-        """Test that dependency IDs are unique with collision handling."""
+        """A pre-seeded dep collision still yields a registered ID."""
         gen = IDGenerator()
         gen.add_existing_id("dep-aaaa")
 
@@ -358,7 +358,7 @@ class TestIDGenerator:
         assert id1 in gen.existing_ids
 
     def test_generate_comment_id_unique(self) -> None:
-        """Test that comment IDs are unique."""
+        """Two generated comment IDs differ and both are registered."""
         gen = IDGenerator()
         id1 = gen.generate_comment_id()
         id2 = gen.generate_comment_id()
@@ -368,7 +368,7 @@ class TestIDGenerator:
         assert id2 in gen.existing_ids
 
     def test_fallback_to_longer_id(self) -> None:
-        """Test fallback to longer ID on max retries."""
+        """A saturated short space still yields a unique registered ID."""
         gen = IDGenerator()
         timestamp = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -388,7 +388,7 @@ class TestIDGeneratorIntegration:
     """Integration tests for ID generation."""
 
     def test_workflow_with_multiple_issues(self) -> None:
-        """Test generating multiple issues with the same title."""
+        """Three same-title issues get three distinct registered hashes."""
         gen = IDGenerator()
         timestamp = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -403,7 +403,7 @@ class TestIDGeneratorIntegration:
         assert all(f"dc-{h}" in gen.existing_ids for h in [hash1, hash2, hash3])
 
     def test_issue_and_dependency_ids_not_colliding(self) -> None:
-        """Test that different ID types don't collide."""
+        """Issue, dependency, and comment IDs are mutually distinct."""
         gen = IDGenerator()
 
         issue_hash = gen.generate_issue_id("Test")

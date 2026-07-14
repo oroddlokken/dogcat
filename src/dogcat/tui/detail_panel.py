@@ -336,7 +336,7 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
         """Compose the detail/edit form (no Header/Footer).
 
         The form is split into row-generators so each region reads on its
-        own; compose() just orders them. (dogcat-271v)
+        own; compose() just orders them.
         """
         ro = self._view_mode
         yield from self._compose_title_bar(ro=ro)

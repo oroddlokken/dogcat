@@ -141,7 +141,6 @@ def _classify_event_type(status_new: str | None, *, is_new: bool) -> str:
 
     Single source for the closed / tombstone / created-or-updated ladder
     that the issue and proposal, new and updated paths each repeated inline.
-    (dogcat-4r3c)
     """
     if status_new == "closed":
         return "closed"
@@ -163,7 +162,7 @@ def _diff_records(
 
     Shared by the issue and proposal paths, which differ only in their
     tracked-field set, the author field names (created_by/proposed_by,
-    updated_by/closed_by), and whether records carry metadata. (dogcat-4r3c)
+    updated_by/closed_by), and whether records carry metadata.
     """
     from dogcat.event_log import EventRecord, diff_metadata
 

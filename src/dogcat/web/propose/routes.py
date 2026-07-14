@@ -70,12 +70,12 @@ def _persist_pinned_namespace(dogcats_dir: str, namespace: str) -> None:
     of being held only in process memory.
 
     Caps the list at :data:`MAX_PINNED_NAMESPACES` so a replay attack on
-    the create-namespace form cannot grow it unbounded. (dogcat-2icd)
+    the create-namespace form cannot grow it unbounded.
 
     Serializes the read-modify-write under the same advisory file lock
     that storage and inbox use, so two concurrent web POSTs creating
-    distinct new namespaces don't lose-update each other (dogcat-436f).
-    The atomic save (dogcat-1s7e) covers the corruption side of the same
+    distinct new namespaces don't lose-update each other.
+    The atomic save covers the corruption side of the same
     race; the lock here covers the lost-update side.
     """
     from pathlib import Path as _Path
@@ -104,7 +104,7 @@ def _persist_pinned_namespace(dogcats_dir: str, namespace: str) -> None:
 # Cookie token shape: secrets.token_urlsafe(32) yields ~43 chars from
 # [A-Za-z0-9_-]; we accept anything that looks like that to reject a
 # client-controlled empty/short cookie pair before reaching the
-# compare_digest step. (dogcat-2icd)
+# compare_digest step.
 _valid_token_re = _re.compile(r"^[A-Za-z0-9_-]{40,128}$")
 
 
@@ -160,6 +160,10 @@ def _origin_is_allowed(request: Request) -> bool:
             site is not None and site not in {"same-origin", "same-site", "none"}
         )
     host = request.headers.get("host", "")
+    # The "//" prefix anchors host to the start of the URL's authority
+    # (right after the scheme's "://"). A bare endswith(host) would let
+    # https://evil-example.com spoof example.com, reopening origin
+    # spoofing on the CSRF check — keep the prefix when simplifying.
     return origin.endswith("//" + host) if host else False
 
 
@@ -264,7 +268,19 @@ def _form_context(
 
 @router.get("/", response_class=HTMLResponse)
 async def propose_form(request: Request) -> HTMLResponse:
-    """Render the proposal submission form."""
+    """Render the proposal submission form (GET ``/``).
+
+    Reads three optional query params: ``submitted`` (``"true"`` shows the
+    post-submit success banner), ``id`` (the proposal whose title the banner
+    echoes — resolved server-side against the inbox, never taken from the
+    query string), and ``namespace`` (pre-selects a namespace when it is one
+    this app already knows). Side effect: mints a fresh single-use CSRF nonce
+    and sets it as the CSRF cookie on the response, so every GET hands out a
+    new token.
+
+    Returns:
+        An ``HTMLResponse`` carrying the rendered form and the CSRF cookie.
+    """
     templates = request.app.state.templates
     namespace = request.app.state.namespace
     submitted = request.query_params.get("submitted") == "true"
@@ -277,7 +293,7 @@ async def propose_form(request: Request) -> HTMLResponse:
     # query-string value, so a crafted ``/?submitted=true&id=...&title=evil``
     # URL cannot reflect attacker-controlled text into dogcat's brand
     # chrome. We only display the banner when the id resolves to a real
-    # proposal in this app's inbox. (dogcat-khb5)
+    # proposal in this app's inbox.
     proposal_title: str | None = None
     proposal_id: str | None = None
     if submitted and proposal_id_param:
@@ -297,7 +313,6 @@ async def propose_form(request: Request) -> HTMLResponse:
 
     # Always mint a fresh single-use nonce per GET. Reusing the previous
     # cookie value is unsafe because it would extend the replay window.
-    # (dogcat-2icd)
     csrf_token = _issue_nonce(request)
     response = templates.TemplateResponse(
         request,
@@ -323,13 +338,35 @@ async def submit_proposal(
     description: str = Form(""),
     csrf_token: str = Form(""),
 ) -> HTMLResponse | RedirectResponse:
-    """Handle proposal form submission via InboxStorage."""
+    """Handle proposal form submission via InboxStorage (POST ``/``).
+
+    Enforces the CSRF defense layers (cookie/form token equality, a
+    single-use server-issued nonce, and an Origin / Sec-Fetch-Site check),
+    validates the fields, then persists the proposal off-thread.
+
+    Two response shapes:
+
+    - **200** — an ``HTMLResponse`` re-rendering the form with an error
+      message on any CSRF or validation failure (bad token, missing or
+      oversize title, invalid or oversize namespace, or a failed write).
+    - **303** — a ``RedirectResponse`` (POST-redirect-GET) to
+      ``/?submitted=true&id=...`` after a successful write.
+
+    Side effects: every response path sets a fresh single-use CSRF cookie; a
+    successful submit for a not-yet-known namespace appends it to the
+    in-process namespace list and pins it to disk (rolled back if the pin
+    write fails).
+
+    Returns:
+        ``HTMLResponse`` (200, error re-render) or ``RedirectResponse``
+        (303, success).
+    """
     import hmac
 
     templates = request.app.state.templates
 
     cookie_token = request.cookies.get(CSRF_COOKIE_NAME, "")
-    # Defense layers (dogcat-2icd):
+    # Defense layers:
     # 1. Cookie + form token must be present, well-shaped, and equal.
     # 2. The token must be a server-issued nonce — single-use within
     #    CSRF_NONCE_TTL_SECONDS — so a captured pair cannot be replayed.
@@ -359,7 +396,7 @@ async def submit_proposal(
 
     # On a successful CSRF check, mint a fresh nonce so the next form
     # submit gets a new single-use token. The previous nonce was consumed
-    # by ``_consume_nonce`` above. (dogcat-2icd)
+    # by ``_consume_nonce`` above.
     session_token = _issue_nonce(request)
 
     def _render_error(message: str) -> HTMLResponse:
@@ -388,7 +425,10 @@ async def submit_proposal(
     # pay NFKC over the full payload, and get the body reflected back in
     # the error template (2x bandwidth amplification). Replace with a
     # placeholder so _render_error does not echo a multi-MB string.
-    # (dogcat-1tbd)
+    # The 4x multiplier is generous pre-normalization headroom: NFKC can
+    # collapse several raw codepoints into one, so allow up to 4x the final
+    # cap before this cheap length reject; the real MAX_NAMESPACE_LEN check
+    # runs after normalization below.
     if len(namespace) > MAX_NAMESPACE_LEN * 4:
         # The form context echoes ``namespace`` back into the rendered
         # page — clamp the value before that happens.
@@ -401,7 +441,7 @@ async def submit_proposal(
     namespace = _normalize_namespace(namespace)
     if not _is_valid_namespace(namespace):
         # On rejection, do not echo the (possibly attacker-controlled)
-        # namespace value back into the form. (dogcat-1tbd)
+        # namespace value back into the form.
         namespace = ""
         return _render_error(
             "Namespace must be 1-64 ASCII letters, digits, '-' or '_'."
@@ -440,7 +480,6 @@ async def submit_proposal(
                 # be invisible to the persisted pin layer for the rest of
                 # the process lifetime, vanishing on restart while
                 # silently passing the in-process validity check.
-                # (dogcat-30jb)
                 if namespace in valid_namespaces:
                     valid_namespaces.remove(namespace)
                 raise

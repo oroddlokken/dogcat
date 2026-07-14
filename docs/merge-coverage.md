@@ -10,14 +10,14 @@ The source of truth for claims is the module docstring at the top of
 row here. Rows marked **gap** must link to an open issue tracking the
 missing coverage.
 
-## Issues (LWW by `updated_at`)
+## Issues (LWW by status finality, then `updated_at`)
 
 | Claim | Test(s) | Status |
 | --- | --- | --- |
 | Idempotent: merging a record set with itself returns the same set | `tests/test_merge_properties.py::TestMergeIdempotency::test_issue_idempotency` | green |
 | Deterministic: fixed `ours`/`theirs` produce the same result | `tests/test_merge_driver.py::TestMergeJSONL::test_same_issue_latest_wins` | green |
 | Convergent across argument order (effectively-CRDT) | `tests/test_merge_properties.py::TestMergeConvergence::test_issue_convergence` | green |
-| Monotonic in `updated_at`: later edit wins, never resurrected | `tests/test_merge_properties.py::TestMergeMonotonicityUpdatedAt::test_updated_at_monotonic_wins_later`, `test_updated_at_monotonic_ours_wins_later` | green |
+| Monotonic within a status rank: later edit wins, never resurrected (cross-rank finality covered by the two rows below) | `tests/test_merge_properties.py::TestMergeMonotonicityUpdatedAt::test_updated_at_monotonic_wins_later`, `test_updated_at_monotonic_ours_wins_later` | green |
 | Issue tombstone is preserved even when the other side has a later open edit | `tests/test_merge_driver.py::test_issue_tombstone_wins_over_later_open_edit` | green |
 | Issue `closed` wins over a later `open` edit on the other side | `tests/test_merge_driver.py::test_issue_closed_wins_over_later_open_edit` | green |
 | Same status → falls back to `updated_at` | `tests/test_merge_driver.py::test_issue_same_status_falls_back_to_updated_at` | green |
@@ -64,6 +64,7 @@ missing coverage.
 | No data loss for additive edits (issues) | `tests/test_merge_properties.py::TestNoDataLossForAdditive::test_additive_issue_preserved` | green |
 | No data loss for additive edits (proposals) | `tests/test_merge_properties.py::TestNoDataLossForAdditive::test_additive_proposal_preserved` | green |
 | Deletes win against silence (issues) | `tests/test_merge_properties.py::TestDeletionWinsOverSilence::test_delete_issue_wins_over_no_op` | green |
+| Last-line-wins is bounded by base: concurrent dep/link adds and deletes resolve via the three-way comparison, not by timestamp | `tests/test_merge_driver.py::test_dep_deleted_by_theirs_stays_deleted`, `tests/test_merge_properties.py::TestReAddWinsOverDelete::test_readd_issue_wins_over_stale_delete` | green (transitive — dep/link records have no timestamp tiebreak path) |
 | Empty inputs handled cleanly | `tests/test_merge_driver.py::test_empty_inputs`, `tests/test_merge_edge_cases.py` | green |
 | Mixed record types in one merge invocation | `tests/test_merge_driver.py::test_mixed_records`, `test_mixed_record_types_resolve` | green |
 
@@ -96,8 +97,8 @@ missing coverage.
 | Fresh clone without merge driver: `dcat git check` names fix | `tests/test_git_clones.py::TestFreshCloneWithoutMergeDriver` | green |
 | `git stash` / `pop` / `apply` with pending .dogcats changes | `tests/test_git_stash.py` | green |
 | `git bisect`: detached HEAD and rapid checkouts | `tests/test_git_bisect.py` | green |
-| Linked worktree scenarios | `tests/test_git_worktrees.py` | partial — `test_worktree_branch_isolation` does not actually exercise worktrees; tracked under dogcat-row5 |
-| Inbox proposal merge edge cases (local) | `tests/test_inbox_merge.py` | partial — accept/reject scenarios from dogcat-4xu9 require a configured remote inbox; covered as local close/delete/create instead, see dogcat-2832 notes |
+| Linked worktree scenarios | `tests/test_git_worktrees.py::TestLinkedWorktrees::test_worktree_main_and_branch_share_dogcats`, `test_worktree_detached_head` | green |
+| Inbox proposal merge edge cases (local) | `tests/test_inbox_merge.py` | green — local close/delete/create merge paths; accept/reject need a configured remote inbox and are out of scope here (covered by `tests/test_cmd_inbox.py`, `tests/test_merge_driver.py`) |
 
 ## Maintaining this doc
 

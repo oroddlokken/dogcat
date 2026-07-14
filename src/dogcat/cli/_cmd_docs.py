@@ -55,11 +55,16 @@ _GIT_GUIDE_TEXT = """\
 
 ── Merge Semantics & Field-Level Conflicts ────────────────────────────────
 
-  The merge driver uses Last-Writer-Wins (LWW) by updated_at timestamp:
+  The merge driver uses Last-Writer-Wins (LWW), resolved by status
+  finality first and then the updated_at timestamp:
 
-  • Issues: The entire record with the latest timestamp wins. This means
-    if branch A edits the title and branch B edits the priority (with a
-    later timestamp), B's entire record wins and A's title edit is lost.
+  • Issues: LWW by status finality (draft < active < closed < tombstone),
+    then by updated_at. A more final status wins first, so an older close
+    or tombstone is never reverted by a newer concurrent edit that left
+    the issue active. Within the same status, the entire record with the
+    latest timestamp wins: if branch A edits the title and branch B edits
+    the priority (with a later timestamp), B's entire record wins and A's
+    title edit is lost.
 
   • Proposals: LWW by status finality (open < closed < tombstone), then
     by updated_at. Once closed/tombstoned, it cannot be reverted.
@@ -151,7 +156,7 @@ def _run_git_checks() -> tuple[bool, dict[str, HealthCheck]]:
 
     Shared logic used by both ``dcat git check`` and ``dcat prime --opinionated``.
     Returns typed :class:`HealthCheck` rows so every renderer reads them by
-    attribute (pyright-checked) instead of untyped string keys. (dogcat-483i)
+    attribute (pyright-checked) instead of untyped string keys.
     """
     checks: dict[str, HealthCheck] = {}
     all_passed = True
@@ -907,7 +912,7 @@ def register(app: typer.Typer) -> None:
 
         # In global-fallback mode the store and namespace are invisible
         # from the filesystem; name them so agents know where issues go
-        # and how to opt out. (dogcat-mbk1)
+        # and how to opt out.
         from dogcat.global_config import was_resolved_via_global
 
         global_mode_section = ""
@@ -1178,6 +1183,9 @@ def _prime_flags_path(dogcats_dir: str) -> Path:
     import hashlib
     import os
 
+    # 12 hex chars (48 bits) of the path digest keeps per-project cache keys
+    # collision-free on one machine while keeping the filename short. This is
+    # a cache key, not a security token, so the full digest is unnecessary.
     project_key = hashlib.sha256(str(Path(dogcats_dir).resolve()).encode()).hexdigest()[
         :12
     ]

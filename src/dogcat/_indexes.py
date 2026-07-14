@@ -55,7 +55,7 @@ def rebuild_indexes(
     Args:
         issues: ``(full_id, parent)`` pairs — only these two fields feed the
             indexes, and taking pairs instead of Issue objects lets the
-            store's lazy map (dogcat-4g8d) rebuild without materializing
+            store's lazy map rebuild without materializing
             every record (see ``LazyIssueMap.iter_id_parent``).
         dependencies: Current dependency edges.
         links: Current link edges.

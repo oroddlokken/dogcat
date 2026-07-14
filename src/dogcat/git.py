@@ -24,7 +24,7 @@ def _c_locale_env() -> dict[str, str]:
 
     Forces git to emit C-locale stdout/stderr so substring checks ("not
     a git repository", "fatal: ...") match regardless of the user's
-    locale. (dogcat-4tl1)
+    locale.
     """
     return {**os.environ, "LC_ALL": "C", "LANG": "C"}
 
@@ -32,7 +32,7 @@ def _c_locale_env() -> dict[str, str]:
 # Default timeout (seconds) for every ``git`` subprocess. Without a
 # timeout, a stalled NFS ``$HOME``, a dead credential helper, or a
 # broken LFS smudge wedges every dcat invocation indefinitely. Override
-# via ``DCAT_GIT_TIMEOUT_SECS`` for slow networks. (dogcat-1uq7)
+# via ``DCAT_GIT_TIMEOUT_SECS`` for slow networks.
 _GIT_TIMEOUT_DEFAULT = 10.0
 
 
@@ -61,7 +61,7 @@ def _run(
     distinguish "no repo" from real failures. The call is bounded by
     :func:`_git_timeout` (default 10 s, overridable via
     ``DCAT_GIT_TIMEOUT_SECS``); on TimeoutExpired we return None like a
-    missing binary so callers degrade gracefully. (dogcat-1uq7)
+    missing binary so callers degrade gracefully.
     """
     env = _c_locale_env()
     timeout = _git_timeout()

@@ -5,7 +5,7 @@ Pure functions that translate domain objects (:class:`~dogcat.models.Dependency`
 archive-membership decision for a single raw JSONL line. Extracted from
 :class:`~dogcat.storage.JSONLStorage` so the god class shrinks toward cohesive
 units and the serialization / classification rules live in one place and are
-independently testable. (dogcat-4cza, continues dogcat-5bk9)
+independently testable.
 
 Issue serialization already lives in :func:`dogcat.models.issue_to_dict` /
 :func:`dogcat.models.dict_to_issue`; this module covers the dependency and link
@@ -135,7 +135,7 @@ def classify_archived_line(
     Unparseable JSON, or a parseable-but-malformed record missing an expected
     key (e.g. a link row without ``from_id``, or an issue without ``id``), is
     kept in the source partition rather than raising — a single bad row must
-    not abort the whole archive under the lock. (dogcat-4258)
+    not abort the whole archive under the lock.
     """
     try:
         data = orjson.loads(stripped)

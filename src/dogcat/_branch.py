@@ -3,7 +3,7 @@
 Storage avoids auto-compacting on feature branches (it would create noisy
 diffs). Deciding whether the working tree is on a default branch is a
 self-contained responsibility extracted from ``JSONLStorage`` so the god
-class shrinks toward cohesive units. (dogcat-5bk9)
+class shrinks toward cohesive units.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ def known_default_branches(dogcats_dir: Path) -> frozenset[str]:
         # init.defaultBranch is per-repo and writable by any collaborator.
         # If it points to a non-conventional name, log a one-line warning so
         # the user notices before a noisy compaction lands on a feature
-        # branch. (dogcat-2wys)
+        # branch.
         if configured not in DEFAULT_BRANCH_NAMES:
             logging.getLogger(__name__).warning(
                 "init.defaultBranch=%r is not a conventional default "
@@ -59,11 +59,16 @@ def is_default_branch(dogcats_dir: Path) -> bool:
     The known-default-branch set is :data:`DEFAULT_BRANCH_NAMES` plus the
     user's ``init.defaultBranch`` git config when set.
     """
+    # Kept inline here (not via dogcat.git.current_branch) because the
+    # storage path needs the stderr to distinguish "no repo" (safe) from
+    # "permission denied" (not safe); the git module's helper collapses both
+    # to None.
+    #
     # Force the C locale so stderr text matches the literal English match
     # below. Under non-English LC_ALL git emits localized strings and the
     # substring check would fail, disabling auto-compaction silently.
-    # (dogcat-4tl1). Time-bound the call so a stalled HOME / credential
-    # helper / LFS smudge cannot wedge dcat indefinitely. (dogcat-1uq7)
+    # Time-bound the call so a stalled HOME / credential helper / LFS smudge
+    # cannot wedge dcat indefinitely.
     try:
         from dogcat.git import _c_locale_env, _git_timeout
 
@@ -94,7 +99,3 @@ def is_default_branch(dogcats_dir: Path) -> bool:
         result.stderr.strip() if result.stderr else "<no stderr>",
     )
     return False
-    # NOTE: kept inline here (not via dogcat.git.current_branch) because the
-    # storage path needs the stderr to distinguish "no repo" (safe) from
-    # "permission denied" (not safe). The git module's helper collapses both
-    # to None.

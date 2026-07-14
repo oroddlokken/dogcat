@@ -113,7 +113,7 @@ def _make_alias(
     # annotations as bare strings, and for options declared via Annotated
     # aliases (cli/_list_options) the ``typer.Option`` metadata lives in the
     # annotation — so Typer would lose the custom flags/help and regenerate a
-    # default ``--param-name`` option. (dogcat-5bhv)
+    # default ``--param-name`` option.
     sig = inspect.signature(source_fn, eval_str=True)
     new_params = [p for name, p in sig.parameters.items() if name not in exclude_params]
 
@@ -141,7 +141,7 @@ def _make_alias(
     # string annotation against ``_helpers``' globals — missing names imported
     # only into the source command's module (e.g. the shared ``_list_options``
     # option aliases). Resolving here, in the source function's own module,
-    # yields concrete annotation objects that need no further lookup. (dogcat-5bhv)
+    # yields concrete annotation objects that need no further lookup.
     resolved_hints = get_type_hints(source_fn, include_extras=True)
     wrapper.__annotations__ = {
         name: ann for name, ann in resolved_hints.items() if name not in exclude_params
@@ -237,7 +237,6 @@ def walkup_find_store(start_dir: str | None = None) -> str | None:
     (git toplevel by default, or ``$HOME``) to prevent a planted
     ``/tmp/.dogcatrc`` from silently re-rooting commands. Set
     ``DCAT_RC_WALKUP_UNRESTRICTED=1`` to fall back to legacy behavior.
-    (dogcat-4107)
 
     Unlike :func:`find_dogcats_dir` this applies no fallback: it returns
     None when the walk exhausts without finding a store, so callers can
@@ -249,6 +248,13 @@ def walkup_find_store(start_dir: str | None = None) -> str | None:
 
     Returns:
         Path to the store directory, or None if the walk found nothing.
+
+    Raises:
+        SystemExit: With code 1 (after printing to stderr) when a
+            ``.dogcatrc`` encountered on the walk is malformed / unparseable
+            or points at a nonexistent directory. Such a walk terminates the
+            process rather than returning None, so the return type covers
+            only the "walked cleanly" outcomes.
     """
     from dogcat.config import (
         get_rc_walkup_boundary,
@@ -306,6 +312,11 @@ def find_dogcats_dir(start_dir: str | None = None) -> str:
 
     Returns:
         Path to .dogcats directory, or ".dogcats" if not found
+
+    Raises:
+        SystemExit: Propagated from :func:`walkup_find_store` when a
+            ``.dogcatrc`` on the walk is malformed or points at a
+            nonexistent directory.
     """
     found = walkup_find_store(start_dir)
     if found is not None:
@@ -407,7 +418,7 @@ def resolve_limit(
 
     ``limit_arg or limit_opt`` (the previous pattern) treats ``0`` as
     falsy, silently skipping truncation, and lets ``-1`` slip through to
-    ``issues[:-1]`` which drops the last item. (dogcat-26a4)
+    ``issues[:-1]`` which drops the last item.
     """
     value = limit_arg if limit_arg is not None else limit_opt
     if value is None:
@@ -520,7 +531,6 @@ def parse_duration(value: str) -> datetime:
     # but ISO parsing must use the original-case string because
     # ``datetime.fromisoformat`` only accepts uppercase ``Z``. Without
     # this, ``dcat snooze 2026-04-25T00:00:00Z`` was rejected.
-    # (dogcat-3x9q)
     match = re.fullmatch(r"(\d+)([dwmDWM])", stripped)
     if match:
         amount = int(match.group(1))
@@ -531,7 +541,7 @@ def parse_duration(value: str) -> datetime:
             days = amount * 7
         else:  # unit == "m"
             days = amount * 30
-        # Cap snooze duration at ~100 years (dogcat-dfn9): a typo
+        # Cap snooze duration at ~100 years: a typo
         # like 999999999999d would otherwise OverflowError inside
         # timedelta, and a far-future snooze permanently orphans the
         # issue from list views.
@@ -556,7 +566,7 @@ def parse_duration(value: str) -> datetime:
             # Use the local zoneinfo (DST-aware) rather than the fixed
             # offset of ``datetime.now()``: a snooze a few months out
             # would otherwise stamp the wrong offset across a DST
-            # transition. (dogcat-3x9q)
+            # transition.
             try:
                 from zoneinfo import ZoneInfo
 
@@ -643,7 +653,7 @@ class ParsedCreateArgs(NamedTuple):
     """Positional create-args parsed into title + optional shorthands.
 
     A NamedTuple so existing ``title, priority, ... = _parse_args_for_create``
-    unpacking still works while giving the fields names. (dogcat-3s3h)
+    unpacking still works while giving the fields names.
     """
 
     title: str

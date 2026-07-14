@@ -35,7 +35,7 @@ def _filtered_inbox_proposals(
     """Load inbox proposals for export, applying the namespace filter.
 
     Returns proposal dicts (tombstones included), or ``[]`` when there is no
-    inbox file. Extracted from the export command body. (dogcat-2ix3)
+    inbox file. Extracted from the export command body.
     """
     from dogcat.inbox import InboxStorage
     from dogcat.models import proposal_to_dict

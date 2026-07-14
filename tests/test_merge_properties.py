@@ -14,9 +14,7 @@ from hypothesis import strategies as st
 
 from dogcat.merge_driver import merge_jsonl
 
-# ============================================================================
 # Strategies for generating record types
-# ============================================================================
 
 
 def _issue_record(**kwargs: Any) -> dict[str, Any]:
@@ -109,9 +107,7 @@ def unique_event_list_strategy(draw: Any) -> list[dict[str, Any]]:
     return events
 
 
-# ============================================================================
 # Helper functions
-# ============================================================================
 
 
 def _records_equal(rec1: dict[str, Any], rec2: dict[str, Any]) -> bool:
@@ -169,9 +165,7 @@ def _get_proposal_by_id(
     return None
 
 
-# ============================================================================
 # Property tests for invariants
-# ============================================================================
 
 
 class TestMergeIdempotency:

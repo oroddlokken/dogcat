@@ -5,7 +5,7 @@ namespace filtering, and orphan reparenting were implemented once for
 ``dcat list`` and then re-implemented inline in the TUI dashboard. When one
 copy changed, the two surfaces could silently show different issue sets.
 This module is the single source of truth consumed by both (and, later, the
-web UI). (dogcat-1bxq)
+web UI).
 """
 
 from __future__ import annotations

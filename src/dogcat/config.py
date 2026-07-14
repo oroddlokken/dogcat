@@ -51,7 +51,7 @@ def parse_dogcatrc(rc_path: str | Path) -> Path:
 
     Raises:
         ValueError: If the file is empty / unreadable / contains a
-            control byte or embedded newline. (dogcat-2o1f)
+            control byte or embedded newline.
             ``OSError`` from ``read_text`` is wrapped here so callers
             don't need to catch both exception types — the rc file
             being unreadable should surface as a clear "cannot read
@@ -99,7 +99,7 @@ def get_rc_walkup_boundary(start: Path | None = None) -> Path | None:
     their own home directory.
 
     Set ``DCAT_RC_WALKUP_UNRESTRICTED=1`` to opt back into the legacy
-    "walk to filesystem root" behavior. (dogcat-4107)
+    "walk to filesystem root" behavior.
     """
     import os
     import subprocess
@@ -114,6 +114,10 @@ def get_rc_walkup_boundary(start: Path | None = None) -> Path | None:
             check=False,
             capture_output=True,
             text=True,
+            # Tighter than the 10s _git_timeout() default (dogcat.git):
+            # this rev-parse bounds the .dogcatrc walkup on the CLI startup
+            # hot path, so a hung git must not stall every command. Kept
+            # inline rather than routed through git._run.
             timeout=5,
         )
         if result.returncode == 0:
@@ -208,7 +212,7 @@ def get_local_config_path(dogcats_dir: str) -> Path:
 # Keys whose value MUST be a list of strings. A scalar string here
 # would silently iterate per-character ("frontend" → {'f','r','o','n',
 # 't','e','d'}), which the rename-namespace path turns into a hard
-# crash and the visibility filter into a stealthy bug. (dogcat-4o1p)
+# crash and the visibility filter into a stealthy bug.
 _LIST_OF_STR_CONFIG_KEYS = (
     "visible_namespaces",
     "hidden_namespaces",
@@ -218,7 +222,7 @@ _LIST_OF_STR_CONFIG_KEYS = (
 _STR_CONFIG_KEYS = ("namespace", "issue_prefix", "inbox_remote")
 # Keys whose value MUST be a bool. A string here ("false" / "no" /
 # "0") would be truthy under ``bool(...)`` and silently flip a
-# security-sensitive toggle. (dogcat-22t5)
+# security-sensitive toggle.
 _BOOL_CONFIG_KEYS = ("allow_creating_namespaces", "git_tracking")
 
 # Every config key the runtime reads, in a stable order. Drives the typed
@@ -238,7 +242,7 @@ class DogcatConfig:
 
     Known keys are exposed as attributes; any other key a newer dcat (or a
     hand-edit) wrote is preserved verbatim in :attr:`extra` so a
-    load -> mutate -> save round-trip never drops it. (dogcat-4qyv)
+    load -> mutate -> save round-trip never drops it.
 
     The mapping dunders (``__getitem__`` etc.) back the dynamic-key
     ``dcat config`` command and dict-unpacking (``{**cfg}``); they route known
@@ -337,7 +341,7 @@ def _validate_config_shape(payload: dict[str, Any], source: str) -> dict[str, An
 
     Coercing here keeps callers (which previously did
     ``list(config.get('pinned_namespaces', []))`` etc.) from silently
-    iterating a wrongly-typed scalar. (dogcat-4o1p)
+    iterating a wrongly-typed scalar.
     """
     cleaned: dict[str, Any] = dict(payload)
     for key in _LIST_OF_STR_CONFIG_KEYS:
@@ -442,7 +446,7 @@ def _find_rc_parent() -> Path | None:
 
     The walk is bounded by :func:`get_rc_walkup_boundary` (git toplevel
     or ``$HOME``) so we don't trust an arbitrary ancestor like
-    ``/tmp/.dogcatrc`` planted by another user. (dogcat-4107)
+    ``/tmp/.dogcatrc`` planted by another user.
 
     Returns:
         The parent directory containing .dogcatrc, or None if not found.
@@ -545,7 +549,7 @@ def atomic_write_toml(path: Path, payload: dict[str, Any]) -> None:
     truncated config that ``_load_toml`` silently treats as ``{}`` —
     every configured setting (namespace, visible_namespaces, etc.)
     is lost without a signal. The pattern mirrors
-    ``_atomic_write_json`` in :mod:`dogcat.cli._cmd_doctor`. (dogcat-1s7e)
+    ``_atomic_write_json`` in :mod:`dogcat.cli._cmd_doctor`.
     Also used by :mod:`dogcat.global_config` for the user-global file.
     """
     import os
@@ -793,11 +797,9 @@ def extract_namespace(issue_id: str) -> str | None:
     return issue_id[:last_hyphen] if last_hyphen > 0 else None
 
 
-# ---------------------------------------------------------------------------
 # Deprecated aliases — the canonical names are the ``*_namespace`` helpers
 # above. These shims keep the old ``*_prefix`` names importable for one
 # release for any out-of-tree callers; remove them the release after.
-# (dogcat-38gk)
 get_issue_prefix = get_namespace
 set_issue_prefix = set_namespace
 extract_prefix = extract_namespace

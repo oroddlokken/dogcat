@@ -95,7 +95,7 @@ def parse_version(version: str | None) -> VersionTuple | None:
 
     Cached: :func:`find_newest_record_version` calls this once per loaded
     record, but a store rarely holds more than a handful of distinct
-    ``dcat_version`` strings (dogcat-3nkp).
+    ``dcat_version`` strings.
     """
     if not version:
         return None

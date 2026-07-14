@@ -12,21 +12,28 @@ Merge algebra
 The merger is a state-based three-way merge per record kind. It is
 *effectively* a CRDT — the same set of concurrent edits produces the
 same merged state regardless of which side is labeled "ours" — but
-the guarantees are informal, not formally verified. The invariants
-below describe what callers can rely on.
+the guarantees are informal: formal model-checking is out of scope, so
+the invariants below are what callers can rely on, backed by the test
+suite (``tests/test_merge.py``, ``tests/test_merge_driver.py``).
 
-**Issues** (LWW by ``updated_at``)
+**Issues** (LWW by status finality, then ``updated_at``)
 
+- Status order: ``draft < open/in_progress/in_review/blocked/deferred <
+  closed < tombstone``. A more final status wins over ``updated_at`` so a
+  concurrent edit that left the issue active on one branch cannot
+  silently revert a ``closed`` or ``tombstone`` from the other. The five
+  active statuses share one rank.
 - *Idempotent*: merging a record set with itself returns the same set.
 - *Deterministic*: for fixed ``ours`` and ``theirs`` arguments the
   result is fully determined — ours is iterated first, theirs second,
-  and ``new_ts >= old_ts`` is the wins rule, so on equal timestamps
-  theirs wins. Argument order matters because git always assigns
-  ours/theirs unambiguously per merge invocation; both sides of a
+  and within a status rank ``new_ts >= old_ts`` is the wins rule, so on
+  equal timestamps theirs wins. Argument order matters because git always
+  assigns ours/theirs unambiguously per merge invocation; both sides of a
   ``git merge`` invoking this driver see the same labels.
-- *Monotonic in updated_at*: a later edit to a given issue can only
-  ever be replaced by an even later edit; older versions never
-  resurrect.
+- *Monotonic within a rank*: among edits at the same finality a later
+  edit can only ever be replaced by an even later edit; older versions
+  never resurrect. Across ranks a more final status always wins,
+  regardless of ``updated_at``.
 
 **Proposals** (LWW by status finality, then ``updated_at``)
 
@@ -81,17 +88,11 @@ order. For each key (identity tuple) in the union of base, ours, and theirs:
 
 **Scope notes**
 
-- Issue/proposal merge is whole-record LWW: two concurrent edits to
-  *different* fields of the same record keep only the side with the
-  newer ``updated_at``. Per-field merging would require either
-  per-field timestamps on every issue record (schema-breaking change
-  affecting every reader) or deriving state from the event log (a
-  different merge algorithm entirely). Both sit outside the scope of
-  documenting the existing algebra (issue 5dzc) and would themselves
-  be tracked as separate features if/when concurrent same-issue
-  edits become common enough to matter — the post-merge concurrent-
-  edit detector (``dcat doctor --post-merge``) surfaces this case
-  today so it's visible rather than silent.
+- Issue/proposal merge is whole-record LWW: concurrent edits to
+  *different* fields of one record keep only the newer-``updated_at``
+  side and drop the other. Per-field merging is out of scope (it would
+  need per-field timestamps or event-log-derived state); ``dcat doctor
+  --post-merge`` surfaces the dropped edit so the loss is visible.
 - *Octopus merges are not supported.* Git's octopus strategy
   (``git merge a b c``) bypasses per-file merge drivers when any
   branch produces a content conflict and aborts with "Should not be
@@ -103,11 +104,6 @@ order. For each key (identity tuple) in the union of base, ours, and theirs:
   correctness. The remaining fields (``created_at``, ``created_by``)
   are audit metadata; collapsing two concurrent ``add`` ops with the
   same identity to one record is the intended behavior, not a defect.
-- Formal verification with a model checker is explicitly out of scope
-  per issue 5dzc ("at minimum the invariants that hold across
-  concurrent edits — even if not formally verified"). The invariants
-  above are exercised by the test suite in ``tests/test_merge.py``
-  and ``tests/test_merge_driver.py``.
 """
 
 from __future__ import annotations
@@ -264,7 +260,7 @@ def _parse_iso_ts(value: str) -> datetime:
     by string but earlier in absolute time), and ``Z`` vs ``+00:00`` for
     the same instant compare unequal. We parse the ISO string, treat
     naive timestamps as UTC, and normalize to UTC for comparison so the
-    LWW rule reflects absolute time. (dogcat-623e)
+    LWW rule reflects absolute time.
 
     Returns ``_MIN_AWARE`` for unparseable / empty strings so older or
     legacy records always lose any tie-break against a parseable peer.
@@ -306,8 +302,8 @@ _PROPOSAL_STATUS_RANK: dict[str, int] = {
 
 
 # Issue statuses ordered by finality. tombstone is final because a deletion
-# must never be reverted by a concurrent edit on a feature branch (see
-# dogcat-mro6). closed is "final-ish" — branches can still reopen, but a
+# must never be reverted by a concurrent edit on a feature branch. closed is
+# "final-ish" — branches can still reopen, but a
 # concurrent edit that left the issue OPEN should not silently overwrite
 # a CLOSED record from the other side.
 _ISSUE_STATUS_RANK: dict[str, int] = {
@@ -390,7 +386,7 @@ def _merge_issues_lww(
     Status finality (TOMBSTONE > CLOSED > active states > DRAFT) wins over
     ``updated_at`` so a concurrent edit on one branch cannot silently revert
     a tombstone or close from the other branch. Within the same rank, the
-    record with the later ``updated_at`` wins. (dogcat-mro6)
+    record with the later ``updated_at`` wins.
     """
     issues: dict[str, dict[str, Any]] = {}
     for record in [*ours_records, *theirs_records]:
@@ -534,7 +530,7 @@ def merge_jsonl(
 
     # Assemble: issues, proposals, deps, links, events (matches compaction order).
     # Events are sorted by absolute time so cross-timezone records come out in
-    # the right order. (dogcat-623e)
+    # the right order.
     result: list[dict[str, Any]] = []
     result.extend(issues.values())
     result.extend(proposals.values())

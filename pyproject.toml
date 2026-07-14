@@ -147,15 +147,6 @@ reportUnusedFunction = "none"   # Vulture handles this
 deprecateTypingAliases = true
 # basedpyright rules:
 reportUnreachable = true
-# reportIgnoreCommentWithoutRule = true
-# reportPrivateLocalImportUsage = true
-# reportImplicitRelativeImport = true
-# reportInvalidCast = true
-# reportUnsafeMultipleInheritance = true
-# reportUnusedParameter = true
-#reportImplicitAbstractClass = true
-# reportIncompatibleUnannotatedOverride = true
-# reportInvalidAbstractMethod = true
 
 [tool.djlint]
 ignore = "H023,H030,H031,J018"

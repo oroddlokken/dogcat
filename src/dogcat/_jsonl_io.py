@@ -39,7 +39,7 @@ def atomic_rewrite_jsonl(
     # tempfile rename doesn't silently demote a 0644-shared file to
     # 0600 (NamedTemporaryFile's default mode). Without this, a shared
     # .dogcats becomes inaccessible to everyone except the writer
-    # after the first compaction. (dogcat-1cfd)
+    # after the first compaction.
     target_mode: int | None = None
     try:
         if target.exists():

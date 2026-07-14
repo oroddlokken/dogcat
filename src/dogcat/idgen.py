@@ -142,9 +142,7 @@ def cumulative_collision_probability(issue_count: int, length: int) -> float:
 
 def _base36_encode(data: bytes) -> str:
     """Encode bytes as base36 (0-9, a-z)."""
-    # Convert bytes to int
     num = int.from_bytes(data, byteorder="big")
-    # Convert to base36
     if num == 0:
         return "0"
 
@@ -171,14 +169,10 @@ def generate_hash_id(
     Returns:
         Hash string (just the hash portion, no prefix)
     """
-    # Combine input_data with nonce
     combined = input_data + nonce
-    # Hash using SHA256
     hash_obj = hashlib.sha256(combined.encode())
     hash_bytes = hash_obj.digest()
-    # Encode as base36
     hash_str = _base36_encode(hash_bytes)
-    # Take first 'length' characters
     return hash_str[:length]
 
 
@@ -270,9 +264,8 @@ class IDGenerator:
         """Record an existing ID for collision detection.
 
         Incremental-registration counterpart to the ``existing_ids``
-        constructor arg; exercised by tests, no production caller today —
-        kept as the public way to register an id after construction
-        (dogcat-jh04).
+        constructor arg — the public way to register an id after
+        construction.
         """
         self.existing_ids.add(issue_id)
 
@@ -335,7 +328,9 @@ class IDGenerator:
                 self.existing_ids.add(full_id)
                 return candidate_hash
 
-        # If standard length fails, try longer ID (length + 2)
+        # If standard length fails, try longer ID (length + 2). Two extra
+        # base36 chars widen the keyspace 36**2 = 1296x, so even a saturated
+        # standard-length space yields a collision-free ID on this fallback.
         fallback_length = length + 2
         candidate_hash = generate_hash_id(
             input_data,

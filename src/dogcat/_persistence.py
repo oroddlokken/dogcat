@@ -11,7 +11,6 @@ Extracted from the ``_write`` closure formerly nested inside
 :meth:`dogcat.storage.JSONLStorage._save_locked` so the ~85-line rewrite body
 is a module-level free function taking explicit state — independently testable
 without constructing a storage instance or holding the file lock.
-(dogcat-63tf, continues dogcat-4cza / dogcat-5bk9)
 """
 
 from __future__ import annotations
@@ -73,7 +72,7 @@ def compact_snapshot(
     # Reuse the canonical record serializers so a new persisted
     # dependency/link field only has to be added in one place —
     # missing this copy would silently drop the field on every
-    # compaction rewrite. (dogcat-e252)
+    # compaction rewrite.
     for dep in dependencies:
         out.write(orjson.dumps(dependency_to_record(dep)))
         out.write(b"\n")
@@ -104,7 +103,7 @@ def _preserve_events(
 
     Applies the prune/rename filters and tolerates malformed lines the same
     way ``_load`` does: a corrupt last line that ``_load`` skipped (setting
-    ``_needs_compaction``) must not crash the next rewrite (dogcat-5tix), so
+    ``_needs_compaction``) must not crash the next rewrite, so
     the same exception set + non-dict guard is caught and the line skipped.
     """
     if not source.exists():

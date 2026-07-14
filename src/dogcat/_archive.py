@@ -1,7 +1,6 @@
 """Archive eligibility and partitioning for the issues store.
 
-Extracted from :class:`~dogcat.storage.JSONLStorage` (dogcat-27nu, continues
-dogcat-4cza which already pulled out the pure ``classify_archived_line``).
+Extracted from :class:`~dogcat.storage.JSONLStorage`.
 :func:`partition_archivable` is the ~90-line decision over the candidate set; it
 reads the issue graph through the :class:`ArchiveQueries` protocol (satisfied by
 ``JSONLStorage``) so it can be exercised against a lightweight fake with no real
@@ -45,10 +44,12 @@ def partition_archivable(
 ) -> ArchivePartition:
     """Split ``candidates`` into archivable issues and skipped-with-reason.
 
-    An issue is archivable iff it has no open children, no parent staying
-    behind, no dependencies / dependents / links / incoming links pointing
-    outside the candidate set. ``candidates`` is treated as the set under
-    consideration — a dependency on another candidate is not a blocker.
+    An issue is archivable iff it has no non-closed children (any child not
+    in status ``closed`` blocks — deferred, blocked, draft and tombstone
+    included), no parent staying behind, no dependencies / dependents /
+    links / incoming links pointing outside the candidate set.
+    ``candidates`` is treated as the set under consideration — a dependency
+    on another candidate is not a blocker.
     """
     candidate_ids = {i.full_id for i in candidates}
     archivable: list[Issue] = []

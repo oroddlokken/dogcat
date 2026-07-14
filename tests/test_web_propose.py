@@ -1145,6 +1145,32 @@ class TestBodySizeLimit:
         )
         assert resp.status_code == 413
 
+    def test_413_carries_security_headers(self, client: TestClient) -> None:
+        """413 rejections still ship the standard security headers.
+
+        Regression for dogcat-izo0: SecurityHeadersMiddleware must be the
+        outermost layer so the body-size guard's 413 — returned without
+        calling downstream — is still stamped with the headers. Covers both
+        the Content-Length fast path and the streamed real-body path.
+        """
+        from dogcat.web.propose import MAX_REQUEST_BODY_BYTES
+
+        fast = client.post(
+            "/",
+            content=b"x",
+            headers={"Content-Length": str(10 * 1024 * 1024 * 1024)},
+        )
+        slow = client.post(
+            "/",
+            content=b"a" * (MAX_REQUEST_BODY_BYTES + 1),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        for resp in (fast, slow):
+            assert resp.status_code == 413
+            assert resp.headers.get("X-Content-Type-Options") == "nosniff"
+            assert resp.headers.get("X-Frame-Options") == "DENY"
+            assert resp.headers.get("Content-Security-Policy")
+
     def test_normal_form_post_still_succeeds(self, client: TestClient) -> None:
         """A small, valid form POST passes the body-size check."""
         token = _csrf(client)

@@ -149,7 +149,7 @@ class InboxStorage(EventEmitterMixin):
         Exception semantics: a raise inside the ``with`` block still
         flushes the buffered records in ``finally`` — the contract
         matches :meth:`JSONLStorage.batch` (best-effort save, not
-        all-or-nothing rollback). (dogcat-29nz)
+        all-or-nothing rollback).
         """
         if self._batch_records is not None:
             yield
@@ -210,10 +210,10 @@ class InboxStorage(EventEmitterMixin):
         """Serialize a proposal to a dict for appending."""
         return proposal_to_dict(proposal)
 
-    # -- Event emission helpers ------------------------------------------
+    # Event emission helpers
 
     # _emit_event / _build_event_record / _append_with_event are provided by
-    # EventEmitterMixin (dogcat._events), shared with JSONLStorage (dogcat-m5e6).
+    # EventEmitterMixin (dogcat._events), shared with JSONLStorage.
 
     @staticmethod
     def _tracked_changes(
@@ -283,6 +283,18 @@ class InboxStorage(EventEmitterMixin):
         Encapsulates the namespace + IDGenerator + Proposal-construction
         pattern that the propose CLI, the web propose endpoint, and the
         demo all reimplemented separately.
+
+        Every parameter maps onto the :class:`~dogcat.models.Proposal` field
+        of the same name (``namespace`` defaults to ``DEFAULT_NAMESPACE``).
+        The generated ID is minted in the ``<namespace>-inbox`` ID space, so
+        proposal IDs never collide with issue IDs in the same namespace.
+
+        Returns:
+            The created and persisted proposal.
+
+        Raises:
+            ValueError: Propagated from :meth:`create` when the generated ID
+                already exists or the built proposal fails validation.
         """
         from dogcat.idgen import IDGenerator
 
@@ -389,7 +401,7 @@ class InboxStorage(EventEmitterMixin):
         # Tombstone is final — closing a tombstoned proposal would
         # silently overwrite its forensics (deleted_at/deleted_by) with
         # closed_at/closed_by and resurrect it from list() filters.
-        # Mirrors the JSONLStorage.close guard. (dogcat-5o1m)
+        # Mirrors the JSONLStorage.close guard.
         if proposal.status == ProposalStatus.TOMBSTONE:
             msg = (
                 f"Cannot close tombstoned proposal {proposal.full_id!r}: "

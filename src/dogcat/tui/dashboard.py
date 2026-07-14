@@ -261,7 +261,7 @@ class DogcatTUI(App[None]):
         from dogcat.issue_queries import default_visible_issues, reparent_orphans
 
         # Shared with `dcat list`: hide terminal + snoozed, apply namespace
-        # filter, then root orphaned children. (dogcat-1bxq)
+        # filter, then root orphaned children.
         ns_filter = get_namespace_filter(str(self._storage.dogcats_dir))
         issues = default_visible_issues(self._storage, ns_filter=ns_filter)
 

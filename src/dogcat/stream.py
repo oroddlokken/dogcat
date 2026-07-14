@@ -24,7 +24,12 @@ from dogcat.storage import JSONLStorage
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-# Retry configuration for handling race conditions during file writes
+# Retry configuration for handling race conditions during file writes.
+# Three attempts with a 50ms gap (~100ms worst-case added latency across the
+# two inter-attempt sleeps): transient contention from another process mid
+# write/rename almost always clears within a retry or two, and 50ms is long
+# enough for a competing write to finish yet short enough to stay
+# imperceptible.
 _RETRY_ATTEMPTS = 3
 _RETRY_DELAY_MS = 50  # milliseconds between retries
 

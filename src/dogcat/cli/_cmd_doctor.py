@@ -594,7 +594,7 @@ def register(app: typer.Typer) -> None:
 
         # Surface the skip reason loudly — the previous silent ``pass``
         # made --post-merge appear to succeed cleanly even when no
-        # detection ran at all. (dogcat-40t6)
+        # detection ran at all.
         if post_merge_skip_reason and not is_json():
             typer.echo(post_merge_skip_reason, err=True)
 
@@ -762,7 +762,7 @@ def _render_doctor_text(
 
 @dataclass
 class IdDistributionRow:
-    """One namespace's ID-collision statistics row. (dogcat-3s3h).
+    """One namespace's ID-collision statistics row.
 
     ``length`` is the ID length the generator would currently use for a
     database of that size; ``p_step`` is the per-generation collision
@@ -851,7 +851,7 @@ def _check_precompact_hook(claude_dir: Path) -> str:
             continue
         # Tolerate non-dict settings.json (``[]``, ``null``, scalar)
         # — doctor IS the recovery tool, so it must not crash on a
-        # malformed user file. (dogcat-2yho)
+        # malformed user file.
         if not isinstance(data_raw, dict):
             continue
         data: dict[str, Any] = cast("dict[str, Any]", data_raw)
@@ -897,7 +897,7 @@ def _install_precompact_hook(claude_dir: Path) -> None:
     except (OSError, orjson.JSONDecodeError):
         data_raw = {}
     # Replace a non-dict file with an empty dict so the install path
-    # produces a well-formed file. (dogcat-2yho)
+    # produces a well-formed file.
     data: dict[str, Any] = (
         cast("dict[str, Any]", data_raw) if isinstance(data_raw, dict) else {}
     )

@@ -8,6 +8,10 @@ storage class.
 from __future__ import annotations
 
 # Compact when appended lines exceed this fraction of the base file size.
+# 0.5 caps between-compaction growth at ~1.5x the compacted size: a lower
+# ratio rewrites the whole file more often (write amplification), a higher
+# ratio lets it grow larger before reclaiming (more disk, slower loads).
+# 0.5 is the midpoint balancing those two costs.
 COMPACTION_RATIO = 0.5
 # Minimum base size before ratio-based compaction kicks in. Files smaller
 # than this skip compaction entirely; the cost of rewriting outweighs the

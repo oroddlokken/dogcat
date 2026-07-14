@@ -30,7 +30,7 @@ Always ask these as separate questions — the user may want to update the issue
 
 ## Data files
 
-`.dogcats/issues.jsonl` is the append-only JSONL store for all issue data. It contains three record types: `issue` (the issues themselves), `dependency` (blocks/depends-on relationships between issues), and `event` (audit log entries recording every change). The file is loaded by `JSONLStorage` in `src/dogcat/storage.py`.
+`.dogcats/issues.jsonl` is the append-only JSONL store for all issue data. It contains four record types: `issue` (the issues themselves), `dependency` (blocks/depends-on relationships between issues), `link` (non-blocking related-to links between issues), and `event` (audit log entries recording every change). The file is loaded by `JSONLStorage` in `src/dogcat/storage.py`.
 
 `.dogcats/inbox.jsonl` is the append-only JSONL store for proposals — lightweight suggestions submitted from the web UI (or other sources) that haven't been triaged into full issues yet. Each `proposal` record has its own lifecycle (`open` → `closed`/`tombstone`). Managed by `src/dogcat/inbox.py`.
 

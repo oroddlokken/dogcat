@@ -67,7 +67,7 @@ def register(app: typer.Typer) -> None:
         # python-multipart / fastapi prints the same friendly install
         # hint as a missing uvicorn. Without this, a partial install
         # would either leak a raw ModuleNotFoundError or start the
-        # server and 500 on every POST. (dogcat-5n9q)
+        # server and 500 on every POST.
         import importlib
 
         missing: list[str] = []
@@ -106,7 +106,7 @@ def register(app: typer.Typer) -> None:
         # Use ``is True`` so a stray string in config.toml ("false"/"no"/"0")
         # cannot silently flip this on. The config loader also validates
         # the type and drops non-bools, but defending here makes the
-        # intent explicit. (dogcat-22t5)
+        # intent explicit.
         if allow_creating_namespaces is None:
             config = load_config(resolved_dir)
             resolved_allow = config.allow_creating_namespaces is True
@@ -125,7 +125,7 @@ def register(app: typer.Typer) -> None:
                 "every network interface. The CSRF + nonce defenses cap "
                 "abuse but do not authenticate the submitter — bind to "
                 "127.0.0.1 unless you intentionally want a multi-host "
-                "endpoint. (dogcat-2icd)",
+                "endpoint.",
                 err=True,
             )
 

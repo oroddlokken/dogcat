@@ -102,7 +102,7 @@ class ChartSeries:
     """One grouping dimension's chart data (counts + display metadata).
 
     Replaces the unlabeled 5-tuple ``_chart_data`` used to return, which was
-    unpacked positionally at two call sites. (dogcat-3s3h)
+    unpacked positionally at two call sites.
     """
 
     counts: dict[str, int]

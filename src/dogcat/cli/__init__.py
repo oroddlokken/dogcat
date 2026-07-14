@@ -58,7 +58,7 @@ def _global_options(
 # Python ABI, etc.) doesn't collapse the whole CLI — including the
 # diagnostic commands like ``dcat doctor`` users would reach for to
 # investigate. Failures are logged with the module name and the rest
-# of the CLI continues to work. (dogcat-1ge7)
+# of the CLI continues to work.
 import importlib  # noqa: E402
 import logging  # noqa: E402
 

@@ -73,9 +73,7 @@ class ArchiveStats:
     archive_path: Path
 
 
-# ---------------------------------------------------------------------------
-# Per-field coercion table for JSONLStorage.update() (dogcat-2ix3)
-# ---------------------------------------------------------------------------
+# Per-field coercion table for JSONLStorage.update()
 def _coerce_priority(key: str, value: Any) -> Any:
     # bool is an int subclass — exclude it so True/False don't slip through.
     if isinstance(value, bool) or not isinstance(value, int):
@@ -190,7 +188,7 @@ class JSONLStorage(EventEmitterMixin):
         self.path = Path(path)
         self.dogcats_dir = self.path.parent
         # Lazy map: raw record dicts materialize to Issue on first access
-        # (dogcat-4g8d), so ID-targeted commands don't construct the whole
+        # , so ID-targeted commands don't construct the whole
         # store. Records are validated at load; see _parse_issue_record.
         self._issues: LazyIssueMap = LazyIssueMap()
         self._dependencies: list[Dependency] = []
@@ -213,10 +211,8 @@ class JSONLStorage(EventEmitterMixin):
         self._default_branch_cache: bool | None = None
 
         if create_dir:
-            # Create .dogcats directory if it doesn't exist (used by init)
             self.dogcats_dir.mkdir(parents=True, exist_ok=True)
         elif not self.dogcats_dir.exists():
-            # Fail if directory doesn't exist and create_dir is False
             msg = (
                 f"Directory '{self.dogcats_dir}' does not exist. "
                 f"Run 'dcat init' first to initialize the repository."
@@ -289,7 +285,7 @@ class JSONLStorage(EventEmitterMixin):
 
             # Fast path: event records are read lazily by EventLog and only
             # skipped here, yet they make up half or more of a mature store's
-            # lines — don't pay orjson for them (dogcat-4mfq). The endswith
+            # lines — don't pay orjson for them. The endswith
             # guard keeps a truncated event line (crash mid-append) on the
             # slow path so it still lands in _bad_lines / _needs_compaction.
             # Trade-offs: event lines written with a different key order fall
@@ -351,7 +347,7 @@ class JSONLStorage(EventEmitterMixin):
 
         Validates eagerly — so malformed records still land in
         ``_bad_lines`` at load time via the caller's except clause — but
-        defers Issue construction to first access (dogcat-4g8d).
+        defers Issue construction to first access.
         """
         full_id = precheck_issue_record(data)
         self._issues.set_raw(full_id, data)
@@ -497,7 +493,7 @@ class JSONLStorage(EventEmitterMixin):
         flushing keeps disk consistent with memory rather than dropping
         completed writes that happened before the exception. Callers
         that want all-or-nothing semantics must roll back the in-memory
-        state themselves before re-raising. (dogcat-29nz)
+        state themselves before re-raising.
         """
         if self._batch_records is not None:
             yield
@@ -518,7 +514,7 @@ class JSONLStorage(EventEmitterMixin):
         so a 26-id ``dcat close`` paid for 26 forks. The result can't change
         mid-command (we're not switching branches under our own feet), so we
         memoize it on the instance — fresh storage per CLI invocation. The
-        detection itself lives in :mod:`dogcat._branch`. (dogcat-5bk9)
+        detection itself lives in :mod:`dogcat._branch`.
         """
         if self._default_branch_cache is None:
             from dogcat._branch import is_default_branch
@@ -526,9 +522,9 @@ class JSONLStorage(EventEmitterMixin):
             self._default_branch_cache = is_default_branch(self.dogcats_dir)
         return self._default_branch_cache
 
-    # -- Event emission helpers ------------------------------------------
+    # Event emission helpers
     # _emit_event / _build_event_record / _append_with_event are provided by
-    # EventEmitterMixin (dogcat._events), shared with InboxStorage (dogcat-m5e6).
+    # EventEmitterMixin (dogcat._events), shared with InboxStorage.
 
     def _tracked_changes(
         self,
@@ -612,6 +608,24 @@ class JSONLStorage(EventEmitterMixin):
         TUI detail panel, demo). Callers that need to wire dependencies or
         validate references stay in their own modules — this only owns the
         construction step.
+
+        Every parameter maps onto the :class:`~dogcat.models.Issue` field of
+        the same name; see that class for field semantics and defaults
+        (``status`` defaults to ``OPEN``, ``priority`` to 2 / Medium). Four
+        parameters do more than a plain assignment: ``timestamp`` seeds both
+        the ID generator and the issue's own timestamps, defaulting to now in
+        the local timezone — pass it explicitly for deterministic IDs in
+        tests and imports; ``duplicate_of`` is stored verbatim and is *not*
+        validated to exist here; ``labels`` and ``metadata`` are copied into
+        fresh containers so the caller's list/dict is never aliased onto the
+        persisted issue.
+
+        Returns:
+            The created and persisted issue.
+
+        Raises:
+            ValueError: Propagated from :meth:`create` when the generated ID
+                already exists or the built issue fails validation.
         """
         from dogcat.idgen import IDGenerator
 
@@ -805,12 +819,12 @@ class JSONLStorage(EventEmitterMixin):
         Defense against silent corruption from setattr-with-anything:
         ``priority=True`` would pass ``isinstance(int)`` (bool is int);
         ``labels='bug'`` would iterate as ``{'b','u','g'}`` and break
-        every label filter; ``status=42`` would store an int. (dogcat-3o3b)
+        every label filter; ``status=42`` would store an int.
 
         Table-driven: each key with a special coercer looks up
         ``_UPDATE_COERCERS``; the remaining string-or-none fields share one
         rule; anything else (datetime fields) passes through for the
-        dataclass to validate. (dogcat-2ix3)
+        dataclass to validate.
         """
         coercer = _UPDATE_COERCERS.get(key)
         if coercer is not None:
@@ -836,7 +850,17 @@ class JSONLStorage(EventEmitterMixin):
             The updated issue
 
         Raises:
-            ValueError: If issue doesn't exist or updates contain disallowed fields
+            ValueError: If the issue doesn't exist, or if it is tombstoned
+                and ``updates`` would change its status to anything other
+                than tombstone (tombstones are immutable).
+
+        Note:
+            A plain-dict ``updates`` is not validated for field names here:
+            keys outside ``UPDATABLE_FIELDS`` are silently skipped, so a
+            mistyped field name is dropped rather than raising. Pass an
+            :class:`~dogcat.models.UpdateRequest` to have unknown field
+            names rejected — that check runs at its construction, before
+            this call.
         """
         updates = updates.to_dict() if isinstance(updates, UpdateRequest) else updates
 
@@ -849,7 +873,7 @@ class JSONLStorage(EventEmitterMixin):
         # flips a tombstone back to OPEN with deleted_* still populated.
         # ``dcat reopen`` only handles CLOSED→OPEN, not TOMBSTONE→*. The
         # right path for resurrecting a tombstone is a future explicit
-        # "undelete" command. (dogcat-4g76)
+        # "undelete" command.
         if issue.status == Status.TOMBSTONE and "status" in updates:
             new_status = updates["status"]
             if isinstance(new_status, str):
@@ -880,7 +904,7 @@ class JSONLStorage(EventEmitterMixin):
         # store a wrong-typed value and corrupt downstream code (e.g. a
         # string ``labels`` would iterate as characters in filters; a
         # bool ``priority`` would pass validate_priority because bool is
-        # an int subclass). (dogcat-3o3b)
+        # an int subclass).
         for key, value in updates.items():
             if key not in self.UPDATABLE_FIELDS:
                 continue
@@ -911,7 +935,6 @@ class JSONLStorage(EventEmitterMixin):
                     resolved_id,
                 )
 
-        # Update timestamp
         issue.updated_at = datetime.now().astimezone()
 
         # Re-validate after applying updates so length / namespace / control-char
@@ -991,13 +1014,11 @@ class JSONLStorage(EventEmitterMixin):
                 msg = f"Issue with ID {new_full_id} already exists"
                 raise ValueError(msg)
 
-            # Update the issue itself
             issue.namespace = new_namespace
             issue.updated_at = datetime.now().astimezone()
             if updated_by:
                 issue.updated_by = updated_by
 
-            # Re-key in _issues dict
             del self._issues[old_full_id]
             self._issues[new_full_id] = issue
 
@@ -1141,7 +1162,10 @@ class JSONLStorage(EventEmitterMixin):
             The closed issue
 
         Raises:
-            ValueError: If issue doesn't exist
+            ValueError: If the issue doesn't exist, or if it is tombstoned
+                (a deleted issue cannot be closed; use ``dcat reopen``
+                first). Closing an already-closed issue is idempotent and
+                does not raise.
         """
         resolved_id = self._resolve_or_raise(issue_id)
 
@@ -1149,7 +1173,7 @@ class JSONLStorage(EventEmitterMixin):
         # Refuse to resurrect a tombstoned issue. Without this guard, a
         # ``dcat delete`` followed by ``dcat close`` flips status back to
         # CLOSED but leaves ``deleted_at`` set — see reopen(), which has
-        # always gated on Status.CLOSED. (dogcat-4g76)
+        # always gated on Status.CLOSED.
         if issue.status == Status.TOMBSTONE:
             msg = (
                 f"Issue {issue.full_id} is tombstoned; "
@@ -1253,7 +1277,7 @@ class JSONLStorage(EventEmitterMixin):
         issue = self._issues[resolved_id]
         # Idempotent delete: a second delete on a tombstone is a no-op so
         # the original deleted_at / deleted_reason / deleted_by are not
-        # silently overwritten (forensic record loss). (dogcat-4g76)
+        # silently overwritten (forensic record loss).
         if issue.status == Status.TOMBSTONE:
             return issue
 
@@ -1836,7 +1860,7 @@ def get_namespaces(
                 counts.inbox += 1
         except (OSError, ValueError, RuntimeError):
             # A corrupt/unreadable inbox.jsonl must not silently drop its
-            # namespaces from the counts — surface it. (dogcat-4258)
+            # namespaces from the counts — surface it.
             logging.getLogger(__name__).warning(
                 "Failed to load inbox proposals for namespace counts",
                 exc_info=True,
@@ -1853,7 +1877,7 @@ def get_namespaces(
             ns_counts.setdefault(ns, NamespaceCounts())
     except (OSError, ValueError):
         # A corrupt config.toml must not silently drop pinned namespaces
-        # from the counts — surface it. (dogcat-4258)
+        # from the counts — surface it.
         logging.getLogger(__name__).warning(
             "Failed to load config for pinned namespaces in namespace counts",
             exc_info=True,

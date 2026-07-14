@@ -174,7 +174,7 @@ def register(app: typer.Typer) -> None:
             # Mirror get_namespace_filter: in global-fallback mode with
             # no local lists, global visible_namespaces (plus the derived
             # primary) drives visibility; without it only the derived
-            # primary is visible. (dogcat-mbk1)
+            # primary is visible.
             from dogcat.global_config import (
                 load_global_config,
                 was_resolved_via_global,

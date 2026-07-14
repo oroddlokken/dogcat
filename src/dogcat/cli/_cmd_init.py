@@ -22,7 +22,7 @@ def _warn_if_shadowing_global_store() -> None:
     ``default_storage``; its issues live there. A new local store takes
     precedence for every dcat command in this subtree, so ``dcat list``
     suddenly shows an empty database while the issues stay in the
-    shared store. (dogcat-mbk1)
+    shared store.
     """
     from dogcat.global_config import load_global_config
 
@@ -174,7 +174,7 @@ def register(app: typer.Typer) -> None:
             # resolvers never derive two different namespaces from the same
             # directory (e.g. a non-ASCII name like "Aeroprosjekt"). The
             # inline isalnum()/strip sanitizer skipped NFKD transliteration
-            # and accepted non-ASCII letters. (dogcat-2acd)
+            # and accepted non-ASCII letters.
             project_dir = dogcats_path.resolve().parent
             namespace = slug_from_dir(project_dir.name) or DEFAULT_NAMESPACE
 

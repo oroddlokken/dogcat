@@ -54,7 +54,7 @@ class EventRecord:
 
 # First bytes of every event line orjson-serialized from _serialize below.
 # JSONLStorage._load uses this to skip event records without JSON-parsing
-# them (dogcat-4mfq); "record_type" must therefore stay the FIRST key in
+# them; "record_type" must therefore stay the FIRST key in
 # _serialize. A prefix match on the top-level first key cannot be spoofed
 # by nested content, unlike a substring check.
 EVENT_LINE_PREFIX = b'{"record_type":"event"'
@@ -139,7 +139,7 @@ class _BaseEventLog:
         other append to ``issues.jsonl`` / ``inbox.jsonl``. Without this an
         event could be lost on power loss even after the issue record was
         fsynced, or concatenate onto a corrupt tail as one unparseable
-        line. (dogcat-61rd)
+        line.
         """
         payload = orjson.dumps(_serialize(event)) + b"\n"
         with self._file_lock():
@@ -236,7 +236,7 @@ class _BaseEventLog:
                     continue
                 # Mirror :meth:`JSONLStorage._load`'s tolerance: a single
                 # corrupt line must not crash ``dcat history`` /
-                # ``dcat workflow`` / etc. (dogcat-4s8b)
+                # ``dcat workflow`` / etc.
                 try:
                     raw_data = orjson.loads(line)
                     if not isinstance(raw_data, dict):

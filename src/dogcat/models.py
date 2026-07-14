@@ -96,7 +96,7 @@ _E = TypeVar("_E", bound=Enum)
 
 # value -> member maps, built once per enum class. ``dict_to_issue`` runs
 # _safe_enum for every record in the store, and ``Enum.__call__`` is an
-# order of magnitude slower than a dict hit (dogcat-3nkp).
+# order of magnitude slower than a dict hit.
 _ENUM_VALUE_MAPS: dict[type[Enum], dict[object, Enum]] = {}
 
 
@@ -190,7 +190,6 @@ class Dependency:
         Same field set as the JSONL record but without the storage-only
         ``record_type`` / ``dcat_version`` envelope, so the export path and
         the store never drift on which fields a dependency carries.
-        (dogcat-e252)
         """
         return {
             "issue_id": self.issue_id,
@@ -217,7 +216,7 @@ class Link:
     def to_export_dict(self) -> dict[str, Any]:
         """Serialize to the ``dcat admin export`` shape.
 
-        Mirror of :meth:`Dependency.to_export_dict` for links. (dogcat-e252)
+        Mirror of :meth:`Dependency.to_export_dict` for links.
         """
         return {
             "from_id": self.from_id,
@@ -275,10 +274,8 @@ class Issue:
     def is_duplicate(self) -> bool:
         """Check if this issue is marked as a duplicate.
 
-        Kept for parity with :meth:`is_closed` / :meth:`is_tombstone`; no
-        production caller today (live sites compare ``duplicate_of`` to a
-        specific id rather than test presence), retained as the
-        predicate-family member (dogcat-jh04).
+        Kept for parity with :meth:`is_closed` / :meth:`is_tombstone` as a
+        member of the issue-predicate family.
         """
         return self.duplicate_of is not None
 
@@ -655,7 +652,7 @@ def validate_proposal(proposal: Proposal) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Backward-compatible re-exports (dogcat-4yq2)
+# Backward-compatible re-exports
 # ---------------------------------------------------------------------------
 # The JSONL (de)serialization helpers moved to dogcat.models_serde. Callers
 # still do ``from dogcat.models import issue_to_dict`` (tests also import the

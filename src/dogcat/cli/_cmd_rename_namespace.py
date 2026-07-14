@@ -49,7 +49,7 @@ def register(app: typer.Typer) -> None:
             # In global-fallback mode the "current" namespace is derived
             # from the project root, not the store's config: a rename here
             # would rewrite the shared store's primary namespace and orphan
-            # the renamed issues from this project's derived view. (dogcat-mbk1)
+            # the renamed issues from this project's derived view.
             from dogcat.global_config import was_resolved_via_global
 
             if was_resolved_via_global(actual_dir):

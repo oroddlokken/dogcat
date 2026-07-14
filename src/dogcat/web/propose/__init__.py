@@ -46,17 +46,17 @@ class ProposeAppState:
 
 # Maximum size of the pinned-namespaces list. A namespace-creation form
 # bug or replay attack with --allow-creating-namespaces could otherwise
-# grow this list unbounded. (dogcat-2icd)
+# grow this list unbounded.
 MAX_PINNED_NAMESPACES = 100
 
 # Single-use CSRF nonce TTL. After this window, an issued nonce is
-# rejected even if not yet consumed. (dogcat-2icd)
+# rejected even if not yet consumed.
 CSRF_NONCE_TTL_SECONDS = 600
 
 # Maximum POST body size (bytes) — the form needs only namespace + short
 # title + 50 KB description + the CSRF token, so 256 KiB is a generous
 # cap that still rejects multi-GB blow-ups before python-multipart
-# materializes the body in memory. (dogcat-5zjh)
+# materializes the body in memory.
 MAX_REQUEST_BODY_BYTES = 256 * 1024
 
 
@@ -111,7 +111,7 @@ def create_app(
         redoc_url=None,
         # Disable the schema endpoint too — leaving it on at the
         # default /openapi.json discloses the full route + form-field
-        # schema even when /docs and /redoc are disabled. (dogcat-6a5j)
+        # schema even when /docs and /redoc are disabled.
         openapi_url=None,
     )
 
@@ -149,7 +149,7 @@ def create_app(
     app.state.inbox = state.inbox
     # Server-issued nonces, single-use within CSRF_NONCE_TTL_SECONDS.
     # Maps token (str) → expiry timestamp (float). Submitted POST tokens
-    # must be present here, removed on consumption. (dogcat-2icd)
+    # must be present here, removed on consumption.
     app.state.csrf_nonces = {}
 
     from starlette.middleware.base import BaseHTTPMiddleware
@@ -169,7 +169,6 @@ def create_app(
         before our Form-bound route fields run, so a single 10 GB
         request OOMs the server. Reject early via Content-Length and
         also stream-cap to catch chunked bodies that omit the header.
-        (dogcat-5zjh)
         """
 
         async def dispatch(self, request: Request, call_next: Any) -> Response:
@@ -209,10 +208,14 @@ def create_app(
                 return PlainTextResponse("Payload Too Large", status_code=413)
             return response
 
-    # Order matters: body-size guard runs before security headers so
-    # rejected requests still get the standard headers on their 413.
-    app.add_middleware(SecurityHeadersMiddleware)
+    # Order matters. add_middleware inserts at position 0, so the LAST call
+    # is the outermost layer. SecurityHeadersMiddleware must be outermost:
+    # BodySizeLimitMiddleware returns its own 413 without calling downstream,
+    # so only an outer security-headers pass still stamps that 413 (and every
+    # other response) with the standard headers. Registering it inner would
+    # ship 413s bare.
     app.add_middleware(BodySizeLimitMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
 
     from starlette.staticfiles import StaticFiles
 

@@ -26,7 +26,7 @@ class ValidationError:
     ``validate_*`` helper returns ``list[ValidationError]`` so Pyright
     catches field typos. :meth:`to_dict` serializes to the legacy
     ``{"level": ..., "message": ...}`` shape at the JSON-output boundary
-    (``dcat doctor --json``). (dogcat-3s3h)
+    (``dcat doctor --json``).
     """
 
     level: Literal["error", "warning"]
@@ -263,7 +263,7 @@ def validate_references(
     ``add``/``remove`` ops. Reference checks therefore run on the
     *resolved* state only — a superseded record's parent legitimately goes
     stale when the referenced issue is later pruned or renamed, and the
-    next compaction drops the record entirely (dogcat-5hcu). Event
+    next compaction drops the record entirely. Event
     references stay per-record (events are never superseded) and are
     warnings, not errors.
     """
@@ -352,7 +352,9 @@ def validate_references(
 def validate_jsonl(path: Path) -> list[ValidationError]:
     """Run all validation checks on a JSONL file.
 
-    Returns a list of error/warning dicts with 'level' and 'message' keys.
+    Returns a ``list[ValidationError]`` — access ``.level`` (``"error"`` or
+    ``"warning"``) and ``.message`` as attributes; call ``.to_dict()`` for
+    the legacy ``{"level", "message"}`` JSON shape.
     """
     records, errors = parse_raw_records(path)
 
@@ -411,7 +413,9 @@ def validate_proposal_record(
 def validate_inbox_jsonl(path: Path) -> list[ValidationError]:
     """Run validation checks on an inbox.jsonl file.
 
-    Returns a list of error/warning dicts with 'level' and 'message' keys.
+    Returns a ``list[ValidationError]`` — access ``.level`` (``"error"`` or
+    ``"warning"``) and ``.message`` as attributes; call ``.to_dict()`` for
+    the legacy ``{"level", "message"}`` JSON shape.
     """
     records, errors = parse_raw_records(path)
 
@@ -428,7 +432,7 @@ def _detect_cycles(
     """Detect circular dependencies using iterative DFS.
 
     Iterative — recursive form blew Python's frame limit on a 1001-deep
-    chain (dogcat-1r7h). Uses explicit ``(node, neighbor_iter)`` frames.
+    chain. Uses explicit ``(node, neighbor_iter)`` frames.
     """
     errors: list[ValidationError] = []
     visited: set[str] = set()
@@ -469,9 +473,7 @@ def _detect_cycles(
     return errors
 
 
-# ---------------------------------------------------------------------------
 # Post-merge concurrent edit detection
-# ---------------------------------------------------------------------------
 
 
 def _load_issues_at_ref(
@@ -484,7 +486,7 @@ def _load_issues_at_ref(
     Returns ``None`` when ``git show <ref>:<path>`` fails (missing ref,
     missing path at that ref, permission denied, git unavailable). Callers
     must distinguish this from an empty dict, which legitimately means
-    ``the file existed at that ref and contained no issues``. (dogcat-9wj2)
+    ``the file existed at that ref and contained no issues``.
     """
     import dogcat.git as git_helpers
 
@@ -521,8 +523,15 @@ def detect_concurrent_edits(
 ) -> list[dict[str, Any]]:
     """Detect issues modified on both sides of the latest merge.
 
-    Returns a list of warning dicts describing concurrent edits.
-    Each warning has 'level', 'message', and 'fields' keys.
+    Returns a list of warning dicts. Every warning has ``level`` and
+    ``message``; beyond that there are two shapes:
+
+    - Concurrent-edit warnings also carry ``issue_id`` and ``fields`` (a
+      field-name → per-side diff mapping).
+    - The single ref-load-failure warning carries ``failed_refs`` (a list
+      of ``{role, ref}``) instead of ``fields`` — emitted when the storage
+      file could not be read at base/parent_1/parent_2, meaning detection
+      was skipped rather than clean.
     """
     import dogcat.git as git_helpers
 
@@ -546,7 +555,7 @@ def detect_concurrent_edits(
     # but the storage file couldn't be read (missing path at that ref, git
     # error, permission denied). Returning [] in that case used to look
     # like ``no concurrent edits`` while actually meaning ``we have no
-    # idea`` — surface the integrity gap as a warning instead. (dogcat-9wj2)
+    # idea`` — surface the integrity gap as a warning instead.
     base_issues = _load_issues_at_ref(base, storage_rel, work_dir)
     p1_issues = _load_issues_at_ref(parent1, storage_rel, work_dir)
     p2_issues = _load_issues_at_ref(parent2, storage_rel, work_dir)

@@ -5,7 +5,7 @@ Both the ``dcat doctor`` report and the ``dcat git check`` /
 thing — one named row with a pass/fail state, a fix hint, and optional
 metadata. Sharing :class:`HealthCheck` gives every renderer typed
 attribute access (so pyright catches ``check.passecd`` typos) instead of
-untyped ``dict[str, dict[str, object]]`` string-key lookups. (dogcat-483i)
+untyped ``dict[str, dict[str, object]]`` string-key lookups.
 """
 
 from __future__ import annotations
