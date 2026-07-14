@@ -199,7 +199,7 @@ def register(app: typer.Typer) -> None:
 
         if no_git:
             config = load_shared_config(dogcats_dir)
-            config["git_tracking"] = False
+            config.git_tracking = False
             save_config(dogcats_dir, config)
             typer.echo("✓ Disabled git tracking (git_tracking = false)")
 

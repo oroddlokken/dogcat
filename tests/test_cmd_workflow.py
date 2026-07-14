@@ -1465,20 +1465,23 @@ class TestIncludeInbox:
 
     def test_list_include_inbox_shows_remote_proposals(self, tmp_path: Path) -> None:
         """Test that list --include-inbox shows remote inbox proposals."""
-        from dogcat.config import save_config, save_local_config
+        from dogcat.config import DogcatConfig, save_config, save_local_config
 
         local_dir = tmp_path / "local"
         local_dir.mkdir()
         local_dogcats = local_dir / ".dogcats"
         runner.invoke(app, ["init", "--dogcats-dir", str(local_dogcats)])
-        save_config(str(local_dogcats), {"namespace": "myproj"})
+        save_config(str(local_dogcats), DogcatConfig.from_dict({"namespace": "myproj"}))
 
         remote_dir = tmp_path / "remote"
         remote_dir.mkdir()
         remote_dogcats = remote_dir / ".dogcats"
         runner.invoke(app, ["init", "--dogcats-dir", str(remote_dogcats)])
 
-        save_local_config(str(local_dogcats), {"inbox_remote": str(remote_dir)})
+        save_local_config(
+            str(local_dogcats),
+            DogcatConfig.from_dict({"inbox_remote": str(remote_dir)}),
+        )
 
         # Create a proposal in the remote inbox targeting our namespace
         runner.invoke(
@@ -1505,20 +1508,23 @@ class TestIncludeInbox:
         self, tmp_path: Path
     ) -> None:
         """--include-inbox hides remote proposals from other namespaces."""
-        from dogcat.config import save_config, save_local_config
+        from dogcat.config import DogcatConfig, save_config, save_local_config
 
         local_dir = tmp_path / "local"
         local_dir.mkdir()
         local_dogcats = local_dir / ".dogcats"
         runner.invoke(app, ["init", "--dogcats-dir", str(local_dogcats)])
-        save_config(str(local_dogcats), {"namespace": "myproj"})
+        save_config(str(local_dogcats), DogcatConfig.from_dict({"namespace": "myproj"}))
 
         remote_dir = tmp_path / "remote"
         remote_dir.mkdir()
         remote_dogcats = remote_dir / ".dogcats"
         runner.invoke(app, ["init", "--dogcats-dir", str(remote_dogcats)])
 
-        save_local_config(str(local_dogcats), {"inbox_remote": str(remote_dir)})
+        save_local_config(
+            str(local_dogcats),
+            DogcatConfig.from_dict({"inbox_remote": str(remote_dir)}),
+        )
 
         # Create proposals for different namespaces
         runner.invoke(

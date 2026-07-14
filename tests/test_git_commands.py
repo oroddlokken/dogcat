@@ -233,10 +233,13 @@ class TestGitCheck:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Git check exits cleanly when git_tracking=false."""
-        from dogcat.config import save_config
+        from dogcat.config import DogcatConfig, save_config
 
         monkeypatch.chdir(git_repo.path)
-        save_config(str(git_repo.dogcats_dir), {"git_tracking": False})
+        save_config(
+            str(git_repo.dogcats_dir),
+            DogcatConfig.from_dict({"git_tracking": False}),
+        )
 
         result = runner.invoke(app, ["git", "check"], catch_exceptions=False)
         assert result.exit_code == 0
@@ -248,10 +251,13 @@ class TestGitCheck:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Git check --json returns skipped status when git_tracking=false."""
-        from dogcat.config import save_config
+        from dogcat.config import DogcatConfig, save_config
 
         monkeypatch.chdir(git_repo.path)
-        save_config(str(git_repo.dogcats_dir), {"git_tracking": False})
+        save_config(
+            str(git_repo.dogcats_dir),
+            DogcatConfig.from_dict({"git_tracking": False}),
+        )
 
         result = runner.invoke(
             app,
@@ -549,10 +555,13 @@ class TestPrimeGitHealth:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """When git_tracking=false in config, prime skips git health section."""
-        from dogcat.config import save_config
+        from dogcat.config import DogcatConfig, save_config
 
         monkeypatch.chdir(git_repo.path)
-        save_config(str(git_repo.dogcats_dir), {"git_tracking": False})
+        save_config(
+            str(git_repo.dogcats_dir),
+            DogcatConfig.from_dict({"git_tracking": False}),
+        )
 
         result = runner.invoke(
             app,

@@ -299,6 +299,79 @@ class TestCLICommandAliases:
         assert "Bug issue" in result.stdout
         assert "Feature issue" not in result.stdout
 
+    def test_alias_preserves_short_flag_of_shared_option(self, tmp_path: Path) -> None:
+        """A _make_alias clone keeps the shared option's custom short flag.
+
+        Regression: the list-view filter options are declared once via the
+        shared Annotated aliases in cli/_list_options; the ``typer.Option``
+        metadata (flags, help, completion) lives in the annotation, so the
+        alias cloner must resolve annotations (eval_str) or the ``-t`` short
+        flag is lost and Typer regenerates a plain ``--issue-type``. (dogcat-5bhv)
+        """
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        runner.invoke(
+            app, ["create", "Bug issue", "-t", "bug", "--dogcats-dir", str(dogcats_dir)]
+        )
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Feat issue",
+                "-t",
+                "feature",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        # 'l' is a _make_alias clone of 'list'; -t is the shared option's short flag.
+        result = runner.invoke(
+            app, ["l", "-t", "bug", "--dogcats-dir", str(dogcats_dir)]
+        )
+        assert result.exit_code == 0
+        assert "Bug issue" in result.stdout
+        assert "Feat issue" not in result.stdout
+
+    def test_shared_option_short_flags_on_direct_command(self, tmp_path: Path) -> None:
+        """The workflow list commands expose the shared options' short flags."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        runner.invoke(
+            app,
+            [
+                "create",
+                "P1 bug",
+                "-t",
+                "bug",
+                "-p",
+                "1",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        runner.invoke(
+            app,
+            [
+                "create",
+                "P3 bug",
+                "-t",
+                "bug",
+                "-p",
+                "3",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        # -p is PriorityFilterOpt's short flag; ready is a direct command.
+        result = runner.invoke(
+            app, ["ready", "-p", "1", "--dogcats-dir", str(dogcats_dir)]
+        )
+        assert result.exit_code == 0
+        assert "P1 bug" in result.stdout
+        assert "P3 bug" not in result.stdout
+
     def test_lt_alias_shows_table(self, tmp_path: Path) -> None:
         """Test that 'lt' shows list in table mode."""
         dogcats_dir = tmp_path / ".dogcats"

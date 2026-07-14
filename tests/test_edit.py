@@ -148,7 +148,7 @@ class TestCollapsibleFields:
             await pilot.press("ctrl+s")
 
         storage.update.assert_called_once()
-        updates = storage.update.call_args[0][1]
+        updates = storage.update.call_args[0][1].to_dict()
         assert updates["notes"] == "new notes"
         assert updates["acceptance"] == "new criteria"
         assert updates["design"] == "new design"
@@ -171,7 +171,7 @@ class TestCollapsibleFields:
             await pilot.press("ctrl+s")
 
         storage.update.assert_called_once()
-        updates = storage.update.call_args[0][1]
+        updates = storage.update.call_args[0][1].to_dict()
         assert "notes" not in updates
         assert "acceptance" not in updates
         assert "design" not in updates
@@ -226,7 +226,7 @@ class TestExternalRefField:
             await pilot.press("ctrl+s")
 
         storage.update.assert_called_once()
-        updates = storage.update.call_args[0][1]
+        updates = storage.update.call_args[0][1].to_dict()
         assert updates["external_ref"] == "https://example.com"
 
     @pytest.mark.asyncio
@@ -243,7 +243,7 @@ class TestExternalRefField:
             await pilot.press("ctrl+s")
 
         storage.update.assert_called_once()
-        updates = storage.update.call_args[0][1]
+        updates = storage.update.call_args[0][1].to_dict()
         assert "external_ref" not in updates
 
 
@@ -547,7 +547,7 @@ class TestParentPicker:
             await pilot.press("ctrl+s")
 
         storage.update.assert_called_once()
-        updates = storage.update.call_args[0][1]
+        updates = storage.update.call_args[0][1].to_dict()
         assert updates["parent"] == "dc-par1"
 
     @pytest.mark.asyncio
@@ -567,7 +567,7 @@ class TestParentPicker:
             await pilot.press("ctrl+s")
 
         storage.update.assert_called_once()
-        updates = storage.update.call_args[0][1]
+        updates = storage.update.call_args[0][1].to_dict()
         assert updates["parent"] is None
 
     @pytest.mark.asyncio
@@ -628,7 +628,7 @@ class TestParentPicker:
             await pilot.press("ctrl+s")
 
         storage.update.assert_called_once()
-        updates = storage.update.call_args[0][1]
+        updates = storage.update.call_args[0][1].to_dict()
         assert "parent" not in updates
 
 
@@ -794,7 +794,7 @@ class TestManualCheckboxToggle:
             await pilot.press("ctrl+s")
 
         storage.update.assert_called_once()
-        updates = storage.update.call_args[0][1]
+        updates = storage.update.call_args[0][1].to_dict()
         assert "metadata" in updates
         assert updates["metadata"]["manual"] is True
 
@@ -814,7 +814,7 @@ class TestManualCheckboxToggle:
             await pilot.press("ctrl+s")
 
         storage.update.assert_called_once()
-        updates = storage.update.call_args[0][1]
+        updates = storage.update.call_args[0][1].to_dict()
         assert "metadata" in updates
         assert "manual" not in updates["metadata"]
 

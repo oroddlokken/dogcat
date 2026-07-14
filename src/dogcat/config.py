@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import logging
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
 import orjson
 
@@ -220,6 +221,116 @@ _STR_CONFIG_KEYS = ("namespace", "issue_prefix", "inbox_remote")
 # security-sensitive toggle. (dogcat-22t5)
 _BOOL_CONFIG_KEYS = ("allow_creating_namespaces", "git_tracking")
 
+# Every config key the runtime reads, in a stable order. Drives the typed
+# DogcatConfig fields below; anything outside this set is forward-compat data
+# preserved verbatim in ``DogcatConfig.extra``.
+_KNOWN_CONFIG_KEYS: tuple[str, ...] = (
+    *_STR_CONFIG_KEYS,
+    *_BOOL_CONFIG_KEYS,
+    *_LIST_OF_STR_CONFIG_KEYS,
+    "disable_legend_colors",
+)
+
+
+@dataclass
+class DogcatConfig:
+    """Typed view of a merged dogcat config with forward-compat passthrough.
+
+    Known keys are exposed as attributes; any other key a newer dcat (or a
+    hand-edit) wrote is preserved verbatim in :attr:`extra` so a
+    load -> mutate -> save round-trip never drops it. (dogcat-4qyv)
+
+    The mapping dunders (``__getitem__`` etc.) back the dynamic-key
+    ``dcat config`` command and dict-unpacking (``{**cfg}``); they route known
+    keys to their attribute and everything else to :attr:`extra`. A key whose
+    attribute is ``None`` is treated as absent — so ``to_dict`` never writes a
+    defaulted key the user did not set, and ``key in cfg`` matches the old
+    dict semantics.
+    """
+
+    namespace: str | None = None
+    issue_prefix: str | None = None
+    inbox_remote: str | None = None
+    allow_creating_namespaces: bool | None = None
+    git_tracking: bool | None = None
+    visible_namespaces: list[str] | None = None
+    hidden_namespaces: list[str] | None = None
+    pinned_namespaces: list[str] | None = None
+    disable_legend_colors: bool | None = None
+    extra: dict[str, Any] = field(default_factory=dict[str, Any])
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DogcatConfig:
+        """Build from a raw config dict, routing unknown keys to :attr:`extra`."""
+        known: dict[str, Any] = {}
+        extra: dict[str, Any] = {}
+        for key, value in data.items():
+            if key in _KNOWN_CONFIG_KEYS:
+                known[key] = value
+            else:
+                extra[key] = value
+        return cls(**known, extra=extra)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize back to a plain dict, emitting only keys that are set.
+
+        A known key whose attribute is ``None`` is omitted so writing back
+        never adds a defaulted key to the user's TOML; unknown keys in
+        :attr:`extra` are preserved.
+        """
+        result: dict[str, Any] = {}
+        for key in _KNOWN_CONFIG_KEYS:
+            value = getattr(self, key)
+            if value is not None:
+                result[key] = value
+        result.update(self.extra)
+        return result
+
+    def __getitem__(self, key: str) -> Any:
+        if key in _KNOWN_CONFIG_KEYS:
+            value = getattr(self, key)
+            if value is None:
+                raise KeyError(key)
+            return value
+        return self.extra[key]
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        if key in _KNOWN_CONFIG_KEYS:
+            setattr(self, key, value)
+        else:
+            self.extra[key] = value
+
+    def __delitem__(self, key: str) -> None:
+        if key in _KNOWN_CONFIG_KEYS:
+            if getattr(self, key) is None:
+                raise KeyError(key)
+            setattr(self, key, None)
+        else:
+            del self.extra[key]
+
+    def __contains__(self, key: str) -> bool:
+        if key in _KNOWN_CONFIG_KEYS:
+            return getattr(self, key) is not None
+        return key in self.extra
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Dict-style read used by dynamic-key callers; prefer attributes."""
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def keys(self) -> list[str]:
+        """Set keys, for ``{**cfg}`` unpacking and the config command."""
+        return list(self.to_dict().keys())
+
+    def items(self) -> list[tuple[str, Any]]:
+        """Set (key, value) pairs, for the config command."""
+        return list(self.to_dict().items())
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.to_dict())
+
 
 def _validate_config_shape(payload: dict[str, Any], source: str) -> dict[str, Any]:
     """Drop shape-violating values from a config dict, logging each drop.
@@ -366,7 +477,7 @@ def _get_repo_local_config_path() -> Path | None:
     return rc_parent / DOGCATS_DIR_NAME / LOCAL_CONFIG_FILENAME
 
 
-def load_config(dogcats_dir: str) -> dict[str, Any]:
+def load_config(dogcats_dir: str) -> DogcatConfig:
     """Load configuration from .dogcats/config.toml, merged with config.local.toml.
 
     Values in config.local.toml override those in config.toml (shallow merge).
@@ -377,7 +488,7 @@ def load_config(dogcats_dir: str) -> dict[str, Any]:
         dogcats_dir: Path to .dogcats directory
 
     Returns:
-        Merged configuration dictionary, or empty dict if no config exists
+        Typed :class:`DogcatConfig` (empty when no config exists)
     """
     config = _load_toml(get_config_path(dogcats_dir))
     local = _load_toml(get_local_config_path(dogcats_dir))
@@ -391,10 +502,10 @@ def load_config(dogcats_dir: str) -> dict[str, Any]:
         if repo_local:
             config.update(repo_local)
 
-    return config
+    return DogcatConfig.from_dict(config)
 
 
-def load_shared_config(dogcats_dir: str) -> dict[str, Any]:
+def load_shared_config(dogcats_dir: str) -> DogcatConfig:
     """Load only the shared config.toml (ignoring config.local.toml).
 
     Use this when you need to write back to config.toml without
@@ -404,12 +515,12 @@ def load_shared_config(dogcats_dir: str) -> dict[str, Any]:
         dogcats_dir: Path to .dogcats directory
 
     Returns:
-        Configuration dictionary from config.toml only
+        Typed :class:`DogcatConfig` from config.toml only
     """
-    return _load_toml(get_config_path(dogcats_dir))
+    return DogcatConfig.from_dict(_load_toml(get_config_path(dogcats_dir)))
 
 
-def load_local_config(dogcats_dir: str) -> dict[str, Any]:
+def load_local_config(dogcats_dir: str) -> DogcatConfig:
     """Load the local config.local.toml.
 
     When using .dogcatrc, reads from the repo-local .dogcats/config.local.toml
@@ -419,12 +530,12 @@ def load_local_config(dogcats_dir: str) -> dict[str, Any]:
         dogcats_dir: Path to .dogcats directory
 
     Returns:
-        Configuration dictionary from config.local.toml only
+        Typed :class:`DogcatConfig` from config.local.toml only
     """
     repo_local_path = _get_repo_local_config_path()
     if repo_local_path is not None:
-        return _load_toml(repo_local_path)
-    return _load_toml(get_local_config_path(dogcats_dir))
+        return DogcatConfig.from_dict(_load_toml(repo_local_path))
+    return DogcatConfig.from_dict(_load_toml(get_local_config_path(dogcats_dir)))
 
 
 def atomic_write_toml(path: Path, payload: dict[str, Any]) -> None:
@@ -463,7 +574,7 @@ def atomic_write_toml(path: Path, payload: dict[str, Any]) -> None:
         raise
 
 
-def save_local_config(dogcats_dir: str, config: dict[str, Any]) -> None:
+def save_local_config(dogcats_dir: str, config: DogcatConfig) -> None:
     """Save configuration to config.local.toml.
 
     When using .dogcatrc, saves to the repo-local .dogcats/config.local.toml
@@ -471,24 +582,24 @@ def save_local_config(dogcats_dir: str, config: dict[str, Any]) -> None:
 
     Args:
         dogcats_dir: Path to .dogcats directory
-        config: Configuration dictionary to save
+        config: Configuration to save
     """
     repo_local_path = _get_repo_local_config_path()
     if repo_local_path is not None:
         config_path = repo_local_path
     else:
         config_path = get_local_config_path(dogcats_dir)
-    atomic_write_toml(config_path, config)
+    atomic_write_toml(config_path, config.to_dict())
 
 
-def save_config(dogcats_dir: str, config: dict[str, Any]) -> None:
+def save_config(dogcats_dir: str, config: DogcatConfig) -> None:
     """Save configuration to .dogcats/config.toml.
 
     Args:
         dogcats_dir: Path to .dogcats directory
-        config: Configuration dictionary to save
+        config: Configuration to save
     """
-    atomic_write_toml(get_config_path(dogcats_dir), config)
+    atomic_write_toml(get_config_path(dogcats_dir), config.to_dict())
 
 
 def _resolve_dogcats_path(dogcats_dir: str) -> str:
@@ -571,10 +682,10 @@ def get_namespace(dogcats_dir: str) -> str:
 
     # Try config file ("namespace" key, with "issue_prefix" fallback)
     config = load_config(dogcats_dir)
-    if "namespace" in config:
-        return config["namespace"]
-    if "issue_prefix" in config:
-        return config["issue_prefix"]
+    if config.namespace is not None:
+        return config.namespace
+    if config.issue_prefix is not None:
+        return config.issue_prefix
 
     # Try to auto-detect from existing issues
     prefix = _detect_namespace_from_issues(dogcats_dir)
@@ -597,8 +708,8 @@ def set_namespace(dogcats_dir: str, namespace: str) -> None:
         namespace: Namespace to set
     """
     config = load_shared_config(dogcats_dir)
-    config["namespace"] = namespace
-    config.pop("issue_prefix", None)
+    config.namespace = namespace
+    config.issue_prefix = None
     save_config(dogcats_dir, config)
 
 
@@ -712,8 +823,8 @@ def get_namespace_filter(
         return lambda ns: ns == explicit_namespace
 
     config = load_config(dogcats_dir)
-    visible: list[str] | None = config.get("visible_namespaces")
-    hidden: list[str] | None = config.get("hidden_namespaces")
+    visible = config.visible_namespaces
+    hidden = config.hidden_namespaces
 
     primary = get_namespace(dogcats_dir)
 
@@ -747,7 +858,7 @@ def get_namespace_filter(
     return None
 
 
-def migrate_config_keys(config: dict[str, Any]) -> bool:
+def migrate_config_keys(config: DogcatConfig) -> bool:
     """Rename deprecated config keys to their current names.
 
     Renames ``issue_prefix`` → ``namespace`` in-place.
@@ -756,9 +867,9 @@ def migrate_config_keys(config: dict[str, Any]) -> bool:
         True if any keys were migrated, False otherwise.
     """
     changed = False
-    if "issue_prefix" in config:
-        if "namespace" not in config:
-            config["namespace"] = config["issue_prefix"]
-        del config["issue_prefix"]
+    if config.issue_prefix is not None:
+        if config.namespace is None:
+            config.namespace = config.issue_prefix
+        config.issue_prefix = None
         changed = True
     return changed

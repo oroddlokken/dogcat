@@ -51,7 +51,7 @@ def _get_remote_inbox(dogcats_dir: str) -> tuple[InboxStorage, str] | None:
     dogcats_dir = resolve_dogcats_dir(dogcats_dir)
 
     config = load_config(dogcats_dir)
-    remote_path = config.get("inbox_remote")
+    remote_path = config.inbox_remote
     if not remote_path:
         return None
 

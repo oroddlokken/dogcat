@@ -256,7 +256,7 @@ def register(app: typer.Typer) -> None:
 
         dogcats_dir = find_dogcats_dir()
         config = load_config(dogcats_dir)
-        if config.get("git_tracking") is False:
+        if config.git_tracking is False:
             if is_json():
                 typer.echo(
                     orjson.dumps(
@@ -1113,7 +1113,7 @@ Proposals are lightweight (cross-repo) requests (accept, reject, or ignore).
 
         # Remote inbox section — shown when inbox_remote is configured
         config = load_config(dogcats_dir)
-        inbox_remote = config.get("inbox_remote")
+        inbox_remote = config.inbox_remote
         if inbox_remote:
             remote_section = f"""\
 ## Remote Inbox ({inbox_remote})
@@ -1126,7 +1126,7 @@ Proposals are lightweight (cross-repo) requests (accept, reject, or ignore).
             output_parts.append(remote_section)
 
         # Git health checks — always run unless git_tracking is disabled
-        git_tracking = config.get("git_tracking", True)
+        git_tracking = config.git_tracking if config.git_tracking is not None else True
 
         if git_tracking is not False:
             import dogcat.git as git_helpers

@@ -88,19 +88,19 @@ def register(app: typer.Typer) -> None:
                 config_changed = True
 
             # Update visible_namespaces
-            visible: list[str] | None = config.get("visible_namespaces")
+            visible = config.visible_namespaces
             if visible and old_namespace in visible:
                 visible[visible.index(old_namespace)] = new_namespace
                 config_changed = True
 
             # Update hidden_namespaces
-            hidden: list[str] | None = config.get("hidden_namespaces")
+            hidden = config.hidden_namespaces
             if hidden and old_namespace in hidden:
                 hidden[hidden.index(old_namespace)] = new_namespace
                 config_changed = True
 
             # Update pinned_namespaces
-            pinned: list[str] | None = config.get("pinned_namespaces")
+            pinned = config.pinned_namespaces
             if pinned and old_namespace in pinned:
                 pinned[pinned.index(old_namespace)] = new_namespace
                 config_changed = True

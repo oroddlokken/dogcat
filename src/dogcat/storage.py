@@ -11,8 +11,10 @@ from typing import IO, TYPE_CHECKING, Any, cast
 
 import orjson
 
+from dogcat._archive import ArchivePartition, partition_archivable
 from dogcat._compaction import should_compact
 from dogcat._diff import field_value, tracked_changes
+from dogcat._events import EventEmitterMixin
 from dogcat._id_resolve import resolve_partial_id
 from dogcat._indexes import rebuild_indexes
 from dogcat._jsonl_io import (
@@ -20,10 +22,17 @@ from dogcat._jsonl_io import (
     atomic_rewrite_jsonl,
     split_and_rewrite_jsonl,
 )
+from dogcat._persistence import compact_snapshot
+from dogcat._queries import children_of, dangling_dependencies, filter_issues
+from dogcat._records import (
+    classify_archived_line,
+    dependency_to_record,
+    link_to_record,
+    parse_dependency_record,
+    parse_link_record,
+)
 from dogcat._schema import warn_if_records_from_newer_version
-from dogcat._version import version as _dcat_version
 from dogcat.constants import (
-    DEFAULT_NAMESPACE,
     DOGCATS_DIR_NAME,
     ISSUES_FILENAME,
     LOCK_FILENAME,
@@ -39,6 +48,7 @@ from dogcat.models import (
     Link,
     LinkType,
     Status,
+    UpdateRequest,
     classify_record,
     dict_to_issue,
     issue_to_dict,
@@ -49,14 +59,6 @@ from dogcat.models import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
     from contextlib import AbstractContextManager
-
-
-@dataclasses.dataclass(frozen=True)
-class ArchivePartition:
-    """Result of partitioning candidates into archivable + skipped sets."""
-
-    archivable: list[Issue]
-    skipped: list[tuple[Issue, str]]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -168,7 +170,7 @@ _STRING_OR_NONE_UPDATE_FIELDS: frozenset[str] = frozenset(
 )
 
 
-class JSONLStorage:
+class JSONLStorage(EventEmitterMixin):
     """Manages atomic JSONL storage for issues."""
 
     def __init__(
@@ -273,14 +275,6 @@ class JSONLStorage:
         while lines and not lines[-1].strip():
             lines.pop()
 
-        # Dispatch table for record-type-specific parsers. ``event`` records
-        # are intentionally absent — they're loaded lazily by EventLog.read
-        # and skipped during issue replay.
-        parsers = {
-            "link": self._parse_link_record,
-            "dependency": self._parse_dependency_record,
-        }
-
         for line_idx, raw_line in enumerate(lines):
             line = raw_line.strip()
             if not line:
@@ -296,11 +290,14 @@ class JSONLStorage:
                 data = cast("dict[str, Any]", raw_data)
                 parsed_records.append(data)
                 rtype = classify_record(data)
+                # ``event`` records are loaded lazily by EventLog.read and
+                # skipped during issue replay.
                 if rtype == "event":
                     continue
-                parser = parsers.get(rtype)
-                if parser is not None:
-                    parser(data, link_map=link_map, dep_map=dep_map)
+                if rtype == "link":
+                    parse_link_record(data, link_map)
+                elif rtype == "dependency":
+                    parse_dependency_record(data, dep_map)
                 else:
                     # Default: treat as an issue record (last-write-wins).
                     self._parse_issue_record(data)
@@ -330,54 +327,6 @@ class JSONLStorage:
         # the one currently running — readers ignore unknown fields but new
         # semantics may not be honored. See dogcat._schema.
         warn_if_records_from_newer_version(parsed_records, source=str(self.path))
-
-    @staticmethod
-    def _parse_link_record(
-        data: dict[str, Any],
-        *,
-        link_map: dict[tuple[str, str, str], Link],
-        dep_map: dict[tuple[str, str, str], Dependency],  # noqa: ARG004
-    ) -> None:
-        """Apply one link record (``add`` or ``remove`` op) to the in-memory map."""
-        op = data.get("op", "add")
-        key = (
-            data["from_id"],
-            data["to_id"],
-            data.get("link_type", "relates_to"),
-        )
-        if op == "remove":
-            link_map.pop(key, None)
-            return
-        link_map[key] = Link(
-            from_id=data["from_id"],
-            to_id=data["to_id"],
-            link_type=data.get("link_type", "relates_to"),
-            created_at=datetime.fromisoformat(data["created_at"]),
-            created_by=data.get("created_by"),
-        )
-
-    @staticmethod
-    def _parse_dependency_record(
-        data: dict[str, Any],
-        *,
-        link_map: dict[tuple[str, str, str], Link],  # noqa: ARG004
-        dep_map: dict[tuple[str, str, str], Dependency],
-    ) -> None:
-        """Apply one dependency record (``add`` or ``remove`` op) to the map."""
-        op = data.get("op", "add")
-        key = (data["issue_id"], data["depends_on_id"], data["type"])
-        if op == "remove":
-            dep_map.pop(key, None)
-            return
-        from dogcat.models import _safe_enum
-
-        dep_map[key] = Dependency(
-            issue_id=data["issue_id"],
-            depends_on_id=data["depends_on_id"],
-            dep_type=_safe_enum(DependencyType, data["type"], "dependency.type"),
-            created_at=datetime.fromisoformat(data["created_at"]),
-            created_by=data.get("created_by"),
-        )
 
     def _parse_issue_record(self, data: dict[str, Any]) -> None:
         """Apply one issue record under last-write-wins semantics."""
@@ -452,74 +401,15 @@ class JSONLStorage:
             self._load()
 
         def _write(tmp_file: IO[bytes]) -> int:
-            line_count = 0
-            for issue in self._issues.values():
-                tmp_file.write(orjson.dumps(issue_to_dict(issue)))
-                tmp_file.write(b"\n")
-                line_count += 1
-
-            # Reuse the canonical record serializers so a new persisted
-            # dependency/link field only has to be added in one place —
-            # missing this copy would silently drop the field on every
-            # compaction rewrite. (dogcat-e252)
-            for dep in self._dependencies:
-                tmp_file.write(orjson.dumps(self._dep_record(dep)))
-                tmp_file.write(b"\n")
-                line_count += 1
-
-            for link in self._links:
-                tmp_file.write(orjson.dumps(self._link_record(link)))
-                tmp_file.write(b"\n")
-                line_count += 1
-
-            # Preserve event records from the current file
-            if self.path.exists():
-                with self.path.open("rb") as src:
-                    for line_idx, raw_line in enumerate(src):
-                        raw_line = raw_line.strip()
-                        if not raw_line:
-                            continue
-                        # Match _load's exception tolerance: a corrupt
-                        # last line that _load skipped (setting
-                        # _needs_compaction) must not crash the next
-                        # rewrite (dogcat-5tix). Catch the same exception
-                        # set + non-dict guard.
-                        try:
-                            raw_data = orjson.loads(raw_line)
-                            if not isinstance(raw_data, dict):
-                                msg = (
-                                    f"expected JSON object, got "
-                                    f"{type(raw_data).__name__}"
-                                )
-                                raise TypeError(msg)  # noqa: TRY301
-                            data = cast("dict[str, Any]", raw_data)
-                        except (
-                            orjson.JSONDecodeError,
-                            ValueError,
-                            KeyError,
-                            AttributeError,
-                            TypeError,
-                        ) as e:
-                            logging.getLogger(__name__).warning(
-                                "Skipping malformed line %d in %s during "
-                                "compaction: %s",
-                                line_idx + 1,
-                                self.path,
-                                e,
-                            )
-                            continue
-                        if data.get("record_type") == "event":
-                            eid = data.get("issue_id", "")
-                            if _prune_event_ids and eid in _prune_event_ids:
-                                continue
-                            if _rename_event_ids and eid in _rename_event_ids:
-                                data["issue_id"] = _rename_event_ids[eid]
-                                raw_line = orjson.dumps(data)
-                            tmp_file.write(raw_line)
-                            tmp_file.write(b"\n")
-                            line_count += 1
-
-            return line_count
+            return compact_snapshot(
+                tmp_file,
+                issues=self._issues.values(),
+                dependencies=self._dependencies,
+                links=self._links,
+                source=self.path,
+                prune_event_ids=_prune_event_ids,
+                rename_event_ids=_rename_event_ids,
+            )
 
         line_count = atomic_rewrite_jsonl(self.path, self.dogcats_dir, _write)
         self._base_lines = line_count
@@ -614,72 +504,8 @@ class JSONLStorage:
         return self._default_branch_cache
 
     # -- Event emission helpers ------------------------------------------
-
-    def _emit_event(
-        self,
-        event_type: str,
-        issue: Issue,
-        changes: dict[str, dict[str, Any]],
-        by: str | None = None,
-    ) -> None:
-        """Emit an event to the event log (best-effort)."""
-        self._event_log.try_emit(
-            event_type,
-            issue.full_id,
-            issue.updated_at.isoformat(),
-            issue.title,
-            changes,
-            by=by,
-        )
-
-    def _build_event_record(
-        self,
-        event_type: str,
-        issue: Issue,
-        changes: dict[str, dict[str, Any]],
-        by: str | None = None,
-    ) -> dict[str, Any] | None:
-        """Build the event JSONL dict for a mutation without writing it.
-
-        Returns ``None`` when there are no changes to record, matching the
-        no-op semantics of :meth:`_emit_event`. Used by mutation methods
-        that want to coalesce the issue record + event record into a single
-        locked append, halving file-lock + fsync churn per mutation.
-        """
-        return self._event_log.build_record(
-            event_type,
-            issue.full_id,
-            issue.updated_at.isoformat(),
-            issue.title,
-            changes,
-            by=by,
-        )
-
-    def _append_with_event(
-        self,
-        records: list[dict[str, Any]],
-        event_record: dict[str, Any] | None,
-    ) -> None:
-        """Append data records and (optionally) an event record in one call.
-
-        Equivalent to ``_append(records)`` followed by
-        ``_event_log.try_emit(...)`` but covered by a single file lock and a
-        single fsync — eliminates
-        the write amplification a 26-id ``dcat close`` batch otherwise pays.
-        """
-        if event_record is None:
-            self._append(records)
-            return
-        # Best-effort event record: failures inside _append still raise, but
-        # the event payload is always cheap to serialize, so swallowing it
-        # here would be premature — let the caller's existing exception
-        # handling decide.
-        self._append([*records, event_record])
-
-    @staticmethod
-    def _field_value(value: Any) -> Any:
-        """Normalize a field value for event storage (delegates to _diff)."""
-        return field_value(value)
+    # _emit_event / _build_event_record / _append_with_event are provided by
+    # EventEmitterMixin (dogcat._events), shared with InboxStorage (dogcat-m5e6).
 
     def _tracked_changes(
         self,
@@ -692,43 +518,6 @@ class JSONLStorage:
         return tracked_changes(
             old_values, new_values, TRACKED_FIELDS & frozenset(old_values)
         )
-
-    @staticmethod
-    def _issue_record(issue: Issue) -> dict[str, Any]:
-        """Serialize an issue to a dict for appending."""
-        return issue_to_dict(issue)
-
-    @staticmethod
-    def _dep_record(dep: Dependency, *, op: str = "add") -> dict[str, Any]:
-        """Serialize a dependency to a dict for appending."""
-        d: dict[str, Any] = {
-            "record_type": "dependency",
-            "dcat_version": _dcat_version,
-            "issue_id": dep.issue_id,
-            "depends_on_id": dep.depends_on_id,
-            "type": dep.dep_type.value,
-            "created_at": dep.created_at.isoformat(),
-            "created_by": dep.created_by,
-        }
-        if op != "add":
-            d["op"] = op
-        return d
-
-    @staticmethod
-    def _link_record(link: Link, *, op: str = "add") -> dict[str, Any]:
-        """Serialize a link to a dict for appending."""
-        d: dict[str, Any] = {
-            "record_type": "link",
-            "dcat_version": _dcat_version,
-            "from_id": link.from_id,
-            "to_id": link.to_id,
-            "link_type": link.link_type,
-            "created_at": link.created_at.isoformat(),
-            "created_by": link.created_by,
-        }
-        if op != "add":
-            d["op"] = op
-        return d
 
     def create(self, issue: Issue) -> Issue:
         """Create a new issue.
@@ -762,12 +551,12 @@ class JSONLStorage:
             if value is not None and value != [] and value != "":
                 changes[field_name] = {
                     "old": None,
-                    "new": self._field_value(value),
+                    "new": field_value(value),
                 }
         event_record = self._build_event_record(
             "created", issue, changes, by=issue.created_by
         )
-        self._append_with_event([self._issue_record(issue)], event_record)
+        self._append_with_event([issue_to_dict(issue)], event_record)
 
         return issue
 
@@ -855,7 +644,7 @@ class JSONLStorage:
                 changed = True
             if changed:
                 other.updated_at = now
-                records.append(self._issue_record(other))
+                records.append(issue_to_dict(other))
 
         for dep in self._dependencies:
             changed = False
@@ -866,7 +655,7 @@ class JSONLStorage:
                 dep.depends_on_id = new_full_id
                 changed = True
             if changed:
-                records.append(self._dep_record(dep))
+                records.append(dependency_to_record(dep))
 
         for link in self._links:
             changed = False
@@ -877,7 +666,7 @@ class JSONLStorage:
                 link.to_id = new_full_id
                 changed = True
             if changed:
-                records.append(self._link_record(link))
+                records.append(link_to_record(link))
 
         return records
 
@@ -953,30 +742,7 @@ class JSONLStorage:
             if isinstance(filters, FilterSpec)
             else FilterSpec.from_dict(filters)
         )
-
-        if spec.status is not None:
-            status_filter = (
-                spec.status if isinstance(spec.status, Status) else Status(spec.status)
-            )
-            issues = [i for i in issues if i.status == status_filter]
-
-        if spec.priority is not None:
-            issues = [i for i in issues if i.priority == spec.priority]
-
-        if spec.issue_type is not None:
-            issues = [i for i in issues if i.issue_type.value == spec.issue_type]
-
-        if spec.label is not None:
-            if isinstance(spec.label, list):
-                label_set: set[str] = set(spec.label)
-                issues = [i for i in issues if label_set & set(i.labels)]
-            else:
-                issues = [i for i in issues if spec.label in i.labels]
-
-        if spec.owner is not None:
-            issues = [i for i in issues if i.owner == spec.owner]
-
-        return issues
+        return filter_issues(issues, spec)
 
     # Fields that callers are allowed to modify via update().
     # Internal/identity fields (id, namespace, full_id, created_at, etc.) are excluded.
@@ -1034,12 +800,14 @@ class JSONLStorage:
         # Datetime fields are allowed-through; the dataclass validates.
         return value
 
-    def update(self, issue_id: str, updates: dict[str, Any]) -> Issue:
+    def update(self, issue_id: str, updates: UpdateRequest | dict[str, Any]) -> Issue:
         """Update an issue.
 
         Args:
             issue_id: The ID of the issue to update (supports partial IDs)
-            updates: Dictionary of fields to update
+            updates: Either an :class:`~dogcat.models.UpdateRequest` (typed,
+                preferred — unknown field names are rejected at construction)
+                or a legacy dict of fields to update.
 
         Returns:
             The updated issue
@@ -1047,6 +815,8 @@ class JSONLStorage:
         Raises:
             ValueError: If issue doesn't exist or updates contain disallowed fields
         """
+        updates = updates.to_dict() if isinstance(updates, UpdateRequest) else updates
+
         resolved_id = self._resolve_or_raise(issue_id)
 
         issue = self._issues[resolved_id]
@@ -1138,7 +908,7 @@ class JSONLStorage:
         if "status" in changes and changes["status"]["new"] == "closed":
             event_type = "closed"
         event_record = self._build_event_record(event_type, issue, changes, by=by)
-        self._append_with_event([self._issue_record(issue)], event_record)
+        self._append_with_event([issue_to_dict(issue)], event_record)
 
         return issue
 
@@ -1383,7 +1153,7 @@ class JSONLStorage:
             {"status": {"old": old_status, "new": "closed"}},
             by=closed_by,
         )
-        self._append_with_event([self._issue_record(issue)], event_record)
+        self._append_with_event([issue_to_dict(issue)], event_record)
 
         return issue
 
@@ -1432,7 +1202,7 @@ class JSONLStorage:
         event_record = self._build_event_record(
             "reopened", issue, changes, by=reopened_by
         )
-        self._append_with_event([self._issue_record(issue)], event_record)
+        self._append_with_event([issue_to_dict(issue)], event_record)
 
         return issue
 
@@ -1505,8 +1275,8 @@ class JSONLStorage:
         # write amplification (was issue+deps+links append, then a separate
         # event append).
         records: list[dict[str, Any]] = [issue_to_dict(issue)]
-        records.extend(self._dep_record(d, op="remove") for d in removed_deps)
-        records.extend(self._link_record(lnk, op="remove") for lnk in removed_links)
+        records.extend(dependency_to_record(d, op="remove") for d in removed_deps)
+        records.extend(link_to_record(lnk, op="remove") for lnk in removed_links)
         event_record = self._build_event_record(
             "deleted",
             issue,
@@ -1579,7 +1349,7 @@ class JSONLStorage:
         self._deps_by_depends_on.setdefault(resolved_depends_on_id, []).append(
             dependency,
         )
-        self._append([self._dep_record(dependency)])
+        self._append([dependency_to_record(dependency)])
         return dependency
 
     def remove_dependency(self, issue_id: str, depends_on_id: str) -> None:
@@ -1612,7 +1382,7 @@ class JSONLStorage:
         ]
         self._rebuild_indexes()
         if removed:
-            self._append([self._dep_record(d, op="remove") for d in removed])
+            self._append([dependency_to_record(d, op="remove") for d in removed])
 
     def get_dependencies(self, issue_id: str) -> list[Dependency]:
         """Get all dependencies of an issue.
@@ -1693,7 +1463,7 @@ class JSONLStorage:
         self._links.append(link)
         self._links_by_from.setdefault(resolved_from_id, []).append(link)
         self._links_by_to.setdefault(resolved_to_id, []).append(link)
-        self._append([self._link_record(link)])
+        self._append([link_to_record(link)])
         return link
 
     def remove_link(self, from_id: str, to_id: str) -> None:
@@ -1729,7 +1499,7 @@ class JSONLStorage:
         ]
         self._rebuild_indexes()
         if removed:
-            self._append([self._link_record(lnk, op="remove") for lnk in removed])
+            self._append([link_to_record(lnk, op="remove") for lnk in removed])
 
     def get_links(self, issue_id: str) -> list[Link]:
         """Get all links from an issue.
@@ -1774,11 +1544,7 @@ class JSONLStorage:
             ValueError: If issue doesn't exist
         """
         resolved_id = self._resolve_or_raise(issue_id)
-        return [
-            self._issues[cid]
-            for cid in self._children_by_parent.get(resolved_id, [])
-            if cid in self._issues
-        ]
+        return children_of(self._children_by_parent, self._issues, resolved_id)
 
     def get_issue_ids(self) -> set[str]:
         """Get all issue IDs in storage.
@@ -1798,93 +1564,11 @@ class JSONLStorage:
     def archivable_partition(self, candidates: list[Issue]) -> ArchivePartition:
         """Split ``candidates`` into archivable issues and skipped-with-reason.
 
-        An issue is archivable iff it has no open children, no parent staying
-        behind, no dependencies / dependents / links / incoming links pointing
-        outside the candidate set. ``candidates`` is treated as the set under
-        consideration — a dependency on another candidate is not a blocker.
+        The decision logic lives in :func:`dogcat._archive.partition_archivable`;
+        this store satisfies its :class:`~dogcat._archive.ArchiveQueries` graph
+        protocol, so it just forwards ``self``.
         """
-        candidate_ids = {i.full_id for i in candidates}
-        archivable: list[Issue] = []
-        skipped: list[tuple[Issue, str]] = []
-
-        for issue in candidates:
-            children = self.get_children(issue.full_id)
-            open_children = [c for c in children if c.status != Status.CLOSED]
-            if open_children:
-                skipped.append(
-                    (
-                        issue,
-                        f"has {len(open_children)} open child(ren): "
-                        + ", ".join(c.full_id for c in open_children[:3]),
-                    )
-                )
-                continue
-
-            if issue.parent and issue.parent not in candidate_ids:
-                parent_issue = self.get(issue.parent)
-                parent_status = parent_issue.status.value if parent_issue else "unknown"
-                skipped.append(
-                    (
-                        issue,
-                        f"parent {issue.parent} is not being archived"
-                        f" (status: {parent_status})",
-                    )
-                )
-                continue
-
-            deps = self.get_dependencies(issue.full_id)
-            bad_deps = [d for d in deps if d.depends_on_id not in candidate_ids]
-            if bad_deps:
-                skipped.append(
-                    (
-                        issue,
-                        "depends on non-archived issue(s): "
-                        + ", ".join(d.depends_on_id for d in bad_deps[:3]),
-                    )
-                )
-                continue
-
-            dependents = self.get_dependents(issue.full_id)
-            bad_dependents = [d for d in dependents if d.issue_id not in candidate_ids]
-            if bad_dependents:
-                skipped.append(
-                    (
-                        issue,
-                        "is depended on by non-archived issue(s): "
-                        + ", ".join(d.issue_id for d in bad_dependents[:3]),
-                    )
-                )
-                continue
-
-            links = self.get_links(issue.full_id)
-            bad_links = [link for link in links if link.to_id not in candidate_ids]
-            if bad_links:
-                skipped.append(
-                    (
-                        issue,
-                        "has links to non-archived issue(s): "
-                        + ", ".join(link.to_id for link in bad_links[:3]),
-                    )
-                )
-                continue
-
-            incoming_links = self.get_incoming_links(issue.full_id)
-            bad_incoming = [
-                link for link in incoming_links if link.from_id not in candidate_ids
-            ]
-            if bad_incoming:
-                skipped.append(
-                    (
-                        issue,
-                        "has incoming links from non-archived issue(s): "
-                        + ", ".join(link.from_id for link in bad_incoming[:3]),
-                    )
-                )
-                continue
-
-            archivable.append(issue)
-
-        return ArchivePartition(archivable=archivable, skipped=skipped)
+        return partition_archivable(candidates, self)
 
     def archive(self, archivable_ids: set[str], archive_path: Path) -> ArchiveStats:
         """Move records for ``archivable_ids`` from storage to ``archive_path``.
@@ -1899,51 +1583,13 @@ class JSONLStorage:
 
         def classify(stripped: bytes) -> bool:
             nonlocal dep_count, link_count
-            try:
-                data = orjson.loads(stripped)
-            except orjson.JSONDecodeError:
-                return False
-
-            try:
-                rtype = classify_record(data)
-                if rtype == "link":
-                    result = (
-                        data["from_id"] in archivable_ids
-                        and data["to_id"] in archivable_ids
-                    )
-                    if result:
-                        link_count += 1
-                elif rtype == "dependency":
-                    result = (
-                        data["issue_id"] in archivable_ids
-                        and data["depends_on_id"] in archivable_ids
-                    )
-                    if result:
-                        dep_count += 1
-                elif rtype == "event":
-                    result = data.get("issue_id") in archivable_ids
-                else:
-                    # Issue record — resolve full_id from raw dict
-                    if "namespace" in data:
-                        full_id = f"{data['namespace']}-{data['id']}"
-                    elif "-" in str(data.get("id", "")):
-                        full_id = data["id"]
-                    else:
-                        full_id = f"{DEFAULT_NAMESPACE}-{data['id']}"
-                    result = full_id in archivable_ids
-            except (KeyError, TypeError):
-                # A parseable-but-malformed row (e.g. a record_type: link
-                # missing from_id, or an issue missing id) must not raise
-                # KeyError under the lock and abort the whole archive. Keep
-                # it in the source partition so no data is lost. (dogcat-4258)
-                logging.getLogger(__name__).warning(
-                    "Keeping malformed record during archive "
-                    "(missing expected key): %.200s",
-                    stripped,
-                )
-                return False
-            else:
-                return result
+            decision = classify_archived_line(stripped, archivable_ids)
+            if decision.archive:
+                if decision.record_type == "link":
+                    link_count += 1
+                elif decision.record_type == "dependency":
+                    dep_count += 1
+            return decision.archive
 
         with self._file_lock():
             archive_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2054,11 +1700,7 @@ class JSONLStorage:
             List of dependencies where either issue_id or depends_on_id
             is not in storage.
         """
-        return [
-            dep
-            for dep in self._dependencies
-            if dep.issue_id not in self._issues or dep.depends_on_id not in self._issues
-        ]
+        return dangling_dependencies(self._dependencies, self._issues)
 
     def remove_dependencies(self, deps_to_remove: list[Dependency]) -> None:
         """Remove specific dependency records and rewrite storage.
@@ -2183,7 +1825,7 @@ def get_namespaces(
 
         resolved_dir = str(dogcats_dir) if dogcats_dir else str(storage.dogcats_dir)
         config = load_config(resolved_dir)
-        pinned: list[str] = config.get("pinned_namespaces", [])
+        pinned: list[str] = config.pinned_namespaces or []
         for ns in pinned:
             ns_counts.setdefault(ns, NamespaceCounts())
     except (OSError, ValueError):

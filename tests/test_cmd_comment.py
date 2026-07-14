@@ -365,11 +365,11 @@ class TestCommentLifecycleFlow:
 
     def test_comments_survive_rename_namespace(self, tmp_path: Path) -> None:
         """rename-namespace preserves every comment on every issue."""
-        from dogcat.config import save_config
+        from dogcat.config import DogcatConfig, save_config
 
         dogcats_dir = tmp_path / ".dogcats"
         runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
-        save_config(str(dogcats_dir), {"namespace": "old"})
+        save_config(str(dogcats_dir), DogcatConfig.from_dict({"namespace": "old"}))
 
         create_result = runner.invoke(
             app,

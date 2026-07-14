@@ -132,3 +132,48 @@ class TestArchivablePartitionSkipReasons:
         partition = storage.archivable_partition([a])
         assert partition.archivable == [a]
         assert partition.skipped == []
+
+
+class TestPartitionArchivableInIsolation:
+    """partition_archivable runs against a fake graph, no store or lock.
+
+    The seam extracted in dogcat-27nu: JSONLStorage.archivable_partition just
+    forwards to dogcat._archive.partition_archivable(candidates, self), which
+    reads the graph through the ArchiveQueries protocol.
+    """
+
+    def test_fake_queries_split_open_child_from_clean(self) -> None:
+        """A candidate with an open child is skipped; a clean one is archivable."""
+        from dogcat._archive import partition_archivable
+
+        clean = Issue(id="ok", title="clean", status=Status.CLOSED)
+        blocked = Issue(id="blk", title="blocked", status=Status.CLOSED)
+        open_child = Issue(id="ch", title="child", status=Status.OPEN)
+
+        class FakeQueries:
+            """Minimal ArchiveQueries: only 'blocked' has an open child."""
+
+            def get(self, _issue_id: str) -> Issue | None:
+                return None
+
+            def get_children(self, issue_id: str) -> list[Issue]:
+                return [open_child] if issue_id == blocked.full_id else []
+
+            def get_dependencies(self, _issue_id: str) -> list[object]:
+                return []
+
+            def get_dependents(self, _issue_id: str) -> list[object]:
+                return []
+
+            def get_links(self, _issue_id: str) -> list[object]:
+                return []
+
+            def get_incoming_links(self, _issue_id: str) -> list[object]:
+                return []
+
+        partition = partition_archivable([clean, blocked], FakeQueries())  # type: ignore[arg-type]
+        assert [i.full_id for i in partition.archivable] == [clean.full_id]
+        assert len(partition.skipped) == 1
+        skipped_issue, reason = partition.skipped[0]
+        assert skipped_issue.full_id == blocked.full_id
+        assert "open child" in reason

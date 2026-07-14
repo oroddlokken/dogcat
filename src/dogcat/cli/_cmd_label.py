@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import orjson
 import typer
 
 from dogcat.config import get_namespace, load_config
+from dogcat.models import UpdateRequest
 
 from ._completions import complete_issue_ids, complete_labels, complete_subcommands
 from ._helpers import get_storage, with_ns_shim
@@ -62,12 +61,10 @@ def register(app: typer.Typer) -> None:
                     # on the same Issue object, so an in-place mutation would
                     # leave old and new pointing at the same already-changed
                     # list and suppress the event.
-                    updates: dict[str, Any] = {
-                        "labels": [*issue.labels, label_name],
-                    }
+                    request = UpdateRequest(labels=[*issue.labels, label_name])
                     if by:
-                        updates["updated_by"] = by
-                    storage.update(issue_id, updates)
+                        request.updated_by = by
+                    storage.update(issue_id, request)
                     typer.echo(f"✓ Added label '{label_name}' to {issue.full_id}")
                 else:
                     typer.echo(f"Label '{label_name}' already on {issue.full_id}")
@@ -83,12 +80,12 @@ def register(app: typer.Typer) -> None:
                     raise typer.Exit(1)
 
                 if label_name in issue.labels:
-                    updates: dict[str, Any] = {
-                        "labels": [lbl for lbl in issue.labels if lbl != label_name],
-                    }
+                    request = UpdateRequest(
+                        labels=[lbl for lbl in issue.labels if lbl != label_name]
+                    )
                     if by:
-                        updates["updated_by"] = by
-                    storage.update(issue_id, updates)
+                        request.updated_by = by
+                    storage.update(issue_id, request)
                     typer.echo(f"✓ Removed label '{label_name}' from {issue.full_id}")
                 else:
                     typer.echo(f"Label '{label_name}' not on {issue.full_id}")
@@ -171,8 +168,8 @@ def register(app: typer.Typer) -> None:
             # Determine annotations
             primary = get_namespace(actual_dogcats_dir)
             config = load_config(actual_dogcats_dir)
-            visible: list[str] | None = config.get("visible_namespaces")
-            hidden: list[str] | None = config.get("hidden_namespaces")
+            visible = config.visible_namespaces
+            hidden = config.hidden_namespaces
 
             # Mirror get_namespace_filter: in global-fallback mode with
             # no local lists, global visible_namespaces (plus the derived

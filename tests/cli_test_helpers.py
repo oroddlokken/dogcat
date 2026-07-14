@@ -41,10 +41,10 @@ runner = CliRunner()
 
 def _init_with_namespace(dogcats_dir: Path, namespace: str = "proj-a") -> None:
     """Initialize a dogcats repo and set a specific namespace."""
-    from dogcat.config import save_config
+    from dogcat.config import DogcatConfig, save_config
 
     runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
-    save_config(str(dogcats_dir), {"namespace": namespace})
+    save_config(str(dogcats_dir), DogcatConfig(namespace=namespace))
 
 
 def _create_issue(dogcats_dir: Path, title: str, **kwargs: str) -> None:

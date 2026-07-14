@@ -32,7 +32,7 @@ from dogcat.constants import (
     TYPE_OPTIONS,
     parse_labels,
 )
-from dogcat.models import DependencyType, is_manual_issue
+from dogcat.models import DependencyType, UpdateRequest, is_manual_issue
 from dogcat.tui.shared import SHARED_CSS, make_issue_label
 
 if TYPE_CHECKING:
@@ -950,7 +950,9 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
 
         try:
             if updates:
-                updated = self._storage.update(self._issue.full_id, updates)
+                updated = self._storage.update(
+                    self._issue.full_id, UpdateRequest.from_dict(updates)
+                )
             else:
                 updated = self._issue
             self._apply_dep_plan(self._issue.full_id, dep_plan)

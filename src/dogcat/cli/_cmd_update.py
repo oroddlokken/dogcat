@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+import dataclasses
+from typing import TYPE_CHECKING
 
 import orjson
 import typer
@@ -36,24 +37,26 @@ if TYPE_CHECKING:
 def _apply_manual_metadata_update(
     storage: JSONLStorage,
     issue_id: str,
-    issue_updates: dict[str, Any],
+    request: UpdateRequest,
     *,
     manual: bool | None,
-) -> dict[str, Any]:
-    """Patch ``issue_updates['metadata']`` with the new manual flag, if set.
+) -> UpdateRequest:
+    """Return a copy of ``request`` with the manual flag folded into metadata.
 
-    Returns the same dict so the caller can keep chaining mutations.
-    Raises ``ValueError`` if the issue is missing — same contract the
-    inline code had.
+    Copies per issue because the manual flag merges into the *target* issue's
+    existing metadata, so the shared base request is never mutated across a
+    multi-id update. Raises ``ValueError`` if the issue is missing — same
+    contract the inline code had.
     """
+    request = dataclasses.replace(request)
     if manual is None:
-        return issue_updates
+        return request
     current = storage.get(issue_id)
     if current is None:
         msg = f"Issue {issue_id} not found"
         raise ValueError(msg)
-    issue_updates["metadata"] = set_manual_flag(current.metadata or {}, manual=manual)
-    return issue_updates
+    request.metadata = set_manual_flag(current.metadata or {}, manual=manual)
+    return request
 
 
 def _remove_dep_with_check(
@@ -92,6 +95,75 @@ def _remove_dep_with_check(
         msg = f"{subject} does not block {resolved_target}"
         raise ValueError(msg)
     storage.remove_dependency(resolved_target, subject)
+
+
+def _build_update_request(
+    storage: JSONLStorage,
+    *,
+    title: str | None,
+    status: str | None,
+    priority: int | None,
+    issue_type: str | None,
+    description: str | None,
+    owner: str | None,
+    acceptance: str | None,
+    notes: str | None,
+    design: str | None,
+    external_ref: str | None,
+    duplicate_of: str | None,
+    parent: str | None,
+    labels: str | None,
+    snooze_until: str | None,
+    unsnooze: bool,
+) -> UpdateRequest:
+    """Assemble a typed :class:`UpdateRequest` from the raw ``--option`` values.
+
+    Building the request (rather than an untyped dict) rejects unknown field
+    names at construction time. ``duplicate_of``/``parent`` accept ``""`` to
+    clear the field, or a partial ID that is resolved against ``storage``.
+    """
+    from ._helpers import require_resolved_id
+
+    request = UpdateRequest()
+    if title is not None:
+        request.title = title
+    if status is not None:
+        request.status = status
+    if priority is not None:
+        request.priority = priority
+    if issue_type is not None:
+        request.issue_type = issue_type
+    if description is not None:
+        request.description = description
+    if owner is not None:
+        request.owner = owner
+    if acceptance is not None:
+        request.acceptance = acceptance
+    if notes is not None:
+        request.notes = notes
+    if design is not None:
+        request.design = design
+    if external_ref is not None:
+        request.external_ref = external_ref
+    if duplicate_of is not None:
+        request.duplicate_of = (
+            None
+            if duplicate_of == ""
+            else require_resolved_id(storage, duplicate_of, label="Duplicate target")
+        )
+    if parent is not None:
+        request.parent = (
+            None
+            if parent == ""
+            else require_resolved_id(storage, parent, label="Parent issue")
+        )
+    if labels is not None:
+        request.labels = parse_labels(labels)
+    if snooze_until is not None:
+        request.snoozed_until = parse_duration(snooze_until)
+    if unsnooze:
+        request.snoozed_until = None
+    return request
 
 
 def register(app: typer.Typer) -> None:
@@ -283,55 +355,24 @@ def register(app: typer.Typer) -> None:
 
             storage = get_storage(dogcats_dir)
 
-            # Build a typed UpdateRequest instead of an untyped dict so unknown
-            # field names are rejected at construction time.
-            request = UpdateRequest()
-            if title is not None:
-                request.title = title
-            if status is not None:
-                request.status = status
-            if priority is not None:
-                request.priority = priority
-            if issue_type is not None:
-                request.issue_type = issue_type
-            if description is not None:
-                request.description = description
-            if owner is not None:
-                request.owner = owner
-            if acceptance is not None:
-                request.acceptance = acceptance
-            if notes is not None:
-                request.notes = notes
-            if design is not None:
-                request.design = design
-            if external_ref is not None:
-                request.external_ref = external_ref
-            if duplicate_of is not None:
-                if duplicate_of == "":
-                    request.duplicate_of = None
-                else:
-                    from ._helpers import require_resolved_id
-
-                    request.duplicate_of = require_resolved_id(
-                        storage, duplicate_of, label="Duplicate target"
-                    )
-            if parent is not None:
-                if parent == "":
-                    request.parent = None
-                else:
-                    from ._helpers import require_resolved_id
-
-                    request.parent = require_resolved_id(
-                        storage, parent, label="Parent issue"
-                    )
-            if labels is not None:
-                request.labels = parse_labels(labels)
-            if snooze_until is not None:
-                request.snoozed_until = parse_duration(snooze_until)
-            if unsnooze:
-                request.snoozed_until = None
-
-            updates = request.to_dict()
+            request = _build_update_request(
+                storage,
+                title=title,
+                status=status,
+                priority=priority,
+                issue_type=issue_type,
+                description=description,
+                owner=owner,
+                acceptance=acceptance,
+                notes=notes,
+                design=design,
+                external_ref=external_ref,
+                duplicate_of=duplicate_of,
+                parent=parent,
+                labels=labels,
+                snooze_until=snooze_until,
+                unsnooze=unsnooze,
+            )
 
             if (
                 request.is_empty()
@@ -351,13 +392,13 @@ def register(app: typer.Typer) -> None:
             )
 
             def _update(issue_id: str) -> None:
-                issue_updates = _apply_manual_metadata_update(
-                    storage, issue_id, dict(updates), manual=manual
+                issue_request = _apply_manual_metadata_update(
+                    storage, issue_id, request, manual=manual
                 )
 
-                if issue_updates:
-                    issue_updates["updated_by"] = final_updated_by
-                    issue = storage.update(issue_id, issue_updates)
+                if not issue_request.is_empty():
+                    issue_request.updated_by = final_updated_by
+                    issue = storage.update(issue_id, issue_request)
                 else:
                     issue = storage.get(issue_id)
                     if issue is None:

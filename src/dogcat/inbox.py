@@ -11,6 +11,7 @@ from typing import IO, TYPE_CHECKING, Any, cast
 import orjson
 
 from dogcat._diff import tracked_changes
+from dogcat._events import EventEmitterMixin
 from dogcat._id_resolve import resolve_partial_id
 from dogcat._jsonl_io import append_jsonl_payload, atomic_rewrite_jsonl
 from dogcat._schema import warn_if_records_from_newer_version
@@ -34,7 +35,7 @@ if TYPE_CHECKING:
     from contextlib import AbstractContextManager
 
 
-class InboxStorage:
+class InboxStorage(EventEmitterMixin):
     """Manages atomic JSONL storage for inbox proposals."""
 
     def __init__(
@@ -211,59 +212,8 @@ class InboxStorage:
 
     # -- Event emission helpers ------------------------------------------
 
-    def _emit_event(
-        self,
-        event_type: str,
-        proposal: Proposal,
-        changes: dict[str, dict[str, Any]],
-        by: str | None = None,
-    ) -> None:
-        """Emit an event to the inbox event log (best-effort)."""
-        self._event_log.try_emit(
-            event_type,
-            proposal.full_id,
-            proposal.updated_at.isoformat(),
-            proposal.title,
-            changes,
-            by=by,
-        )
-
-    def _build_event_record(
-        self,
-        event_type: str,
-        proposal: Proposal,
-        changes: dict[str, dict[str, Any]],
-        by: str | None = None,
-    ) -> dict[str, Any] | None:
-        """Build the event JSONL dict for a proposal mutation.
-
-        Mirrors :meth:`JSONLStorage._build_event_record` so callers can
-        bundle proposal+event records into a single locked append.
-        """
-        return self._event_log.build_record(
-            event_type,
-            proposal.full_id,
-            proposal.updated_at.isoformat(),
-            proposal.title,
-            changes,
-            by=by,
-        )
-
-    def _append_with_event(
-        self,
-        records: list[dict[str, Any]],
-        event_record: dict[str, Any] | None,
-    ) -> None:
-        """Append data records and (optionally) an event record in one call.
-
-        Single-lock equivalent of ``_append`` followed by
-        ``_event_log.try_emit``. Halves lock acquisitions and fsyncs per
-        mutation in batched flows like ``dcat inbox close A B C``.
-        """
-        if event_record is None:
-            self._append(records)
-            return
-        self._append([*records, event_record])
+    # _emit_event / _build_event_record / _append_with_event are provided by
+    # EventEmitterMixin (dogcat._events), shared with JSONLStorage (dogcat-m5e6).
 
     @staticmethod
     def _tracked_changes(

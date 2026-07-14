@@ -1,7 +1,6 @@
 """Tests for config module."""
 
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -9,6 +8,7 @@ from dogcat.config import (
     CONFIG_FILENAME,
     DEFAULT_PREFIX,
     LOCAL_CONFIG_FILENAME,
+    DogcatConfig,
     _detect_namespace_from_directory,
     _detect_namespace_from_issues,
     _resolve_dogcats_path,
@@ -98,7 +98,7 @@ class TestLoadSaveConfig:
     def test_load_nonexistent_config(self, tmp_path: Path) -> None:
         """Loading nonexistent config returns empty dict."""
         config = load_config(str(tmp_path / ".dogcats"))
-        assert config == {}
+        assert config.to_dict() == {}
 
     def test_save_and_load_config(self, tmp_path: Path) -> None:
         """Save and load config roundtrip."""
@@ -106,17 +106,17 @@ class TestLoadSaveConfig:
         dogcats_dir.mkdir()
 
         config = {"namespace": "myproject", "other": "value"}
-        save_config(str(dogcats_dir), config)
+        save_config(str(dogcats_dir), DogcatConfig.from_dict(config))
 
         loaded = load_config(str(dogcats_dir))
-        assert loaded == config
+        assert loaded.to_dict() == config
 
     def test_save_creates_directory(self, tmp_path: Path) -> None:
         """Save creates directory if it doesn't exist."""
         dogcats_dir = tmp_path / ".dogcats"
         assert not dogcats_dir.exists()
 
-        save_config(str(dogcats_dir), {"namespace": "test"})
+        save_config(str(dogcats_dir), DogcatConfig.from_dict({"namespace": "test"}))
 
         assert dogcats_dir.exists()
         assert (dogcats_dir / CONFIG_FILENAME).exists()
@@ -126,7 +126,7 @@ class TestLoadSaveConfig:
         dogcats_dir = tmp_path / "a" / "b" / ".dogcats"
         assert not dogcats_dir.exists()
 
-        save_config(str(dogcats_dir), {"namespace": "test"})
+        save_config(str(dogcats_dir), DogcatConfig.from_dict({"namespace": "test"}))
 
         assert dogcats_dir.exists()
 
@@ -209,7 +209,10 @@ class TestLoadSaveConfig:
         dogcats_dir.mkdir()
 
         # Establish baseline state.
-        save_config(str(dogcats_dir), {"namespace": "original", "x": "y"})
+        save_config(
+            str(dogcats_dir),
+            DogcatConfig.from_dict({"namespace": "original", "x": "y"}),
+        )
         config_path = dogcats_dir / CONFIG_FILENAME
         original_bytes = config_path.read_bytes()
 
@@ -218,7 +221,9 @@ class TestLoadSaveConfig:
             patch("os.replace", side_effect=OSError("disk full")),
             pytest.raises(OSError, match="disk full"),
         ):
-            save_config(str(dogcats_dir), {"namespace": "second"})
+            save_config(
+                str(dogcats_dir), DogcatConfig.from_dict({"namespace": "second"})
+            )
 
         # The file on disk should match the pre-write state — not be
         # truncated or empty.
@@ -234,7 +239,7 @@ class TestLoadSaveConfig:
         (dogcats_dir / CONFIG_FILENAME).write_text("")
 
         config = load_config(str(dogcats_dir))
-        assert config == {}
+        assert config.to_dict() == {}
 
     def test_load_invalid_toml(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
@@ -252,7 +257,7 @@ class TestLoadSaveConfig:
 
         with caplog.at_level("WARNING", logger="dogcat.config"):
             config = load_config(str(dogcats_dir))
-        assert config == {}
+        assert config.to_dict() == {}
         assert any("Failed to parse" in rec.getMessage() for rec in caplog.records), (
             f"Expected parse warning; got {[r.getMessage() for r in caplog.records]}"
         )
@@ -292,8 +297,8 @@ class TestLoadSaveConfig:
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
 
-        save_config(str(dogcats_dir), {"namespace": "first"})
-        save_config(str(dogcats_dir), {"namespace": "second"})
+        save_config(str(dogcats_dir), DogcatConfig.from_dict({"namespace": "first"}))
+        save_config(str(dogcats_dir), DogcatConfig.from_dict({"namespace": "second"}))
 
         loaded = load_config(str(dogcats_dir))
         assert loaded["namespace"] == "second"
@@ -308,10 +313,10 @@ class TestLoadSaveConfig:
             "custom_setting": "value",
             "nested": {"key": "value"},
         }
-        save_config(str(dogcats_dir), config)
+        save_config(str(dogcats_dir), DogcatConfig.from_dict(config))
 
         loaded = load_config(str(dogcats_dir))
-        assert loaded == config
+        assert loaded.to_dict() == config
 
     def test_config_file_is_valid_toml(self, tmp_path: Path) -> None:
         """Saved config file is valid TOML."""
@@ -325,7 +330,7 @@ class TestLoadSaveConfig:
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
 
-        save_config(str(dogcats_dir), {"namespace": "test"})
+        save_config(str(dogcats_dir), DogcatConfig.from_dict({"namespace": "test"}))
 
         # Should not raise
         with (dogcats_dir / CONFIG_FILENAME).open("rb") as f:
@@ -359,7 +364,10 @@ class TestSetGetIssuePrefix:
         dogcats_dir.mkdir()
 
         # Save initial config with extra key
-        save_config(str(dogcats_dir), {"namespace": "old", "other_key": "value"})
+        save_config(
+            str(dogcats_dir),
+            DogcatConfig.from_dict({"namespace": "old", "other_key": "value"}),
+        )
 
         # Update just the prefix
         set_namespace(str(dogcats_dir), "new")
@@ -623,41 +631,43 @@ class TestMigrateConfigKeys:
 
     def test_renames_issue_prefix_to_namespace(self) -> None:
         """Renames issue_prefix to namespace."""
-        config: dict[str, Any] = {"issue_prefix": "myapp"}
+        config = DogcatConfig.from_dict({"issue_prefix": "myapp"})
         changed = migrate_config_keys(config)
         assert changed is True
-        assert config == {"namespace": "myapp"}
+        assert config.to_dict() == {"namespace": "myapp"}
 
     def test_no_change_when_already_namespace(self) -> None:
         """No change when config already uses namespace."""
-        config: dict[str, Any] = {"namespace": "myapp"}
+        config = DogcatConfig.from_dict({"namespace": "myapp"})
         changed = migrate_config_keys(config)
         assert changed is False
-        assert config == {"namespace": "myapp"}
+        assert config.to_dict() == {"namespace": "myapp"}
 
     def test_namespace_wins_over_issue_prefix(self) -> None:
         """When both keys exist, namespace is kept and issue_prefix is removed."""
-        config: dict[str, Any] = {"namespace": "new", "issue_prefix": "old"}
+        config = DogcatConfig.from_dict({"namespace": "new", "issue_prefix": "old"})
         changed = migrate_config_keys(config)
         assert changed is True
-        assert config == {"namespace": "new"}
+        assert config.to_dict() == {"namespace": "new"}
 
     def test_preserves_other_keys(self) -> None:
         """Other config keys are preserved."""
-        config: dict[str, Any] = {
-            "issue_prefix": "myapp",
-            "git_tracking": True,
-        }
+        config = DogcatConfig.from_dict(
+            {
+                "issue_prefix": "myapp",
+                "git_tracking": True,
+            }
+        )
         changed = migrate_config_keys(config)
         assert changed is True
-        assert config == {"namespace": "myapp", "git_tracking": True}
+        assert config.to_dict() == {"namespace": "myapp", "git_tracking": True}
 
     def test_empty_config(self) -> None:
         """Empty config returns False."""
-        config: dict[str, Any] = {}
+        config = DogcatConfig.from_dict({})
         changed = migrate_config_keys(config)
         assert changed is False
-        assert config == {}
+        assert config.to_dict() == {}
 
 
 class TestGetIssuePrefixBackwardCompat:
@@ -667,7 +677,9 @@ class TestGetIssuePrefixBackwardCompat:
         """get_namespace reads legacy issue_prefix key."""
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
-        save_config(str(dogcats_dir), {"issue_prefix": "legacy"})
+        save_config(
+            str(dogcats_dir), DogcatConfig.from_dict({"issue_prefix": "legacy"})
+        )
 
         assert get_namespace(str(dogcats_dir)) == "legacy"
 
@@ -675,7 +687,10 @@ class TestGetIssuePrefixBackwardCompat:
         """Namespace key takes precedence over legacy issue_prefix."""
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
-        save_config(str(dogcats_dir), {"namespace": "new", "issue_prefix": "old"})
+        save_config(
+            str(dogcats_dir),
+            DogcatConfig.from_dict({"namespace": "new", "issue_prefix": "old"}),
+        )
 
         assert get_namespace(str(dogcats_dir)) == "new"
 
@@ -881,7 +896,9 @@ class TestRepoLocalConfig:
         (repo_dir / DOGCATRC_FILENAME).write_text(str(shared_dir) + "\n")
 
         monkeypatch.chdir(repo_dir)
-        save_local_config(str(shared_dir), {"namespace": "backend"})
+        save_local_config(
+            str(shared_dir), DogcatConfig.from_dict({"namespace": "backend"})
+        )
 
         # Should save to repo-local, not shared
         repo_local = repo_dir / ".dogcats" / "config.local.toml"
@@ -931,7 +948,7 @@ class TestGetNamespaceFilter:
         """No visible/hidden config outside .dogcatrc context → no filtering."""
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
-        save_config(str(dogcats_dir), {"namespace": "a"})
+        save_config(str(dogcats_dir), DogcatConfig.from_dict({"namespace": "a"}))
 
         monkeypatch.chdir(tmp_path)
         result = get_namespace_filter(str(dogcats_dir))
@@ -941,7 +958,10 @@ class TestGetNamespaceFilter:
         """visible_namespaces = ["b"] with primary "a" → allows "a" and "b"."""
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
-        save_config(str(dogcats_dir), {"namespace": "a", "visible_namespaces": ["b"]})
+        save_config(
+            str(dogcats_dir),
+            DogcatConfig.from_dict({"namespace": "a", "visible_namespaces": ["b"]}),
+        )
 
         ns_filter = get_namespace_filter(str(dogcats_dir))
         assert ns_filter is not None
@@ -953,7 +973,10 @@ class TestGetNamespaceFilter:
         """hidden_namespaces = ["b"] → blocks "b", allows everything else."""
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
-        save_config(str(dogcats_dir), {"namespace": "a", "hidden_namespaces": ["b"]})
+        save_config(
+            str(dogcats_dir),
+            DogcatConfig.from_dict({"namespace": "a", "hidden_namespaces": ["b"]}),
+        )
 
         ns_filter = get_namespace_filter(str(dogcats_dir))
         assert ns_filter is not None
@@ -967,7 +990,7 @@ class TestGetNamespaceFilter:
         dogcats_dir.mkdir()
         save_config(
             str(dogcats_dir),
-            {"namespace": "a", "hidden_namespaces": ["a", "b"]},
+            DogcatConfig.from_dict({"namespace": "a", "hidden_namespaces": ["a", "b"]}),
         )
 
         ns_filter = get_namespace_filter(str(dogcats_dir))
@@ -981,7 +1004,7 @@ class TestGetNamespaceFilter:
         dogcats_dir.mkdir()
         save_config(
             str(dogcats_dir),
-            {"namespace": "a", "visible_namespaces": ["b"]},
+            DogcatConfig.from_dict({"namespace": "a", "visible_namespaces": ["b"]}),
         )
 
         ns_filter = get_namespace_filter(str(dogcats_dir), explicit_namespace="c")
@@ -996,7 +1019,10 @@ class TestGetNamespaceFilter:
         """Empty visible_namespaces outside .dogcatrc context → no filtering."""
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
-        save_config(str(dogcats_dir), {"namespace": "a", "visible_namespaces": []})
+        save_config(
+            str(dogcats_dir),
+            DogcatConfig.from_dict({"namespace": "a", "visible_namespaces": []}),
+        )
 
         monkeypatch.chdir(tmp_path)
         result = get_namespace_filter(str(dogcats_dir))
@@ -1008,7 +1034,10 @@ class TestGetNamespaceFilter:
         """Empty hidden_namespaces outside .dogcatrc context → no filtering."""
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
-        save_config(str(dogcats_dir), {"namespace": "a", "hidden_namespaces": []})
+        save_config(
+            str(dogcats_dir),
+            DogcatConfig.from_dict({"namespace": "a", "hidden_namespaces": []}),
+        )
 
         monkeypatch.chdir(tmp_path)
         result = get_namespace_filter(str(dogcats_dir))
@@ -1021,7 +1050,9 @@ class TestGetNamespaceFilter:
         # Set up shared .dogcats dir
         shared_dogcats = tmp_path / "shared" / ".dogcats"
         shared_dogcats.mkdir(parents=True)
-        save_config(str(shared_dogcats), {"namespace": "myrepo"})
+        save_config(
+            str(shared_dogcats), DogcatConfig.from_dict({"namespace": "myrepo"})
+        )
 
         # Set up repo dir with .dogcatrc pointing to shared dir
         repo_dir = tmp_path / "repo"
@@ -1043,7 +1074,9 @@ class TestGetNamespaceFilter:
         shared_dogcats.mkdir(parents=True)
         save_config(
             str(shared_dogcats),
-            {"namespace": "a", "visible_namespaces": ["b", "c"]},
+            DogcatConfig.from_dict(
+                {"namespace": "a", "visible_namespaces": ["b", "c"]}
+            ),
         )
 
         repo_dir = tmp_path / "repo"
@@ -1065,7 +1098,7 @@ class TestGetNamespaceFilter:
         """Without .dogcatrc and without visible/hidden config, no filtering."""
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
-        save_config(str(dogcats_dir), {"namespace": "a"})
+        save_config(str(dogcats_dir), DogcatConfig.from_dict({"namespace": "a"}))
 
         monkeypatch.chdir(tmp_path)
 
@@ -1188,24 +1221,31 @@ class TestLocalConfig:
     def test_load_local_config_missing(self, tmp_path: Path) -> None:
         """Loading nonexistent local config returns empty dict."""
         config = load_local_config(str(tmp_path / ".dogcats"))
-        assert config == {}
+        assert config.to_dict() == {}
 
     def test_save_and_load_local_config(self, tmp_path: Path) -> None:
         """Save and load local config roundtrip."""
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
 
-        save_local_config(str(dogcats_dir), {"inbox_remote": "~/git/inbox"})
+        save_local_config(
+            str(dogcats_dir), DogcatConfig.from_dict({"inbox_remote": "~/git/inbox"})
+        )
         loaded = load_local_config(str(dogcats_dir))
-        assert loaded == {"inbox_remote": "~/git/inbox"}
+        assert loaded.to_dict() == {"inbox_remote": "~/git/inbox"}
 
     def test_load_config_merges_local(self, tmp_path: Path) -> None:
         """load_config merges config.local.toml on top of config.toml."""
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
 
-        save_config(str(dogcats_dir), {"namespace": "myproject", "git_tracking": True})
-        save_local_config(str(dogcats_dir), {"inbox_remote": "~/git/inbox"})
+        save_config(
+            str(dogcats_dir),
+            DogcatConfig.from_dict({"namespace": "myproject", "git_tracking": True}),
+        )
+        save_local_config(
+            str(dogcats_dir), DogcatConfig.from_dict({"inbox_remote": "~/git/inbox"})
+        )
 
         config = load_config(str(dogcats_dir))
         assert config["namespace"] == "myproject"
@@ -1217,8 +1257,12 @@ class TestLocalConfig:
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
 
-        save_config(str(dogcats_dir), {"namespace": "shared-ns"})
-        save_local_config(str(dogcats_dir), {"namespace": "local-ns"})
+        save_config(
+            str(dogcats_dir), DogcatConfig.from_dict({"namespace": "shared-ns"})
+        )
+        save_local_config(
+            str(dogcats_dir), DogcatConfig.from_dict({"namespace": "local-ns"})
+        )
 
         config = load_config(str(dogcats_dir))
         assert config["namespace"] == "local-ns"
@@ -1228,8 +1272,12 @@ class TestLocalConfig:
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
 
-        save_config(str(dogcats_dir), {"namespace": "myproject"})
-        save_local_config(str(dogcats_dir), {"inbox_remote": "~/git/inbox"})
+        save_config(
+            str(dogcats_dir), DogcatConfig.from_dict({"namespace": "myproject"})
+        )
+        save_local_config(
+            str(dogcats_dir), DogcatConfig.from_dict({"inbox_remote": "~/git/inbox"})
+        )
 
         config = load_shared_config(str(dogcats_dir))
         assert config["namespace"] == "myproject"
@@ -1240,7 +1288,9 @@ class TestLocalConfig:
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
 
-        save_local_config(str(dogcats_dir), {"inbox_remote": "~/git/inbox"})
+        save_local_config(
+            str(dogcats_dir), DogcatConfig.from_dict({"inbox_remote": "~/git/inbox"})
+        )
         set_namespace(str(dogcats_dir), "myproject")
 
         # config.toml should NOT have inbox_remote
@@ -1258,8 +1308,92 @@ class TestLocalConfig:
         dogcats_dir = tmp_path / ".dogcats"
         dogcats_dir.mkdir()
 
-        save_config(str(dogcats_dir), {"namespace": "myproject"})
+        save_config(
+            str(dogcats_dir), DogcatConfig.from_dict({"namespace": "myproject"})
+        )
         (dogcats_dir / LOCAL_CONFIG_FILENAME).write_text("this is [not valid")
 
         config = load_config(str(dogcats_dir))
-        assert config == {"namespace": "myproject"}
+        assert config.to_dict() == {"namespace": "myproject"}
+
+
+class TestDogcatConfig:
+    """Tests for the typed DogcatConfig wrapper (dogcat-4qyv)."""
+
+    def test_from_dict_routes_known_and_unknown_keys(self) -> None:
+        """Known keys land on attributes; unknown keys land in extra."""
+        cfg = DogcatConfig.from_dict(
+            {"namespace": "proj", "git_tracking": True, "future_key": "keep"}
+        )
+        assert cfg.namespace == "proj"
+        assert cfg.git_tracking is True
+        assert cfg.extra == {"future_key": "keep"}
+
+    def test_to_dict_omits_unset_known_keys(self) -> None:
+        """A known key left as None is not emitted (absent stays absent)."""
+        cfg = DogcatConfig(namespace="proj")
+        assert cfg.to_dict() == {"namespace": "proj"}
+        assert "git_tracking" not in cfg.to_dict()
+
+    def test_to_dict_emits_explicit_false(self) -> None:
+        """An explicitly-set falsey bool is preserved (only None is dropped)."""
+        cfg = DogcatConfig(git_tracking=False)
+        assert cfg.to_dict() == {"git_tracking": False}
+
+    def test_roundtrip_preserves_forward_compat_keys(self) -> None:
+        """from_dict -> to_dict is value-preserving, including unknown keys.
+
+        This is the core dogcat-4qyv guarantee: a load -> mutate -> save cycle
+        must not drop keys a newer dcat version wrote.
+        """
+        raw = {
+            "namespace": "proj",
+            "visible_namespaces": ["a", "b"],
+            "some_future_setting": {"nested": 1},
+        }
+        assert DogcatConfig.from_dict(raw).to_dict() == raw
+
+    def test_mutate_then_to_dict_keeps_extra(self) -> None:
+        """Mutating a known attribute leaves forward-compat keys intact."""
+        cfg = DogcatConfig.from_dict({"issue_prefix": "old", "future_key": "keep"})
+        cfg.namespace = "new"
+        cfg.issue_prefix = None
+        assert cfg.to_dict() == {"namespace": "new", "future_key": "keep"}
+
+    def test_mapping_getitem_setitem_delitem(self) -> None:
+        """The mapping dunders route known keys to attrs, others to extra."""
+        cfg = DogcatConfig()
+        cfg["namespace"] = "proj"
+        cfg["custom"] = "x"
+        assert cfg["namespace"] == "proj"
+        assert cfg.namespace == "proj"
+        assert cfg["custom"] == "x"
+        assert cfg.extra == {"custom": "x"}
+        del cfg["namespace"]
+        assert cfg.namespace is None
+        assert "namespace" not in cfg
+
+    def test_contains_treats_none_known_key_as_absent(self) -> None:
+        """`key in cfg` matches the old dict semantics (present iff set)."""
+        cfg = DogcatConfig(namespace="proj")
+        assert "namespace" in cfg
+        assert "git_tracking" not in cfg
+
+    def test_getitem_raises_keyerror_for_unset_known_key(self) -> None:
+        """Indexing an unset known key raises KeyError, like a dict miss."""
+        cfg = DogcatConfig()
+        with pytest.raises(KeyError):
+            _ = cfg["namespace"]
+
+    def test_get_returns_default_for_missing(self) -> None:
+        """get() falls back to the default for absent keys."""
+        cfg = DogcatConfig()
+        assert cfg.get("git_tracking", True) is True
+        assert cfg.get("namespace") is None
+
+    def test_keys_and_items_and_unpacking(self) -> None:
+        """keys()/items()/`**cfg` expose only the set values."""
+        cfg = DogcatConfig.from_dict({"namespace": "proj", "custom": "x"})
+        assert set(cfg.keys()) == {"namespace", "custom"}
+        assert dict(cfg.items()) == {"namespace": "proj", "custom": "x"}
+        assert {**cfg} == {"namespace": "proj", "custom": "x"}

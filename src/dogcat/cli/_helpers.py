@@ -7,7 +7,7 @@ import getpass
 import inspect
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, get_type_hints
 
 import typer
 from typer.core import TyperGroup
@@ -108,7 +108,13 @@ def _make_alias(
     import copy
 
     defaults = param_defaults or {}
-    sig = inspect.signature(source_fn)
+    # eval_str resolves ``from __future__ import annotations`` strings against
+    # the source function's own module. Without it the cloned signature keeps
+    # annotations as bare strings, and for options declared via Annotated
+    # aliases (cli/_list_options) the ``typer.Option`` metadata lives in the
+    # annotation — so Typer would lose the custom flags/help and regenerate a
+    # default ``--param-name`` option. (dogcat-5bhv)
+    sig = inspect.signature(source_fn, eval_str=True)
     new_params = [p for name, p in sig.parameters.items() if name not in exclude_params]
 
     if param_help:
@@ -129,12 +135,16 @@ def _make_alias(
     wrapper.__signature__ = sig.replace(parameters=new_params)  # type: ignore[attr-defined]
     wrapper.__doc__ = doc
     wrapper.__module__ = source_fn.__module__
-    # Copy string annotations so typing.get_type_hints() resolves them
-    # correctly (required when using `from __future__ import annotations`).
+    # Copy the source's RESOLVED type hints, not the raw
+    # ``from __future__ import annotations`` strings. The wrapper's code object
+    # lives in *this* module, so Typer's ``get_type_hints`` would resolve any
+    # string annotation against ``_helpers``' globals — missing names imported
+    # only into the source command's module (e.g. the shared ``_list_options``
+    # option aliases). Resolving here, in the source function's own module,
+    # yields concrete annotation objects that need no further lookup. (dogcat-5bhv)
+    resolved_hints = get_type_hints(source_fn, include_extras=True)
     wrapper.__annotations__ = {
-        name: ann
-        for name, ann in source_fn.__annotations__.items()
-        if name not in exclude_params
+        name: ann for name, ann in resolved_hints.items() if name not in exclude_params
     }
     return wrapper
 
@@ -763,7 +773,7 @@ def load_remote_inbox_proposals(
         config = load_config(dogcats_dir)
     except (ValueError, RuntimeError):
         return [], None
-    remote_path = config.get("inbox_remote")
+    remote_path = config.inbox_remote
     if not remote_path:
         return [], None
 

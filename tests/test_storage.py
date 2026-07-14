@@ -200,6 +200,34 @@ class TestCRUDOperations:
         assert retrieved is not None
         assert retrieved.title == "Updated"
 
+    def test_update_accepts_update_request(self, storage: JSONLStorage) -> None:
+        """update() accepts a typed UpdateRequest, not just a dict."""
+        from dogcat.models import UpdateRequest
+
+        storage.create(Issue(id="issue-1", title="Original", priority=2))
+
+        updated = storage.update("issue-1", UpdateRequest(title="Updated", priority=1))
+        assert updated.title == "Updated"
+        assert updated.priority == 1
+
+        retrieved = storage.get("issue-1")
+        assert retrieved is not None
+        assert retrieved.title == "Updated"
+        assert retrieved.priority == 1
+
+    def test_update_request_and_dict_are_equivalent(
+        self, storage: JSONLStorage
+    ) -> None:
+        """The same change applied as an UpdateRequest or a dict matches."""
+        from dogcat.models import UpdateRequest
+
+        storage.create(Issue(id="issue-1", title="A"))
+        storage.create(Issue(id="issue-2", title="A"))
+
+        via_dict = storage.update("issue-1", {"title": "B", "notes": "n"})
+        via_req = storage.update("issue-2", UpdateRequest(title="B", notes="n"))
+        assert (via_dict.title, via_dict.notes) == (via_req.title, via_req.notes)
+
     def test_update_nonexistent_issue_raises(self, storage: JSONLStorage) -> None:
         """Test that updating nonexistent issue raises."""
         with pytest.raises(ValueError, match="not found"):
@@ -2480,10 +2508,13 @@ class TestGetNamespaces:
 
     def test_pinned_namespaces_always_included(self, temp_dogcats_dir: Path) -> None:
         """Pinned namespaces appear even with no issues or proposals."""
-        from dogcat.config import save_config
+        from dogcat.config import DogcatConfig, save_config
         from dogcat.storage import NamespaceCounts, get_namespaces
 
-        save_config(str(temp_dogcats_dir), {"pinned_namespaces": ["pinned-ns"]})
+        save_config(
+            str(temp_dogcats_dir),
+            DogcatConfig.from_dict({"pinned_namespaces": ["pinned-ns"]}),
+        )
         storage_path = temp_dogcats_dir / "issues.jsonl"
         storage = JSONLStorage(str(storage_path), create_dir=True)
 
@@ -2496,10 +2527,13 @@ class TestGetNamespaces:
         self, temp_dogcats_dir: Path
     ) -> None:
         """Pinned namespace that also has issues shows correct counts."""
-        from dogcat.config import save_config
+        from dogcat.config import DogcatConfig, save_config
         from dogcat.storage import NamespaceCounts, get_namespaces
 
-        save_config(str(temp_dogcats_dir), {"pinned_namespaces": ["ns-a"]})
+        save_config(
+            str(temp_dogcats_dir),
+            DogcatConfig.from_dict({"pinned_namespaces": ["ns-a"]}),
+        )
         storage_path = temp_dogcats_dir / "issues.jsonl"
         storage = JSONLStorage(str(storage_path), create_dir=True)
         storage.create(Issue(id="a1", title="A1", namespace="ns-a"))

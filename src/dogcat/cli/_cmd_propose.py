@@ -106,7 +106,7 @@ def register(app: typer.Typer) -> None:
         else:
             try:
                 config = load_config(target_dir)
-                ns = str(config.get("namespace", DEFAULT_NAMESPACE))
+                ns = config.namespace or DEFAULT_NAMESPACE
             except Exception:
                 ns = DEFAULT_NAMESPACE
 

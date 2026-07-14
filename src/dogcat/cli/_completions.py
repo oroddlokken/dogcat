@@ -128,7 +128,7 @@ def complete_proposal_ids(
 
         # Remote proposals
         config = load_config(dogcats_dir)
-        remote_path = config.get("inbox_remote")
+        remote_path = config.inbox_remote
         if remote_path:
             remote_dogcats = Path(remote_path).expanduser()
             if remote_dogcats.name != ".dogcats":

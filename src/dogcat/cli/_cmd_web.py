@@ -109,7 +109,7 @@ def register(app: typer.Typer) -> None:
         # intent explicit. (dogcat-22t5)
         if allow_creating_namespaces is None:
             config = load_config(resolved_dir)
-            resolved_allow = config.get("allow_creating_namespaces") is True
+            resolved_allow = config.allow_creating_namespaces is True
         else:
             resolved_allow = allow_creating_namespaces
 

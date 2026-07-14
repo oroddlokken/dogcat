@@ -87,7 +87,7 @@ def _persist_pinned_namespace(dogcats_dir: str, namespace: str) -> None:
     lock_path = _Path(dogcats_dir) / LOCK_FILENAME
     with advisory_file_lock(lock_path):
         config = load_local_config(dogcats_dir)
-        pinned: list[str] = list(config.get("pinned_namespaces", []))
+        pinned: list[str] = list(config.pinned_namespaces or [])
         if namespace in pinned:
             return
         if len(pinned) >= MAX_PINNED_NAMESPACES:
@@ -97,7 +97,7 @@ def _persist_pinned_namespace(dogcats_dir: str, namespace: str) -> None:
             )
             raise ValueError(msg)
         pinned.append(namespace)
-        config["pinned_namespaces"] = pinned
+        config.pinned_namespaces = pinned
         save_local_config(dogcats_dir, config)
 
 

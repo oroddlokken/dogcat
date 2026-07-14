@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 from fastapi.testclient import TestClient
 
 from dogcat.cli import app as cli_app
-from dogcat.config import save_config
+from dogcat.config import DogcatConfig, save_config
 from dogcat.inbox import InboxStorage
 from dogcat.storage import JSONLStorage
 from dogcat.web.propose import create_app
@@ -28,7 +28,7 @@ def web_dogcats(tmp_path: Path) -> Path:
     dogcats.mkdir()
     (dogcats / "issues.jsonl").touch()
     (dogcats / "inbox.jsonl").touch()
-    save_config(str(dogcats), {"namespace": "testns"})
+    save_config(str(dogcats), DogcatConfig.from_dict({"namespace": "testns"}))
     return dogcats
 
 
@@ -45,7 +45,7 @@ def web_dogcats_multi_ns(tmp_path: Path) -> Path:
     storage.create(Issue(id="aaa", title="Issue A", namespace="alpha"))
     storage.create(Issue(id="bbb", title="Issue B", namespace="beta"))
     storage.create(Issue(id="ccc", title="Issue C", namespace="alpha"))
-    save_config(str(dogcats), {"namespace": "alpha"})
+    save_config(str(dogcats), DogcatConfig.from_dict({"namespace": "alpha"}))
     return dogcats
 
 
@@ -1206,7 +1206,9 @@ class TestPinnedNamespaceCap:
         dogcats.mkdir()
         save_local_config(
             str(dogcats),
-            {"pinned_namespaces": [f"ns{i}" for i in range(MAX_PINNED_NAMESPACES)]},
+            DogcatConfig.from_dict(
+                {"pinned_namespaces": [f"ns{i}" for i in range(MAX_PINNED_NAMESPACES)]}
+            ),
         )
 
         import pytest
@@ -1489,15 +1491,16 @@ class TestWebToCliFlow:
         remote_dogcats = tmp_path / "remote" / ".dogcats"
         remote_dogcats.mkdir(parents=True)
         (remote_dogcats / "inbox.jsonl").touch()
-        save_config(str(remote_dogcats), {"namespace": "inbox"})
+        save_config(str(remote_dogcats), DogcatConfig.from_dict({"namespace": "inbox"}))
 
         # Local dogcats: maintainer's project. inbox_remote → remote.
         local_dogcats = tmp_path / "local" / ".dogcats"
         local_dogcats.mkdir(parents=True)
         runner.invoke(cli_app, ["init", "--dogcats-dir", str(local_dogcats)])
-        save_config(str(local_dogcats), {"namespace": "myproj"})
+        save_config(str(local_dogcats), DogcatConfig.from_dict({"namespace": "myproj"}))
         save_local_config(
-            str(local_dogcats), {"inbox_remote": str(remote_dogcats.parent)}
+            str(local_dogcats),
+            DogcatConfig.from_dict({"inbox_remote": str(remote_dogcats.parent)}),
         )
 
         # Stranger fills the web form against the remote dogcats.

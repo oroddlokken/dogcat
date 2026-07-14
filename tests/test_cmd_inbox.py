@@ -582,24 +582,26 @@ def _setup_remote_inbox(
     Returns:
         Tuple of (local_dogcats_dir, remote_dogcats_dir).
     """
-    from dogcat.config import save_config, save_local_config
+    from dogcat.config import DogcatConfig, save_config, save_local_config
 
     # Set up local project
     local_dir = tmp_path / "local"
     local_dir.mkdir()
     local_dogcats = local_dir / ".dogcats"
     runner.invoke(app, ["init", "--dogcats-dir", str(local_dogcats)])
-    save_config(str(local_dogcats), {"namespace": local_ns})
+    save_config(str(local_dogcats), DogcatConfig.from_dict({"namespace": local_ns}))
 
     # Set up remote inbox
     remote_dir = tmp_path / "remote"
     remote_dir.mkdir()
     remote_dogcats = remote_dir / ".dogcats"
     runner.invoke(app, ["init", "--dogcats-dir", str(remote_dogcats)])
-    save_config(str(remote_dogcats), {"namespace": "inbox"})
+    save_config(str(remote_dogcats), DogcatConfig.from_dict({"namespace": "inbox"}))
 
     # Point local at remote
-    save_local_config(str(local_dogcats), {"inbox_remote": str(remote_dir)})
+    save_local_config(
+        str(local_dogcats), DogcatConfig.from_dict({"inbox_remote": str(remote_dir)})
+    )
 
     return local_dogcats, remote_dogcats
 

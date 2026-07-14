@@ -326,6 +326,35 @@ class TestUpdateRequest:
         req.notes = "hi"
         assert not req.is_empty()
 
+    def test_from_dict_builds_only_provided_fields(self) -> None:
+        """``from_dict`` sets exactly the given keys and leaves the rest UNSET."""
+        from dogcat.models import UpdateRequest
+
+        req = UpdateRequest.from_dict({"title": "T", "priority": 1})
+        assert req.to_dict() == {"title": "T", "priority": 1}
+
+    def test_from_dict_preserves_explicit_none(self) -> None:
+        """A None value survives the round-trip (clear-intent for parent)."""
+        from dogcat.models import UpdateRequest
+
+        req = UpdateRequest.from_dict({"parent": None})
+        assert req.to_dict() == {"parent": None}
+
+    def test_from_dict_rejects_unknown_field(self) -> None:
+        """A typo'd/unknown field name raises ValueError at the boundary."""
+        import pytest
+
+        from dogcat.models import UpdateRequest
+
+        with pytest.raises(ValueError, match=r"Unknown update field.*bogus"):
+            UpdateRequest.from_dict({"title": "T", "bogus": 1})
+
+    def test_from_dict_empty_is_empty(self) -> None:
+        """An empty dict yields an empty request."""
+        from dogcat.models import UpdateRequest
+
+        assert UpdateRequest.from_dict({}).is_empty()
+
 
 class TestLinkTypeEnum:
     """Test LinkType enumeration and ``link_type_value`` helper."""

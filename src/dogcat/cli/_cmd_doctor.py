@@ -11,6 +11,7 @@ import orjson
 import typer
 
 from dogcat.config import (
+    DogcatConfig,
     get_config_path,
     get_namespace,
     load_config,
@@ -232,7 +233,7 @@ def register(app: typer.Typer) -> None:
 
         if fix and not config_exists and dogcats_path.exists():
             detected_prefix = get_namespace(dogcats_dir)
-            save_config(dogcats_dir, {"namespace": detected_prefix})
+            save_config(dogcats_dir, DogcatConfig(namespace=detected_prefix))
             config_exists = True
             typer.echo(
                 f"Fixed: Created {config_path.name} with namespace='{detected_prefix}'",
@@ -273,12 +274,12 @@ def register(app: typer.Typer) -> None:
         # Only check if config.toml exists (skip if Check 2a failed)
         if config_exists:
             config = load_config(dogcats_dir)
-            prefix_value = config.get("namespace") or config.get("issue_prefix")
+            prefix_value = config.namespace or config.issue_prefix
             prefix_ok = bool(prefix_value)
 
             if fix and not prefix_ok:
                 detected_prefix = get_namespace(dogcats_dir)
-                config["namespace"] = detected_prefix
+                config.namespace = detected_prefix
                 save_config(dogcats_dir, config)
                 prefix_ok = True
                 typer.echo(
@@ -298,7 +299,7 @@ def register(app: typer.Typer) -> None:
         # Check 2c: deprecated issue_prefix key
         if config_exists:
             config = load_config(dogcats_dir)
-            has_deprecated = "issue_prefix" in config
+            has_deprecated = config.issue_prefix is not None
             deprecated_ok = not has_deprecated
 
             if fix and has_deprecated:
@@ -325,13 +326,11 @@ def register(app: typer.Typer) -> None:
         # Check 2d: mutual exclusivity of visible/hidden namespaces
         if config_exists:
             config = load_config(dogcats_dir)
-            has_both = bool(
-                config.get("visible_namespaces") and config.get("hidden_namespaces"),
-            )
+            has_both = bool(config.visible_namespaces and config.hidden_namespaces)
             mutual_ok = not has_both
 
             if fix and has_both:
-                del config["hidden_namespaces"]
+                config.hidden_namespaces = None
                 save_config(dogcats_dir, config)
                 mutual_ok = True
                 typer.echo(

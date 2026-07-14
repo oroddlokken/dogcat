@@ -40,6 +40,20 @@ from ._helpers import (
     with_ns_shim,
 )
 from ._json_state import echo_error, is_json, set_json
+from ._list_options import (
+    AgentOnlyOpt,
+    AllNamespacesOpt,
+    ExcludeTypeFilterOpt,
+    HasCommentsOpt,
+    IssueTypeFilterOpt,
+    ManualFilterOpt,
+    NamespaceFilterOpt,
+    NoParentOpt,
+    OwnerFilterOpt,
+    ParentFilterOpt,
+    PriorityFilterOpt,
+    WithoutCommentsOpt,
+)
 
 if TYPE_CHECKING:
     from dogcat.models import Issue
@@ -442,6 +456,114 @@ def _render_issue_show(issue: Issue, storage: JSONLStorage) -> str:
     return "\n".join(output_lines)
 
 
+def _render_list_json(issues: list[Issue], final_limit: int | None) -> None:
+    """Emit list results as a JSON array of issue dicts (respecting --limit)."""
+    from dogcat.models import issue_to_dict
+
+    if final_limit is not None:
+        issues = issues[:final_limit]
+    output = [issue_to_dict(issue) for issue in issues]
+    typer.echo(orjson.dumps(output).decode())
+
+
+def _render_list_text(
+    issues: list[Issue],
+    storage: JSONLStorage,
+    *,
+    expand: bool,
+    tree: bool,
+    table: bool,
+    final_limit: int | None,
+    dogcats_dir: str,
+) -> None:
+    """Emit the human-readable list output (brief/tree/table + legend).
+
+    Handles deferred-subtree collapsing (unless ``expand``), blocked-status
+    symbols, and the ``--limit`` slice (applied after collapsing so previews
+    count against the limit the same way the pre-extraction code did).
+    """
+    from dogcat.deps import get_blocked_issues
+
+    # Collapse children of deferred parents (unless --expand)
+    if expand:
+        deferred_view = DeferredView(filtered=issues)
+    else:
+        deferred_view = _collapse_deferred_subtrees(issues, storage)
+        issues = deferred_view.filtered
+    hidden_counts = deferred_view.hidden_counts
+    deferred_blocker_map = deferred_view.deferred_blocker_map
+    preview_subtasks = deferred_view.preview_subtasks
+
+    if final_limit is not None:
+        issues = issues[:final_limit]
+
+    # Get blocked issue IDs to show correct status symbol
+    blocked_issues = get_blocked_issues(storage)
+    blocked_ids = {bi.issue_id for bi in blocked_issues}
+    blocked_by_map = {bi.issue_id: bi.blocking_ids for bi in blocked_issues}
+
+    total_hidden = sum(hidden_counts.values()) - sum(
+        len(p) for p in preview_subtasks.values()
+    )
+    config = load_config(dogcats_dir)
+    legend_color = not config.disable_legend_colors
+
+    if not issues:
+        typer.echo("No issues found")
+        return
+
+    typer.echo(f"Issues ({len(issues)}):")
+    if tree:
+        typer.echo(
+            format_issue_tree(
+                issues,
+                blocked_ids=blocked_ids,
+                blocked_by_map=blocked_by_map,
+                deferred=deferred_view,
+            ),
+        )
+    elif table:
+        typer.echo(
+            format_issue_table(
+                issues,
+                blocked_ids=blocked_ids,
+                blocked_by_map=blocked_by_map,
+                deferred=deferred_view,
+            ),
+        )
+    else:
+        for issue in issues:
+            has_previews = issue.full_id in preview_subtasks
+            typer.echo(
+                format_issue_brief(
+                    issue,
+                    blocked_ids=blocked_ids,
+                    blocked_by_map=blocked_by_map,
+                    hidden_subtask_count=(
+                        None if has_previews else hidden_counts.get(issue.full_id)
+                    ),
+                    deferred_blockers=deferred_blocker_map.get(issue.full_id),
+                ),
+            )
+            if has_previews:
+                previews = preview_subtasks[issue.full_id]
+                for preview in previews:
+                    typer.echo(
+                        "  "
+                        + format_issue_brief(
+                            preview,
+                            blocked_ids=blocked_ids,
+                            blocked_by_map=blocked_by_map,
+                        ),
+                    )
+                total = hidden_counts.get(issue.full_id, 0)
+                remaining = total - len(previews)
+                if remaining > 0:
+                    msg = f"[...and {remaining} more hidden subtasks]"
+                    typer.echo("  " + typer.style(msg, fg="yellow"))
+    typer.echo(get_legend(total_hidden, color=legend_color))
+
+
 def register(app: typer.Typer) -> None:
     """Register read/display commands."""
 
@@ -459,26 +581,9 @@ def register(app: typer.Typer) -> None:
             help="Filter by status",
             autocompletion=complete_statuses,
         ),
-        priority: int | None = typer.Option(
-            None,
-            "--priority",
-            "-p",
-            help="Filter by priority",
-            autocompletion=complete_priorities,
-        ),
-        issue_type: str | None = typer.Option(
-            None,
-            "--type",
-            "-t",
-            help="Filter by type",
-            autocompletion=complete_types,
-        ),
-        exclude_type: list[str] = typer.Option(  # noqa: B008
-            [],
-            "--exclude-type",
-            help="Exclude issues of this type (repeatable)",
-            autocompletion=complete_types,
-        ),
+        priority: PriorityFilterOpt = None,
+        issue_type: IssueTypeFilterOpt = None,
+        exclude_type: ExcludeTypeFilterOpt = [],  # noqa: B006,
         label: str | None = typer.Option(
             None,
             "--label",
@@ -486,24 +591,9 @@ def register(app: typer.Typer) -> None:
             help="Filter by label (comma or space separated)",
             autocompletion=complete_labels,
         ),
-        owner: str | None = typer.Option(
-            None,
-            "--owner",
-            "-o",
-            help="Filter by owner",
-            autocompletion=complete_owners,
-        ),
-        parent: str | None = typer.Option(
-            None,
-            "--parent",
-            help="Filter by parent issue ID",
-            autocompletion=complete_issue_ids,
-        ),
-        no_parent: bool = typer.Option(
-            False,
-            "--no-parent",
-            help="Show only top-level issues (no parent)",
-        ),
+        owner: OwnerFilterOpt = None,
+        parent: ParentFilterOpt = None,
+        no_parent: NoParentOpt = False,
         closed: bool = typer.Option(False, "--closed", help="Show only closed issues"),
         open_issues: bool = typer.Option(
             False,
@@ -528,39 +618,12 @@ def register(app: typer.Typer) -> None:
             autocompletion=complete_dates,
         ),
         limit: int | None = typer.Option(None, "--limit", help="Limit results"),
-        namespace: str | None = typer.Option(
-            None,
-            "--namespace",
-            help="Filter by namespace",
-            autocompletion=complete_namespaces,
-        ),
-        all_namespaces: bool = typer.Option(
-            False,
-            "--all-namespaces",
-            "--all-ns",
-            "-A",
-            help="Show issues from all namespaces",
-        ),
-        agent_only: bool = typer.Option(
-            False,
-            "--agent-only",
-            help="Only show issues available for agents",
-        ),
-        manual: bool = typer.Option(
-            False,
-            "--manual",
-            help="Only show issues marked as manual",
-        ),
-        has_comments: bool = typer.Option(
-            False,
-            "--has-comments",
-            help="Only show issues that have at least one comment",
-        ),
-        without_comments: bool = typer.Option(
-            False,
-            "--without-comments",
-            help="Only show issues that have no comments",
-        ),
+        namespace: NamespaceFilterOpt = None,
+        all_namespaces: AllNamespacesOpt = False,
+        agent_only: AgentOnlyOpt = False,
+        manual: ManualFilterOpt = False,
+        has_comments: HasCommentsOpt = False,
+        without_comments: WithoutCommentsOpt = False,
         tree: bool = typer.Option(
             False,
             "--tree",
@@ -649,99 +712,17 @@ def register(app: typer.Typer) -> None:
             final_limit = resolve_limit(None, limit)
 
             if is_json():
-                if final_limit is not None:
-                    issues = issues[:final_limit]
-                from dogcat.models import issue_to_dict
-
-                output = [issue_to_dict(issue) for issue in issues]
-                typer.echo(orjson.dumps(output).decode())
+                _render_list_json(issues, final_limit)
             else:
-                # Collapse children of deferred parents (unless --expand)
-                if expand:
-                    deferred_view = DeferredView(filtered=issues)
-                else:
-                    deferred_view = _collapse_deferred_subtrees(issues, storage)
-                    issues = deferred_view.filtered
-                hidden_counts = deferred_view.hidden_counts
-                deferred_blocker_map = deferred_view.deferred_blocker_map
-                preview_subtasks = deferred_view.preview_subtasks
-
-                if final_limit is not None:
-                    issues = issues[:final_limit]
-
-                # Get blocked issue IDs to show correct status symbol
-                from dogcat.deps import get_blocked_issues
-
-                blocked_issues = get_blocked_issues(storage)
-                blocked_ids = {bi.issue_id for bi in blocked_issues}
-                blocked_by_map = {bi.issue_id: bi.blocking_ids for bi in blocked_issues}
-
-                total_hidden = sum(hidden_counts.values()) - sum(
-                    len(p) for p in preview_subtasks.values()
+                _render_list_text(
+                    issues,
+                    storage,
+                    expand=expand,
+                    tree=tree,
+                    table=table,
+                    final_limit=final_limit,
+                    dogcats_dir=actual_dogcats_dir,
                 )
-                config = load_config(actual_dogcats_dir)
-                legend_color = not config.get("disable_legend_colors", False)
-
-                if not issues:
-                    typer.echo("No issues found")
-                else:
-                    typer.echo(f"Issues ({len(issues)}):")
-                    if tree:
-                        typer.echo(
-                            format_issue_tree(
-                                issues,
-                                blocked_ids=blocked_ids,
-                                blocked_by_map=blocked_by_map,
-                                deferred=deferred_view,
-                            ),
-                        )
-                    elif table:
-                        typer.echo(
-                            format_issue_table(
-                                issues,
-                                blocked_ids=blocked_ids,
-                                blocked_by_map=blocked_by_map,
-                                deferred=deferred_view,
-                            ),
-                        )
-                    else:
-                        for issue in issues:
-                            has_previews = issue.full_id in preview_subtasks
-                            typer.echo(
-                                format_issue_brief(
-                                    issue,
-                                    blocked_ids=blocked_ids,
-                                    blocked_by_map=blocked_by_map,
-                                    hidden_subtask_count=(
-                                        None
-                                        if has_previews
-                                        else hidden_counts.get(issue.full_id)
-                                    ),
-                                    deferred_blockers=deferred_blocker_map.get(
-                                        issue.full_id,
-                                    ),
-                                ),
-                            )
-                            if has_previews:
-                                previews = preview_subtasks[issue.full_id]
-                                for preview in previews:
-                                    typer.echo(
-                                        "  "
-                                        + format_issue_brief(
-                                            preview,
-                                            blocked_ids=blocked_ids,
-                                            blocked_by_map=blocked_by_map,
-                                        ),
-                                    )
-                                total = hidden_counts.get(issue.full_id, 0)
-                                remaining = total - len(previews)
-                                if remaining > 0:
-                                    msg = f"[...and {remaining} more hidden subtasks]"
-                                    typer.echo(
-                                        "  " + typer.style(msg, fg="yellow"),
-                                    )
-                    typer.echo(get_legend(total_hidden, color=legend_color))
-
                 # Append inbox proposals if requested
                 if include_inbox:
                     _show_inbox_proposals(actual_dogcats_dir, namespace, all_namespaces)
@@ -844,26 +825,9 @@ def register(app: typer.Typer) -> None:
             help="Filter by status",
             autocompletion=complete_statuses,
         ),
-        priority: int | None = typer.Option(
-            None,
-            "--priority",
-            "-p",
-            help="Filter by priority",
-            autocompletion=complete_priorities,
-        ),
-        issue_type: str | None = typer.Option(
-            None,
-            "--type",
-            "-t",
-            help="Filter by type",
-            autocompletion=complete_types,
-        ),
-        exclude_type: list[str] = typer.Option(  # noqa: B008
-            [],
-            "--exclude-type",
-            help="Exclude issues of this type (repeatable)",
-            autocompletion=complete_types,
-        ),
+        priority: PriorityFilterOpt = None,
+        issue_type: IssueTypeFilterOpt = None,
+        exclude_type: ExcludeTypeFilterOpt = [],  # noqa: B006,
         label: str | None = typer.Option(
             None,
             "--label",
@@ -871,24 +835,9 @@ def register(app: typer.Typer) -> None:
             help="Filter by label (comma or space separated)",
             autocompletion=complete_labels,
         ),
-        owner: str | None = typer.Option(
-            None,
-            "--owner",
-            "-o",
-            help="Filter by owner",
-            autocompletion=complete_owners,
-        ),
-        parent: str | None = typer.Option(
-            None,
-            "--parent",
-            help="Filter by parent issue ID",
-            autocompletion=complete_issue_ids,
-        ),
-        no_parent: bool = typer.Option(
-            False,
-            "--no-parent",
-            help="Show only top-level issues (no parent)",
-        ),
+        owner: OwnerFilterOpt = None,
+        parent: ParentFilterOpt = None,
+        no_parent: NoParentOpt = False,
         closed: bool = typer.Option(False, "--closed", help="Show only closed issues"),
         open_issues: bool = typer.Option(
             False,
@@ -913,39 +862,12 @@ def register(app: typer.Typer) -> None:
             autocompletion=complete_dates,
         ),
         limit: int | None = typer.Option(None, "--limit", help="Limit results"),
-        namespace: str | None = typer.Option(
-            None,
-            "--namespace",
-            help="Filter by namespace",
-            autocompletion=complete_namespaces,
-        ),
-        all_namespaces: bool = typer.Option(
-            False,
-            "--all-namespaces",
-            "--all-ns",
-            "-A",
-            help="Show issues from all namespaces",
-        ),
-        agent_only: bool = typer.Option(
-            False,
-            "--agent-only",
-            help="Only show issues available for agents",
-        ),
-        manual: bool = typer.Option(
-            False,
-            "--manual",
-            help="Only show issues marked as manual",
-        ),
-        has_comments: bool = typer.Option(
-            False,
-            "--has-comments",
-            help="Only show issues that have at least one comment",
-        ),
-        without_comments: bool = typer.Option(
-            False,
-            "--without-comments",
-            help="Only show issues that have no comments",
-        ),
+        namespace: NamespaceFilterOpt = None,
+        all_namespaces: AllNamespacesOpt = False,
+        agent_only: AgentOnlyOpt = False,
+        manual: ManualFilterOpt = False,
+        has_comments: HasCommentsOpt = False,
+        without_comments: WithoutCommentsOpt = False,
         include_snoozed: bool = typer.Option(
             False,
             "--include-snoozed",
