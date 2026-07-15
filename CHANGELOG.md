@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.13.1 (2026-07-15)
+
 ### Fixed
 
 - **`dcat comment add` accepts `-m` as an alias for `--text`.** git/gh/hg all use `-m` for messages, so callers reached for `dcat comment <id> add -m "…"` by reflex; the unknown flag exited non-zero with the comment never saved — an easy footgun to miss in a batch. `-m` now behaves exactly like `-t`/`--text` (closes dogcat-3qt2).
