@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Development
+
+- **`softprops/action-gh-release` moved to v3 (native Node 24) and pinned by commit SHA**, and the `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24` env workaround — which was forcing the deprecated Node 20 action onto Node 24 — is removed from the publish and release workflows, clearing the GitHub Actions deprecation warning (closes dogcat-1fqv).
+- **All remaining third-party GitHub Actions are pinned to full commit SHAs** (each with a trailing `# vX.Y.Z` comment) and bumped to current majors — `actions/checkout` v5→v7, `astral-sh/setup-uv` v7→v8, and `pypa/gh-action-pypi-publish` from the `release/v1` branch to v1.14.0 — and a new Dependabot config (`.github/dependabot.yml`; github-actions ecosystem, weekly, grouped into one PR) raises automated PRs to keep the pins fresh (closes dogcat-4w73).
+
 ## 0.13.1 (2026-07-15)
 
 ### Fixed
