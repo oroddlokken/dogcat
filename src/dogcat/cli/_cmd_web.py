@@ -119,7 +119,7 @@ def register(app: typer.Typer) -> None:
             allow_creating_namespaces=resolved_allow,
         )
 
-        if host in {"0.0.0.0", "::"}:
+        if host in {"0.0.0.0", "::"}:  # noqa: S104  # the warning below is the guard
             typer.echo(
                 f"warning: binding to {host} exposes the propose form to "
                 "every network interface. The CSRF + nonce defenses cap "

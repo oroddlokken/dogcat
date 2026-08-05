@@ -59,7 +59,9 @@ def main() -> None:  # noqa: D103
     dcat_script = Path(__file__).resolve().parent / "dcat.py"
     exe = [sys.executable, str(dcat_script)]
 
-    result = subprocess.run(
+    # check=False: Typer's completion shim exits non-zero on an unmatched
+    # prefix, which is a normal outcome here, not a failure.
+    result = subprocess.run(  # noqa: S603  # argv is sys.executable + a sibling script
         exe,
         env={
             **os.environ,
@@ -68,6 +70,7 @@ def main() -> None:  # noqa: D103
         },
         capture_output=True,
         text=True,
+        check=False,
     )
 
     stdout = result.stdout.strip()

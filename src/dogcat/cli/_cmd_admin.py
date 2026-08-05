@@ -574,8 +574,8 @@ def register(app: typer.Typer) -> None:
             storage_path = storage.path
 
             with storage_path.open("rb") as f:
-                for line_bytes in f:
-                    line_bytes = line_bytes.strip()
+                for raw_bytes in f:
+                    line_bytes = raw_bytes.strip()
                     if not line_bytes:
                         continue
                     data = orjson.loads(line_bytes)
@@ -592,7 +592,7 @@ def register(app: typer.Typer) -> None:
                         changes: dict[str, dict[str, Any]] = {}
                         for field_name in TRACKED_FIELDS:
                             value = new_state.get(field_name)
-                            if value is not None and value != [] and value != "":
+                            if value is not None and value not in ([], ""):
                                 if field_name == "description":
                                     changes[field_name] = {
                                         "old": None,

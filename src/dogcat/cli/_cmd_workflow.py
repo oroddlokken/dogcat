@@ -969,17 +969,16 @@ def register(app: typer.Typer) -> None:
 
                 output = [issue_to_dict(issue) for issue in recent]
                 typer.echo(orjson.dumps(output).decode())
+            elif not recent:
+                typer.echo("No recently added issues")
             else:
-                if not recent:
-                    typer.echo("No recently added issues")
-                else:
-                    typer.echo(f"Recently Added ({len(recent)}):")
-                    for issue in recent:
-                        created_str = typer.style(
-                            f"[{issue.created_at.strftime('%Y-%m-%d %H:%M')}]",
-                            fg="bright_black",
-                        )
-                        typer.echo(f"{format_issue_brief(issue)} {created_str}")
+                typer.echo(f"Recently Added ({len(recent)}):")
+                for issue in recent:
+                    created_str = typer.style(
+                        f"[{issue.created_at.strftime('%Y-%m-%d %H:%M')}]",
+                        fg="bright_black",
+                    )
+                    typer.echo(f"{format_issue_brief(issue)} {created_str}")
 
         except typer.Exit:
             raise

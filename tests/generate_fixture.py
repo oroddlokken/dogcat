@@ -124,6 +124,7 @@ print(f"Generated {{len(ids)}} issues")
             capture_output=True,
             text=True,
             cwd=clone_dir,
+            check=False,  # the returncode branch below reports stdout+stderr
         )
 
         if result.returncode != 0:
@@ -153,6 +154,7 @@ print(f"Generated {{count}} proposals")
             capture_output=True,
             text=True,
             cwd=clone_dir,
+            check=False,  # pre-v0.10.0 tags have no inbox; failure is expected
         )
 
         inbox_path = dogcats_dir / "inbox.jsonl"

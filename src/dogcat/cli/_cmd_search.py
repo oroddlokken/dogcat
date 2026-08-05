@@ -188,11 +188,11 @@ def register(app: typer.Typer) -> None:
             matches: list[tuple[Issue, list[tuple[str, str]]]] = []
             for issue in issues:
                 matched_fields: list[tuple[str, str]] = []
-                for attr, label in search_fields:
+                for attr, field_label in search_fields:
                     text = getattr(issue, attr, None)
                     if text and pattern.search(text):
                         snippet = _extract_snippet(text, pattern)
-                        matched_fields.append((label, snippet))
+                        matched_fields.append((field_label, snippet))
                 # Also search comments
                 for comment in issue.comments:
                     if comment.text and pattern.search(comment.text):
@@ -210,21 +210,20 @@ def register(app: typer.Typer) -> None:
 
                 output = [issue_to_dict(issue) for issue, _ in matches]
                 typer.echo(orjson.dumps(output).decode())
+            elif not matches:
+                typer.echo(f"No issues found matching '{query}'")
             else:
-                if not matches:
-                    typer.echo(f"No issues found matching '{query}'")
-                else:
-                    typer.echo(f"Found {len(matches)} issue(s) matching '{query}':\n")
-                    for issue, matched_fields in matches:
-                        typer.echo(format_issue_brief(issue))
-                        for field_name, snippet in matched_fields:
-                            if field_name == "Title":
-                                continue  # Title is already visible
-                            styled_field = typer.style(
-                                f"  {field_name}:",
-                                fg="bright_black",
-                            )
-                            typer.echo(f"{styled_field} {snippet}")
+                typer.echo(f"Found {len(matches)} issue(s) matching '{query}':\n")
+                for issue, matched_fields in matches:
+                    typer.echo(format_issue_brief(issue))
+                    for field_name, snippet in matched_fields:
+                        if field_name == "Title":
+                            continue  # Title is already visible
+                        styled_field = typer.style(
+                            f"  {field_name}:",
+                            fg="bright_black",
+                        )
+                        typer.echo(f"{styled_field} {snippet}")
 
         except typer.Exit:
             raise

@@ -167,11 +167,11 @@ class StreamEmitter(FileSystemEventHandler):
                     events.append(event)
 
         # Check for deletes (issues in old but not new)
-        for issue_id in old_state:
+        for issue_id, old_issue in old_state.items():
             if issue_id not in new_state:
                 delete_changes: dict[str, FieldChange] = {
                     "status": FieldChange(
-                        old=old_state[issue_id].get("status"),
+                        old=old_issue.get("status"),
                         new="deleted",
                     ),
                 }
@@ -245,8 +245,8 @@ class StreamEmitter(FileSystemEventHandler):
                     f.seek(self._file_position)
                     new_bytes = f.read()
 
-                for line in new_bytes.splitlines():
-                    line = line.strip()
+                for raw_line in new_bytes.splitlines():
+                    line = raw_line.strip()
                     if not line:
                         continue
                     data = orjson.loads(line)
@@ -444,8 +444,8 @@ class InboxStreamEmitter(FileSystemEventHandler):
                     f.seek(self._file_position)
                     new_bytes = f.read()
 
-                for line in new_bytes.splitlines():
-                    line = line.strip()
+                for raw_line in new_bytes.splitlines():
+                    line = raw_line.strip()
                     if not line:
                         continue
                     data = orjson.loads(line)

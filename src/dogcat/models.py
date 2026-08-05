@@ -663,28 +663,31 @@ def validate_proposal(proposal: Proposal) -> None:
 # ``__getattr__`` (PEP 562) — whichever module is imported first finishes
 # loading before the other is pulled in, so neither import order deadlocks. The
 # ``TYPE_CHECKING`` re-imports keep the names statically visible to type
-# checkers without running at import time.
+# checkers without running at import time. The ``X as X`` spelling is the PEP
+# 484 explicit re-export marker — without it pyright treats these as private to
+# this module and rejects ``from dogcat.models import issue_to_dict`` — so
+# PLC0414 ("import alias does not rename") is silenced rather than obeyed.
 if TYPE_CHECKING:
     from dogcat.models_serde import (
-        _migrate_close_reason as _migrate_close_reason,
+        _migrate_close_reason as _migrate_close_reason,  # noqa: PLC0414
     )
     from dogcat.models_serde import (
-        _migrate_notes as _migrate_notes,
+        _migrate_notes as _migrate_notes,  # noqa: PLC0414
     )
     from dogcat.models_serde import (
-        classify_record as classify_record,
+        classify_record as classify_record,  # noqa: PLC0414
     )
     from dogcat.models_serde import (
-        dict_to_issue as dict_to_issue,
+        dict_to_issue as dict_to_issue,  # noqa: PLC0414
     )
     from dogcat.models_serde import (
-        dict_to_proposal as dict_to_proposal,
+        dict_to_proposal as dict_to_proposal,  # noqa: PLC0414
     )
     from dogcat.models_serde import (
-        issue_to_dict as issue_to_dict,
+        issue_to_dict as issue_to_dict,  # noqa: PLC0414
     )
     from dogcat.models_serde import (
-        proposal_to_dict as proposal_to_dict,
+        proposal_to_dict as proposal_to_dict,  # noqa: PLC0414
     )
 
 _SERDE_REEXPORTS = frozenset(

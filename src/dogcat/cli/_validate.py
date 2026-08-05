@@ -112,8 +112,8 @@ def parse_raw_records(
         errors.append(ValidationError(level="error", message=f"{path} does not exist"))
         return records, errors
 
-    for lineno, raw in enumerate(path.read_bytes().splitlines(), start=1):
-        raw = raw.strip()
+    for lineno, raw_line in enumerate(path.read_bytes().splitlines(), start=1):
+        raw = raw_line.strip()
         if not raw:
             continue
         try:
@@ -585,10 +585,12 @@ def detect_concurrent_edits(
         )
         return warnings
 
-    # Narrow types after the integrity guard above.
-    assert base_issues is not None
-    assert p1_issues is not None
-    assert p2_issues is not None
+    # Narrow types after the integrity guard above. S101 does not apply: these
+    # are type-checker assertions, not runtime validation — the guard that made
+    # them true already returned.
+    assert base_issues is not None  # noqa: S101
+    assert p1_issues is not None  # noqa: S101
+    assert p2_issues is not None  # noqa: S101
 
     # Find issues modified in BOTH parents relative to base
     p1_modified = {

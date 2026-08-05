@@ -298,7 +298,7 @@ class TestStreamEmitterIncrementalParsing:
         captured_events: list[StreamEvent] = []
         emitter = StreamEmitter(
             str(storage_path),
-            on_event=lambda e: captured_events.append(e),
+            on_event=captured_events.append,
         )
         initial_position = emitter._file_position
 
@@ -330,7 +330,7 @@ class TestStreamEmitterIncrementalParsing:
         captured_events: list[StreamEvent] = []
         emitter = StreamEmitter(
             str(storage_path),
-            on_event=lambda e: captured_events.append(e),
+            on_event=captured_events.append,
         )
 
         assert emitter._file_position > 0
@@ -368,7 +368,7 @@ class TestStreamEmitterIncrementalParsing:
         captured_events: list[StreamEvent] = []
         emitter = StreamEmitter(
             str(storage_path),
-            on_event=lambda e: captured_events.append(e),
+            on_event=captured_events.append,
         )
 
         # Call handle_file_change without any actual file changes
@@ -385,7 +385,7 @@ class TestStreamEmitterIncrementalParsing:
         captured_events: list[StreamEvent] = []
         emitter = StreamEmitter(
             str(storage_path),
-            on_event=lambda e: captured_events.append(e),
+            on_event=captured_events.append,
         )
 
         # Update the issue (appends new line)
@@ -424,7 +424,7 @@ class TestStreamEmitterIncrementalParsing:
         captured_events: list[StreamEvent] = []
         emitter = StreamEmitter(
             str(storage_path),
-            on_event=lambda e: captured_events.append(e),
+            on_event=captured_events.append,
         )
 
         # Create two issues
@@ -455,7 +455,7 @@ class TestInboxStreamEmitter:
         captured: list[StreamEvent] = []
         emitter = InboxStreamEmitter(
             str(inbox_path),
-            on_event=lambda e: captured.append(e),
+            on_event=captured.append,
         )
 
         # Create a proposal
@@ -479,7 +479,7 @@ class TestInboxStreamEmitter:
         captured: list[StreamEvent] = []
         emitter = InboxStreamEmitter(
             str(inbox_path),
-            on_event=lambda e: captured.append(e),
+            on_event=captured.append,
         )
 
         # Close the proposal
@@ -502,7 +502,7 @@ class TestInboxStreamEmitter:
         captured: list[StreamEvent] = []
         emitter = InboxStreamEmitter(
             str(inbox_path),
-            on_event=lambda e: captured.append(e),
+            on_event=captured.append,
         )
 
         inbox.delete("dc-inbox-test1")
@@ -522,7 +522,7 @@ class TestInboxStreamEmitter:
         captured: list[StreamEvent] = []
         emitter = InboxStreamEmitter(
             str(inbox_path),
-            on_event=lambda e: captured.append(e),
+            on_event=captured.append,
         )
 
         emitter._handle_file_change()  # noqa: SLF001
@@ -539,7 +539,7 @@ class TestInboxStreamEmitter:
         captured: list[StreamEvent] = []
         emitter = InboxStreamEmitter(
             str(inbox_path),
-            on_event=lambda e: captured.append(e),
+            on_event=captured.append,
         )
         initial_pos = emitter._file_position
 

@@ -73,8 +73,11 @@ def register(app: typer.Typer) -> None:
 
                 inbox = InboxStorage(dogcats_dir=actual_dir)
                 inbox_count = inbox.rename_namespace(old_namespace, new_namespace)
-            except Exception:
-                pass  # inbox may not exist
+            except Exception:  # noqa: S110
+                # Renaming the issue store already succeeded; a missing or
+                # unreadable inbox must not fail the whole command, and there
+                # is no logger on this path to route the exception to.
+                pass
 
             # Update config references
             config = load_config(actual_dir)

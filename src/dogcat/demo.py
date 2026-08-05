@@ -1476,7 +1476,7 @@ def generate_demo_inbox(dogcats_dir: str) -> int:
     p = _propose(
         "asdf test proposal please ignore",
         proposed_by="unknown",
-        source_repo="/tmp/test-repo",
+        source_repo="/tmp/test-repo",  # noqa: S108  # demo payload, never opened
     )
     inbox.delete(p.full_id)
 

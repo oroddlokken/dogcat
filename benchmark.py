@@ -236,7 +236,7 @@ class DeterministicIssueGenerator:
             seed: Random seed for reproducibility
             prefix: ID prefix for generated issues
         """
-        self.rng = random.Random(seed)
+        self.rng = random.Random(seed)  # noqa: S311  # seeded fixture data, not crypto
         self.prefix = prefix
         self.issue_counter = 0
         self.comment_counter = 0
@@ -346,7 +346,7 @@ class DeterministicIssueGenerator:
                 metadata[key] = self.rng.choice(
                     ["auth", "api", "ui", "db", "infra", "core"],
                 )
-            elif key == "affected_version" or key == "fix_version":
+            elif key in {"affected_version", "fix_version"}:
                 metadata[key] = f"{self.rng.randint(1, 5)}.{self.rng.randint(0, 20)}.0"
             elif key == "environment":
                 metadata[key] = self.rng.choice(["dev", "staging", "prod"])

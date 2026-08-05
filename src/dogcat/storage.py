@@ -567,7 +567,7 @@ class JSONLStorage(EventEmitterMixin):
         changes: dict[str, dict[str, Any]] = {}
         for field_name in TRACKED_FIELDS:
             value = getattr(issue, field_name, None)
-            if value is not None and value != [] and value != "":
+            if value is not None and value not in ([], ""):
                 changes[field_name] = {
                     "old": None,
                     "new": field_value(value),
@@ -905,11 +905,10 @@ class JSONLStorage(EventEmitterMixin):
         # string ``labels`` would iterate as characters in filters; a
         # bool ``priority`` would pass validate_priority because bool is
         # an int subclass).
-        for key, value in updates.items():
+        for key, raw_value in updates.items():
             if key not in self.UPDATABLE_FIELDS:
                 continue
-            value = self._coerce_update_value(key, value)
-            setattr(issue, key, value)
+            setattr(issue, key, self._coerce_update_value(key, raw_value))
 
         # Handle status transition side effects
         if "status" in updates:
@@ -1296,24 +1295,22 @@ class JSONLStorage(EventEmitterMixin):
         removed_deps = [
             d
             for d in self._dependencies
-            if d.issue_id == resolved_id or d.depends_on_id == resolved_id
+            if resolved_id in (d.issue_id, d.depends_on_id)
         ]
         removed_links = [
-            link
-            for link in self._links
-            if link.from_id == resolved_id or link.to_id == resolved_id
+            link for link in self._links if resolved_id in (link.from_id, link.to_id)
         ]
 
         # Clean up in-memory state
         self._dependencies = [
             d
             for d in self._dependencies
-            if d.issue_id != resolved_id and d.depends_on_id != resolved_id
+            if resolved_id not in (d.issue_id, d.depends_on_id)
         ]
         self._links = [
             link
             for link in self._links
-            if link.from_id != resolved_id and link.to_id != resolved_id
+            if resolved_id not in (link.from_id, link.to_id)
         ]
         self._rebuild_indexes()
 
@@ -1790,8 +1787,8 @@ class JSONLStorage(EventEmitterMixin):
             prune_ids = set(tombstone_ids)
             if self.path.exists():
                 with self.path.open("rb") as src:
-                    for raw_line in src:
-                        raw_line = raw_line.strip()
+                    for src_line in src:
+                        raw_line = src_line.strip()
                         if not raw_line:
                             continue
                         try:

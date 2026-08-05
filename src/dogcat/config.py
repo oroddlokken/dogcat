@@ -109,8 +109,8 @@ def get_rc_walkup_boundary(start: Path | None = None) -> Path | None:
 
     cwd = start if start is not None else Path.cwd()
     try:
-        result = subprocess.run(
-            ["git", "-C", str(cwd), "rev-parse", "--show-toplevel"],
+        result = subprocess.run(  # noqa: S603  # fixed argv, no shell
+            ["git", "-C", str(cwd), "rev-parse", "--show-toplevel"],  # noqa: S607
             check=False,
             capture_output=True,
             text=True,
@@ -718,8 +718,8 @@ def _detect_namespace_from_issues(dogcats_dir: str) -> str | None:
         prefix_counts: dict[str, int] = {}
 
         with issues_path.open("rb") as f:
-            for line in f:
-                line = line.strip()
+            for raw_line in f:
+                line = raw_line.strip()
                 if not line:
                     continue
                 try:

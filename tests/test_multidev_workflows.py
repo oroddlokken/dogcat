@@ -28,17 +28,21 @@ if TYPE_CHECKING:
 def as_developer(repo: GitRepo, name: str, email: str) -> Any:
     """Context manager to temporarily switch git identity."""
     # Save original identity
+    # check=False: an unset user.name/user.email exits non-zero, and an empty
+    # string is exactly the "no original identity" case we want to restore to.
     orig_name = subprocess.run(
         ["git", "config", "user.name"],
         cwd=repo.path,
         capture_output=True,
         text=True,
+        check=False,
     ).stdout.strip()
     orig_email = subprocess.run(
         ["git", "config", "user.email"],
         cwd=repo.path,
         capture_output=True,
         text=True,
+        check=False,
     ).stdout.strip()
 
     # Set new identity

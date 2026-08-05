@@ -31,7 +31,7 @@ def _invoke(dogcats_dir: Path, args: list[str]) -> str:
 
 def _extract_id(create_output: str) -> str:
     """Extract issue ID from create command output."""
-    return create_output.split(": ")[0].split()[-1]
+    return create_output.split(": ", maxsplit=1)[0].rsplit(maxsplit=1)[-1]
 
 
 class TestFullLifecycleWithReopen:

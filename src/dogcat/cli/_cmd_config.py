@@ -320,23 +320,22 @@ def register(app: typer.Typer) -> None:
 
         if is_json():
             typer.echo(orjson.dumps(effective, option=orjson.OPT_INDENT_2).decode())
+        elif not effective:
+            typer.echo("No configuration values set.")
         else:
-            if not effective:
-                typer.echo("No configuration values set.")
-            else:
-                for k, v in sorted(effective.items()):
-                    if k in local_keys:
-                        suffix = " (local)"
-                    elif k in global_keys and k not in config:
-                        suffix = " (global)"
-                    elif k in global_keys:
-                        suffix = " (shared, overrides global)"
-                    else:
-                        suffix = ""
-                    if isinstance(v, list):
-                        typer.echo(f"{k} = {', '.join(str(i) for i in v)}{suffix}")  # type: ignore[reportUnknownArgumentType, reportUnknownVariableType]
-                    else:
-                        typer.echo(f"{k} = {v}{suffix}")
+            for k, v in sorted(effective.items()):
+                if k in local_keys:
+                    suffix = " (local)"
+                elif k in global_keys and k not in config:
+                    suffix = " (global)"
+                elif k in global_keys:
+                    suffix = " (shared, overrides global)"
+                else:
+                    suffix = ""
+                if isinstance(v, list):
+                    typer.echo(f"{k} = {', '.join(str(i) for i in v)}{suffix}")  # type: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+                else:
+                    typer.echo(f"{k} = {v}{suffix}")
 
     @config_app.command("keys")
     def config_keys(

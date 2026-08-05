@@ -98,12 +98,11 @@ def register(app: typer.Typer) -> None:
 
                 if is_json():
                     typer.echo(orjson.dumps(issue.labels).decode())
+                elif issue.labels:
+                    for lbl in issue.labels:
+                        typer.echo(f"  {lbl}")
                 else:
-                    if issue.labels:
-                        for lbl in issue.labels:
-                            typer.echo(f"  {lbl}")
-                    else:
-                        typer.echo("No labels")
+                    typer.echo("No labels")
             else:
                 echo_error(f"Unknown subcommand: {subcommand}")
                 raise typer.Exit(1)
@@ -138,12 +137,11 @@ def register(app: typer.Typer) -> None:
                     for lbl, count in sorted(label_counts.items())
                 ]
                 typer.echo(orjson.dumps(result).decode())
+            elif label_counts:
+                for lbl, count in sorted(label_counts.items()):
+                    typer.echo(f"  {lbl} ({count})")
             else:
-                if label_counts:
-                    for lbl, count in sorted(label_counts.items()):
-                        typer.echo(f"  {lbl} ({count})")
-                else:
-                    typer.echo("No labels found")
+                typer.echo("No labels found")
 
         except typer.Exit:
             raise
@@ -209,20 +207,19 @@ def register(app: typer.Typer) -> None:
                     for ns, counts in sorted(ns_counts.items())
                 ]
                 typer.echo(orjson.dumps(result).decode())
+            elif ns_counts:
+                for ns, counts in sorted(ns_counts.items()):
+                    ann = _annotation(ns)
+                    suffix = f" ({ann})" if ann else ""
+                    parts: list[str] = []
+                    if counts.issues:
+                        parts.append(f"{counts.issues} issues")
+                    if counts.inbox:
+                        parts.append(f"{counts.inbox} inbox")
+                    detail = ", ".join(parts) if parts else "0 issues"
+                    typer.echo(f"  {ns} ({detail}){suffix}")
             else:
-                if ns_counts:
-                    for ns, counts in sorted(ns_counts.items()):
-                        ann = _annotation(ns)
-                        suffix = f" ({ann})" if ann else ""
-                        parts: list[str] = []
-                        if counts.issues:
-                            parts.append(f"{counts.issues} issues")
-                        if counts.inbox:
-                            parts.append(f"{counts.inbox} inbox")
-                        detail = ", ".join(parts) if parts else "0 issues"
-                        typer.echo(f"  {ns} ({detail}){suffix}")
-                else:
-                    typer.echo("No namespaces found")
+                typer.echo("No namespaces found")
 
         except typer.Exit:
             raise

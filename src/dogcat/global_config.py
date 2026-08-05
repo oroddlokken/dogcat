@@ -157,7 +157,7 @@ def resolve_global_fallback() -> str | None:
     :func:`was_resolved_via_global`) and prints a one-time stderr notice
     so issue writes never land in the shared store silently.
     """
-    global _global_fallback_path
+    global _global_fallback_path  # noqa: PLW0603  # see the module note above
 
     cfg = load_global_config()
     if cfg.default_storage is None or not cfg.default_storage.is_dir():
@@ -198,5 +198,5 @@ def reset_resolution_state() -> None:
     called from tests/conftest.py between tests so resolution state never
     leaks across them.
     """
-    global _global_fallback_path
+    global _global_fallback_path  # noqa: PLW0603  # see the module note above
     _global_fallback_path = None

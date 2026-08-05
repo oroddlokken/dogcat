@@ -41,8 +41,8 @@ def _parse_issues_from_bytes(raw: bytes) -> dict[str, dict[str, Any]]:
     from dogcat.models import classify_record, dict_to_issue, issue_to_dict
 
     states: dict[str, dict[str, Any]] = {}
-    for line in raw.splitlines():
-        line = line.strip()
+    for raw_line in raw.splitlines():
+        line = raw_line.strip()
         if not line:
             continue
         try:
@@ -61,8 +61,8 @@ def _parse_proposals_from_bytes(raw: bytes) -> dict[str, dict[str, Any]]:
     from dogcat.models import classify_record, dict_to_proposal, proposal_to_dict
 
     states: dict[str, dict[str, Any]] = {}
-    for line in raw.splitlines():
-        line = line.strip()
+    for raw_line in raw.splitlines():
+        line = raw_line.strip()
         if not line:
             continue
         try:
@@ -173,7 +173,7 @@ def _diff_records(
             changes: dict[str, dict[str, Any]] = {}
             for field_name in tracked_fields:
                 value = new_state.get(field_name)
-                if value is not None and value != [] and value != "":
+                if value is not None and value not in ([], ""):
                     changes[field_name] = {"old": None, "new": _field_value(value)}
             if include_metadata:
                 changes.update(diff_metadata(None, new_state.get("metadata")))

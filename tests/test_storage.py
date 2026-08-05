@@ -421,8 +421,8 @@ class TestAtomicWrites:
         # Read the file and verify each line is valid JSON with expected structure
         records: list[dict[str, object]] = []
         with storage_path.open() as f:
-            for line in f:
-                line = line.strip()
+            for raw_line in f:
+                line = raw_line.strip()
                 if line:
                     records.append(json.loads(line))
 
@@ -1105,11 +1105,11 @@ class TestInputCapEnforcement:
         Pinning this prevents an over-eager strip that would mangle
         legitimate uses of bidi marks. (dogcat-2rpd)
         """
-        storage.create(Issue(id="zw", title="hello​world‮marker"))
+        storage.create(Issue(id="zw", title="hello\u200bworld‮marker"))
         # Both characters survive the storage round-trip.
         reloaded = JSONLStorage(str(storage.path)).get("dc-zw")
         assert reloaded is not None
-        assert "​" in reloaded.title
+        assert "\u200b" in reloaded.title
         assert "‮" in reloaded.title
 
     def test_multibyte_utf8_title_round_trips(self, storage: JSONLStorage) -> None:

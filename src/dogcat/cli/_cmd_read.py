@@ -1111,7 +1111,7 @@ def register(app: typer.Typer) -> None:
                     typer.echo("No issues found")
                 raise typer.Exit(1)
 
-            picked = random.choice(issues)
+            picked = random.choice(issues)  # noqa: S311  # picking an issue, not a key
 
             if is_json():
                 from dogcat.models import issue_to_dict

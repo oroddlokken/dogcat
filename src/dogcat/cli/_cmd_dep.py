@@ -91,14 +91,13 @@ def register(app: typer.Typer) -> None:
                         for dep in deps
                     ]
                     typer.echo(orjson.dumps(output).decode())
+                elif deps:
+                    for dep in deps:
+                        typer.echo(
+                            f"  → {dep.depends_on_id} ({dep.dep_type.value})",
+                        )
                 else:
-                    if deps:
-                        for dep in deps:
-                            typer.echo(
-                                f"  → {dep.depends_on_id} ({dep.dep_type.value})",
-                            )
-                    else:
-                        typer.echo("No dependencies")
+                    typer.echo("No dependencies")
             else:
                 echo_error(f"Unknown subcommand: {subcommand}")
                 raise typer.Exit(1)
@@ -195,18 +194,17 @@ def register(app: typer.Typer) -> None:
                         ],
                     }
                     typer.echo(orjson.dumps(output).decode())
+                elif links or incoming:
+                    if links:
+                        typer.echo("Outgoing links:")
+                        for link in links:
+                            typer.echo(f"  → {link.to_id} ({link.link_type})")
+                    if incoming:
+                        typer.echo("Incoming links:")
+                        for link in incoming:
+                            typer.echo(f"  ← {link.from_id} ({link.link_type})")
                 else:
-                    if links or incoming:
-                        if links:
-                            typer.echo("Outgoing links:")
-                            for link in links:
-                                typer.echo(f"  → {link.to_id} ({link.link_type})")
-                        if incoming:
-                            typer.echo("Incoming links:")
-                            for link in incoming:
-                                typer.echo(f"  ← {link.from_id} ({link.link_type})")
-                    else:
-                        typer.echo("No links")
+                    typer.echo("No links")
             else:
                 echo_error(f"Unknown subcommand: {subcommand}")
                 raise typer.Exit(1)

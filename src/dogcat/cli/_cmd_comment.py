@@ -99,14 +99,13 @@ def register(app: typer.Typer) -> None:
                         for c in issue.comments
                     ]
                     typer.echo(orjson.dumps(output).decode())
+                elif not issue.comments:
+                    typer.echo("No comments")
                 else:
-                    if not issue.comments:
-                        typer.echo("No comments")
-                    else:
-                        for comment in issue.comments:
-                            ts = comment.created_at.isoformat()
-                            typer.echo(f"[{comment.id}] {comment.author} ({ts})")
-                            typer.echo(f"  {comment.text}")
+                    for comment in issue.comments:
+                        ts = comment.created_at.isoformat()
+                        typer.echo(f"[{comment.id}] {comment.author} ({ts})")
+                        typer.echo(f"  {comment.text}")
 
             elif action == "delete":
                 if not comment_id:

@@ -62,13 +62,17 @@ def _run(
     :func:`_git_timeout` (default 10 s, overridable via
     ``DCAT_GIT_TIMEOUT_SECS``); on TimeoutExpired we return None like a
     missing binary so callers degrade gracefully.
+
+    S603/S607 are silenced throughout: argv is a fixed list (never a shell
+    string), and resolving "git" off PATH is the point — dcat must use whichever
+    git the user's environment provides, not one pinned at install time.
     """
     env = _c_locale_env()
     timeout = _git_timeout()
     try:
         if capture_text:
-            return subprocess.run(
-                ["git", *args],
+            return subprocess.run(  # noqa: S603
+                ["git", *args],  # noqa: S607
                 capture_output=True,
                 text=True,
                 check=False,
@@ -76,8 +80,8 @@ def _run(
                 env=env,
                 timeout=timeout,
             )
-        return subprocess.run(
-            ["git", *args],
+        return subprocess.run(  # noqa: S603
+            ["git", *args],  # noqa: S607
             capture_output=True,
             check=False,
             cwd=str(cwd) if cwd else None,

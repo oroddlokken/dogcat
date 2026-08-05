@@ -123,7 +123,7 @@ def _record_set_equal(set1: list[dict[str, Any]], set2: list[dict[str, Any]]) ->
     # Sort both by some stable criteria for comparison
     def record_key(r: dict[str, Any]) -> tuple[str, ...]:
         rtype = r.get("record_type", "")
-        if rtype == "issue" or rtype == "proposal":
+        if rtype in {"issue", "proposal"}:
             return (rtype, r.get("namespace", ""), r.get("id", ""))
         if rtype == "dependency":
             return (rtype, r.get("issue_id", ""), r.get("depends_on_id", ""))

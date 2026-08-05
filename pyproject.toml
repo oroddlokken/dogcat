@@ -65,6 +65,7 @@ exclude = ["src/dogcat/_version.py"]
 select = [
   "A",    # flake8-builtins
   "ARG",  # flake8-unused-arguments 
+  "ASYNC", # flake8-async
   "B",    # bugbear
   "BLE",  # flake8-blind-except
   "C4",   # flake8-comprehensions
@@ -77,10 +78,12 @@ select = [
   "ERA",  # flake8-eradicate
   "EXE",  # flake8-executable
   "F",    # Pyflakes
-  "I",    # isort
+  "FA",   # flake8-future-annotations
+  "FBT",  # flake8-boolean-trap
   "FLY",  # flynt
   "FURB", # refurb
   "G",    # flake8-logging-format 
+  "I",    # isort
   "ICN",  # flake8-import-conventions 
   "INP",  # flake8-no-pep420 
   "ISC",  # flake8-implicit-str-concat
@@ -88,6 +91,7 @@ select = [
   "N",    # pep8-naming
   "PERF", # Perflint 
   "PIE",  # flake8-pie
+  "PL",   # Pylint (PLC, PLE, PLR, PLW)
   "PT",   # flake8-pytest-style
   "PTH",  # flake8-use-pathlib 
   "PYI",  # flake8-pyi
@@ -95,10 +99,12 @@ select = [
   "RET",  # flake8-return
   "RSE",  # flake8-raise
   "RUF",  # Ruff
+  "S",    # flake8-bandit (security)
   "SIM",  # flake8-simplify
   "SLF",  # flake8-self 
   "SLOT", # flake8-slots
   "T10",  # flake8-debugger
+  "T20",  # flake8-print
   "TC",   # flake8-type-checking
   "TID",  # flake8-tidy-imports
   "TRY",  # tryceratops
@@ -121,12 +127,51 @@ ignore = [
   "B904",   # raise ... from err - tedious for CLI exits
   "BLE001", # Blind except - intentional for defensive TUI/CLI code
   "C901",   # McCabe complexity - CLI commands are inherently complex
+  "PLR0912", # Too many branches - the same complaint as C901, already settled above
   "SLF001", # Private member access - common pattern in this codebase
   "TRY401", # Redundant exception in logging.exception - stylistic
   "G004",   # Logging f-string - acceptable in this project
+  "PLR0911", # Too many return statements - CLI dispatch fans out
+  "PLR0913", # Too many arguments - Typer commands mirror their option list
+  "PLR0915", # Too many statements - see C901
+  "PLR0917", # Too many positional arguments - fights stdlib-mirroring signatures
+  "PLR2004", # Magic value comparison - too noisy
+  "FBT001",  # Boolean positional arg in definition - Typer flags are booleans
+  "FBT002",  # Boolean default positional arg - as above
+  "FBT003",  # Boolean positional value in call
+  "T201",    # print - this is a CLI; print is the output channel
+  "S608",    # SQL injection - false positive for parameterized queries
+  # Deferred imports are how this CLI keeps startup cheap, and they are
+  # load-bearing: `import dogcat.cli` pulls in no textual, fastapi or uvicorn
+  # module, because each sits inside the function that needs it. `python -X
+  # importtime` puts textual.app alone at ~360ms against dogcat.cli's ~605ms,
+  # so hoisting these to module scope would roughly double what every `dcat`
+  # invocation pays. Several also break import cycles inside cli/. (colophon-59t5)
+  "PLC0415", # Import outside top-level
 ]
 
 [tool.ruff.lint.per-file-ignores]
+# D103: missing docstring in public function — test functions are self-documenting.
+# INP001: implicit namespace package — the tests dir intentionally has no __init__.py.
+# S101: use of assert — asserts are the point of a test.
+# S105/S106: hardcoded password — test fixtures use throwaway credentials.
+# S603/S607: the suite drives real `git` with fixed argv to build repo fixtures;
+#   the src-side calls carry per-line noqa instead (see dogcat/git.py).
+# S108: "/tmp/..." here is fixture *text* fed to path parsing, never opened.
+# PLE2502: test_storage.py pins the round-trip of bidi control characters
+#   (dogcat-2rpd), so the file must literally contain them.
+"tests/**" = [
+  "D103",
+  "INP001",
+  "S101",
+  "S105",
+  "S106",
+  "S603",
+  "S607",
+  "S108",
+  "PLE2502",
+]
+
 # The list-view commands annotate their options with the shared Annotated
 # aliases from cli/_list_options. Under `from __future__ import annotations`
 # Typer still resolves those annotations at runtime (get_type_hints), so the

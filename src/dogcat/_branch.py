@@ -73,7 +73,7 @@ def is_default_branch(dogcats_dir: Path) -> bool:
         from dogcat.git import _c_locale_env, _git_timeout
 
         result = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],  # noqa: S607  # PATH git
             capture_output=True,
             text=True,
             check=False,
