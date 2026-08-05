@@ -13,13 +13,26 @@ var:
 fmt:
     uv run ruff format src tests dcat.py benchmark.py tabcomp.py
     uv run ruff check --fix --unsafe-fixes src tests dcat.py benchmark.py tabcomp.py
-    uv run djlint src/dogcat/web --reformat --quiet & eslint --no-error-on-unmatched-pattern --fix 'src/dogcat/web/**/static/**/*js' & pnpm run --silent stylelint-fix & wait
+    # djlint --reformat exits non-zero whenever it rewrites a file, so `|| true`
+    # keeps `fmt` (an apply step) green. Genuine djlint issues are still caught
+    # by `lint`, which runs djlint in check mode. The `rc` loop below is what
+    # makes a failing branch fail the recipe — a bare `wait` returns the last
+    # job's status and silently swallowed the others.
+    uv run djlint src/dogcat/web --reformat --quiet || true & d=$!; \
+    pnpm run --silent oxfmt-fix & o=$!; \
+    pnpm run --silent oxlint-fix & l=$!; \
+    pnpm run --silent stylelint-fix & s=$!; \
+    rc=0; for p in $d $o $l $s; do wait $p || rc=1; done; exit $rc
 
 # lint the code
 lint:
     uv run ruff format --check --diff src tests dcat.py benchmark.py tabcomp.py
     uv run ruff check src tests dcat.py benchmark.py tabcomp.py
-    uv run djlint src/dogcat/web & eslint --no-error-on-unmatched-pattern 'src/dogcat/web/**/static/**/*js' & pnpm run --silent stylelint & wait
+    uv run djlint src/dogcat/web & d=$!; \
+    pnpm run --silent oxfmt & o=$!; \
+    pnpm run --silent oxlint & l=$!; \
+    pnpm run --silent stylelint & s=$!; \
+    rc=0; for p in $d $o $l $s; do wait $p || rc=1; done; exit $rc
 
 # lint using pyright
 lint-pyright:

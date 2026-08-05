@@ -1,0 +1,10 @@
+{
+    "$schema": "./node_modules/oxlint/configuration_schema.json",
+    "env": {
+        "browser": true
+    },
+    "ignorePatterns": ["**/vendor/**"],
+    "rules": {
+        "no-unused-vars": ["error", { "args": "all", "argsIgnorePattern": "^_" }]
+    }
+}

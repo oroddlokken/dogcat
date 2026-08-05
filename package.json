@@ -1,15 +1,16 @@
 {
   "devDependencies": {
-    "eslint": "^9.39.1",
+    "oxfmt": "^0.62.0",
+    "oxlint": "^1.77.0",
     "stylelint": "^16.16.0",
     "stylelint-config-standard": "^38.0.0"
   },
   "scripts": {
+    "oxlint": "oxlint src/dogcat/web/static/js",
+    "oxlint-fix": "oxlint --fix src/dogcat/web/static/js",
+    "oxfmt": "oxfmt --check src/dogcat/web/static/js",
+    "oxfmt-fix": "oxfmt src/dogcat/web/static/js",
     "stylelint": "stylelint --allow-empty-input 'src/dogcat/web/**/static/**/*.css'",
     "stylelint-fix": "stylelint --fix --allow-empty-input 'src/dogcat/web/**/static/**/*.css'"
-  },
-  "dependencies": {
-    "@eslint/js": "^9.39.1",
-    "globals": "^16.5.0"
   }
 }
