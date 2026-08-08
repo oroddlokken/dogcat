@@ -45,19 +45,20 @@ class TestExampleMd:
         assert "Should I update issue" in result.output
 
 
-def test_template_bounds_multiple_in_progress() -> None:
-    """The template must say when more than one `in_progress` is allowed.
+def test_template_permits_multiple_in_progress() -> None:
+    """The template stays permissive about several `in_progress` issues.
 
-    It told the agent to work "one at a time, not the whole backlog at
-    once" and then, four lines later, that working on multiple related
-    issues was fine — without ever naming the condition. Users paste this
-    whole into their CLAUDE.md, so the gap ships to every project.
-    (dogcat-1zi3)
+    dogcat-1zi3 tightened this to "only when a single change closes all of
+    them"; the maintainer reverted it deliberately, because this repo's own
+    stricter rule is not the right default to ship to every project that
+    pastes the template. Pin the permissive sentence so the strict bound
+    cannot come back unnoticed. (dogcat-4yb5)
     """
     result = runner.invoke(app, ["example-md"])
     assert result.exit_code == 0
 
-    assert "only when a single change closes all of them" in result.stdout
-    assert "okay to work on multiple related issues" not in result.stdout
+    assert "It is okay to work on multiple related issues at the same time." in (
+        result.stdout
+    )
     # The rule it qualifies must still be present, or the bound is orphaned.
     assert "one at a time, not the whole backlog at once" in result.stdout

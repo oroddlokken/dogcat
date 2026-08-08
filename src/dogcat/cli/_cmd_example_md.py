@@ -31,9 +31,8 @@ time, not the whole backlog at once. Set `in_review` when that issue's work is \
 done before moving on. `dcat list` is how the user sees what is live, so a \
 stale status misreports the session.
 
-Mark more than one issue `in_progress` only when a single change closes all \
-of them; otherwise finish the current issue first. If there is a priority \
-conflict, ask the user which to focus on first.
+It is okay to work on multiple related issues at the same time. If there is a \
+priority conflict, ask the user which to focus on first.
 
 When research or discussion produces findings relevant to an existing issue, \
 ask these as **separate questions in order**:

@@ -805,6 +805,38 @@ class TestMergeDriverCLI:
             if ln.strip():
                 orjson.loads(ln)
 
+    def test_merge_driver_preserves_file_mode(self, tmp_path: Path) -> None:
+        """A 0644-shared store keeps mode 0644 after the driver rewrites it.
+
+        The driver replaces the ours file via a tempfile rename, and a
+        tempfile is created 0600 — so without carrying the original mode
+        across, a merge leaves the store readable only by whoever merged.
+        (dogcat-64nd)
+        """
+        from typer.testing import CliRunner
+
+        from dogcat.cli import app
+
+        base = tmp_path / "base.jsonl"
+        ours = tmp_path / "ours.jsonl"
+        theirs = tmp_path / "theirs.jsonl"
+
+        base.write_text("")
+        ours.write_text(
+            '{"record_type":"issue","namespace":"t","id":"a","title":"A","status":"open","priority":2,"issue_type":"task","updated_at":"2026-01-01T00:00:00+00:00"}\n'
+        )
+        theirs.write_text(
+            '{"record_type":"issue","namespace":"t","id":"b","title":"B","status":"open","priority":2,"issue_type":"task","updated_at":"2026-01-01T00:00:00+00:00"}\n'
+        )
+        ours.chmod(0o644)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            app, ["git", "merge-driver", str(base), str(ours), str(theirs)]
+        )
+        assert result.exit_code == 0
+        assert ours.stat().st_mode & 0o777 == 0o644
+
 
 # Integration tests: merge driver with real git repos
 

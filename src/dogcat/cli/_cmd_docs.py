@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import IO, TYPE_CHECKING, Any
 
 import typer
 
@@ -21,6 +22,25 @@ from ._json_state import echo_error, is_json, set_json
 from ._list_options import (
     JsonOpt,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
+def _write_records(
+    records: list[dict[str, Any]],
+) -> Callable[[IO[bytes]], int]:
+    """Return a write_fn for ``atomic_rewrite_jsonl`` that dumps ``records``."""
+    import orjson
+
+    def writer(f: IO[bytes]) -> int:
+        for record in records:
+            f.write(orjson.dumps(record))
+            f.write(b"\n")
+        return len(records)
+
+    return writer
+
 
 # Sub-app for 'dcat git' subcommands
 git_app = typer.Typer(
@@ -359,10 +379,7 @@ def register(app: typer.Typer) -> None:
             dcat git rebase
             git rebase --continue
         """
-        import tempfile
-
-        import orjson
-
+        from dogcat._jsonl_io import atomic_rewrite_jsonl
         from dogcat.merge_driver import merge_jsonl, parse_conflicted_jsonl
 
         dogcats_dir = Path(find_dogcats_dir())
@@ -390,25 +407,11 @@ def register(app: typer.Typer) -> None:
 
                 merged = merge_jsonl(base, ours, theirs)
 
-                # Atomic write via tempfile + rename, hand-rolled rather than
-                # routed through _jsonl_io.atomic_rewrite_jsonl. That skips
-                # the helper's mode preservation (and its fsync): the rename
-                # lands NamedTemporaryFile's 0600, so on a store shared at
-                # 0644 this leaves issues.jsonl readable only by whoever
-                # rebased. No record of why the helper was not used — treat
-                # the divergence as unexplained, not as a reviewed choice.
-                with tempfile.NamedTemporaryFile(
-                    mode="wb",
-                    dir=jsonl_path.parent,
-                    delete=False,
-                    suffix=".jsonl",
-                ) as tmp:
-                    for record in merged:
-                        tmp.write(orjson.dumps(record))
-                        tmp.write(b"\n")
-                    tmp_path = Path(tmp.name)
-
-                tmp_path.replace(jsonl_path)
+                atomic_rewrite_jsonl(
+                    jsonl_path,
+                    jsonl_path.parent,
+                    _write_records(merged),
+                )
 
                 # Stage the resolved file
                 import dogcat.git as git_helpers
@@ -450,11 +453,9 @@ def register(app: typer.Typer) -> None:
         """
         import logging
 
-        import orjson
-
+        from dogcat._jsonl_io import atomic_rewrite_jsonl
         from dogcat.merge_driver import _parse_jsonl, merge_jsonl
 
-        tmp_path: Path | None = None
         try:
             base_path = Path(base)
             ours_path = Path(ours)
@@ -466,33 +467,17 @@ def register(app: typer.Typer) -> None:
 
             merged = merge_jsonl(base_records, ours_records, theirs_records)
 
-            # Write to temp file + rename so a crash never leaves a partial ours file.
-            # Same unexplained divergence as `dcat git rebase` above: not
-            # _jsonl_io.atomic_rewrite_jsonl, so no mode preservation and no
-            # fsync. On a 0644-shared store the merged file comes back 0600
-            # and only the merging user can read it afterwards.
-            import tempfile
-
-            with tempfile.NamedTemporaryFile(
-                mode="wb",
-                dir=ours_path.parent,
-                delete=False,
-                suffix=".jsonl",
-            ) as tmp:
-                for record in merged:
-                    tmp.write(orjson.dumps(record))
-                    tmp.write(b"\n")
-                tmp_path = Path(tmp.name)
-
-            tmp_path.replace(ours_path)
+            atomic_rewrite_jsonl(
+                ours_path,
+                ours_path.parent,
+                _write_records(merged),
+            )
         except Exception:
             logging.getLogger("dogcat.merge_driver").exception(
                 "Merge driver failed. Git will mark this path conflicted and leave it "
                 "holding ours-side records only — staging it as-is discards every "
                 "record from the other branch.",
             )
-            if tmp_path is not None:
-                tmp_path.unlink(missing_ok=True)
             raise typer.Exit(1)
 
         raise typer.Exit(0)

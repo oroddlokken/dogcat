@@ -234,6 +234,43 @@ class TestGitRebase:
         assert "pa" in proposal_ids
         assert "pb" in proposal_ids
 
+    def test_preserves_file_mode(self, git_repo: GitRepo) -> None:
+        """A 0644-shared store keeps mode 0644 after the resolve.
+
+        The resolve replaces the file via a tempfile rename, and a tempfile
+        is created 0600 — so without carrying the original mode across, a
+        store shared with the rest of the team comes back readable only by
+        whoever rebased. (dogcat-64nd)
+        """
+        repo = git_repo
+
+        repo.create_branch("branch-a")
+        s = repo.storage()
+        s.create(Issue(id="m1", namespace="test", title="M1"))
+        repo.commit_all("Add m1")
+
+        repo.switch_branch("main")
+        repo.create_branch("branch-b")
+        s = repo.storage()
+        s.create(Issue(id="m2", namespace="test", title="M2"))
+        repo.commit_all("Add m2")
+
+        repo.switch_branch("main")
+        repo.merge("branch-a")
+        repo.merge("branch-b")
+        assert _has_conflict_markers(repo.storage_path)
+
+        repo.storage_path.chmod(0o644)
+
+        old_cwd = _in_repo(repo)
+        try:
+            exit_code, _output = _run_dcat_rebase()
+        finally:
+            os.chdir(old_cwd)
+
+        assert exit_code == 0
+        assert repo.storage_path.stat().st_mode & 0o777 == 0o644
+
 
 class TestParseConflictedJsonl:
     """Unit tests for parse_conflicted_jsonl."""
