@@ -8,7 +8,12 @@ from typing import TYPE_CHECKING
 import orjson
 import typer
 
-from dogcat.constants import parse_labels
+from dogcat.constants import (
+    PRIORITY_VALUES_HELP,
+    STATUS_VALUES_HELP,
+    TYPE_VALUES_HELP,
+    parse_labels,
+)
 from dogcat.models import UpdateRequest, set_manual_flag
 
 from ._completions import (
@@ -29,6 +34,11 @@ from ._helpers import (
     parse_duration,
 )
 from ._json_state import echo_error, is_json, set_json
+from ._list_options import (
+    ByOpt,
+    DogcatsDirOpt,
+    JsonOpt,
+)
 
 if TYPE_CHECKING:
     from dogcat.storage import JSONLStorage
@@ -181,14 +191,14 @@ def register(app: typer.Typer) -> None:
             None,
             "--status",
             "-s",
-            help="New status (draft, open, in_progress, in_review, blocked, deferred)",
+            help=f"New status ({STATUS_VALUES_HELP})",
             autocompletion=complete_statuses,
         ),
         priority: int | None = typer.Option(
             None,
             "--priority",
             "-p",
-            help="New priority (0-4 or p0-p4)",
+            help=f"New priority ({PRIORITY_VALUES_HELP})",
             parser=_parse_priority_value,
             metavar="PRIORITY",
             autocompletion=complete_priorities,
@@ -197,7 +207,7 @@ def register(app: typer.Typer) -> None:
             None,
             "--type",
             "-t",
-            help="New issue type (task, bug, feature, story, chore, epic, question)",
+            help=f"New issue type ({TYPE_VALUES_HELP})",
             autocompletion=complete_types,
         ),
         description: str | None = typer.Option(
@@ -307,13 +317,9 @@ def register(app: typer.Typer) -> None:
             "--unsnooze",
             help="Remove snooze from issue",
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        updated_by: str | None = typer.Option(
-            None,
-            "--by",
-            help="Who is updating this",
-        ),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        updated_by: ByOpt = None,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Update one or more issues."""
         set_json(json_output)

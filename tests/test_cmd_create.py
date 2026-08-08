@@ -712,7 +712,7 @@ class TestCLICreate:
         )
         assert result.exit_code == 1
         # Error message goes to stderr, captured in result.output
-        assert "not found" in result.output
+        assert "matched no issue" in result.output
 
         # Verify no issue was created
         result = runner.invoke(
@@ -747,7 +747,7 @@ class TestCLICreate:
         )
         assert result.exit_code == 1
         # Error message goes to stderr, captured in result.output
-        assert "not found" in result.output
+        assert "matched no issue" in result.output
 
         # Verify no issue was created
         result = runner.invoke(
@@ -902,7 +902,7 @@ class TestCLICreate:
             ],
         )
         assert result.exit_code == 1
-        assert "Parent issue nonexistent not found" in result.output
+        assert "Parent issue 'nonexistent' matched no issue" in result.output
 
     def test_create_auto_populates_owner_and_created_by(self, tmp_path: Path) -> None:
         """Test that create auto-populates owner and created_by from git config."""

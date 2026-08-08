@@ -184,7 +184,13 @@ def create_app(
                 if parsed_length < 0:
                     return PlainTextResponse("Bad Request", status_code=400)
                 if parsed_length > MAX_REQUEST_BODY_BYTES:
-                    return PlainTextResponse("Payload Too Large", status_code=413)
+                    return PlainTextResponse(
+                        "Submission too large. The form accepts up to "
+                        "256 KB total; your description is almost "
+                        "certainly the cause. Go back, shorten it, and "
+                        "submit again.",
+                        status_code=413,
+                    )
 
             # Slow path for chunked bodies: wrap the receive callable so
             # we can count bytes as they arrive and abort once we cross
@@ -205,7 +211,13 @@ def create_app(
             request._receive = cap_receive
             response = await call_next(request)
             if received_bytes > MAX_REQUEST_BODY_BYTES:
-                return PlainTextResponse("Payload Too Large", status_code=413)
+                return PlainTextResponse(
+                    "Submission too large. The form accepts up to "
+                    "256 KB total; your description is almost "
+                    "certainly the cause. Go back, shorten it, and "
+                    "submit again.",
+                    status_code=413,
+                )
             return response
 
     # Order matters. add_middleware inserts at position 0, so the LAST call

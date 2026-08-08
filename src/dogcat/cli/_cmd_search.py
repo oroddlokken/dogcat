@@ -18,6 +18,10 @@ from ._completions import (
 from ._formatting import format_issue_brief
 from ._helpers import apply_common_filters, get_storage
 from ._json_state import echo_error, is_json, set_json
+from ._list_options import (
+    DogcatsDirOpt,
+    JsonOpt,
+)
 
 
 def _extract_snippet(text: str, pattern: re.Pattern[str], context: int = 40) -> str:
@@ -122,8 +126,8 @@ def register(app: typer.Typer) -> None:
             "--without-comments",
             help="Only show issues that have no comments",
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Search issues by text content across all fields.
 

@@ -75,7 +75,12 @@ def unique_issue_list_strategy(draw: Any) -> list[dict[str, Any]]:
     for i in range(num_issues):
         issue_id = f"issue{i}"
         updated_at = draw(timestamp_strategy())
-        issues.append(_issue_record(id=issue_id, updated_at=updated_at))
+        # Vary the title too. With only id and updated_at varying, two lists
+        # that collided on the same id *and* the same timestamp produced
+        # byte-identical records, so the convergence property held trivially
+        # and could not see the argument-order bug. (dogcat-1xgi)
+        title = draw(st.sampled_from(["Alpha", "Beta", "Gamma"]))
+        issues.append(_issue_record(id=issue_id, title=title, updated_at=updated_at))
     return issues
 
 

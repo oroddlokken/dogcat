@@ -135,6 +135,15 @@ STATUS_OPTIONS = [
     ("Closed", "closed"),
 ]
 
+# Comma-joined value lists for CLI option help, rendered from the option
+# lists above rather than retyped per command. The hand-written copies had
+# already drifted: two --status helps omitted `closed`, which the parser
+# accepts and tab-completion offers, and --type was spelled five ways
+# including one truncated to "etc.". (dogcat-85m4)
+STATUS_VALUES_HELP = ", ".join(value for _label, value in STATUS_OPTIONS)
+TYPE_VALUES_HELP = ", ".join(value for _label, value in TYPE_OPTIONS)
+PRIORITY_VALUES_HELP = "0-4, p0-p4, or " + "/".join(PRIORITY_NAMES)
+
 # Inbox proposal statuses (display_label, value)
 INBOX_STATUS_OPTIONS = [
     ("Open", "open"),
@@ -164,7 +173,12 @@ MERGE_DRIVER_CMD = "dcat git merge-driver %O %A %B"
 MERGE_DRIVER_NAME = "dogcat JSONL merge driver"
 MERGE_DRIVER_GIT_KEY = "merge.dcat-jsonl.driver"
 MERGE_DRIVER_GIT_NAME_KEY = "merge.dcat-jsonl.name"
-GITATTRIBUTES_ENTRY = ".dogcats/*.jsonl merge=dcat-jsonl"
+# ``**`` is required: a gitattributes glob without it does not cross a
+# directory separator, so ".dogcats/*.jsonl" left the tracked
+# .dogcats/archive/*.jsonl files on git's default text merge, free to
+# take conflict markers. ``**/`` matches zero or more directories, so
+# this one pattern covers both issues.jsonl and archive/. (dogcat-1xgi)
+GITATTRIBUTES_ENTRY = ".dogcats/**/*.jsonl merge=dcat-jsonl"
 
 # Fields tracked in the event log (content fields only)
 TRACKED_FIELDS: frozenset[str] = frozenset(

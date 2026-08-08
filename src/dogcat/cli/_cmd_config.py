@@ -17,10 +17,13 @@ from dogcat.config import (
 from ._completions import complete_config_keys, complete_config_values
 from ._helpers import SortedGroup, find_dogcats_dir, is_gitignored
 from ._json_state import echo_error, is_json, set_json
+from ._list_options import (
+    JsonOpt,
+)
 
 # Sub-app for 'dcat config' subcommands
 config_app = typer.Typer(
-    help="Manage dogcat configuration.",
+    help="Read and write config.toml, config.local.toml and the global config.",
     no_args_is_help=True,
     cls=SortedGroup,
 )
@@ -39,7 +42,7 @@ _ARRAY_KEYS = frozenset(
 _KNOWN_KEYS: dict[str, dict[str, Any]] = {
     "namespace": {
         "type": "str",
-        "description": "Issue ID prefix / project namespace",
+        "description": "Namespace prefixed to every issue ID in this store",
         "default": "auto-detected",
     },
     "git_tracking": {
@@ -75,7 +78,11 @@ _KNOWN_KEYS: dict[str, dict[str, Any]] = {
     "allow_creating_namespaces": {
         "type": "bool",
         "description": "Allow creating new namespaces in web propose form",
-        "default": True,
+        # Unset resolves to False, not True: _cmd_web.py reads it as
+        # ``config.allow_creating_namespaces is True`` and create_app's
+        # parameter defaults to False. Pinned by
+        # test_config_keys_bool_defaults_match_resolution.
+        "default": False,
         "values": "true, false (also: 1/0, yes/no, on/off)",
     },
     "inbox_remote": {
@@ -211,7 +218,7 @@ def register(app: typer.Typer) -> None:
             help="Configuration key to read",
             autocompletion=complete_config_keys,
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+        json_output: JsonOpt = False,
         global_: bool = typer.Option(
             False,
             "--global",
@@ -242,6 +249,24 @@ def register(app: typer.Typer) -> None:
         dogcats_dir = find_dogcats_dir()
         config = load_config(dogcats_dir)
         if key not in config:
+            # A known key that is merely unset is not an error: _KNOWN_KEYS
+            # documents its default, and `dcat config keys` was the only
+            # surface that stated one — which is how the wrong
+            # allow_creating_namespaces default went unnoticed. An unknown
+            # key still errors. (dogcat-1w21)
+            if key in _KNOWN_KEYS:
+                default = _KNOWN_KEYS[key]["default"]
+                if isinstance(default, bool):
+                    default = str(default).lower()
+                if is_json():
+                    typer.echo(
+                        orjson.dumps(
+                            {key: None, "set": False, "default": default}
+                        ).decode()
+                    )
+                else:
+                    typer.echo(f"{default}  (unset — this is the default)")
+                return
             echo_error(f"Key '{key}' not found in config")
             raise typer.Exit(1)
         val = config[key]
@@ -298,7 +323,7 @@ def register(app: typer.Typer) -> None:
 
     @config_app.command("list")
     def config_list(
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+        json_output: JsonOpt = False,
     ) -> None:
         """List all configuration values."""
         set_json(json_output)
@@ -321,7 +346,7 @@ def register(app: typer.Typer) -> None:
         if is_json():
             typer.echo(orjson.dumps(effective, option=orjson.OPT_INDENT_2).decode())
         elif not effective:
-            typer.echo("No configuration values set.")
+            typer.echo("No configuration values set")
         else:
             for k, v in sorted(effective.items()):
                 if k in local_keys:
@@ -339,7 +364,7 @@ def register(app: typer.Typer) -> None:
 
     @config_app.command("keys")
     def config_keys(
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+        json_output: JsonOpt = False,
     ) -> None:
         """List all available configuration keys and their descriptions."""
         set_json(json_output)

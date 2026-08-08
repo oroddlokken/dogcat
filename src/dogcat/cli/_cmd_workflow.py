@@ -35,9 +35,12 @@ from ._json_state import echo_error, is_json, set_json
 from ._list_options import (
     AgentOnlyOpt,
     AllNamespacesOpt,
+    ByOpt,
+    DogcatsDirOpt,
     ExcludeTypeFilterOpt,
     HasCommentsOpt,
     IssueTypeFilterOpt,
+    JsonOpt,
     LabelFilterOpt,
     ManualFilterOpt,
     NamespaceFilterOpt,
@@ -56,8 +59,12 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     def ready(
-        limit_arg: int | None = typer.Argument(None, help="Limit results"),
-        limit: int | None = typer.Option(None, "--limit", help="Limit results"),
+        limit_arg: int | None = typer.Argument(
+            None, help="Show at most N issues (default: all)"
+        ),
+        limit: int | None = typer.Option(
+            None, "--limit", help="Show at most N issues (default: all)"
+        ),
         issue_type: IssueTypeFilterOpt = None,
         exclude_type: ExcludeTypeFilterOpt = [],  # noqa: B006
         priority: PriorityFilterOpt = None,
@@ -83,8 +90,8 @@ def register(app: typer.Typer) -> None:
             "--include-inbox",
             help="Show pending inbox proposals alongside ready issues",
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Show issues ready to work (no blocking dependencies)."""
         set_json(json_output)
@@ -164,8 +171,12 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     def blocked(
-        limit_arg: int | None = typer.Argument(None, help="Limit results"),
-        limit: int | None = typer.Option(None, "--limit", help="Limit results"),
+        limit_arg: int | None = typer.Argument(
+            None, help="Show at most N issues (default: all)"
+        ),
+        limit: int | None = typer.Option(
+            None, "--limit", help="Show at most N issues (default: all)"
+        ),
         issue_type: IssueTypeFilterOpt = None,
         exclude_type: ExcludeTypeFilterOpt = [],  # noqa: B006
         priority: PriorityFilterOpt = None,
@@ -179,10 +190,16 @@ def register(app: typer.Typer) -> None:
         manual: ManualFilterOpt = False,
         has_comments: HasCommentsOpt = False,
         without_comments: WithoutCommentsOpt = False,
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
-        """Show all blocked issues."""
+        """Show issues blocked by an unfinished dependency.
+
+        Not the same set as ``--status blocked``: this lists issues whose
+        dependencies are unfinished, whatever their own status, while an
+        issue set to the ``blocked`` status with no dependencies appears
+        here only if it has one.
+        """
         set_json(json_output)
         try:
             from dogcat.deps import get_blocked_issues
@@ -232,9 +249,9 @@ def register(app: typer.Typer) -> None:
                 ]
                 typer.echo(orjson.dumps(output).decode())
             elif not blocked_issues:
-                typer.echo("No blocked issues")
+                typer.echo("No issues blocked by dependencies")
             else:
-                typer.echo(f"Blocked ({len(blocked_issues)}):")
+                typer.echo(f"Blocked by dependencies ({len(blocked_issues)}):")
                 for bi in blocked_issues:
                     issue = storage.get(bi.issue_id)
                     if issue:
@@ -264,8 +281,12 @@ def register(app: typer.Typer) -> None:
 
     @app.command("in-progress")
     def in_progress(
-        limit_arg: int | None = typer.Argument(None, help="Limit results"),
-        limit: int | None = typer.Option(None, "--limit", help="Limit results"),
+        limit_arg: int | None = typer.Argument(
+            None, help="Show at most N issues (default: all)"
+        ),
+        limit: int | None = typer.Option(
+            None, "--limit", help="Show at most N issues (default: all)"
+        ),
         issue_type: IssueTypeFilterOpt = None,
         exclude_type: ExcludeTypeFilterOpt = [],  # noqa: B006
         priority: PriorityFilterOpt = None,
@@ -281,8 +302,8 @@ def register(app: typer.Typer) -> None:
         without_comments: WithoutCommentsOpt = False,
         tree: TreeOpt = False,
         table: TableOpt = False,
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Show issues currently in progress."""
         set_json(json_output)
@@ -313,8 +334,12 @@ def register(app: typer.Typer) -> None:
 
     @app.command("open")
     def open_issues(
-        limit_arg: int | None = typer.Argument(None, help="Limit results"),
-        limit: int | None = typer.Option(None, "--limit", help="Limit results"),
+        limit_arg: int | None = typer.Argument(
+            None, help="Show at most N issues (default: all)"
+        ),
+        limit: int | None = typer.Option(
+            None, "--limit", help="Show at most N issues (default: all)"
+        ),
         issue_type: IssueTypeFilterOpt = None,
         exclude_type: ExcludeTypeFilterOpt = [],  # noqa: B006
         priority: PriorityFilterOpt = None,
@@ -330,8 +355,8 @@ def register(app: typer.Typer) -> None:
         without_comments: WithoutCommentsOpt = False,
         tree: TreeOpt = False,
         table: TableOpt = False,
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Show all open issues."""
         set_json(json_output)
@@ -362,8 +387,12 @@ def register(app: typer.Typer) -> None:
 
     @app.command("in-review")
     def in_review(
-        limit_arg: int | None = typer.Argument(None, help="Limit results"),
-        limit: int | None = typer.Option(None, "--limit", help="Limit results"),
+        limit_arg: int | None = typer.Argument(
+            None, help="Show at most N issues (default: all)"
+        ),
+        limit: int | None = typer.Option(
+            None, "--limit", help="Show at most N issues (default: all)"
+        ),
         issue_type: IssueTypeFilterOpt = None,
         exclude_type: ExcludeTypeFilterOpt = [],  # noqa: B006
         priority: PriorityFilterOpt = None,
@@ -379,8 +408,8 @@ def register(app: typer.Typer) -> None:
         without_comments: WithoutCommentsOpt = False,
         tree: TreeOpt = False,
         table: TableOpt = False,
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Show issues currently in review."""
         set_json(json_output)
@@ -531,8 +560,12 @@ def register(app: typer.Typer) -> None:
 
     @app.command(name="ir", hidden=True)
     def in_review_shortcut(
-        limit_arg: int | None = typer.Argument(None, help="Limit results"),
-        limit: int | None = typer.Option(None, "--limit", help="Limit results"),
+        limit_arg: int | None = typer.Argument(
+            None, help="Show at most N issues (default: all)"
+        ),
+        limit: int | None = typer.Option(
+            None, "--limit", help="Show at most N issues (default: all)"
+        ),
         issue_type: IssueTypeFilterOpt = None,
         exclude_type: ExcludeTypeFilterOpt = [],  # noqa: B006
         priority: PriorityFilterOpt = None,
@@ -548,8 +581,8 @@ def register(app: typer.Typer) -> None:
         without_comments: WithoutCommentsOpt = False,
         tree: TreeOpt = False,
         table: TableOpt = False,
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """List issues with in-review status."""
         set_json(json_output)
@@ -579,8 +612,12 @@ def register(app: typer.Typer) -> None:
 
     @app.command(name="ip", hidden=True)
     def in_progress_shortcut(
-        limit_arg: int | None = typer.Argument(None, help="Limit results"),
-        limit: int | None = typer.Option(None, "--limit", help="Limit results"),
+        limit_arg: int | None = typer.Argument(
+            None, help="Show at most N issues (default: all)"
+        ),
+        limit: int | None = typer.Option(
+            None, "--limit", help="Show at most N issues (default: all)"
+        ),
         issue_type: IssueTypeFilterOpt = None,
         exclude_type: ExcludeTypeFilterOpt = [],  # noqa: B006
         priority: PriorityFilterOpt = None,
@@ -596,8 +633,8 @@ def register(app: typer.Typer) -> None:
         without_comments: WithoutCommentsOpt = False,
         tree: TreeOpt = False,
         table: TableOpt = False,
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """List issues with in-progress status."""
         set_json(json_output)
@@ -627,8 +664,12 @@ def register(app: typer.Typer) -> None:
 
     @app.command("deferred")
     def deferred(
-        limit_arg: int | None = typer.Argument(None, help="Limit results"),
-        limit: int | None = typer.Option(None, "--limit", help="Limit results"),
+        limit_arg: int | None = typer.Argument(
+            None, help="Show at most N issues (default: all)"
+        ),
+        limit: int | None = typer.Option(
+            None, "--limit", help="Show at most N issues (default: all)"
+        ),
         issue_type: IssueTypeFilterOpt = None,
         exclude_type: ExcludeTypeFilterOpt = [],  # noqa: B006
         priority: PriorityFilterOpt = None,
@@ -644,8 +685,8 @@ def register(app: typer.Typer) -> None:
         without_comments: WithoutCommentsOpt = False,
         tree: TreeOpt = False,
         table: TableOpt = False,
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Show issues currently deferred."""
         set_json(json_output)
@@ -681,13 +722,9 @@ def register(app: typer.Typer) -> None:
             help="Issue ID",
             autocompletion=complete_issue_ids,
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        operator: str | None = typer.Option(
-            None,
-            "--by",
-            help="Who is making this change",
-        ),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        operator: ByOpt = None,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Set an issue's status to deferred."""
         _set_status(
@@ -701,8 +738,12 @@ def register(app: typer.Typer) -> None:
 
     @app.command("manual")
     def manual_list(
-        limit_arg: int | None = typer.Argument(None, help="Limit results"),
-        limit: int | None = typer.Option(None, "--limit", help="Limit results"),
+        limit_arg: int | None = typer.Argument(
+            None, help="Show at most N issues (default: all)"
+        ),
+        limit: int | None = typer.Option(
+            None, "--limit", help="Show at most N issues (default: all)"
+        ),
         issue_type: IssueTypeFilterOpt = None,
         exclude_type: ExcludeTypeFilterOpt = [],  # noqa: B006,
         priority: PriorityFilterOpt = None,
@@ -714,8 +755,8 @@ def register(app: typer.Typer) -> None:
         all_namespaces: AllNamespacesOpt = False,
         tree: TreeOpt = False,
         table: TableOpt = False,
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Show issues marked as manual."""
         set_json(json_output)
@@ -778,13 +819,9 @@ def register(app: typer.Typer) -> None:
             help="Issue ID",
             autocompletion=complete_issue_ids,
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        operator: str | None = typer.Option(
-            None,
-            "--by",
-            help="Who is making this change",
-        ),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        operator: ByOpt = None,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Mark an issue as manual (not for agents)."""
         try:
@@ -834,8 +871,8 @@ def register(app: typer.Typer) -> None:
         manual: ManualFilterOpt = False,
         has_comments: HasCommentsOpt = False,
         without_comments: WithoutCommentsOpt = False,
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Show recently closed issues (oldest first).
 
@@ -930,8 +967,8 @@ def register(app: typer.Typer) -> None:
         manual: ManualFilterOpt = False,
         has_comments: HasCommentsOpt = False,
         without_comments: WithoutCommentsOpt = False,
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Show recently created issues in chronological order (oldest first).
 
@@ -1014,8 +1051,8 @@ def register(app: typer.Typer) -> None:
         manual: ManualFilterOpt = False,
         has_comments: HasCommentsOpt = False,
         without_comments: WithoutCommentsOpt = False,
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Show in-progress and in-review issues together."""
         set_json(json_output)
@@ -1055,9 +1092,7 @@ def register(app: typer.Typer) -> None:
                 typer.echo(orjson.dumps(output).decode())
             else:
                 typer.echo(f"In Progress ({len(ip_issues)}):")
-                if not ip_issues:
-                    typer.echo("  No in-progress issues")
-                else:
+                if ip_issues:
                     ip_has_parent = any(i.parent for i in ip_issues)
                     if ip_has_parent:
                         tree = format_issue_tree(ip_issues)
@@ -1069,9 +1104,7 @@ def register(app: typer.Typer) -> None:
 
                 typer.echo()
                 typer.echo(f"In Review ({len(ir_issues)}):")
-                if not ir_issues:
-                    typer.echo("  No in-review issues")
-                else:
+                if ir_issues:
                     ir_has_parent = any(i.parent for i in ir_issues)
                     if ir_has_parent:
                         tree = format_issue_tree(ir_issues)
@@ -1100,13 +1133,9 @@ def register(app: typer.Typer) -> None:
             help="Duration (e.g. 7d, 2w, 1m) or ISO8601 date",
             autocompletion=complete_snooze_durations,
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        operator: str | None = typer.Option(
-            None,
-            "--by",
-            help="Who is making this change",
-        ),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        operator: ByOpt = None,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Snooze an issue for a duration (hide from list/ready)."""
         set_json(json_output)
@@ -1127,7 +1156,9 @@ def register(app: typer.Typer) -> None:
                 typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
             else:
                 until_str = snooze_until.strftime("%Y-%m-%d")
-                typer.echo(f"Snoozed {issue.full_id}: {issue.title} until {until_str}")
+                typer.echo(
+                    f"✓ Snoozed {issue.full_id}: {issue.title} until {until_str}"
+                )
 
         except ValueError as e:
             echo_error(str(e))
@@ -1146,13 +1177,9 @@ def register(app: typer.Typer) -> None:
             help="Issue ID to unsnooze",
             autocompletion=complete_issue_ids,
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        operator: str | None = typer.Option(
-            None,
-            "--by",
-            help="Who is making this change",
-        ),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        operator: ByOpt = None,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Remove snooze from an issue (make it visible again)."""
         set_json(json_output)
@@ -1179,7 +1206,7 @@ def register(app: typer.Typer) -> None:
 
                 typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
             else:
-                typer.echo(f"Unsnoozed {issue.full_id}: {issue.title}")
+                typer.echo(f"✓ Unsnoozed {issue.full_id}: {issue.title}")
 
         except typer.Exit:
             raise
@@ -1189,8 +1216,12 @@ def register(app: typer.Typer) -> None:
 
     @app.command("snoozed")
     def snoozed_list(
-        limit_arg: int | None = typer.Argument(None, help="Limit results"),
-        limit: int | None = typer.Option(None, "--limit", help="Limit results"),
+        limit_arg: int | None = typer.Argument(
+            None, help="Show at most N issues (default: all)"
+        ),
+        limit: int | None = typer.Option(
+            None, "--limit", help="Show at most N issues (default: all)"
+        ),
         issue_type: IssueTypeFilterOpt = None,
         exclude_type: ExcludeTypeFilterOpt = [],  # noqa: B006
         priority: PriorityFilterOpt = None,
@@ -1206,8 +1237,8 @@ def register(app: typer.Typer) -> None:
         without_comments: WithoutCommentsOpt = False,
         tree: TreeOpt = False,
         table: TableOpt = False,
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Show currently snoozed issues."""
         set_json(json_output)

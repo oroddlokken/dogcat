@@ -12,6 +12,11 @@ from dogcat.models import Status
 from ._completions import complete_issue_ids
 from ._helpers import apply_to_each, get_default_operator, get_storage, with_ns_shim
 from ._json_state import is_json, set_json
+from ._list_options import (
+    ByOpt,
+    DogcatsDirOpt,
+    JsonOpt,
+)
 
 if TYPE_CHECKING:
     from dogcat.storage import JSONLStorage
@@ -52,13 +57,9 @@ def register(app: typer.Typer) -> None:
             "-r",
             help="Reason for closing",
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        closed_by: str | None = typer.Option(
-            None,
-            "--by",
-            help="Who is closing this",
-        ),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        closed_by: ByOpt = None,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Close one or more issues."""
         set_json(json_output)
@@ -100,18 +101,14 @@ def register(app: typer.Typer) -> None:
             "-r",
             help="Reason for deletion",
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        deleted_by: str | None = typer.Option(
-            None,
-            "--by",
-            help="Who is deleting this",
-        ),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        deleted_by: ByOpt = None,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Delete one or more issues (creates tombstone).
 
         This marks the issue(s) as deleted (tombstone status) rather than permanently
-        removing them from the database. Issues will be hidden from normal lists
+        removing them from the store. Issues will be hidden from normal lists
         but can still be viewed with --all flag.
         """
         set_json(json_output)
@@ -145,18 +142,14 @@ def register(app: typer.Typer) -> None:
             autocompletion=complete_issue_ids,
         ),
         reason: str = typer.Option(None, "--reason", "-r", help="Reason for deletion"),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        deleted_by: str = typer.Option(
-            None,
-            "--by",
-            help="Who is deleting this",
-        ),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        deleted_by: ByOpt = None,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Delete an issue (alias for 'delete' command).
 
         This marks the issue as deleted (tombstone status) rather than permanently
-        removing it from the database. The issue will be hidden from normal lists
+        removing it from the store. The issue will be hidden from normal lists
         but can still be viewed with --all flag.
         """
         # Just call delete with the same parameters

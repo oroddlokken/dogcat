@@ -388,7 +388,13 @@ async def submit_proposal(
             request,
             "propose.html",
             _form_context(
-                request, namespace, new_token, error="Invalid form submission."
+                request,
+                namespace,
+                new_token,
+                error=(
+                    "This form expired — each page load accepts one "
+                    "submission. A fresh token is loaded below; submit again."
+                ),
             ),
         )
         _issue_csrf_token(rejected, new_token)
@@ -485,7 +491,10 @@ async def submit_proposal(
                 raise
     except (ValueError, RuntimeError, OSError):
         logger.exception("Failed to create proposal")
-        return _render_error("Failed to submit proposal.")
+        return _render_error(
+            "Could not save the proposal. The dcat web server printed "
+            "the cause to its terminal — check there, then resubmit."
+        )
 
     query = urlencode(
         {

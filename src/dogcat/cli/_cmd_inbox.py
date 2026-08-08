@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import orjson
 import typer
 
-from dogcat.constants import STATUS_COLORS
+from dogcat.constants import STATUS_COLORS, TYPE_VALUES_HELP
 
 from ._completions import (
     complete_labels,
@@ -24,6 +24,11 @@ from ._helpers import (
     resolve_dogcats_dir,
 )
 from ._json_state import echo_error, is_json, set_json
+from ._list_options import (
+    ByOpt,
+    DogcatsDirOpt,
+    JsonOpt,
+)
 
 if TYPE_CHECKING:
     from dogcat.inbox import InboxStorage
@@ -150,7 +155,7 @@ def _format_proposal_full(proposal: Proposal) -> str:
 
 
 inbox_app = typer.Typer(
-    help="Manage inbox proposals.",
+    help="Triage proposals in inbox.jsonl: accept, reject, close or delete.",
     no_args_is_help=True,
     cls=SortedGroup,
 )
@@ -182,15 +187,8 @@ def register(app: typer.Typer) -> None:
             "-A",
             help="Show proposals from all namespaces",
         ),
-        json_output: bool = typer.Option(
-            False,
-            "--json",
-            help="Output as JSON",
-        ),
-        dogcats_dir: str = typer.Option(
-            ".dogcats",
-            help="Path to .dogcats directory",
-        ),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """List inbox proposals."""
         from dogcat.config import get_namespace_filter
@@ -248,7 +246,7 @@ def register(app: typer.Typer) -> None:
             ]
             typer.echo(orjson.dumps(local_data + remote_data).decode())
         elif not proposals and not remote_proposals:
-            typer.echo("No proposals in inbox.")
+            typer.echo("No proposals in inbox")
         else:
             if proposals:
                 _echo_proposals_grouped(proposals)
@@ -270,15 +268,8 @@ def register(app: typer.Typer) -> None:
             help="Proposal ID",
             autocompletion=complete_proposal_ids,
         ),
-        json_output: bool = typer.Option(
-            False,
-            "--json",
-            help="Output as JSON",
-        ),
-        dogcats_dir: str = typer.Option(
-            ".dogcats",
-            help="Path to .dogcats directory",
-        ),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Show details of a specific proposal."""
         from dogcat.models import proposal_to_dict
@@ -335,20 +326,9 @@ def register(app: typer.Typer) -> None:
             "-i",
             help="Issue ID created from this proposal (stored as string)",
         ),
-        by: str | None = typer.Option(
-            None,
-            "--by",
-            help="Who is closing this",
-        ),
-        json_output: bool = typer.Option(
-            False,
-            "--json",
-            help="Output as JSON",
-        ),
-        dogcats_dir: str = typer.Option(
-            ".dogcats",
-            help="Path to .dogcats directory",
-        ),
+        by: ByOpt = None,
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Close one or more inbox proposals."""
         set_json(json_output)
@@ -386,20 +366,9 @@ def register(app: typer.Typer) -> None:
             help="Proposal ID(s) to delete",
             autocompletion=complete_proposal_ids,
         ),
-        by: str | None = typer.Option(
-            None,
-            "--by",
-            help="Who is deleting this",
-        ),
-        json_output: bool = typer.Option(
-            False,
-            "--json",
-            help="Output as JSON",
-        ),
-        dogcats_dir: str = typer.Option(
-            ".dogcats",
-            help="Path to .dogcats directory",
-        ),
+        by: ByOpt = None,
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Delete one or more inbox proposals (creates tombstone)."""
         set_json(json_output)
@@ -443,7 +412,7 @@ def register(app: typer.Typer) -> None:
             None,
             "--type",
             "-t",
-            help="Issue type (task, bug, feature, etc.)",
+            help=f"Issue type ({TYPE_VALUES_HELP})",
             autocompletion=complete_types,
         ),
         labels: str | None = typer.Option(
@@ -454,15 +423,8 @@ def register(app: typer.Typer) -> None:
             help="Labels (comma or space separated)",
             autocompletion=complete_labels,
         ),
-        json_output: bool = typer.Option(
-            False,
-            "--json",
-            help="Output as JSON",
-        ),
-        dogcats_dir: str = typer.Option(
-            ".dogcats",
-            help="Path to .dogcats directory",
-        ),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Accept a remote proposal and create a local issue from it."""
         from dogcat.config import get_namespace
@@ -574,15 +536,8 @@ def register(app: typer.Typer) -> None:
             "-r",
             help="Reason for rejecting",
         ),
-        json_output: bool = typer.Option(
-            False,
-            "--json",
-            help="Output as JSON",
-        ),
-        dogcats_dir: str = typer.Option(
-            ".dogcats",
-            help="Path to .dogcats directory",
-        ),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Reject one or more remote proposals (closes them in remote inbox)."""
         set_json(json_output)

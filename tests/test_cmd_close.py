@@ -187,7 +187,11 @@ class TestCLIClose:
             ["close", issue_id, "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code != 0
-        assert "tombstone" in (result.stderr + result.stdout).lower()
+        output = result.stderr + result.stdout
+        assert "tombstone" in output.lower()
+        # The message used to prescribe 'dcat reopen', which raises on a
+        # tombstone — it left the user looping between two failing commands.
+        assert "reopen" not in output
 
         # State unchanged: still a tombstone, no spurious closed_at.
         from dogcat.models import Status

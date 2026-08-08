@@ -1532,7 +1532,10 @@ class TestInfoCommand:
         assert "Issue Types:" in result.stdout
         assert "Statuses:" in result.stdout
         assert "Priorities:" in result.stdout
-        assert "Shorthands" in result.stdout
+        assert (
+            "The shorthands above work with the c (create alias) command."
+            in result.stdout
+        )
 
     def test_info_json_output(self) -> None:
         """Test info command with JSON output."""
@@ -3425,8 +3428,9 @@ class TestProgressReview:
             ["pr", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
-        assert "No in-progress issues" in result.stdout
-        assert "No in-review issues" in result.stdout
+        # The "(0)" in the header carries the empty state now.
+        assert "In Progress (0):" in result.stdout
+        assert "In Review (0):" in result.stdout
 
     def test_pr_json(self, tmp_path: Path) -> None:
         """Test pr with JSON output."""

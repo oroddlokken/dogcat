@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
-import typer
+from typing import TYPE_CHECKING
+
+from ._list_options import (
+    DogcatsDirOpt,
+)
+
+if TYPE_CHECKING:
+    import typer
 
 
 def register(app: typer.Typer) -> None:
@@ -10,7 +17,7 @@ def register(app: typer.Typer) -> None:
 
     @app.command("tui")
     def tui(
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Launch the interactive TUI dashboard."""
         from dogcat.cli._helpers import get_storage

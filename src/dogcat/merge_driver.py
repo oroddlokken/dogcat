@@ -24,12 +24,14 @@ suite (``tests/test_merge.py``, ``tests/test_merge_driver.py``).
   silently revert a ``closed`` or ``tombstone`` from the other. The five
   active statuses share one rank.
 - *Idempotent*: merging a record set with itself returns the same set.
-- *Deterministic*: for fixed ``ours`` and ``theirs`` arguments the
-  result is fully determined — ours is iterated first, theirs second,
-  and within a status rank ``new_ts >= old_ts`` is the wins rule, so on
-  equal timestamps theirs wins. Argument order matters because git always
-  assigns ours/theirs unambiguously per merge invocation; both sides of a
-  ``git merge`` invoking this driver see the same labels.
+- *Deterministic and order-independent*: within a status rank the later
+  ``updated_at`` wins. On an exact tie the winner is decided by a
+  canonical serialization of the two records, not by which side was
+  iterated first — so ``merge(base, ours, theirs)`` and
+  ``merge(base, theirs, ours)`` agree. The rule used to be
+  ``new_ts >= old_ts``, which resolved ties by arrival order and meant two
+  collaborators merging the same pair of branches in opposite directions
+  could end up with different content (dogcat-1xgi).
 - *Monotonic within a rank*: among edits at the same finality a later
   edit can only ever be replaced by an even later edit; older versions
   never resurrect. Across ranks a more final status always wins,
@@ -377,6 +379,22 @@ def _replay_with_ops(
     return state
 
 
+def _tie_break_key(record: dict[str, Any]) -> bytes:
+    """Content-derived ordering key for an exact rank+timestamp tie.
+
+    Two sides can edit one record to the same status rank and the same
+    ``updated_at``. The tie-break used to be ``new_ts >= old_ts``, which
+    resolves by *arrival* order, so ``merge(base, ours, theirs)`` kept
+    theirs while ``merge(base, theirs, ours)`` kept ours — the same inputs
+    producing different content depending on which collaborator merged.
+    Comparing a canonical serialization makes the winner a property of the
+    two records, so both argument orders agree. The specific ordering is
+    arbitrary; only its stability matters. ``full_id`` cannot serve here —
+    it is equal on both sides by construction. (dogcat-1xgi)
+    """
+    return orjson.dumps(record, option=orjson.OPT_SORT_KEYS)
+
+
 def _merge_issues_lww(
     ours_records: list[dict[str, Any]],
     theirs_records: list[dict[str, Any]],
@@ -404,7 +422,9 @@ def _merge_issues_lww(
         elif new_rank == old_rank:
             new_ts = _parse_iso_ts(record.get("updated_at", ""))
             old_ts = _parse_iso_ts(existing.get("updated_at", ""))
-            if new_ts >= old_ts:
+            if new_ts > old_ts or (
+                new_ts == old_ts and _tie_break_key(record) > _tie_break_key(existing)
+            ):
                 issues[fid] = record
     return issues
 
@@ -440,7 +460,9 @@ def _merge_proposals(
             old_ts = _parse_iso_ts(
                 existing.get("updated_at", existing.get("created_at", ""))
             )
-            if new_ts >= old_ts:
+            if new_ts > old_ts or (
+                new_ts == old_ts and _tie_break_key(record) > _tie_break_key(existing)
+            ):
                 proposals[fid] = record
     return proposals
 

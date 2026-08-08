@@ -31,6 +31,10 @@ from ._completions import (
 )
 from ._helpers import apply_common_filters, get_storage
 from ._json_state import echo_error, is_json, set_json
+from ._list_options import (
+    DogcatsDirOpt,
+    JsonOpt,
+)
 
 # Ordered keys for each grouping dimension
 _STATUS_ORDER = [v for _, v in STATUS_OPTIONS]
@@ -219,8 +223,8 @@ def register(app: typer.Typer) -> None:
             "--agent-only",
             help="Only show issues available for agents",
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Show issue distribution as a bar chart.
 

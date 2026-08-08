@@ -21,6 +21,11 @@ from ._completions import (
 )
 from ._helpers import apply_common_filters, get_storage
 from ._json_state import echo_error, is_json, set_json
+from ._list_options import (
+    ByOpt,
+    DogcatsDirOpt,
+    JsonOpt,
+)
 
 if TYPE_CHECKING:
     from dogcat.storage import JSONLStorage
@@ -72,8 +77,8 @@ def register(app: typer.Typer) -> None:
             "-n",
             help="Show what would be removed without actually removing",
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Remove tombstoned (deleted) issues and proposals from storage permanently.
 
@@ -175,8 +180,8 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     def stream(
-        by: str = typer.Option(None, "--by", help="Attribution name for events"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        by: ByOpt = None,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Stream issue changes in real-time (JSONL format).
 
@@ -274,7 +279,7 @@ def register(app: typer.Typer) -> None:
             "--include-inbox/--no-inbox",
             help="Include inbox proposals in export",
         ),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Export issues, dependencies, links, and inbox proposals to stdout.
 
@@ -379,7 +384,7 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     def info(
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+        json_output: JsonOpt = False,
     ) -> None:
         """Show valid issue types, statuses, and priorities.
 
@@ -443,28 +448,21 @@ def register(app: typer.Typer) -> None:
             for label, value in PRIORITY_OPTIONS:
                 typer.echo(f"  {value}  - {label}")
 
-            typer.echo("\nShorthands for c (create alias) command:")
-            type_shorthand_list = ", ".join(
-                f"{k}={v}" for k, v in sorted(TYPE_SHORTHANDS.items())
-            )
-            status_shorthand_list = ", ".join(
-                f"{k}={v}" for k, v in sorted(STATUS_SHORTHANDS.items())
-            )
-            typer.echo(f"  Type: {type_shorthand_list}")
-            typer.echo(f"  Status: {status_shorthand_list}")
-            typer.echo("  Priority: 0-4 (0=Critical, 4=Minimal)")
+            # The shorthands themselves are already printed inline on each
+            # type and status row above; only the scope note is new here.
+            typer.echo("\nThe shorthands above work with the c (create alias) command.")
 
     @app.command()
     def status(
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
-        """Show repository status: prefix and issue counts.
+        """Show store status: namespace and issue counts.
 
-        Displays the configured issue prefix and counts of issues by status.
+        Displays the configured namespace and counts of issues by status.
 
         Examples:
-            dcat status         # Show prefix and counts
+            dcat status         # Show namespace and counts
             dcat status --json  # Output as JSON
         """
         set_json(json_output)
@@ -512,7 +510,7 @@ def register(app: typer.Typer) -> None:
                     output["inbox_by_status"] = inbox_counts
                 typer.echo(orjson.dumps(output, option=orjson.OPT_INDENT_2).decode())
             else:
-                typer.echo(f"Prefix: {prefix}")
+                typer.echo(f"Namespace: {prefix}")
                 typer.echo(f"Total issues: {total}")
                 if status_counts:
                     typer.echo("\nBy status:")
@@ -538,8 +536,8 @@ def register(app: typer.Typer) -> None:
             "--dry-run",
             help="Preview without writing events",
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Backfill event history from existing JSONL records.
 
@@ -694,8 +692,8 @@ def register(app: typer.Typer) -> None:
             "-n",
             help="Report bad lines without writing the .bad sidecar or compacting",
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Move malformed lines out of issues.jsonl / inbox.jsonl.
 

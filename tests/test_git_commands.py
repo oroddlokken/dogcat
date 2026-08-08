@@ -293,6 +293,70 @@ class TestGitSetup:
         assert gitattrs.exists()
         assert "merge=dcat-jsonl" in gitattrs.read_text()
 
+    def test_setup_covers_archive_subdirectory(
+        self,
+        git_repo: GitRepo,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The written pattern must reach .dogcats/archive/*.jsonl.
+
+        A gitattributes glob without `**` does not cross a directory
+        separator, so the old `.dogcats/*.jsonl` left the tracked archive
+        files on git's default text merge, free to take conflict markers.
+        `git check-attr` is the only thing that proves the pattern, since
+        the file contents look plausible either way. (dogcat-1xgi)
+        """
+        repo = git_repo
+        monkeypatch.chdir(repo.path)
+
+        result = runner.invoke(app, ["git", "setup"], catch_exceptions=False)
+        assert result.exit_code == 0
+
+        archive = repo.path / ".dogcats" / "archive"
+        archive.mkdir(parents=True, exist_ok=True)
+        (archive / "closed-2026-01-01T00-00-00.jsonl").touch()
+        (repo.path / ".dogcats" / "issues.jsonl").touch()
+
+        checked = subprocess.run(
+            [
+                "git",
+                "check-attr",
+                "merge",
+                ".dogcats/issues.jsonl",
+                ".dogcats/archive/closed-2026-01-01T00-00-00.jsonl",
+            ],
+            cwd=repo.path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        lines = checked.stdout.strip().splitlines()
+        assert len(lines) == 2
+        for line in lines:
+            assert line.endswith("merge: dcat-jsonl"), line
+
+    def test_setup_qualifies_what_the_driver_resolves(
+        self,
+        git_repo: GitRepo,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The closing line must not promise unconditional auto-resolution.
+
+        It read "The merge driver will auto-resolve JSONL conflicts."
+        `dcat git guide` says *most* conflicts and that a rebase does not
+        invoke the driver at all, so a reader who trusted the setup line
+        would skip `dcat git rebase` and hand-resolve the JSONL — the edit
+        that corrupts the event log. (dogcat-1trf)
+        """
+        monkeypatch.chdir(git_repo.path)
+
+        result = runner.invoke(app, ["git", "setup"], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        assert "auto-resolves most JSONL conflicts on merge" in result.stdout
+        assert "dcat git rebase" in result.stdout
+        assert "will auto-resolve JSONL conflicts" not in result.stdout
+
     def test_setup_configures_merge_driver(
         self,
         git_repo: GitRepo,
@@ -489,7 +553,7 @@ class TestPrimeGitHealth:
         result = runner.invoke(app, ["prime"], catch_exceptions=False)
         assert result.exit_code == 0
         assert "DOGCAT WORKFLOW GUIDE" in result.stdout
-        assert "dogcat health check" in result.stdout
+        assert "Dogcat Health Check" in result.stdout
 
     def test_prime_shows_failing_checks_with_gentle_nudge(
         self,
@@ -505,7 +569,7 @@ class TestPrimeGitHealth:
             catch_exceptions=False,
         )
         assert result.exit_code == 0
-        assert "dogcat health check" in result.stdout
+        assert "Dogcat Health Check" in result.stdout
         assert "Suggestion:" in result.stdout
         assert "merge driver" in result.stdout.lower()
         assert "dcat config set git_tracking false" in result.stdout
@@ -547,7 +611,7 @@ class TestPrimeGitHealth:
             catch_exceptions=False,
         )
         assert result.exit_code == 0
-        assert "dogcat health check" not in result.stdout
+        assert "Dogcat Health Check" not in result.stdout
 
     def test_prime_skips_git_checks_when_tracking_disabled(
         self,
@@ -569,7 +633,7 @@ class TestPrimeGitHealth:
             catch_exceptions=False,
         )
         assert result.exit_code == 0
-        assert "dogcat health check" not in result.stdout
+        assert "Dogcat Health Check" not in result.stdout
 
     def test_prime_opinionated_includes_extra_rules(
         self,
@@ -585,7 +649,7 @@ class TestPrimeGitHealth:
         )
         assert result.exit_code == 0
         assert "Before setting in_review" in result.stdout
-        assert "dogcat health check" in result.stdout
+        assert "Dogcat Health Check" in result.stdout
 
     def test_prime_base_excludes_opinionated_rules(
         self,

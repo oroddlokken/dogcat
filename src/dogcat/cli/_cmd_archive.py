@@ -15,6 +15,10 @@ from dogcat.models import Status
 from ._completions import complete_durations, complete_namespaces
 from ._helpers import get_storage
 from ._json_state import echo_error, is_json, set_json
+from ._list_options import (
+    DogcatsDirOpt,
+    JsonOpt,
+)
 
 
 def _archive_inbox(
@@ -110,8 +114,8 @@ def register(app: typer.Typer) -> None:
             "-y",
             help="Skip confirmation prompt",
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Archive closed issues to reduce startup load.
 
@@ -153,7 +157,7 @@ def register(app: typer.Typer) -> None:
             ]
 
             if not closed_issues:
-                typer.echo("No closed issues to archive.")
+                typer.echo("No closed issues to archive")
                 return
 
             if namespace is not None:
@@ -181,7 +185,7 @@ def register(app: typer.Typer) -> None:
             skipped = partition.skipped
 
             if not archivable:
-                typer.echo("No issues can be archived.")
+                typer.echo("No issues can be archived")
                 if skipped:
                     typer.echo("\nSkipped issues:")
                     for issue, reason in skipped:
@@ -202,7 +206,7 @@ def register(app: typer.Typer) -> None:
                     typer.echo(f"  ... and {len(skipped) - 5} more")
 
             if dry_run:
-                typer.echo("\n(dry run - no changes made)")
+                typer.echo("\n(dry run)")
                 return
 
             if not yes:

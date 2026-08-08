@@ -114,7 +114,7 @@ class ParentPickerScreen(ModalScreen[str | None]):
 
         with Vertical(id="parent-picker-container"):
             yield Input(
-                placeholder="Type to filter by ID or title...",
+                placeholder="Filter by ID or title",
                 id="parent-picker-search",
             )
             yield OptionList(id="parent-picker-list")
@@ -428,14 +428,16 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
                 value=(
                     "blocked by: " + ", ".join(depends_on_ids) if depends_on_ids else ""
                 ),
-                placeholder="Blocked by (no blockers)",
+                # A placeholder only renders when the field is empty, so
+                # "(no blockers)" restated the emptiness it was shown for.
+                placeholder="Blocked by",
                 id="depends-on-input",
                 disabled=True,
             )
             blocks_ids = self._get_blocks_ids()
             yield Input(
                 value=("blocking: " + ", ".join(blocks_ids) if blocks_ids else ""),
-                placeholder="Blocks (none)",
+                placeholder="Blocks",
                 id="blocks-input",
                 disabled=True,
             )

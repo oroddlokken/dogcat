@@ -33,7 +33,7 @@ class TestCLIInit:
             app,
             ["init", "--dogcats-dir", str(dogcats_dir)],
         )
-        assert "Dogcat repository initialized" in result.stdout
+        assert "Dogcat store initialized" in result.stdout
 
     def test_init_adds_gitignore_entries(
         self,

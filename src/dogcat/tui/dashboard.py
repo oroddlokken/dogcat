@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 
 class ConfirmDeleteScreen(Screen[bool]):
-    """Confirmation dialog for issue deletion (soft tombstone, recoverable)."""
+    """Confirmation dialog for issue deletion (writes a permanent tombstone)."""
 
     BINDINGS: ClassVar = [
         Binding("escape", "cancel", "Cancel", priority=True),
@@ -76,7 +76,7 @@ class ConfirmDeleteScreen(Screen[bool]):
             yield Static(f"Delete [b]{escape(self._issue_id)}[/b]?")
             yield Static(f"  {self._title}", markup=False)
             yield Static(
-                "Soft delete — recoverable with `dcat reopen`.",
+                "Writes a tombstone. No command restores a deleted issue.",
                 id="confirm-hint",
                 markup=False,
             )

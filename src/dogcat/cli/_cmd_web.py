@@ -14,10 +14,13 @@ from dogcat.constants import (
 )
 
 from ._helpers import SortedGroup
+from ._list_options import (
+    DogcatsDirOpt,
+)
 
 web_app = typer.Typer(
     name="web",
-    help="Web server for dogcat.",
+    help="Serve the proposal submission form over HTTP.",
     no_args_is_help=True,
     cls=SortedGroup,
 )
@@ -52,7 +55,7 @@ def register(app: typer.Typer) -> None:
             _env_default_port(),
             help=f"Port to listen on (env: {WEB_PORT_ENV_VAR})",
         ),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
         namespace: str = typer.Option(
             None, help="Override namespace (auto-detected by default)"
         ),
@@ -122,10 +125,10 @@ def register(app: typer.Typer) -> None:
         if host in {"0.0.0.0", "::"}:  # noqa: S104  # the warning below is the guard
             typer.echo(
                 f"warning: binding to {host} exposes the propose form to "
-                "every network interface. The CSRF + nonce defenses cap "
-                "abuse but do not authenticate the submitter — bind to "
-                "127.0.0.1 unless you intentionally want a multi-host "
-                "endpoint.",
+                "every network interface. Nothing authenticates the "
+                "submitter — anyone who can reach this port can file "
+                "proposals. Bind to 127.0.0.1 unless you intentionally "
+                "want a multi-host endpoint.",
                 err=True,
             )
 

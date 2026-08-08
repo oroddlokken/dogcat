@@ -13,6 +13,10 @@ from dogcat.namespace_slug import slug_from_dir
 
 from ._helpers import get_storage
 from ._json_state import echo_error, is_json, set_json
+from ._list_options import (
+    DogcatsDirOpt,
+    JsonOpt,
+)
 
 
 def _warn_if_shadowing_global_store() -> None:
@@ -82,7 +86,7 @@ def register(app: typer.Typer) -> None:
             "-n",
             help="Issue namespace (default: auto-detect from directory name)",
         ),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
         external_dir: str | None = typer.Option(
             None,
             "--dir",
@@ -101,7 +105,7 @@ def register(app: typer.Typer) -> None:
                 " (sets git_tracking=false, adds .dogcats/ to .gitignore)"
             ),
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+        json_output: JsonOpt = False,
     ) -> None:
         """Initialize a new Dogcat repository.
 
@@ -134,8 +138,9 @@ def register(app: typer.Typer) -> None:
                 raise SystemExit(1)
             rc_path = Path.cwd() / DOGCATRC_FILENAME
             rc_path.write_text(f"{use_existing}\n")
-            typer.echo(f"✓ Created {rc_path} -> {use_existing}")
-            typer.echo(f"\n✓ Linked to existing dogcat repository at {use_existing}")
+            typer.echo(
+                f"\n✓ Linked to existing dogcat store at {use_existing} (via {rc_path})"
+            )
             return
 
         # Both the default .dogcats and a --dir .dogcatrc land in cwd's
@@ -213,7 +218,7 @@ def register(app: typer.Typer) -> None:
             }
             typer.echo(orjson.dumps(output).decode())
         else:
-            typer.echo(f"\n✓ Dogcat repository initialized in {dogcats_dir}")
+            typer.echo(f"\n✓ Dogcat store initialized in {dogcats_dir}")
             typer.echo(
                 f"  Issues will be named: {namespace}-<hash> (e.g., {namespace}-a3f2)"
             )

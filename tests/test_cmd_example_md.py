@@ -43,3 +43,21 @@ class TestExampleMd:
         """Test that the template includes the two-step findings pattern."""
         result = runner.invoke(app, ["example-md"])
         assert "Should I update issue" in result.output
+
+
+def test_template_bounds_multiple_in_progress() -> None:
+    """The template must say when more than one `in_progress` is allowed.
+
+    It told the agent to work "one at a time, not the whole backlog at
+    once" and then, four lines later, that working on multiple related
+    issues was fine — without ever naming the condition. Users paste this
+    whole into their CLAUDE.md, so the gap ships to every project.
+    (dogcat-1zi3)
+    """
+    result = runner.invoke(app, ["example-md"])
+    assert result.exit_code == 0
+
+    assert "only when a single change closes all of them" in result.stdout
+    assert "okay to work on multiple related issues" not in result.stdout
+    # The rule it qualifies must still be present, or the bound is orphaned.
+    assert "one at a time, not the whole backlog at once" in result.stdout

@@ -70,7 +70,7 @@ class TestArchiveBasic:
         assert result.exit_code == 0
         assert "Will archive 1 issue(s)" in result.stdout
         assert "Test issue" in result.stdout
-        assert "dry run - no changes made" in result.stdout
+        assert "(dry run)" in result.stdout
 
         # Verify no archive was created
         archive_dir = dogcats_dir / "archive"

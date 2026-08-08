@@ -23,6 +23,10 @@ from ._formatting import (
 )
 from ._helpers import apply_common_filters, get_storage
 from ._json_state import echo_error, is_json, set_json
+from ._list_options import (
+    DogcatsDirOpt,
+    JsonOpt,
+)
 
 
 def _parse_duration_arg(value: str) -> timedelta:
@@ -63,7 +67,9 @@ def register(app: typer.Typer) -> None:
             "--hours",
             help="Filter by N hours of inactivity",
         ),
-        limit: int | None = typer.Option(None, "--limit", help="Limit results"),
+        limit: int | None = typer.Option(
+            None, "--limit", help="Show at most N issues (default: all)"
+        ),
         issue_type: str | None = typer.Option(
             None,
             "--type",
@@ -127,8 +133,8 @@ def register(app: typer.Typer) -> None:
         ),
         tree: bool = typer.Option(False, "--tree", help="Display as tree"),
         table: bool = typer.Option(False, "--table", help="Display in columns"),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Show issues with no recent activity.
 

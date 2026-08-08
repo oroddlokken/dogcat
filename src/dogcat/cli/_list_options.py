@@ -107,5 +107,44 @@ WithoutCommentsOpt = Annotated[
 ]
 
 # -- Display ---------------------------------------------------------------
-TreeOpt = Annotated[bool, typer.Option("--tree", help="Display as tree")]
-TableOpt = Annotated[bool, typer.Option("--table", help="Display in columns")]
+# Both flags name the other: passing them together exits 1
+# (``_cmd_read.py`` rejects the combination), which neither help said.
+TreeOpt = Annotated[
+    bool, typer.Option("--tree", help="Display as tree (not with --table)")
+]
+TableOpt = Annotated[
+    bool,
+    typer.Option("--table", help="Display in aligned columns (not with --tree)"),
+]
+
+# -- Global ----------------------------------------------------------------
+# Declared here rather than retyped per command: the literals below were
+# repeated at 56 and 55 call sites, and both omitted the fact that made
+# them worth reading. (dogcat-1fr8)
+DogcatsDirOpt = Annotated[
+    str,
+    typer.Option(
+        "--dogcats-dir",
+        help=(
+            "Path to .dogcats directory. Unset, dcat walks up from the "
+            "current directory looking for .dogcatrc, then .dogcats/, then "
+            "the git common dir, then the global default_storage."
+        ),
+    ),
+]
+JsonOpt = Annotated[
+    bool,
+    typer.Option(
+        "--json",
+        help='Output as JSON; errors print {"error": ...} to stderr',
+    ),
+]
+# Every --by site falls back to get_default_operator() when unset, but only
+# one of the nine hand-written help strings said so. (dogcat-29k0)
+ByOpt = Annotated[
+    str | None,
+    typer.Option(
+        "--by",
+        help="Who to record as the author (default: auto-detected)",
+    ),
+]

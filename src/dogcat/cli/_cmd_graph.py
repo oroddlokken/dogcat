@@ -18,6 +18,10 @@ from ._completions import (
 from ._formatting import format_issue_brief
 from ._helpers import apply_common_filters, get_storage
 from ._json_state import echo_error, is_json, set_json
+from ._list_options import (
+    DogcatsDirOpt,
+    JsonOpt,
+)
 
 if TYPE_CHECKING:
     from dogcat.models import Issue
@@ -209,8 +213,8 @@ def register(app: typer.Typer) -> None:
             "--agent-only",
             help="Only show issues available for agents",
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Show dependency graph as an ASCII diagram."""
         set_json(json_output)

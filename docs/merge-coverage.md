@@ -17,14 +17,16 @@ Status is one of three values:
 | Claim | Test(s) | Status |
 | --- | --- | --- |
 | Idempotent: merging a record set with itself returns the same set | `tests/test_merge_properties.py::TestMergeIdempotency::test_issue_idempotency` | green |
-| Deterministic: fixed `ours`/`theirs` produce the same result | `tests/test_merge_driver.py::TestMergeJSONL::test_same_issue_latest_wins` | green |
-| Convergent across argument order (effectively-CRDT) | `tests/test_merge_properties.py::TestMergeConvergence::test_issue_convergence` | green |
+| Deterministic: fixed `ours`/`theirs` produce the same result | `tests/test_merge_driver.py::TestMergeJSONL::test_same_issue_latest_wins`, `tests/test_merge_driver.py::TestMergeJSONL::test_equal_timestamps_converge_across_argument_order` | green |
+| Convergent across argument order (effectively-CRDT) | `tests/test_merge_properties.py::TestMergeConvergence::test_issue_convergence`, `tests/test_merge_driver.py::TestMergeJSONL::test_equal_timestamps_converge_across_argument_order`, `tests/test_merge_driver.py::TestMergeJSONL::test_equal_timestamp_proposals_converge_across_argument_order` | green — the claim was false until dogcat-1xgi: the `new_ts >= old_ts` tie-break resolved an equal-timestamp tie by arrival order, so the two argument orders disagreed. It now breaks ties on a canonical serialization of the records. The property test was vacuous here too — its generator varied only `id` and `updated_at`, so a collision produced byte-identical records; it now varies `title` and fails against the old rule |
 | Monotonic within a status rank: later edit wins, never resurrected (cross-rank finality covered by the two rows below) | `tests/test_merge_properties.py::TestMergeMonotonicityUpdatedAt::test_updated_at_monotonic_wins_later`, `tests/test_merge_properties.py::TestMergeMonotonicityUpdatedAt::test_updated_at_monotonic_ours_wins_later` | green |
 | Issue tombstone is preserved even when the other side has a later open edit | `tests/test_merge_driver.py::TestMergeJSONL::test_issue_tombstone_wins_over_later_open_edit` | green |
 | Issue `closed` wins over a later `open` edit on the other side | `tests/test_merge_driver.py::TestMergeJSONL::test_issue_closed_wins_over_later_open_edit` | green |
 | Same status → falls back to `updated_at` | `tests/test_merge_driver.py::TestMergeJSONL::test_issue_same_status_falls_back_to_updated_at` | green |
 | Cross-timezone: absolute later timestamp wins | `tests/test_merge_driver.py::TestMergeJSONL::test_issue_cross_timezone_picks_absolute_later`, `tests/test_merge_driver.py::TestMergeJSONL::test_issue_pdt_vs_utc_picks_absolute_later` | green |
 | `Z` vs `+00:00` offsets treated equal | `tests/test_merge_driver.py::TestMergeJSONL::test_issue_z_vs_offset_zero_treated_equal` | green |
+| `draft` ranks below every active status (`_ISSUE_STATUS_RANK`, `merge_driver.py:309-318`) | `tests/test_merge_driver.py::TestMergeJSONL::test_draft_loses_to_every_active_status` | green |
+| The five active statuses (`open`, `in_progress`, `in_review`, `blocked`, `deferred`) share rank 1, so any two of them fall through to `updated_at` | `tests/test_merge_driver.py::TestMergeJSONL::test_active_statuses_share_a_rank_and_fall_through_to_timestamp` | green |
 
 ## Proposals (LWW by status finality, then `updated_at`)
 
@@ -77,6 +79,7 @@ Status is one of three values:
 | Whole-record LWW: same-issue edits to different fields drop the older writer | `tests/test_validate.py::TestDetectConcurrentEdits::test_detects_field_level_loss_different_fields` | partial (the detector surfaces the loss; the merge itself still drops the older writer) |
 | Doctor `--post-merge` names the affected fields in CLI output | `tests/test_validate.py::TestDoctorPostMerge::test_post_merge_detects_edits` | green |
 | Octopus merges are not supported (git's strategy bypasses per-file drivers) | `tests/test_git_workflows.py::TestMultipleMerges::test_octopus_merge_aborts_use_sequential` | green |
+| `.dogcats/archive/*.jsonl` gets the merge driver | `tests/test_git_commands.py::TestGitSetup::test_setup_covers_archive_subdirectory` | green — the pattern was `.dogcats/*.jsonl`, and a gitattributes glob without `**` does not cross a directory separator, so archive files merged with git's default text driver. Widened to `.dogcats/**/*.jsonl`; `dcat git rebase` now uses `rglob` to match (dogcat-1xgi) |
 
 ## End-to-end git workflow coverage
 

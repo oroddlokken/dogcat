@@ -97,8 +97,13 @@ class TestCLIDoctor:
             ["doctor", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code != 0
-        assert ".dogcats/ directory exists" in result.stdout
         assert "✗" in result.stdout
+        # The failing row must state the failure, not the pass-phrased
+        # description — the renderer prints `fail_description or description`,
+        # so a missing fail_description rendered "✗ .dogcats/ directory
+        # exists". (dogcat-1ah3)
+        assert "No dogcat store found at" in result.stdout
+        assert "✗ .dogcats/ directory exists" not in result.stdout
 
     def test_doctor_json_output(self, tmp_path: Path) -> None:
         """Test doctor command with JSON output."""
@@ -362,6 +367,43 @@ class TestDoctorFixDanglingDeps:
         # Re-run doctor: the data_integrity check that surfaced the
         # dangling dep must now pass. (dogcat-4rb5)
         _assert_doctor_check_passes(dogcats_dir, "data_integrity")
+
+
+class TestDoctorRemediesNameCommands:
+    """A failed check's Fix line must name a command, not a file to edit.
+
+    "Review errors above and fix issues.jsonl" pointed the user at the
+    append-only store. Hand-editing it corrupts the audit log that the
+    merge driver and compaction both read in order — the exact edit
+    AGENTS.md forbids. (dogcat-4opn)
+    """
+
+    def test_data_integrity_fix_names_a_command(self, tmp_path: Path) -> None:
+        """The data_integrity remedy names dcat update, not the JSONL file."""
+        from dogcat.models import Issue
+        from dogcat.storage import JSONLStorage
+
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        storage_path = dogcats_dir / "issues.jsonl"
+        JSONLStorage(str(storage_path)).create(
+            Issue(id="aaaa", namespace="ns", title="A")
+        )
+        with storage_path.open("ab") as f:
+            f.write(
+                b'{"record_type": "dependency", '
+                b'"issue_id": "ns-aaaa", '
+                b'"depends_on_id": "ns-ghost", '
+                b'"type": "blocks", '
+                b'"created_at": "2026-04-25T12:00:00+00:00"}\n'
+            )
+
+        result = runner.invoke(app, ["doctor", "--dogcats-dir", str(dogcats_dir)])
+
+        assert result.exit_code != 0
+        assert "dcat update <id>" in result.stdout
+        assert "Do not edit issues.jsonl by hand" in result.stdout
+        assert "Review errors above and fix issues.jsonl" not in result.stdout
 
 
 class TestDoctorFixIssuePrefixMigration:
@@ -1243,6 +1285,38 @@ class TestExtractedDoctorHelpers:
         check = _check_dogcats_dir(str(tmp_path / "nope"))
         assert check.passed is False
         assert "dcat init" in (check.fix or "")
+        # Without fail_description the renderer falls back to description,
+        # printing a passing claim beside a ✗. (dogcat-1ah3)
+        assert check.fail_description is not None
+        assert "No dogcat store found at" in check.fail_description
+
+    def test_id_uniqueness_failure_does_not_print_pass_phrasing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A failing ID-uniqueness check must not render "All issue IDs are unique".
+
+        The renderer prints `fail_description or description`, so without a
+        fail_description this row read "✗ All issue IDs are unique". Forcing
+        the check false is the only way to reach that branch — duplicate IDs
+        cannot be produced through the CLI. (dogcat-1ah3)
+        """
+        from dogcat.storage import JSONLStorage
+
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        runner.invoke(app, ["create", "Something", "--dogcats-dir", str(dogcats_dir)])
+
+        def _not_unique(_self: JSONLStorage) -> bool:
+            return False
+
+        monkeypatch.setattr(
+            JSONLStorage, "check_id_uniqueness", _not_unique, raising=True
+        )
+        result = runner.invoke(app, ["doctor", "--dogcats-dir", str(dogcats_dir)])
+
+        assert result.exit_code != 0
+        assert "✗ All issue IDs are unique" not in result.stdout
+        assert "Issue ID uniqueness check failed" in result.stdout
 
     def test_check_dcat_in_path_found(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A dcat binary on PATH is a plain (non-optional) pass."""

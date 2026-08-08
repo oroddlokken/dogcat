@@ -487,7 +487,7 @@ class TestRequireResolvedId:
             require_resolved_id(storage, "missing-id", label="Parent")
         assert exc.value.exit_code == 1
         # Label propagates into the error message.
-        assert "Parent missing-id not found" in capsys.readouterr().err
+        assert "Parent 'missing-id' matched no issue" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------

@@ -388,7 +388,7 @@ class TestCLIUpdate:
             ],
         )
         assert result.exit_code == 1
-        assert "Parent issue nonexistent not found" in result.output
+        assert "Parent issue 'nonexistent' matched no issue" in result.output
 
     def test_update_duplicate_of_with_partial_id_resolves_to_full(
         self,
@@ -482,7 +482,7 @@ class TestCLIUpdate:
             ],
         )
         assert result.exit_code == 1
-        assert "Duplicate target nonexistent not found" in result.output
+        assert "Duplicate target 'nonexistent' matched no issue" in result.output
 
     def test_update_auto_populates_updated_by(self, tmp_path: Path) -> None:
         """Test that update auto-populates updated_by from git config."""

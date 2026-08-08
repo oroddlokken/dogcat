@@ -1175,8 +1175,8 @@ class JSONLStorage(EventEmitterMixin):
         # always gated on Status.CLOSED.
         if issue.status == Status.TOMBSTONE:
             msg = (
-                f"Issue {issue.full_id} is tombstoned; "
-                f"cannot close a deleted issue. Use 'dcat reopen' first."
+                f"Issue {issue.full_id} is deleted (tombstoned) and cannot be "
+                f"closed. A tombstone is permanent; no command restores it."
             )
             raise ValueError(msg)
         if issue.status == Status.CLOSED:

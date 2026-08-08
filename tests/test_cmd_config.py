@@ -557,6 +557,50 @@ class TestConfigKeys:
         assert "Default" in result.stdout
         assert "Description" in result.stdout
 
+    def test_config_keys_bool_defaults_match_resolution(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Each declared bool default must match what an unset store resolves to.
+
+        `dcat config keys` is the only surface that states a default —
+        `dcat config get` errors on an unset key (dogcat-1w21) — so a wrong
+        row here is the only thing an operator reads. The
+        allow_creating_namespaces row printed `true` while every consumer
+        resolved it to False.
+
+        The three bool keys each resolve through their own idiom, and they
+        do not agree: git_tracking treats unset as *enabled*. So this pins
+        them one at a time rather than assuming a shared rule. (dogcat-2l8k)
+        """
+        from dogcat.cli._cmd_config import _KNOWN_KEYS
+
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        _init_with_namespace(dogcats_dir, "proj")
+        config = load_config(str(dogcats_dir))
+
+        # _cmd_web.py:112 — `config.allow_creating_namespaces is True`
+        assert _KNOWN_KEYS["allow_creating_namespaces"]["default"] == (
+            config.allow_creating_namespaces is True
+        )
+        # _cmd_docs.py:1135 — unset means enabled
+        assert _KNOWN_KEYS["git_tracking"]["default"] == (
+            config.git_tracking if config.git_tracking is not None else True
+        )
+        # _cmd_read.py:538 — `not config.disable_legend_colors`
+        assert _KNOWN_KEYS["disable_legend_colors"]["default"] == bool(
+            config.disable_legend_colors
+        )
+
+        # And the value actually rendered to the operator.
+        result = runner.invoke(app, ["config", "keys", "--json"])
+        assert result.exit_code == 0
+        assert (
+            json.loads(result.stdout)["allow_creating_namespaces"]["default"] is False
+        )
+
     def test_config_keys_json(
         self,
         tmp_path: Path,
@@ -782,8 +826,13 @@ class TestConfigUnsetLocalShared:
         result = runner.invoke(app, ["config", "unset", "git_tracking"])
         assert result.exit_code == 0
 
+        # A known-but-unset key now reports its documented default and
+        # says it is unset, rather than erroring like an unknown key.
+        # (dogcat-1w21)
         result = runner.invoke(app, ["config", "get", "git_tracking"])
-        assert result.exit_code != 0
+        assert result.exit_code == 0
+        assert "true" in result.stdout
+        assert "unset" in result.stdout
 
     def test_unset_local_removes_key(
         self,
@@ -802,3 +851,50 @@ class TestConfigUnsetLocalShared:
         local_file = dogcats_dir / "config.local.toml"
         if local_file.exists():
             assert "mylocal" not in local_file.read_text()
+
+
+class TestConfigGetUnsetKnownKey:
+    """`dcat config get` on a known-but-unset key reports its default.
+
+    It used to exit 1 with "not found in config", treating a documented
+    key the same as a typo — which left `dcat config keys` as the only
+    surface stating a default. (dogcat-1w21)
+    """
+
+    def test_unset_known_key_reports_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Exit 0, print the default, and mark it unset."""
+        monkeypatch.chdir(tmp_path)
+        _init_with_namespace(tmp_path / ".dogcats", "proj")
+
+        result = runner.invoke(app, ["config", "get", "allow_creating_namespaces"])
+        assert result.exit_code == 0
+        assert "false" in result.stdout
+        assert "unset" in result.stdout
+
+    def test_unset_known_key_json_marks_it_unset(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--json distinguishes "unset, default X" from "set to X"."""
+        monkeypatch.chdir(tmp_path)
+        _init_with_namespace(tmp_path / ".dogcats", "proj")
+
+        result = runner.invoke(
+            app, ["config", "get", "allow_creating_namespaces", "--json"]
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["set"] is False
+        assert data["default"] == "false"
+        assert data["allow_creating_namespaces"] is None
+
+    def test_unknown_key_still_errors(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A typo must not silently succeed."""
+        monkeypatch.chdir(tmp_path)
+        _init_with_namespace(tmp_path / ".dogcats", "proj")
+
+        result = runner.invoke(app, ["config", "get", "no_such_key"])
+        assert result.exit_code != 0

@@ -345,7 +345,7 @@ class TestCLIList:
             ["list", "--closed-after", "2099-01-01", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
-        assert "No issues found" in result.stdout
+        assert "No issues match these filters" in result.stdout
 
     def test_list_closed_before_filter(self, tmp_path: Path) -> None:
         """Test that --closed-before filter finds issues closed before a date."""
@@ -400,7 +400,7 @@ class TestCLIList:
             ],
         )
         assert result.exit_code == 0
-        assert "No issues found" in result.stdout
+        assert "No issues match these filters" in result.stdout
 
     def test_list_agent_only(self, tmp_path: Path) -> None:
         """Test list --agent-only filters out manual issues."""
@@ -1268,7 +1268,7 @@ class TestListNamespaceFilter:
             ],
         )
         assert result.exit_code == 0
-        assert "No issues found" in result.stdout
+        assert "No issues match these filters" in result.stdout
 
     def test_namespace_overrides_hidden_config(self, tmp_path: Path) -> None:
         """--namespace overrides hidden_namespaces config."""

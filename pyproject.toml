@@ -177,8 +177,9 @@ ignore = [
 # Typer still resolves those annotations at runtime (get_type_hints), so the
 # imports must stay at module scope — TC001 ("move into TYPE_CHECKING") would
 # reintroduce a NameError. (dogcat-5bhv)
-"src/dogcat/cli/_cmd_workflow.py" = ["TC001"]
-"src/dogcat/cli/_cmd_read.py" = ["TC001"]
+# Now every command module, not just the list views: --dogcats-dir and
+# --json moved into the same shared aliases. (dogcat-1fr8)
+"src/dogcat/cli/_cmd_*.py" = ["TC001"]
 
 [tool.pyright]
 venvPath = "."

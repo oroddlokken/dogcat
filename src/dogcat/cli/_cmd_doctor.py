@@ -27,6 +27,10 @@ from dogcat.idgen import (
 from ._health import HealthCheck, HealthReport
 from ._helpers import find_dogcats_dir, get_storage, is_gitignored
 from ._json_state import is_json, set_json
+from ._list_options import (
+    DogcatsDirOpt,
+    JsonOpt,
+)
 from ._validate import (
     ValidationError,
     detect_concurrent_edits,
@@ -40,7 +44,7 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     def doctor(
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+        json_output: JsonOpt = False,
         fix: bool = typer.Option(False, "--fix", help="Automatically fix issues"),
         post_merge: bool = typer.Option(
             False,
@@ -55,7 +59,7 @@ def register(app: typer.Typer) -> None:
                 " (informational; warns if cumulative probability is high)"
             ),
         ),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Diagnose dogcat installation, data integrity, and configuration.
 
@@ -292,7 +296,7 @@ def register(app: typer.Typer) -> None:
                     description="namespace is configured in config.toml",
                     fail_description="namespace is not configured in config.toml",
                     passed=prefix_ok,
-                    fix="Run 'dcat config set namespace <prefix>'",
+                    fix="Run 'dcat config set namespace <name>'",
                 ),
             )
 
@@ -386,7 +390,12 @@ def register(app: typer.Typer) -> None:
                 description="Data integrity (fields, references, cycles)",
                 fail_description=(f"Data integrity: {data_error_count} error(s) found"),
                 passed=data_valid,
-                fix="Review errors above and fix issues.jsonl",
+                fix=(
+                    "Fix each record named above with 'dcat update <id>'. If a "
+                    "line fails to parse, run 'dcat repair-jsonl --dry-run' "
+                    "first. Do not edit issues.jsonl by hand — the merge "
+                    "driver and compaction both read it in order."
+                ),
             ),
         )
 
@@ -411,7 +420,11 @@ def register(app: typer.Typer) -> None:
                         f"Inbox data integrity: {inbox_error_count} error(s) found"
                     ),
                     passed=inbox_data_valid,
-                    fix="Review errors above and fix inbox.jsonl",
+                    fix=(
+                        "Fix each proposal named above with 'dcat inbox'. If a "
+                        "line fails to parse, run 'dcat repair-jsonl --dry-run' "
+                        "first. Do not edit inbox.jsonl by hand."
+                    ),
                 ),
             )
 
@@ -431,6 +444,13 @@ def register(app: typer.Typer) -> None:
             "issue_ids",
             HealthCheck(
                 description="All issue IDs are unique",
+                # Covers both failure paths above: check_id_uniqueness()
+                # returning False, and the bare except that also lands here
+                # when get_storage() raises.
+                fail_description=(
+                    "Issue ID uniqueness check failed — two records share an "
+                    "ID, or the store could not be read"
+                ),
                 passed=issue_ids_unique,
                 fix="Review and fix duplicate IDs in issues.jsonl",
             ),
@@ -449,15 +469,19 @@ def register(app: typer.Typer) -> None:
                         "ID collision probability is below "
                         f"{warn_threshold * 100:.0f}% in every namespace"
                     ),
+                    # No remedy is named on purpose: ID_LENGTH_THRESHOLDS is a
+                    # module constant (constants.py:148) with no config key, so
+                    # an installed user cannot raise it without editing the
+                    # package source.
                     fail_description=(
-                        "Cumulative ID collision probability is high in at least"
-                        " one namespace — consider raising ID_LENGTH_THRESHOLDS"
+                        "Cumulative ID collision probability is above "
+                        f"{warn_threshold * 100:.0f}% in at least one namespace"
                     ),
                     passed=not warn,
                     optional=True,
                     note=(
-                        "Each retry resolves transparently via nonce, so this is"
-                        " informational. Numbers below."
+                        "Each collision retries with a fresh nonce, so it costs"
+                        " a retry, not a duplicate ID."
                     ),
                 ),
             )
@@ -625,6 +649,7 @@ def _check_dogcats_dir(dogcats_dir: str) -> HealthCheck:
     """Check that the ``.dogcats`` store directory exists."""
     return HealthCheck(
         description=f"{dogcats_dir}/ directory exists",
+        fail_description=f"No dogcat store found at {dogcats_dir}/",
         passed=Path(dogcats_dir).exists(),
         fix=f"Run 'dcat init' to create {dogcats_dir}",
     )
@@ -750,7 +775,7 @@ def _render_doctor_text(
                 )
 
     if all_passed:
-        typer.echo(typer.style("\n✓ All checks passed!", fg="green"))
+        typer.echo(typer.style("\n✓ All checks passed", fg="green"))
     else:
         typer.echo(
             typer.style(

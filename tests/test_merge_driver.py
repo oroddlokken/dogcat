@@ -298,6 +298,123 @@ class TestMergeJSONL:
         assert len(issues) == 1
         assert issues[0]["status"] == "closed"
 
+    def test_equal_timestamps_converge_across_argument_order(self) -> None:
+        """Same rank + same updated_at resolves the same way in both orders.
+
+        The tie-break was `new_ts >= old_ts`, which resolves by arrival
+        order: merging ours-then-theirs kept theirs, theirs-then-ours kept
+        ours. Two collaborators merging the same pair of branches in
+        opposite directions ended up with different content, which is
+        exactly what the "convergent across argument order" claim denies.
+        (dogcat-1xgi)
+        """
+        ts = "2026-01-02T00:00:00+00:00"
+        base = [_issue_record(id="tie", title="Original")]
+        ours = [_issue_record(id="tie", title="From ours", updated_at=ts)]
+        theirs = [_issue_record(id="tie", title="From theirs", updated_at=ts)]
+
+        forward = [
+            r for r in merge_jsonl(base, ours, theirs) if r["record_type"] == "issue"
+        ]
+        backward = [
+            r for r in merge_jsonl(base, theirs, ours) if r["record_type"] == "issue"
+        ]
+
+        assert len(forward) == 1
+        assert forward == backward, (
+            "merge is not convergent: argument order changed the winner"
+        )
+        # Stable across repeat calls too, not just symmetric.
+        assert forward == [
+            r for r in merge_jsonl(base, ours, theirs) if r["record_type"] == "issue"
+        ]
+
+    def test_equal_timestamp_proposals_converge_across_argument_order(self) -> None:
+        """Proposals carried the identical positional tie-break. (dogcat-1xgi)."""
+        ts = "2026-03-01T00:00:00+00:00"
+        base = [_proposal_record(id="p1", title="Original")]
+        ours = [_proposal_record(id="p1", title="From ours", updated_at=ts)]
+        theirs = [_proposal_record(id="p1", title="From theirs", updated_at=ts)]
+
+        forward = [
+            r for r in merge_jsonl(base, ours, theirs) if r["record_type"] == "proposal"
+        ]
+        backward = [
+            r for r in merge_jsonl(base, theirs, ours) if r["record_type"] == "proposal"
+        ]
+        assert len(forward) == 1
+        assert forward == backward
+
+    def test_draft_loses_to_every_active_status(self) -> None:
+        """`draft` ranks below the five active statuses, even when newer.
+
+        _ISSUE_STATUS_RANK puts draft at 0 and the active statuses at 1
+        (merge_driver.py:309-318), but `draft` appeared in no merge test.
+        The draft record carries the later timestamp, so only the rank can
+        decide it. (dogcat-1xgi)
+        """
+        for active in ("open", "in_progress", "in_review", "blocked", "deferred"):
+            base = [_issue_record(id="d1", status="draft")]
+            ours = [
+                _issue_record(
+                    id="d1",
+                    status="draft",
+                    title="Still a draft",
+                    updated_at="2026-06-01T00:00:00+00:00",
+                )
+            ]
+            theirs = [
+                _issue_record(
+                    id="d1",
+                    status=active,
+                    title="Promoted",
+                    updated_at="2026-01-01T00:00:00+00:00",
+                )
+            ]
+
+            for a, b in ((ours, theirs), (theirs, ours)):
+                issues = [
+                    r for r in merge_jsonl(base, a, b) if r["record_type"] == "issue"
+                ]
+                assert len(issues) == 1
+                assert issues[0]["status"] == active, (
+                    f"draft beat {active} despite ranking below it"
+                )
+
+    def test_active_statuses_share_a_rank_and_fall_through_to_timestamp(self) -> None:
+        """Any two of the five active statuses tie on rank, so time decides.
+
+        `test_issue_same_status_falls_back_to_updated_at` uses the *same*
+        status on both sides, so equivalence across the five was never
+        checked — a rank typo promoting one of them would not have failed
+        a test. (dogcat-1xgi)
+        """
+        from itertools import permutations
+
+        active = ("open", "in_progress", "in_review", "blocked", "deferred")
+        for earlier, later in permutations(active, 2):
+            base = [_issue_record(id="a1")]
+            ours = [
+                _issue_record(
+                    id="a1", status=earlier, updated_at="2026-01-01T00:00:00+00:00"
+                )
+            ]
+            theirs = [
+                _issue_record(
+                    id="a1", status=later, updated_at="2026-02-01T00:00:00+00:00"
+                )
+            ]
+
+            issues = [
+                r
+                for r in merge_jsonl(base, ours, theirs)
+                if r["record_type"] == "issue"
+            ]
+            assert issues[0]["status"] == later, (
+                f"{earlier} vs {later}: later timestamp did not win, so the "
+                f"two do not share a rank"
+            )
+
     def test_issue_same_status_falls_back_to_updated_at(self) -> None:
         """Same status: the record with the later updated_at still wins."""
         base: list[dict[str, Any]] = []
@@ -366,8 +483,7 @@ class TestMergeJSONL:
                 updated_at="2026-04-25T10:00:00Z",
             )
         ]
-        # Same instant, different formatting; theirs is iterated last so
-        # on tie it wins.
+        # Same instant, different formatting.
         theirs = [
             _issue_record(
                 id="x",
@@ -376,11 +492,19 @@ class TestMergeJSONL:
                 updated_at="2026-04-25T10:00:00+00:00",
             )
         ]
-        result = merge_jsonl(base, ours, theirs)
-        issues = [r for r in result if r.get("record_type") == "issue"]
+        issues = [
+            r for r in merge_jsonl(base, ours, theirs) if r["record_type"] == "issue"
+        ]
         assert len(issues) == 1
-        # Tied timestamps: theirs (iterated last) wins under the deterministic rule.
-        assert issues[0]["title"] == "Offset form"
+        # The point of the test is that neither format reads as *later* than
+        # the other, so this is a tie. Which side a tie resolves to is the
+        # tie-break's business, and it must not depend on argument order
+        # (dogcat-1xgi) — so assert the two orders agree rather than naming
+        # a winner here.
+        swapped = [
+            r for r in merge_jsonl(base, theirs, ours) if r["record_type"] == "issue"
+        ]
+        assert issues == swapped
 
     def test_issue_pdt_vs_utc_picks_absolute_later(self) -> None:
         """PDT (-07) vs UTC: pick the absolute-later record."""

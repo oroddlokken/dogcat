@@ -18,10 +18,13 @@ from dogcat.constants import (
 from ._health import HealthCheck
 from ._helpers import SortedGroup, find_dogcats_dir
 from ._json_state import echo_error, is_json, set_json
+from ._list_options import (
+    JsonOpt,
+)
 
 # Sub-app for 'dcat git' subcommands
 git_app = typer.Typer(
-    help="Git integration commands.",
+    help="Install and check the JSONL merge driver; resolve conflicts.",
     no_args_is_help=True,
     cls=SortedGroup,
 )
@@ -44,12 +47,12 @@ _GIT_GUIDE_TEXT = """\
 
 ── Merge Driver ───────────────────────────────────────────────────────────
 
-  Dogcat includes a custom JSONL merge driver that auto-resolves most
-  merge conflicts. Install it with:
+  Dogcat includes a JSONL merge driver that auto-resolves most merge
+  conflicts. Install it with:
 
     $ dcat git setup
 
-  This configures git to use dogcat's merge driver for .dogcats/*.jsonl
+  This configures git to use dogcat's merge driver for .dogcats/**/*.jsonl
   files. Without the driver, git's default text merge will conflict
   whenever two branches both modify the issue file.
 
@@ -83,8 +86,8 @@ _GIT_GUIDE_TEXT = """\
 
 ── Resolving Merge Conflicts ───────────────────────────────────────────────
 
-  With the merge driver installed, conflicts are rare. If they happen
-  (e.g. during a rebase where the driver isn't invoked):
+  The merge driver runs on merge, not on rebase — a rebase can still
+  leave conflict markers in the JSONL. When that happens:
 
     $ dcat git rebase
 
@@ -99,22 +102,13 @@ _GIT_GUIDE_TEXT = """\
 
     echo ".dogcats/" >> .gitignore
 
-  Scenarios where ignoring makes sense:
-    - Personal TODO tracking you don't want to share
-    - Experimenting with dogcat before adopting it team-wide
-    - Repos where issues are tracked elsewhere (e.g., GitHub Issues)
-
 ── Best Practices ──────────────────────────────────────────────────────────
 
-  1. Commit issue changes with related code
-     When you close a bug, commit the fix and the issue update together.
-     This keeps your history meaningful:
+  1. Commit issue changes with related code:
        $ git add src/fix.py .dogcats/
        $ git commit -m "Fix login timeout bug"
 
-  2. Review .dogcats/ diffs in PRs
-     Include .dogcats/ changes in code review. They document what was
-     done and why.
+  2. Review .dogcats/ diffs in PRs.
 
 ── Quick Reference ─────────────────────────────────────────────────────────
 
@@ -127,20 +121,18 @@ _GIT_GUIDE_TEXT = """\
 
 ── CI Validation ──────────────────────────────────────────────────────
 
-  Add a CI step to validate issue data on pull requests. Dogcat ships
-  a ready-made GitHub Actions workflow at:
-
-    .github/workflows/validate-issues.yml
-
-  It runs 'dcat doctor' whenever .dogcats/ files change, catching
-  broken JSON, invalid references, and corrupt data before merge.
-
-  To use it in your own project, copy the workflow file and ensure
-  dogcat is installable (e.g. via pyproject.toml or requirements.txt).
-
-  For other CI systems, the key command is:
+  Add a CI step that runs this whenever .dogcats/ files change:
 
     dcat doctor          # exits 0 on success, 1 on errors
+
+  It catches broken JSON, invalid references and corrupt data before
+  merge. Make sure dogcat is installable in CI (e.g. via pyproject.toml
+  or requirements.txt).
+
+  The dogcat source repo carries a GitHub Actions workflow that does
+  exactly this, at .github/workflows/validate-issues.yml. It is not
+  part of the installed package — clone the repo to copy it, or write
+  the step yourself from the command above.
 """
 
 
@@ -231,10 +223,7 @@ def _run_git_checks() -> tuple[bool, dict[str, HealthCheck]]:
         description=".gitattributes has JSONL merge driver entry",
         fail_description=".gitattributes is missing JSONL merge driver entry",
         passed=has_gitattrs,
-        fix=(
-            "Run 'dcat git setup' or add"
-            " '.dogcats/*.jsonl merge=dcat-jsonl' to .gitattributes"
-        ),
+        fix=(f"Run 'dcat git setup' or add '{GITATTRIBUTES_ENTRY}' to .gitattributes"),
     )
     if not has_gitattrs:
         all_passed = False
@@ -253,7 +242,7 @@ def register(app: typer.Typer) -> None:
 
     @git_app.command("check")
     def git_check(
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+        json_output: JsonOpt = False,
     ) -> None:
         """Check git-related configuration for dogcat."""
         set_json(json_output)
@@ -308,7 +297,7 @@ def register(app: typer.Typer) -> None:
                     typer.echo(typer.style(f"  Fix: {check.fix}", fg="yellow"))
                 typer.echo()
             if all_passed:
-                typer.echo(typer.style("\n✓ All checks passed!", fg="green"))
+                typer.echo(typer.style("\n✓ All checks passed", fg="green"))
             else:
                 typer.echo(
                     typer.style(
@@ -354,13 +343,17 @@ def register(app: typer.Typer) -> None:
             typer.echo(f"✓ Created .gitattributes with '{entry}'")
 
         typer.echo("✓ Merge driver configured in local git config")
-        typer.echo("\nDone! The merge driver will auto-resolve JSONL conflicts.")
+        typer.echo(
+            "\nDone! The merge driver auto-resolves most JSONL conflicts on "
+            "merge. Rebases don't invoke it — run 'dcat git rebase' if one "
+            "conflicts."
+        )
 
     @git_app.command("rebase")
     def git_rebase() -> None:
         """Auto-resolve JSONL merge conflicts in .dogcats/ files.
 
-        Scans .dogcats/*.jsonl files for git conflict markers, resolves them
+        Scans .dogcats/**/*.jsonl files for git conflict markers, resolves them
         using the semantic merge driver logic, writes the clean result, and
         stages the resolved files with git add.
 
@@ -385,7 +378,10 @@ def register(app: typer.Typer) -> None:
         resolved: list[str] = []
         errors: list[str] = []
 
-        for jsonl_path in sorted(dogcats_dir.glob("*.jsonl")):
+        # rglob, not glob: archive/*.jsonl is tracked and now carries the
+        # merge driver, but a rebase never invokes the driver, so those
+        # files can still take conflict markers. (dogcat-1xgi)
+        for jsonl_path in sorted(dogcats_dir.rglob("*.jsonl")):
             raw = jsonl_path.read_bytes()
             # Quick check for conflict markers
             if b"<<<<<<<" not in raw:
@@ -492,7 +488,7 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     def guide() -> None:
-        """Show a user-friendly guide to using dcat.
+        """Show a guide to using dcat.
 
         Displays a walkthrough of dcat's core features and workflows,
         written for users rather than AI agents.
@@ -502,7 +498,7 @@ def register(app: typer.Typer) -> None:
 ║                           DCAT USER GUIDE                                ║
 ╚════════════════════════════════════════════════════════════════════════════╝
 
-  dcat is a lightweight, git-friendly issue tracker that lives inside
+  dcat is a git-friendly issue tracker that lives inside
   your repository. Issues are stored in a single .dogcats/issues.jsonl
   file — no server, no database, no setup beyond "dcat init".
 
@@ -642,9 +638,14 @@ def register(app: typer.Typer) -> None:
 
     dcat create "Child task" --parent <parent_id>
 
-  Parent-child is purely organizational — children are NOT blocked by
-  their parent. If a child genuinely needs its parent to finish first,
-  add an explicit dependency:
+  Parent-child is organizational — a child of an open parent is never
+  blocked by it. One exception is a deferred parent: its children drop
+  out of 'dcat ready' entirely, and 'dcat list' collapses them under
+  the parent, previewing up to 3 and counting the rest, until you pass
+  --expand.
+
+  If a child genuinely needs its parent to finish first, add an
+  explicit dependency:
 
     dcat dep <child_id> add --depends-on <parent_id>
 
@@ -719,7 +720,7 @@ def register(app: typer.Typer) -> None:
 
   Add labels to an issue:
 
-    dcat label <id> add "backend"
+    dcat label <id> add -l "backend"
 
   Add a comment to an issue:
 
@@ -752,25 +753,19 @@ def register(app: typer.Typer) -> None:
     dcat update <id> --manual       # mark existing issue as manual
     dcat update <id> --no-manual    # remove the manual flag
 
-  `--agent-only` excludes these from list/ready, so autonomous-batch
-  runs (no human available to consult) skip past them. In an
-  interactive session the agent still drives the ticket — analysis,
-  hypothesis, exact next action — and uses the user as hands for
-  the HITL steps. The Manual checkbox in the TUI editor (dcat edit)
-  toggles the same flag.
+  `--agent-only` excludes these from list/ready. The Manual checkbox
+  in the TUI editor (dcat edit) toggles the same flag.
 
 ── Snooze ──────────────────────────────────────────────────────────────────
 
   Temporarily hide an issue from list/ready without changing its status.
-  Useful for "I know about this but don't want to deal with it right now."
 
     dcat snooze <id> 7d              # hide for 7 days
     dcat snooze <id> 2w              # hide for 2 weeks
     dcat snooze <id> 1m              # hide for ~1 month (30 days)
     dcat unsnooze <id>               # reveal early
 
-  The issue keeps its original status (open, in_progress, etc.) and
-  reappears automatically when the snooze expires. No manual action needed.
+  The issue reappears automatically when the snooze expires.
 
   See what's currently snoozed:
 
@@ -798,8 +793,8 @@ def register(app: typer.Typer) -> None:
 
 ── Git Integration ─────────────────────────────────────────────────────────
 
-  Dogcat includes a custom JSONL merge driver that auto-resolves most
-  merge conflicts when multiple branches modify issues.
+  Dogcat includes a JSONL merge driver that auto-resolves most merge
+  conflicts when multiple branches modify issues.
 
   Install the merge driver:
 
@@ -822,7 +817,7 @@ def register(app: typer.Typer) -> None:
     dcat config set <key> <value>         # set a value
     dcat config keys                      # list available keys
 
-── Useful Commands ─────────────────────────────────────────────────────────
+── More Commands ───────────────────────────────────────────────────────────
 
   dcat graph       Visualize the dependency graph as ASCII
   dcat graph <id>  Show subgraph reachable from an issue
@@ -836,7 +831,6 @@ def register(app: typer.Typer) -> None:
   dcat archive     Archive closed issues to reduce startup load
   dcat prune       Permanently remove deleted issues
   dcat stream      Stream issue changes in real-time (JSONL)
-  dcat features    List feature flags and their status
   dcat version     Show the dogcat version
   dcat demo        Generate demo issues for testing
 
@@ -877,7 +871,6 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Show dogcat workflow guide and best practices for AI agents.
 
-        This command displays guidance for effective dogcat usage and workflows.
         Git health checks are included automatically when in a git repo.
         Disable with: dcat config set git_tracking false
         """
@@ -928,7 +921,7 @@ def register(app: typer.Typer) -> None:
   Store: {Path(dogcats_dir).resolve()}
   Namespace: {namespace} (derived from the project root name)
   Lists default to this namespace plus any global visible_namespaces.
-  To give this project its own database: dcat init
+  To give this project its own store: dcat init
   To point it at an existing shared store: dcat init --use-existing-folder <path>
 """
 
@@ -976,13 +969,13 @@ DOGCAT WORKFLOW GUIDE
 ## Quick Start
 
 Allowed issue types, priorities, and statuses:
-  Types: bug, chore, epic, feature, question, story, task
+  Types: task, bug, feature, story, chore, epic, question
   Priorities: 0 (Critical), 1 (High), 2 (Medium, default), 3 (Low), 4 (Minimal)
   Statuses: draft, open, in_progress, in_review, blocked, deferred, closed
 
 `dcat create` and `dcat update` both support --title, --description,
 --priority, --acceptance, --notes, --labels, --parent, --manual,
---design, --external-ref, --depends-on, --blocks, --duplicate-of, --editor
+--design, --external-ref, --depends-on, --blocks, --duplicate-of
 
 1. Create: $ dcat create "Title" --type bug --priority 1 -d "Description"
 
@@ -990,14 +983,14 @@ Allowed issue types, priorities, and statuses:
    $ dcat list                  - All open issues
    $ dcat list <parent_id>     - Children of a parent
    $ dcat ready                - Ready to work (no blockers)
-   $ dcat blocked              - All blocked issues
+   $ dcat blocked              - Blocked by an unfinished dependency
    Use --namespace <ns> or --all-namespaces to filter.
 
 3. Update: $ dcat update <id> --status in_progress
 
 4. Close:  $ dcat close <id> --reason "Fixed"
 
-## Essential Commands
+## Commands
 
   dcat create <title>                        - Create a new issue
   dcat create <title> --depends-on <id>      - Create with dependency
@@ -1050,21 +1043,19 @@ If unsure about scope, ask the user before creating the breakdown.
 ## Agent Integration
 
 `--agent-only` filters in list/ready exclude issues marked `--manual`:
-  dcat ready --agent-only   # autonomous-workable
-  dcat list --agent-only    # autonomous-workable
+  dcat ready --agent-only
+  dcat list --agent-only
 
 Mark `--manual` when a step requires a human in the loop —
 credentials, deploys, hardware, visual confirmation, GUI keystrokes:
   dcat update <id> --manual
 
-`--manual` means HITL, not "agent skips". The filter exists so
-autonomous-batch runs (no human present to consult) move past these.
-When you are in session with a user, drive manual issues like any
-other: do the analysis, frame the hypothesis, hand the user one
-concrete action at a time, take their result, iterate. The human is
-your hands for steps you can't reach; the rest is still your job.
+`--manual` means HITL, not "agent skips". When you are in session
+with a user, drive manual issues like any other: do the analysis,
+frame the hypothesis, hand the user one concrete action at a time,
+take their result, iterate.
 
-## Comment-based filtering
+## Comment-Based Filtering
 
 List-style commands (list, ready, blocked, pr, snoozed, search, stale,
 recently-closed, recently-added, etc.) accept --has-comments and
@@ -1092,7 +1083,7 @@ Freeform tags shown in list/show, filter with --label.
 Temporarily hide issues from list/ready without changing status:
   dcat snooze <id> 7d             - Snooze for 7 days
   dcat snooze <id> 2w             - Snooze for 2 weeks
-  dcat snooze <id> --until 2026-04-01  - Snooze until a date
+  dcat snooze <id> 2026-04-01     - Snooze until a date
   dcat unsnooze <id>              - Remove snooze early
   dcat snoozed                    - List currently snoozed issues
   dcat list --include-snoozed     - Show snoozed issues in list
@@ -1140,7 +1131,7 @@ Proposals are lightweight (cross-repo) requests (accept, reject, or ignore).
             git_dir = git_helpers._run(["rev-parse", "--git-dir"])
             if git_dir is not None and git_dir.returncode == 0:
                 all_passed, checks = _run_git_checks()
-                output_parts.append("## dogcat health check\n")
+                output_parts.append("## Dogcat Health Check\n")
                 for check in checks.values():
                     is_optional = check.optional
                     if check.passed:

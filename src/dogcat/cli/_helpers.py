@@ -47,7 +47,14 @@ def with_ns_shim(func: Callable[..., Any]) -> Callable[..., Any]:
     the actual filter is applied by ``get_namespace_filter()`` reading the
     process state set by the global callback.
     """
-    sig = inspect.signature(func)
+    # eval_str resolves ``from __future__ import annotations`` strings against
+    # the decorated function's own module, the same reason _make_alias below
+    # does it: for options declared via the Annotated aliases in
+    # cli/_list_options, the ``typer.Option`` metadata lives in the annotation.
+    # Left as strings, Typer resolves them against *this* module's globals —
+    # which do not import those aliases — and silently regenerates a default
+    # ``--param-name`` option, turning --json into --json-output. (dogcat-1fr8)
+    sig = inspect.signature(func, eval_str=True)
     shim_params = [
         inspect.Parameter(
             "all_namespaces",
@@ -78,8 +85,8 @@ def with_ns_shim(func: Callable[..., Any]) -> Callable[..., Any]:
 
     wrapper.__signature__ = sig.replace(parameters=new_params)  # type: ignore[attr-defined]
     wrapper.__annotations__ = {
-        **func.__annotations__,
-        "all_namespaces": "bool",
+        **get_type_hints(func, include_extras=True),
+        "all_namespaces": bool,
         "namespace": "str | None",
     }
     return wrapper
@@ -163,7 +170,13 @@ def require_resolved_id(
 
     resolved = storage.resolve_id(raw_id)
     if resolved is None:
-        echo_error(f"{label} {raw_id} not found")
+        # Closed and cross-namespace issues both resolve, so the only
+        # causes left are a typo or an archived record — neither of which
+        # the bare "not found" named. (dogcat-1jnb)
+        echo_error(
+            f"{label} '{raw_id}' matched no issue. Run 'dcat list --all -A' "
+            f"to see current IDs — archived issues are not searched."
+        )
         raise typer.Exit(1)
     return resolved
 

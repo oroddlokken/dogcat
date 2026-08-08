@@ -45,9 +45,11 @@ from ._json_state import echo_error, is_json, set_json
 from ._list_options import (
     AgentOnlyOpt,
     AllNamespacesOpt,
+    DogcatsDirOpt,
     ExcludeTypeFilterOpt,
     HasCommentsOpt,
     IssueTypeFilterOpt,
+    JsonOpt,
     ManualFilterOpt,
     NamespaceFilterOpt,
     NoParentOpt,
@@ -538,7 +540,19 @@ def _render_list_text(
     legend_color = not config.disable_legend_colors
 
     if not issues:
-        typer.echo("No issues found")
+        # "No issues found" could not tell an empty store from one where
+        # the filters emptied the view — and three of those filters
+        # (closed, snoozed, namespace) are on by default, so the user
+        # never typed them. Asking the store distinguishes the two.
+        # (dogcat-2kex)
+        if storage.list():
+            typer.echo(
+                "No issues match these filters. Closed and snoozed issues "
+                "are hidden by default — try --all --include-snoozed, or -A "
+                "for other namespaces."
+            )
+        else:
+            typer.echo('No issues yet. Create one with: dcat create "Title"')
         return
 
     typer.echo(f"Issues ({len(issues)}):")
@@ -646,7 +660,9 @@ def register(app: typer.Typer) -> None:
             help="Issues closed before date (ISO8601)",
             autocompletion=complete_dates,
         ),
-        limit: int | None = typer.Option(None, "--limit", help="Limit results"),
+        limit: int | None = typer.Option(
+            None, "--limit", help="Show at most N issues (default: all)"
+        ),
         namespace: NamespaceFilterOpt = None,
         all_namespaces: AllNamespacesOpt = False,
         agent_only: AgentOnlyOpt = False,
@@ -678,8 +694,8 @@ def register(app: typer.Typer) -> None:
             "--include-inbox",
             help="Show pending inbox proposals alongside issues",
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """List issues with optional filters."""
         set_json(json_output)
@@ -802,8 +818,8 @@ def register(app: typer.Typer) -> None:
             "--include-history",
             help="Append the issue's full event history",
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Show details of one or more issues.
 
@@ -911,7 +927,9 @@ def register(app: typer.Typer) -> None:
             help="Issues closed before date (ISO8601)",
             autocompletion=complete_dates,
         ),
-        limit: int | None = typer.Option(None, "--limit", help="Limit results"),
+        limit: int | None = typer.Option(
+            None, "--limit", help="Show at most N issues (default: all)"
+        ),
         namespace: NamespaceFilterOpt = None,
         all_namespaces: AllNamespacesOpt = False,
         agent_only: AgentOnlyOpt = False,
@@ -923,8 +941,8 @@ def register(app: typer.Typer) -> None:
             "--include-snoozed",
             help="Include snoozed issues in results",
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Render the full `show` block for every issue matching the list filters.
 
@@ -1116,8 +1134,8 @@ def register(app: typer.Typer) -> None:
             "--include-snoozed",
             help="Include snoozed issues in the candidate set",
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Pick one random issue from the same candidate set as `dcat list`."""
         set_json(json_output)
@@ -1184,7 +1202,7 @@ def register(app: typer.Typer) -> None:
             help="Issue ID (opens picker if omitted)",
             autocompletion=complete_issue_ids,
         ),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Open an issue in the Textual editor for interactive editing."""
         try:
@@ -1225,7 +1243,7 @@ def register(app: typer.Typer) -> None:
             help="Issue ID (opens picker if omitted)",
             autocompletion=complete_issue_ids,
         ),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Open an issue in the Textual editor (alias for 'edit' command)."""
         edit(issue_id=issue_id, dogcats_dir=dogcats_dir)

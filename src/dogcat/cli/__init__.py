@@ -10,7 +10,7 @@ import typer
 from ._helpers import SortedGroup
 
 app = typer.Typer(
-    help="dogcat - lightweight, file-based issue tracking "
+    help="dogcat - file-based issue tracking "
     "and memory upgrade for AI agents (and humans!)",
     no_args_is_help=True,
     cls=SortedGroup,
@@ -105,8 +105,11 @@ def _register_command_module(name: str) -> None:
         mod.register(app)
     except Exception as exc:  # noqa: BLE001
         _logger.warning(
+            # No global -v exists (the root callback defines only --json and
+            # -C/--repo), and %s above already carries the exception.
             "Failed to load CLI command module %r: %s. "
-            "The rest of dcat will still work; rerun with -v for details.",
+            "The rest of dcat still works; that module's commands are "
+            "unavailable.",
             name,
             exc,
         )

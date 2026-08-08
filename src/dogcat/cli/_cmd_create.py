@@ -8,7 +8,14 @@ import orjson
 import typer
 
 from dogcat.config import get_namespace
-from dogcat.constants import DEFAULT_PRIORITY, DEFAULT_TYPE, parse_labels
+from dogcat.constants import (
+    DEFAULT_PRIORITY,
+    DEFAULT_TYPE,
+    PRIORITY_VALUES_HELP,
+    STATUS_VALUES_HELP,
+    TYPE_VALUES_HELP,
+    parse_labels,
+)
 from dogcat.models import IssueType, Status
 
 from ._completions import (
@@ -30,6 +37,11 @@ from ._helpers import (
     get_storage,
 )
 from ._json_state import echo_error, is_json, set_json
+from ._list_options import (
+    ByOpt,
+    DogcatsDirOpt,
+    JsonOpt,
+)
 
 
 def _resolve_create_overrides(
@@ -196,7 +208,7 @@ def register(app: typer.Typer) -> None:
             None,
             "--priority",
             "-p",
-            help="Priority (0-4, p0-p4, or critical/high/medium/low/minimal)",
+            help=f"Priority ({PRIORITY_VALUES_HELP})",
             parser=_parse_priority_value,
             metavar="PRIORITY",
             autocompletion=complete_priorities,
@@ -205,14 +217,14 @@ def register(app: typer.Typer) -> None:
             None,
             "--type",
             "-t",
-            help="Issue type (task, bug, feature, story, chore, epic, question)",
+            help=f"Issue type ({TYPE_VALUES_HELP})",
             autocompletion=complete_types,
         ),
         status: str | None = typer.Option(
             None,
             "--status",
             "-s",
-            help="Initial status (draft, open, in_progress, blocked, deferred)",
+            help=f"Initial status ({STATUS_VALUES_HELP})",
             autocompletion=complete_statuses,
         ),
         owner: str | None = typer.Option(
@@ -261,12 +273,8 @@ def register(app: typer.Typer) -> None:
             help="Parent issue ID (makes this a child issue)",
             autocompletion=complete_issue_ids,
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        created_by: str | None = typer.Option(
-            None,
-            "--by",
-            help="Who is creating this",
-        ),
+        json_output: JsonOpt = False,
+        created_by: ByOpt = None,
         design: str | None = typer.Option(None, "--design", help="Design notes"),
         external_ref: str | None = typer.Option(
             None,
@@ -291,7 +299,7 @@ def register(app: typer.Typer) -> None:
             help="Mark issue as manual (not for agents)",
         ),
         allow_shorthands: bool = typer.Option(False, hidden=True),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Create a new issue (implementation)."""
         set_json(json_output)
@@ -484,8 +492,8 @@ def register(app: typer.Typer) -> None:
         arg2: str | None = typer.Argument(None, help=_ARG_HELP_SHORTHAND),
         arg3: str | None = typer.Argument(None, help=_ARG_HELP_SHORTHAND),
         arg4: str | None = typer.Argument(None, help=_ARG_HELP_SHORTHAND),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
+        json_output: JsonOpt = False,
     ) -> None:
         """Open an interactive Textual form to create a new issue.
 
