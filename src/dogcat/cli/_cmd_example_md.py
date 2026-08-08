@@ -26,10 +26,10 @@ to see the current backlog. Work on bugs before features, high priority first.
 When running multiple `dcat` commands, make separate parallel Bash tool calls \
 instead of chaining them with `&&` and `echo` separators.
 
-Mark each issue `in_progress` only when you begin active work on it — one at \
-a time, not the whole backlog at once. Set `in_review` when that issue's work \
-is done before moving on. Status should reflect what you are *actually* \
-working on right now.
+Mark each issue `in_progress` when you begin editing files for it — one at a \
+time, not the whole backlog at once. Set `in_review` when that issue's work is \
+done before moving on. `dcat list` is how the user sees what is live, so a \
+stale status misreports the session.
 
 It is okay to work on multiple related issues at the same time. If there is \
 a priority conflict, ask the user which to focus on first.

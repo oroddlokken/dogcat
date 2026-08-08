@@ -1,6 +1,6 @@
 # Sharing a dogcat database between multiple repos
 
-This guide covers two ways to share one dogcat database across several repos: a machine-wide setup via global config, or a per-repo setup via `.dogcatrc`. The two can coexist.
+This guide covers the two shared-store setups: machine-wide via global config, or per-repo via `.dogcatrc`. The two can coexist. The third setup, a repo's own local `.dogcats/`, is the default and needs no configuration.
 
 ## Quick start (recommended): global config
 
@@ -10,16 +10,18 @@ If you want every new repo on the machine to use the same shared store automatic
 dcat config set --global default_storage /path/to/shared/.dogcats
 ```
 
-After that, every repo without its own `.dogcats/` or `.dogcatrc` resolves to the shared store. Namespace is derived from the repo's directory name (e.g. `~/dev/læring/` → `laering`). No per-repo `.dogcatrc` or `config.local.toml` needed.
+After that, every repo without its own `.dogcats/` or `.dogcatrc` resolves to the shared store. Namespace is derived from the repo directory name, e.g. `~/dev/læring/` → `laering` (see [Config precedence](#config-precedence) for the exact rule). No per-repo `.dogcatrc` or `config.local.toml` needed.
 
 The config lives at `$XDG_CONFIG_HOME/dogcat/config.toml` (or `~/.config/dogcat/config.toml`).
+
+**Agents:** `--global` writes to the user's home directory, not the repo, and changes storage resolution for every repo on the machine that has no `.dogcats/` or `.dogcatrc`. Show the user the current value with `dcat config get --global default_storage` and get confirmation before writing it. The same applies to `dcat init` and `dcat init --use-existing-folder` below: both create files in whatever directory you are standing in, so ask the user to run them rather than running them to try something out.
 
 The `.dogcatrc` / `config.local.toml` setup below is still supported. Use it when you want a specific repo to opt into a different namespace, or to share between just a few repos rather than machine-wide.
 
 ## Example layout (per-repo setup)
 
 ```
-~/dev/issues/              # shared database lives here
+~/dev/issues/              # shared store lives here
   .dogcats/
     issues.jsonl           # single source of truth
     config.toml            # shared config (namespace = "issues")
@@ -42,7 +44,7 @@ The `.dogcatrc` / `config.local.toml` setup below is still supported. Use it whe
 
 ## Per-repo setup (manual)
 
-### 1. Initialize the shared database
+### 1. Initialize the shared store
 
 ```bash
 cd ~/dev/issues
@@ -51,7 +53,7 @@ dcat init --namespace issues
 
 ### 2. Link each repo
 
-In each app repo, link to the shared database:
+In each app repo, link to the shared store:
 
 ```bash
 cd ~/dev/backend-app
@@ -102,11 +104,11 @@ Add to each repo's `.gitignore`:
 .dogcats/config.local.toml
 ```
 
-The `.dogcatrc` file should be committed; it tells everyone where the shared database lives. The `config.local.toml` should not, since the path in `.dogcatrc` is machine-specific.
+Commit `.dogcatrc` so every clone resolves to the same shared store, and write a path relative to the repo — `parse_dogcatrc` resolves a relative path against the `.dogcatrc` directory, while the absolute `~/dev/...` paths shown above only work on the machine that created them. Keep `config.local.toml` out of git: it holds per-checkout namespace and visibility choices, and committing it forces one developer's view onto everyone else.
 
 ## Migrating existing repos
 
-There is no built-in command yet for merging existing per-repo databases into a shared one. Until there is, the safe approach is to keep old repos on their existing `.dogcats/` stores (local stores always win over the global fallback) and let the shared store grow from new repos. Avoid concatenating `issues.jsonl` files by hand — the append-only audit log depends on records being written in order by the CLI.
+No command merges an existing per-repo store into a shared one. Leave existing repos on their own `.dogcats/` store: a local store wins over the global fallback, so they keep working unchanged while the shared store grows from new repos. To move issues across anyway, read the old store with `dcat export` and re-create each issue in the shared store with `dcat create --namespace <ns>`. Every write goes through the CLI (see AGENTS.md, "Store safety") — a hand-concatenated `issues.jsonl` produces IDs and event ordering the merge driver cannot reconcile.
 
 ## Cross-repo issue creation
 
@@ -129,8 +131,8 @@ The issue gets a `frontend-xxxx` ID and shows up in the frontend repo's default 
 dogcat resolves the storage directory in this order (first match wins):
 
 1. **Local `.dogcats/`** in the current directory
-2. **Walk-up `.dogcatrc`** in any ancestor directory
-3. **Global `default_storage`** from `~/.config/dogcat/config.toml`
+2. **Walk-up from the cwd toward the filesystem root.** At each ancestor directory, `.dogcatrc` is checked *before* `.dogcats/`, so a `.dogcatrc` sitting beside a `.dogcats/` directory wins. This walk-up is what makes `dcat` work from a subdirectory of a repo. It is bounded (see `get_rc_walkup_boundary`) and refuses a `.dogcatrc` whose target is owned by another user.
+3. **Global `default_storage`** from `$XDG_CONFIG_HOME/dogcat/config.toml` (default `~/.config/dogcat/config.toml`), tried only once the walk-up reaches the root.
 
 Within the chosen storage directory, config is merged in this order (later wins):
 

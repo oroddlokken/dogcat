@@ -58,61 +58,29 @@ Three setups, in order of scope:
    dcat config set --global default_storage ~/dev/issues/.dogcats
    ```
 
-   New repos will automatically resolve to the shared store, using a namespace derived from the repo's directory name. Existing per-repo setups continue to work; global config is only used as a last fallback.
-
-   The config lives at `$XDG_CONFIG_HOME/dogcat/config.toml` (or `~/.config/dogcat/config.toml`).
-
-See [docs/sharing-a-database.md](docs/sharing-a-database.md) for details.
+See [docs/sharing-a-database.md](docs/sharing-a-database.md) for the namespace rules, the resolution order, and the config precedence chain.
 
 ### Telling your agent to use dogcat
 
-In your `AGENTS.md`/`CLAUDE.md` file, add something like the following:
+Run `dcat example-md` to print a starting block for your `AGENTS.md`/`CLAUDE.md`. It covers the session-start command, when to mark an issue `in_progress`, when to ask before creating an issue, and the approval gate before closing one:
 
-``````text
-# Agent Instructions
+```bash
+dcat example-md >> AGENTS.md
+```
 
-## Issue tracking
-
-This project uses **dcat** for issue tracking. You MUST run `dcat prime --opinionated` for instructions.
-Then run `dcat list --agent-only` to see the list of issues. Generally we work on bugs first, and always on high priority issues first.
-
-When running multiple `dcat` commands, make separate parallel Bash tool calls instead of chaining them with `&&` and `echo` separators.
-
-Mark each issue `in_progress` right when you start working on it — not before. Set `in_review` when work on that issue is done before moving on. The status should reflect what you are *actually* working on right now.
-
-It is okay to work on multiple related issues at the same time, but do NOT batch-mark an entire backlog as `in_progress` upfront. If there is a priority conflict, ask the user which to focus on first.
-
-If the user brings up a new bug, feature or anything else that warrants changes to the code, ALWAYS ask if we should create an issue for it before you start working on the code. When creating issues, set appropriate labels using `--labels` based on the issue content (e.g. `cli`, `tui`, `api`, `docs`, `testing`, `refactor`, `ux`, `performance`, etc.).
-
-When research or discussion produces findings relevant to an existing issue, ask these as **separate questions in order**:
-
-1. First ask: "Should I update issue [id] with these findings?"
-2. Only after that, separately ask: "Should I start working on the implementation?"
-Do NOT combine these into one question. The user may want to update the issue without starting work.
-
-### Closing Issues - IMPORTANT
-
-NEVER close issues without explicit user approval. When work is complete:
-
-1. Set status to `in_review`: `dcat update --status in_review $issueId`
-2. Ask the user to test
-3. Ask if we can close it: "Can I close issue [id] '[title]'?"
-4. Only run `dcat close` after user confirms
-5. Ask: "Should I add this to CHANGELOG.md?" — update if yes
-``````
-
-This is only a starting point - it's up to you to decide how dogcat fits best in your workflow!  
-You can always run `dcat example-md` to get an example of what to put in your AGENTS.md/CLAUDE.md file.
+This is only a starting point - it's up to you to decide how dogcat fits best in your workflow!
 
 `dcat prime` mainly concerns itself on how to use the dcat CLI, not how your workflow should be.  
 `dcat prime --opinionated` is a more opinionated version of the guide for agents, with stricter guidelines.  
 
- You can run `diff <(dcat prime) <(dcat prime --opinionated)` to see the differences.
+You can run `diff <(dcat prime) <(dcat prime --opinionated)` to see the differences.
 
 ### Command cheat sheet
 
 | Command | Action |
 | --- | --- |
+| **Global** | |
+| `dcat -C /path/to/repo list` | Run as if dcat started in another directory (must come before the subcommand) |
 | **Creating** | |
 | `dcat create "My first bug" -t bug -p 0` | Create a bug issue, with priority 0 |
 | `dcat c b 0 "My first bug"` | Same as above, using `dcat c` shorthands for type and priority |
@@ -147,8 +115,16 @@ You can always run `dcat example-md` to get an example of what to put in your AG
 | `dcat tui` | Launch the interactive TUI dashboard |
 | `dcat new` | Interactive TUI for creating a new issue |
 | `dcat edit [$id]` | Interactive TUI for editing an issue |
+| **Proposals & web** | |
+| `dcat web propose` | Start the proposal web form (blocks until you stop it) |
+| `dcat propose --to /path/to/repo "Title"` | Send a proposal to another repo's inbox |
+| `dcat inbox list` | List inbox proposals |
+| `dcat inbox accept $id` | Accept a proposal and create a local issue from it |
+| `dcat inbox reject $id` | Reject a proposal |
 | **Git & maintenance** | |
 | `dcat git setup` | Install the JSONL merge driver for git |
+| `dcat git check` | Check that the merge driver is installed in this clone |
+| `dcat repair-jsonl` | Move malformed lines out of the JSONL stores |
 | `dcat history` | Show change history timeline |
 | `dcat diff` | Show uncommitted issue changes |
 | `dcat doctor` | Run health checks on issue data |
@@ -161,7 +137,7 @@ You can always run `dcat example-md` to get an example of what to put in your AG
 
 Dogcat uses a custom merge driver (`dcat git setup` installs it) to automatically resolve JSONL conflicts. The driver implements a state-based merge algebra:
 
-- **Issues**: Last-Writer-Wins (LWW) by `updated_at` timestamp. When both branches edit the same issue, the one with the later timestamp wins **entirely** — this means concurrent edits to different fields on the same issue may result in data loss. For example, if branch A edits the title and branch B edits the priority (with a later timestamp), B's entire record wins and A's title edit is lost.
+- **Issues**: LWW by status finality first, then `updated_at`. Status rank is `draft` < the active statuses (`open`, `in_progress`, `in_review`, `blocked`, `deferred`) < `closed` < `tombstone`; a more final status wins regardless of timestamp, so a branch that closes or deletes an issue is never silently reverted by a later edit that left it open elsewhere. Within one rank the later `updated_at` wins **entirely** — concurrent edits to different fields on the same issue may result in data loss. For example, if branch A edits the title and branch B edits the priority (with a later timestamp) and both leave the issue open, B's entire record wins and A's title edit is lost.
 
 - **Proposals**: LWW by status finality (`open < closed < tombstone`), then by `updated_at`. Once a proposal is closed or tombstoned, it cannot be reverted.
 
@@ -169,23 +145,25 @@ Dogcat uses a custom merge driver (`dcat git setup` installs it) to automaticall
 
 - **Events**: Append-only, deduplicated by identity.
 
-**Detecting field-level conflicts:** After a merge, run `dcat doctor --post-merge` to detect concurrent edits. The output shows which fields were affected and their values on each branch. This helps identify unintended data loss from LWW resolution. If you detect unexpected conflicts, coordinate edits across branches or use `dcat update` to manually restore lost changes.
+**Detecting field-level conflicts:** After a merge, run `dcat doctor --post-merge` to detect concurrent edits. The output shows which fields were affected and their values on each branch. If you detect unexpected conflicts, coordinate edits across branches or use `dcat update` to manually restore lost changes.
+
+See [docs/merge-coverage.md](docs/merge-coverage.md) for the claim-to-test matrix and the known limitations.
 
 ## Screenshots
 
-Compact table view showing tasks with ID, Parent, Type, Priority, and Title columns:  
+Table view (`dcat list --table`):  
 ![Table View](static/dcat-list_table.png)
 
-Hierarchical tree view displaying parent-child issue relationships:  
+Tree view (`dcat list --tree`):  
 ![Tree View](static/dcat-list_tree.png)
 
-Detailed list view with status indicators and full issue information:  
+List view (`dcat list`):  
 ![List View](static/dcat-list.png)
 
-Ready view showing unblocked issues available for work:  
+Ready issues (`dcat ready`):  
 ![Ready issues](static/dcat-ready.png)
 
-Detailed issue view with description, acceptance criteria, and metadata:  
+Issue details (`dcat show $id`):  
 ![Issue Details](static/dcat-show-issueid.png)
 
 TUI for creating new issues (`dcat new`):  

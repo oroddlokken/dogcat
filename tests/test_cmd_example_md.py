@@ -28,6 +28,17 @@ class TestExampleMd:
             "Wait for explicit user approval before closing any issue" in result.output
         )
 
+    def test_in_review_precedes_the_closure_gate(self) -> None:
+        """The template sets `in_review` before asking to close.
+
+        This repo's own AGENTS.md skips `in_review` because a pull request is
+        its review surface, and that divergence has already caused the template
+        to drift once. Pin the shipped default so a change to it is deliberate.
+        """
+        result = runner.invoke(app, ["example-md"])
+        assert "dcat update --status in_review" in result.output
+        assert result.output.index("in_review") < result.output.index("dcat close")
+
     def test_contains_findings_guidance(self) -> None:
         """Test that the template includes the two-step findings pattern."""
         result = runner.invoke(app, ["example-md"])
