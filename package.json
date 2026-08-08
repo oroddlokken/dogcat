@@ -2,8 +2,8 @@
   "devDependencies": {
     "oxfmt": "^0.62.0",
     "oxlint": "^1.77.0",
-    "stylelint": "^16.16.0",
-    "stylelint-config-standard": "^38.0.0"
+    "stylelint": "^17.14.1",
+    "stylelint-config-standard": "^40.0.0"
   },
   "scripts": {
     "oxlint": "oxlint src/dogcat/web/static/js",
