@@ -150,8 +150,10 @@ ACCEPTANCE_TEMPLATES = [
 ]
 
 DESIGN_TEMPLATES = [
-    "## Approach\nUse existing {component} pattern.\n\n## Changes\n"
-    "- Modify {file}\n- Add tests",
+    (
+        "## Approach\nUse existing {component} pattern.\n\n## Changes\n"
+        "- Modify {file}\n- Add tests"
+    ),
     "Follow RFC-{rfc_num} specification.\nSee design doc: https://docs.example.com/design/{doc_id}",
     "## Architecture\n```\nClient -> API -> Service -> DB\n```\n\nNo breaking changes.",
     "Spike findings: Option B is preferred. Lower complexity, better performance.",

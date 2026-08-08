@@ -74,8 +74,10 @@ def partition_archivable(
             skipped.append(
                 (
                     issue,
-                    f"parent {issue.parent} is not being archived"
-                    f" (status: {parent_status})",
+                    (
+                        f"parent {issue.parent} is not being archived"
+                        f" (status: {parent_status})"
+                    ),
                 )
             )
             continue
