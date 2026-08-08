@@ -69,6 +69,33 @@ class TestAmbiguity:
             resolve_partial_id("abc", ids, kind="issues")
 
 
+class TestTrailingColon:
+    """Ids copied from a terminal pane may carry a trailing ``':'``."""
+
+    def test_full_id_with_trailing_colon(self) -> None:
+        """Exact match still wins once the colon is stripped."""
+        ids = {"dogcat-1iw8", "dogcat-other"}
+        assert resolve_partial_id("dogcat-1iw8:", ids) == "dogcat-1iw8"
+
+    def test_partial_suffix_with_trailing_colon(self) -> None:
+        """Short hash with a trailing colon resolves by suffix."""
+        ids = {"dogcat-1iw8", "dogcat-other"}
+        assert resolve_partial_id("1iw8:", ids) == "dogcat-1iw8"
+
+    def test_colon_only_returns_none(self) -> None:
+        """A bare colon is empty after stripping."""
+        assert resolve_partial_id(":", {"dc-abc"}) is None
+
+    def test_multiple_trailing_colons(self) -> None:
+        """Repeated trailing colons are all stripped."""
+        ids = {"dogcat-inbox-4kzj"}
+        assert resolve_partial_id("4kzj:::", ids) == "dogcat-inbox-4kzj"
+
+    def test_only_trailing_colons_stripped(self) -> None:
+        """A leading colon is not stripped, so it must not match."""
+        assert resolve_partial_id(":abc", {"dc-abc"}) is None
+
+
 class TestHyphenatedNamespace:
     """Multi-segment namespaces (e.g. ``dogcat-inbox-X``) must use rsplit."""
 

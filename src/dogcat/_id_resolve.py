@@ -31,7 +31,9 @@ def resolve_partial_id(
     """Resolve ``partial_id`` against ``ids``.
 
     Args:
-        partial_id: Full or partial id (suffix or short hash).
+        partial_id: Full or partial id (suffix or short hash). Trailing ``':'``
+            characters are stripped — copying an id out of a terminal pane
+            often picks up the colon that followed it.
         ids: All candidate full ids.
         kind: Plural noun used in the ambiguity error (e.g. ``"issues"``,
             ``"proposals"``).
@@ -42,6 +44,8 @@ def resolve_partial_id(
     Raises:
         ValueError: If ``partial_id`` matches more than one id.
     """
+    partial_id = partial_id.rstrip(":")
+
     if not partial_id or not partial_id.strip():
         return None
 

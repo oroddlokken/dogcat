@@ -10,6 +10,10 @@
 
 - **No more imports of the private `typer._click` module.** The typer 0.27 bump (dogcat-1sxv) left two references to typer's vendored click fork, which carries no stability guarantee. The CLI-command-order test now builds its context from the public `typer.Context` (a subclass of the vendored base, so `list_commands` accepts it at runtime), and `SortedGroup.list_commands` annotates `ctx` as `Any` — typer 0.27.1 exports no public name for the vendored base `Context`, and `typer.Context` would narrow the override (closes dogcat-3kay).
 
+### Fixed
+
+- **Issue IDs with trailing colons resolve instead of erroring.** Copying an ID from a zellij pane picks up the following colon, so `dcat show dogcat-1iw8:` failed with "not found". `resolve_partial_id` now strips trailing colons before matching, which covers both issues and proposals in every command; a bare `:` still resolves to nothing (closes dogcat-1zhb).
+
 ### Development
 
 - **The 10000-deep-chain dependency tests build their fixture by direct JSONL writes, dropping from ~40s to ~0.2s each.** Setup called `storage.create()` 10,000 times, each an fsync'd append, blowing CI's 30s pytest timeout on both Python versions — masked until the lint step was fixed, since lint failed before tests ran. `_build_deep_chain` now serializes issue records with the same `issue_to_dict` that `create()` uses and writes them to the file in one pass, as it already did for dependency records (dogcat-308p); the tests target recursion depth in `deps.py`, not `create()` throughput (closes dogcat-4co0).
