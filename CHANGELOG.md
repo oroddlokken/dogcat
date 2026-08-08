@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **No more imports of the private `typer._click` module.** The typer 0.27 bump (dogcat-1sxv) left two references to typer's vendored click fork, which carries no stability guarantee. The CLI-command-order test now builds its context from the public `typer.Context` (a subclass of the vendored base, so `list_commands` accepts it at runtime), and `SortedGroup.list_commands` annotates `ctx` as `Any` — typer 0.27.1 exports no public name for the vendored base `Context`, and `typer.Context` would narrow the override (closes dogcat-3kay).
+
 ### Development
 
 - **13 outdated dependencies bumped to their latest fleet-wide releases** — notably `typer` 0.24.1→0.27.1, `rich` 14.3.3→15.0.0, `textual` 8.0.0→8.2.8, `ruff` 0.15.2→0.16.2 and `pytest` 9.0.2→9.1.1, alongside `djlint` 1.44.1, `hypothesis` 6.165.2, `orjson` 3.11.9, `pyright` 1.1.411, `pytest-asyncio` 1.4.0, `pytest-cov` 7.1.0, `tomli` 2.4.1 and `vulture` 2.16. Two of them needed source changes. Typer 0.27 vendors its own click fork, so `SortedGroup.list_commands` was overriding `TyperGroup` with a `click.Context` parameter that pyright no longer accepts — the annotation now names the vendored `typer._click.Context`, since the public `typer.Context` is a *subclass* and would narrow the override; the CLI-command-order test builds its context from the same vendored module. Ruff 0.16's widened `ISC004` flagged two pre-existing implicit string concatenations inside collections (`benchmark.py`, `_archive.py`), now parenthesized (closes dogcat-1sxv).

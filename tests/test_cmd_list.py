@@ -952,13 +952,13 @@ class TestCLICommandOrder:
 
     def test_commands_are_alphabetically_sorted(self) -> None:
         """Test that the app lists commands in sorted order."""
-        import typer._click
+        import typer
         import typer.main
 
-        # Get the underlying Click group from the Typer app. Typer 0.27 vendors
-        # click, so the group and its Context must come from typer._click.
+        # Get the underlying Click group from the Typer app. typer.Context
+        # subclasses the vendored click Context, so it satisfies list_commands.
         group = typer.main.get_group(app)
-        ctx = typer._click.Context(group)
+        ctx = typer.Context(group)
         commands = group.list_commands(ctx)
         assert len(commands) > 0
         assert commands == sorted(

@@ -27,12 +27,6 @@ from dogcat.storage import JSONLStorage
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
-    # Typer 0.27 vendors its own click fork, so TyperGroup.list_commands takes a
-    # typer._click Context, not a click one. Neither the `click` package nor the
-    # public `typer.Context` (a *subclass*, which would narrow the override)
-    # satisfies the signature; the vendored base is the only accurate type.
-    from typer._click import Context as ClickContext
-
 
 _type_keys = "/".join(sorted(TYPE_SHORTHANDS.keys()))
 _status_keys = "/".join(sorted(STATUS_SHORTHANDS.keys()))
@@ -201,7 +195,11 @@ def apply_to_each(
 class SortedGroup(TyperGroup):
     """Typer group that lists commands in alphabetical order."""
 
-    def list_commands(self, ctx: ClickContext) -> list[str]:
+    # ctx is Any because typer 0.27 vendors its own click fork and exports no
+    # public name for the vendored Context that TyperGroup.list_commands takes;
+    # the public typer.Context is a subclass, which would narrow the override.
+    # Verified against typer 0.27.1.
+    def list_commands(self, ctx: Any) -> list[str]:
         """Return commands sorted alphabetically."""
         return sorted(super().list_commands(ctx))
 
