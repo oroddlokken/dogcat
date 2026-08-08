@@ -150,7 +150,14 @@ def parse_conflicted_jsonl(
     included in both ours and theirs.
 
     Returns:
-        (base_records, ours_records, theirs_records)
+        (base_records, ours_records, theirs_records).
+
+        ``([], [], [])`` when ``raw`` carries no ``<<<<<<<`` marker at all —
+        indistinguishable from a genuinely conflicted but empty file, and
+        ``git_rebase`` relies on exactly that conflation in its
+        ``if not ours and not theirs: continue`` guard. Callers that need to
+        tell the two apart must test for the marker themselves before
+        calling.
     """
     # States: "outside", "ours", "base", "theirs"
     state = "outside"
@@ -382,15 +389,12 @@ def _replay_with_ops(
 def _tie_break_key(record: dict[str, Any]) -> bytes:
     """Content-derived ordering key for an exact rank+timestamp tie.
 
-    Two sides can edit one record to the same status rank and the same
-    ``updated_at``. The tie-break used to be ``new_ts >= old_ts``, which
-    resolves by *arrival* order, so ``merge(base, ours, theirs)`` kept
-    theirs while ``merge(base, theirs, ours)`` kept ours — the same inputs
-    producing different content depending on which collaborator merged.
-    Comparing a canonical serialization makes the winner a property of the
-    two records, so both argument orders agree. The specific ordering is
-    arbitrary; only its stability matters. ``full_id`` cannot serve here —
-    it is equal on both sides by construction. (dogcat-1xgi)
+    Which record this ranks higher is arbitrary — only that it ranks them
+    the same way every time matters, since that is what makes
+    ``merge(base, ours, theirs)`` and ``merge(base, theirs, ours)`` agree.
+    See the module docstring for the ``new_ts >= old_ts`` bug this replaced
+    (dogcat-1xgi). ``full_id`` cannot serve as the key: on an exact tie it is
+    equal on both sides by construction.
     """
     return orjson.dumps(record, option=orjson.OPT_SORT_KEYS)
 
@@ -401,10 +405,8 @@ def _merge_issues_lww(
 ) -> dict[str, dict[str, Any]]:
     """Merge issues by status finality, then ``updated_at``.
 
-    Status finality (TOMBSTONE > CLOSED > active states > DRAFT) wins over
-    ``updated_at`` so a concurrent edit on one branch cannot silently revert
-    a tombstone or close from the other branch. Within the same rank, the
-    record with the later ``updated_at`` wins.
+    Ranks come from :data:`_ISSUE_STATUS_RANK`; the module docstring has the
+    finality argument.
     """
     issues: dict[str, dict[str, Any]] = {}
     for record in [*ours_records, *theirs_records]:
@@ -415,6 +417,12 @@ def _merge_issues_lww(
         if existing is None:
             issues[fid] = record
             continue
+        # The 1 is the rank of "open" here: an unrecognised status — a
+        # Status.UNKNOWN sentinel from a newer dcat — merges as active, so it
+        # never overrides a close or tombstone and never loses to a draft.
+        # _merge_proposals uses 0 for the same rule; the literals differ only
+        # because that table has no draft tier below open, not because the two
+        # kinds are treated differently. Keep them tied to their own "open".
         new_rank = _ISSUE_STATUS_RANK.get(record.get("status", "open"), 1)
         old_rank = _ISSUE_STATUS_RANK.get(existing.get("status", "open"), 1)
         if new_rank > old_rank:
@@ -435,10 +443,9 @@ def _merge_proposals(
 ) -> dict[str, dict[str, Any]]:
     """Merge proposals by status finality, then ``updated_at`` / ``created_at``.
 
-    Higher status finality always wins (TOMBSTONE > CLOSED > OPEN). Within
-    the same rank, the record with the latest ``updated_at`` (falling back
-    to ``created_at`` for legacy records) wins, so deletions and closures
-    are never reverted by concurrent edits.
+    Ranks come from :data:`_PROPOSAL_STATUS_RANK`; the module docstring has
+    the finality argument. The ``created_at`` fallback covers legacy records
+    written before proposals carried ``updated_at``.
     """
     proposals: dict[str, dict[str, Any]] = {}
     for record in [*ours_records, *theirs_records]:
@@ -449,6 +456,10 @@ def _merge_proposals(
         if existing is None:
             proposals[fid] = record
             continue
+        # 0 is the rank of "open" in _PROPOSAL_STATUS_RANK — same
+        # unknown-merges-as-open rule as _merge_issues_lww, which spells it 1
+        # because its table starts at draft. Normalising the two literals to
+        # match would change which record wins.
         new_rank = _PROPOSAL_STATUS_RANK.get(record.get("status", "open"), 0)
         old_rank = _PROPOSAL_STATUS_RANK.get(existing.get("status", "open"), 0)
         if new_rank > old_rank:
@@ -523,6 +534,8 @@ def merge_jsonl(
 ) -> list[dict[str, Any]]:
     """Merge three sets of JSONL records using JSONL-aware semantics.
 
+    Index of what each kind does; the module docstring is the merge algebra.
+
     - Issues: union by full_id, status finality then latest ``updated_at`` wins.
     - Proposals: union by full_id, status finality then latest timestamp wins.
     - Events: union (deduplicated by identity tuple).
@@ -530,7 +543,18 @@ def merge_jsonl(
       A deletion by either side (present in base, absent from that side)
       is honored unless the other side also re-added it.
 
-    Returns the merged list of records.
+    Returns:
+        The merged records, assembled in compaction order: issues,
+        proposals, dependencies, links, then events sorted by absolute
+        timestamp. This list *is* the file content — both callers
+        (``dcat git merge-driver`` and ``dcat git rebase``) write it over
+        the target verbatim.
+
+        Only the five kinds above survive. A record whose
+        ``classify_record`` result is anything else — most plausibly a
+        ``record_type`` written by a newer dcat — is absent from the
+        result, and because the callers overwrite the file, absent means
+        erased from the store rather than merely unmerged.
     """
     issues = _merge_issues_lww(ours_records, theirs_records)
     proposals = _merge_proposals(ours_records, theirs_records)

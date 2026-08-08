@@ -46,7 +46,7 @@ def get_ready_work(
     """Get issues ready to work (no blocking dependencies).
 
     Args:
-        storage: The storage instance
+        storage: Store to read from; never mutated by this call
         filters: Optional filters to apply
         include_snoozed: If True, include currently snoozed issues
 
@@ -117,7 +117,7 @@ def get_blocked_issues(storage: JSONLStorage) -> list[BlockedIssue]:
     """Get all blocked issues with their blockers.
 
     Args:
-        storage: The storage instance
+        storage: Store to read from; never mutated by this call
 
     Returns:
         List of blocked issues with blocking IDs
@@ -155,7 +155,7 @@ def detect_cycles(storage: JSONLStorage) -> list[list[str]]:
     """Detect circular dependencies using iterative DFS.
 
     Args:
-        storage: The storage instance
+        storage: Store to read from; never mutated by this call
 
     Returns:
         List of cycles (each cycle is a list of issue IDs)
@@ -218,7 +218,7 @@ def has_blockers(storage: JSONLStorage, issue_id: str) -> bool:
     feature gap rather than dead code.
 
     Args:
-        storage: The storage instance
+        storage: Store to read from; never mutated by this call
         issue_id: The issue to check
 
     Returns:
@@ -242,7 +242,7 @@ def would_create_cycle(
     """Check if adding a dependency would create a circular dependency.
 
     Args:
-        storage: The storage instance
+        storage: Store to read from; never mutated by this call
         issue_id: The issue that would have the dependency
         depends_on_id: The issue it would depend on
 

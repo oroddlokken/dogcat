@@ -199,7 +199,6 @@ class DogcatTUI(App[None]):
         main_pane = self.query_one("#main-pane", Horizontal)
         if split_active:
             main_pane.add_class("split-active")
-            # Show detail for the currently highlighted issue
             full_id = self._get_selected_issue_id()
             if full_id is not None:
                 await self._show_issue_in_panel(full_id)
@@ -226,7 +225,6 @@ class DogcatTUI(App[None]):
 
         right_pane = self.query_one("#right-pane", Vertical)
 
-        # Remove placeholder if present
         await right_pane.query("#detail-placeholder").remove()
 
         # Always remove and remount — recompose() is async and must be
@@ -248,7 +246,6 @@ class DogcatTUI(App[None]):
         right_pane = self.query_one("#right-pane", Vertical)
         await right_pane.query(IssueDetailPanel).remove()
 
-        # Restore placeholder if missing
         if not right_pane.query("#detail-placeholder"):
             await right_pane.mount(
                 Static("Select an issue to view details", id="detail-placeholder"),
@@ -381,7 +378,6 @@ class DogcatTUI(App[None]):
             return
 
         if self._split_mode:
-            # In split mode, focus the detail panel
             from dogcat.tui.detail_panel import IssueDetailPanel
 
             try:
@@ -405,7 +401,6 @@ class DogcatTUI(App[None]):
         self._load_issues()
         option_list = self.query_one("#issue-list", OptionList)
         self._highlight_issue(option_list, saved_issue.full_id)
-        # Reload panel in view mode
         await self._show_issue_in_panel(saved_issue.full_id)
         self._reapply_split_mode_to_size()
 
@@ -415,7 +410,6 @@ class DogcatTUI(App[None]):
     ) -> None:
         """Handle cancel from the inline detail panel."""
         self.title = "dogcat"
-        # Reload panel in view mode for the currently selected issue
         full_id = self._get_selected_issue_id()
         if full_id is not None:
             await self._show_issue_in_panel(full_id)
@@ -509,7 +503,6 @@ class DogcatTUI(App[None]):
         self._last_selected_id = full_id
 
         if self._split_mode:
-            # Inline editing in the detail panel
             from dogcat.tui.detail_panel import IssueDetailPanel
 
             try:

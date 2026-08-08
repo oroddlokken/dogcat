@@ -78,11 +78,6 @@ def _dep_record(**kwargs: Any) -> dict[str, Any]:
     return defaults
 
 
-# ---------------------------------------------------------------------------
-# Unit tests for merge_jsonl()
-# ---------------------------------------------------------------------------
-
-
 class TestMergeJSONL:
     """Unit tests for the JSONL merge logic."""
 
@@ -348,8 +343,8 @@ class TestMergeJSONL:
     def test_draft_loses_to_every_active_status(self) -> None:
         """`draft` ranks below the five active statuses, even when newer.
 
-        _ISSUE_STATUS_RANK puts draft at 0 and the active statuses at 1
-        (merge_driver.py:309-318), but `draft` appeared in no merge test.
+        _ISSUE_STATUS_RANK (merge_driver.py) puts draft at 0 and the active
+        statuses at 1, but `draft` appeared in no merge test.
         The draft record carries the later timestamp, so only the rank can
         decide it. (dogcat-1xgi)
         """
@@ -658,11 +653,6 @@ class TestMergeJSONL:
         assert len(links) == 1
 
 
-# ---------------------------------------------------------------------------
-# Unit tests for _parse_jsonl() logging and conflict marker detection
-# ---------------------------------------------------------------------------
-
-
 class TestParseJSONLLogging:
     """Verify _parse_jsonl logs warnings for malformed lines and conflict markers."""
 
@@ -723,11 +713,6 @@ class TestParseJSONLLogging:
         assert _parse_jsonl(f) == []
 
 
-# ---------------------------------------------------------------------------
-# Tests for merge driver CLI entry point error handling
-# ---------------------------------------------------------------------------
-
-
 class TestMergeDriverCLI:
     """Verify git_merge_driver CLI has proper error handling."""
 
@@ -763,7 +748,11 @@ class TestMergeDriverCLI:
         assert ids == {"a", "b"}
 
     def test_merge_driver_failure_exits_nonzero(self, tmp_path: Path) -> None:
-        """When merge logic fails, exits 1 so git falls back."""
+        """When merge logic fails, exits 1 so git marks the path conflicted.
+
+        Non-zero is not a request for git's default merge — git runs no
+        fallback and leaves the ours file untouched.
+        """
         from unittest.mock import patch
 
         from typer.testing import CliRunner
@@ -817,9 +806,7 @@ class TestMergeDriverCLI:
                 orjson.loads(ln)
 
 
-# ---------------------------------------------------------------------------
 # Integration tests: merge driver with real git repos
-# ---------------------------------------------------------------------------
 
 
 def _install_merge_driver(repo: GitRepo) -> None:
@@ -974,9 +961,7 @@ class TestMergeDriverIntegration:
         assert len(storage.all_links) >= 1
 
 
-# ---------------------------------------------------------------------------
 # E2E test: full git merge workflow using dcat CLI
-# ---------------------------------------------------------------------------
 
 
 def _cli_invoke(dogcats_dir: Path, args: list[str]) -> str:
@@ -1139,11 +1124,6 @@ class TestGitMergeWorkflowE2E:
         # Should detect concurrent edits on the contested issue
         concurrent_ids = {w["issue_id"] for w in warnings}
         assert contested_id in concurrent_ids
-
-
-# ---------------------------------------------------------------------------
-# Unit test: event dedup key granularity
-# ---------------------------------------------------------------------------
 
 
 class TestEventDedupKey:

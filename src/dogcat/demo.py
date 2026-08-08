@@ -141,9 +141,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         """Update fields on an issue (generates event log entries)."""
         storage.update(issue_id, {**updates, "updated_by": updated_by})
 
-    # =========================================================================
     # Epic 1: Platform Modernization
-    # =========================================================================
     epic1_id = _create(
         "Platform Modernization Initiative",
         description=(
@@ -479,9 +477,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
                 updated_by=creator,
             )
 
-    # =========================================================================
     # Epic 2: User Experience Enhancement
-    # =========================================================================
     epic2_id = _create(
         "User Experience Enhancement",
         description=(
@@ -661,9 +657,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
                 updated_by=creator,
             )
 
-    # =========================================================================
     # Bugs
-    # =========================================================================
     bug1_id = _create(
         "Dashboard crashes on mobile Safari",
         description=(
@@ -866,9 +860,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             created_by=creator,
         )
 
-    # =========================================================================
     # Epic 3: Performance Optimization
-    # =========================================================================
     epic3_id = _create(
         "Performance Optimization",
         description=(
@@ -933,9 +925,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
             created_by="charlie@example.com",
         )
 
-    # =========================================================================
     # Epic 4: Data Analytics Platform (DEFERRED)
-    # =========================================================================
     epic4_id = _create(
         "Data Analytics Platform",
         description=(
@@ -1037,9 +1027,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         created_by="diana@example.com",
     )
 
-    # =========================================================================
     # Chores
-    # =========================================================================
     _create(
         "Update dependencies to latest versions",
         description=(
@@ -1082,9 +1070,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         "Agreed. Let's revisit in Q2.",
     )
 
-    # =========================================================================
     # Standalone tasks
-    # =========================================================================
     standalone_tasks = [
         (
             "Update API documentation",
@@ -1181,9 +1167,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
                 _update(task_id, {"status": "in_progress"}, updated_by=creator)
             _update(task_id, {"status": target_status.value}, updated_by=creator)
 
-    # =========================================================================
     # Questions
-    # =========================================================================
     question1_id = _create(
         "Should we use GraphQL or REST for the new API?",
         description=(
@@ -1248,9 +1232,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         "Budget allows for Datadog. Less operational overhead might be worth it.",
     )
 
-    # =========================================================================
     # Tombstoned (deleted) issues
-    # =========================================================================
     tombstone1_id = _create(
         "Old legacy feature flag system",
         description=(
@@ -1286,9 +1268,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         deleted_by="bob@example.com",
     )
 
-    # =========================================================================
     # Draft issue
-    # =========================================================================
     _create(
         "Mobile app redesign",
         description=(
@@ -1302,9 +1282,7 @@ def generate_demo_issues(storage: JSONLStorage, dogcats_dir: str) -> list[str]:
         created_by="diana@example.com",
     )
 
-    # =========================================================================
     # Snoozed issues
-    # =========================================================================
 
     # A bug that's known but the fix depends on an upstream release next month
     snoozed1_id = _create(

@@ -110,7 +110,8 @@ reference `dcat prime --opinionated --inbox` prints.
 
 The store is not permanently append-only. Once appended lines exceed `COMPACTION_RATIO`, `_append`
 rewrites the whole file with current state only, and that rewrite runs on a default branch alone
-(`storage.py:475`). A large all-lines-changed diff on `issues.jsonl` after merging to `main` is a
+(the `should_compact` branch in `JSONLStorage._append`). A large all-lines-changed diff on
+`issues.jsonl` after merging to `main` is a
 compaction, not corruption — leave it. Writes take an advisory lock, so concurrent `dcat` processes
 are safe and concurrent hand-edits are not.
 
@@ -154,7 +155,8 @@ Read the matching file before working in that area, and update it in the same ch
 - `docs/releasing.md` — `just release-prep`, PyPI, the Homebrew formula
 - `docs/web-ui.md` — CSP, static assets, deferred imports, the node toolchain
 - `docs/merge-coverage.md` — the claim-to-test matrix for `src/dogcat/merge_driver.py`
-- `docs/sharing-a-database.md` — storage resolution and namespaces
+- `docs/sharing-a-database.md` — storage resolution, namespaces, environment overrides
+- `docs/id-collisions.md` — the math behind `ID_LENGTH_THRESHOLDS`, read before re-tuning one
 
 When a change makes a rule here wrong — a renamed `just` target, a moved path, a changed CLI flag —
 fix this file in the same commit.

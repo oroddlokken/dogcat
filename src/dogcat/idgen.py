@@ -1,57 +1,15 @@
 """Hash-based ID generation for issues, dependencies, and comments.
 
-Collision math
---------------
-IDs are base36 strings (alphabet ``0-9a-z``), so the address space for
-length L is ``N = 36^L``:
+IDs are base36 hashes whose length scales with the item count via
+:data:`ID_LENGTH_THRESHOLDS`. Collision rates therefore govern *retries*, not
+correctness: every collision is detected against ``existing_ids`` and resolved
+by :meth:`IDGenerator.generate_id` with a nonce or, once those are exhausted,
+by falling back to ``length + 2``. Reaching a user-visible failure would take
+:data:`max_retries` (100) consecutive collisions.
 
-==========  ============================
-Length L    Address space N = 36^L
-==========  ============================
-4           1,679,616
-5           60,466,176
-6           2,176,782,336
-7           78,364,164,096
-==========  ============================
-
-Per-generation collision probability (chance a freshly generated hash
-collides with one of the ``k`` existing IDs of the same length) is
-approximated by:
-
-    p_step(k, L) ≈ k / N         (exact for uniform sampling, k << N)
-
-Cumulative birthday-paradox probability that *any* collision has been
-hit during the lifetime of a database with ``k`` IDs (i.e. that at
-least one ``IDGenerator`` call has retried with a nonce) is:
-
-    p_all(k, L) ≈ 1 - exp(-k**2 / (2N))
-
-These figures matter only for *retry rate*, not correctness: every
-collision is detected against ``existing_ids`` and resolved by
-:meth:`IDGenerator.generate_id` using a nonce or, if exhausted, by
-falling back to ``length + 2``. A user-visible failure requires
-:data:`max_retries` (100) consecutive retries to all collide, which
-has probability ``p_step^100`` — vanishingly small at any sane
-``k``.
-
-The thresholds in :data:`ID_LENGTH_THRESHOLDS` were chosen to keep
-``p_all`` below a few percent at each band's upper bound:
-
-==========  =======  ===========  =========================
-Boundary    L        p_step(%)    p_all (cumulative, %)
-==========  =======  ===========  =========================
-k ≤ 500     4        ≤ 0.0298%    ≤ 7.17%
-k ≤ 1500    5        ≤ 0.00248%   ≤ 1.85%
-k ≤ 5000    6        ≤ 0.000230%  ≤ 0.572%
-k > 5000    7        decreases    decreases
-==========  =======  ===========  =========================
-
-The thresholds are *empirical* but bounded: each transition tightens
-``p_all`` by roughly an order of magnitude. Re-tuning is safe as long
-as both bands' ``p_all`` at the boundary stay below a target (e.g.
-``p_all < 5%``). The opt-in ``dcat doctor --check-id-distribution``
-check reports the live ``p_step`` and ``p_all`` for the current
-database so drift can be observed before it becomes painful.
+``docs/id-collisions.md`` has the address-space and birthday-paradox
+derivation behind the thresholds; ``dcat doctor --check-id-distribution``
+reports the live figures for a real database.
 """
 
 from __future__ import annotations
@@ -73,7 +31,7 @@ def get_id_length_for_count(issue_count: int) -> int:
     - 6 characters for 1501-5000 issues
     - 7 characters beyond that
 
-    See the module docstring for the birthday-paradox math behind these
+    ``docs/id-collisions.md`` has the birthday-paradox math behind these
     thresholds.
 
     Args:
@@ -276,7 +234,9 @@ class IDGenerator:
         based on content aren't needed.
 
         Returns:
-            Unique ID in format "{namespace}-{counter}"
+            Unique ID in format "{namespace}-{counter}". Registered in
+            ``self.existing_ids`` on the way out — see :meth:`generate_id`
+            on why that makes these generators non-repeatable.
         """
         while True:
             self._counter += 1
@@ -303,18 +263,24 @@ class IDGenerator:
                 (defaults to instance namespace)
 
         Returns:
-            Unique ID hash (without namespace prefix)
+            Unique ID hash (without namespace prefix). Usually ``id_length``
+            characters, but both collision fallbacks return ``id_length + 2``
+            — callers must not assume a fixed width.
+
+        Not a pure function, despite hashing its inputs: every generator on
+        this class registers the minted full id in ``self.existing_ids``, so
+        two calls with the identical ``title`` and ``timestamp`` return
+        *different* hashes. Reusing one generator across a test that expects
+        a stable id will surprise you; construct a fresh one instead.
         """
         if namespace is None:
             namespace = self.namespace
         if timestamp is None:
             timestamp = datetime.now().astimezone()
 
-        # Get the scaled ID length based on current issue count
         length = self.id_length
         input_data = f"{title}:{timestamp.isoformat()}"
 
-        # Try generating with increasing nonce values
         for attempt in range(self.max_retries):
             nonce = "" if attempt == 0 else str(attempt)
             candidate_hash = generate_hash_id(
@@ -322,7 +288,6 @@ class IDGenerator:
                 nonce=nonce,
                 length=length,
             )
-            # Check collision against full ID (namespace-hash)
             full_id = f"{namespace}-{candidate_hash}"
             if full_id not in self.existing_ids:
                 self.existing_ids.add(full_id)
@@ -372,7 +337,9 @@ class IDGenerator:
             prefix: ID prefix
 
         Returns:
-            Unique dependency ID
+            Unique dependency ID. The collision fallback hashes at length 6
+            regardless of ``id_length``, so the width is not fixed.
+            Registered in ``self.existing_ids`` — see :meth:`generate_id`.
         """
         for attempt in range(self.max_retries):
             nonce = "" if attempt == 0 else str(attempt)
@@ -400,7 +367,8 @@ class IDGenerator:
         """Generate a unique comment ID.
 
         Returns:
-            Unique comment ID
+            Unique comment ID, registered in ``self.existing_ids`` — see
+            :meth:`generate_id`.
         """
         candidate_id = generate_comment_id()
         while candidate_id in self.existing_ids:

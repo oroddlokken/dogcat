@@ -29,11 +29,12 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 class ProposeAppState:
     """Typed bundle of values stored on ``app.state``.
 
-    Replaces five separate ``app.state.<attr>`` writes (and the matching
-    ``getattr(state, "name", default)`` reads scattered across the route
-    module) with one named container. Mounted on ``app.state.dcat``;
-    individual attributes are also kept on ``app.state`` for back-compat
-    with existing route accesses while the migration proceeds.
+    Mounted on ``app.state.dcat``, which is the field-checked way for a
+    route to read these. Each attribute is *also* still written flat onto
+    ``app.state`` for routes not yet migrated off ``getattr(state, name,
+    default)``; those two copies are set together at app construction and
+    nothing keeps them in sync afterwards, so write through neither at
+    request time.
     """
 
     dogcats_dir: str
@@ -103,6 +104,12 @@ def create_app(
         namespaces.remove(resolved_namespace)
         namespaces.insert(0, resolved_namespace)
     except Exception:
+        # Deliberately broad. The namespace picker is a convenience; the form
+        # works with just the resolved namespace. Narrowing this to the
+        # exceptions we can name today turns a corrupt, unreadable or
+        # unexpectedly-shaped store into a `dcat web propose` that refuses to
+        # boot — the one state where being able to file a proposal matters
+        # most. Degrade to a single-namespace form instead.
         namespaces = [resolved_namespace]
 
     app = FastAPI(

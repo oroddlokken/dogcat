@@ -486,11 +486,6 @@ class TestDashboardDeleteAction:
             assert not any(isinstance(s, ConfirmDeleteScreen) for s in app.screen_stack)
 
 
-# ---------------------------------------------------------------------------
-# E2E test: TUI with real storage backend
-# ---------------------------------------------------------------------------
-
-
 class TestTUIWithRealStorage:
     """E2E: TUI operations with real JSONLStorage instead of mocks."""
 

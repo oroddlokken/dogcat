@@ -29,7 +29,6 @@ _logger = logging.getLogger(__name__)
 # DEFAULT_NAMESPACE; this module-level name is kept as a back-compat alias.
 DEFAULT_PREFIX = DEFAULT_NAMESPACE
 
-# Config filename
 CONFIG_FILENAME = "config.toml"
 LOCAL_CONFIG_FILENAME = "config.local.toml"
 
@@ -170,25 +169,29 @@ def refuse_if_rc_target_cross_user(rc_path: Path, target: Path) -> None:
 
 
 def get_config_path(dogcats_dir: str) -> Path:
-    """Get the path to the config file.
+    """Get the path to the shared config file.
 
     Args:
         dogcats_dir: Path to .dogcats directory
 
     Returns:
-        Path to config.toml
+        Path to config.toml. Pure path arithmetic — the file is not checked
+        for existence, and an absent config is normal (``load_config``
+        returns an empty :class:`DogcatConfig`).
     """
     return Path(dogcats_dir) / CONFIG_FILENAME
 
 
 def get_local_config_path(dogcats_dir: str) -> Path:
-    """Get the path to the local config file.
+    """Get the path to the gitignored local-override config file.
 
     Args:
         dogcats_dir: Path to .dogcats directory
 
     Returns:
-        Path to config.local.toml
+        Path to config.local.toml, unchecked for existence as in
+        :func:`get_config_path`. Absent is the common case — this file is
+        gitignored, so a fresh clone never has one.
     """
     return Path(dogcats_dir) / LOCAL_CONFIG_FILENAME
 
@@ -594,9 +597,19 @@ def _resolve_dogcats_path(dogcats_dir: str) -> str:
     """Resolve the .dogcats directory path, walking up from CWD if needed.
 
     When commands are run from a subdirectory, ``dogcats_dir`` may be the
-    default ``".dogcats"`` which doesn't exist locally.  This mirrors the
-    walk-up logic in ``cli._helpers.find_dogcats_dir`` so that callers in
-    ``config.py`` (which can't import from ``cli``) get the correct path.
+    default ``".dogcats"`` which doesn't exist locally, so this walks up
+    from CWD for callers in ``config.py`` (which can't import from ``cli``).
+
+    This is the *unhardened* walk. It is not a copy of
+    ``cli._helpers.walkup_find_store`` or of :func:`_find_rc_parent`, both of
+    which stop at :func:`get_rc_walkup_boundary` and run
+    :func:`refuse_if_rc_target_cross_user`. This one climbs to the
+    filesystem root, applies no cross-user refusal, and swallows a malformed
+    ``.dogcatrc`` instead of exiting. A planted ``/tmp/.dogcatrc`` can
+    therefore steer resolution here where it could not there. Why the guards
+    were left off is not recorded — treat the gap as unexplained rather than
+    as a reviewed exemption, and prefer the hardened walk-ups when a caller
+    can reach them.
 
     Args:
         dogcats_dir: Path to .dogcats directory (may be relative/unresolved)
@@ -782,8 +795,10 @@ def extract_namespace(issue_id: str) -> str | None:
 
 
 # Deprecated aliases — the canonical names are the ``*_namespace`` helpers
-# above. These shims keep the old ``*_prefix`` names importable for one
-# release for any out-of-tree callers; remove them the release after.
+# above. These shims kept the old ``*_prefix`` names importable for out-of-tree
+# callers through v0.13.1, the one release they were promised. Remove them in
+# v0.14.0: nothing in-tree imports them except tests/test_config.py, so the
+# deletion is these four lines plus that test. (dogcat-1tzm)
 get_issue_prefix = get_namespace
 set_issue_prefix = set_namespace
 extract_prefix = extract_namespace

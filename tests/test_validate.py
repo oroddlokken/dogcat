@@ -134,11 +134,6 @@ def _warnings(results: list[ValidationError]) -> list[ValidationError]:
     return [r for r in results if r.level == "warning"]
 
 
-# ---------------------------------------------------------------------------
-# Unit tests for parse_raw_records
-# ---------------------------------------------------------------------------
-
-
 class TestParseRawRecords:
     """Test JSONL parsing and basic structural checks."""
 
@@ -195,11 +190,6 @@ class TestParseRawRecords:
         assert errors == []
 
 
-# ---------------------------------------------------------------------------
-# Unit tests for validate_issue
-# ---------------------------------------------------------------------------
-
-
 class TestValidateIssue:
     """Test individual issue record validation."""
 
@@ -251,11 +241,6 @@ class TestValidateIssue:
         )
         assert len(errors) == 1
         assert "invalid timestamp" in errors[0].message
-
-
-# ---------------------------------------------------------------------------
-# Unit tests for validate_references
-# ---------------------------------------------------------------------------
 
 
 class TestValidateReferences:
@@ -353,11 +338,6 @@ class TestValidateReferences:
         assert errors == []
 
 
-# ---------------------------------------------------------------------------
-# Integration: validate_jsonl (full pipeline)
-# ---------------------------------------------------------------------------
-
-
 class TestValidateJsonl:
     """Test the top-level validate_jsonl function."""
 
@@ -380,11 +360,6 @@ class TestValidateJsonl:
         )
         errors = _errors(validate_jsonl(path))
         assert len(errors) >= 2
-
-
-# ---------------------------------------------------------------------------
-# Integration: dcat doctor uses validation
-# ---------------------------------------------------------------------------
 
 
 class TestDoctorValidation:
@@ -431,11 +406,6 @@ class TestDoctorValidation:
         assert len(data["validation_details"]) >= 1
 
 
-# ---------------------------------------------------------------------------
-# Regression: validate real repo data
-# ---------------------------------------------------------------------------
-
-
 class TestValidateRepoData:
     """Validate the actual repo issues.jsonl as a regression test."""
 
@@ -450,9 +420,7 @@ class TestValidateRepoData:
         assert errors == [], f"Validation errors in repo issues.jsonl: {errors}"
 
 
-# ---------------------------------------------------------------------------
 # Concurrent edit detection (post-merge)
-# ---------------------------------------------------------------------------
 
 
 def _install_merge_driver(repo: GitRepo) -> None:
@@ -663,11 +631,6 @@ class TestDetectConcurrentEdits:
         assert "priority" in fields, f"priority not in detected fields: {fields}"
 
 
-# ---------------------------------------------------------------------------
-# Integration: dcat doctor --post-merge
-# ---------------------------------------------------------------------------
-
-
 class TestDoctorPostMerge:
     """Test that doctor --post-merge detects concurrent edits via CLI."""
 
@@ -786,11 +749,6 @@ class TestDoctorPostMerge:
         assert "concurrent_edits" in data
         assert len(data["concurrent_edits"]) == 1
         assert data["concurrent_edits"][0]["issue_id"] == "test-shared"
-
-
-# ---------------------------------------------------------------------------
-# Unit tests for validate_proposal_record / validate_inbox_jsonl
-# ---------------------------------------------------------------------------
 
 
 class TestValidateProposalRecord:

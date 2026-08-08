@@ -3,9 +3,9 @@
 Which glyph and color an issue shows is a subtle rule: a dependency-blocked
 issue displays the blocked "■" glyph, UNLESS its status is one of the
 advanced states (in_review / deferred / closed), which take display
-precedence. That rule was copy-pasted into ``dcat list``, the Rich table,
-and the TUI — this module makes it a single source of truth so the three
-surfaces can never disagree.
+precedence. ``dcat list``, the Rich table and the TUI all render through here,
+which is what keeps the three from disagreeing — re-implementing the rule at a
+new surface is how they start to.
 """
 
 from __future__ import annotations

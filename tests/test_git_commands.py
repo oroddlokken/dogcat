@@ -28,11 +28,6 @@ if TYPE_CHECKING:
 runner = CliRunner()
 
 
-# ---------------------------------------------------------------------------
-# dcat git check
-# ---------------------------------------------------------------------------
-
-
 class TestGitCheck:
     """Test dcat git check command."""
 
@@ -269,11 +264,6 @@ class TestGitCheck:
         assert data["status"] == "skipped"
 
 
-# ---------------------------------------------------------------------------
-# dcat git setup
-# ---------------------------------------------------------------------------
-
-
 class TestGitSetup:
     """Test dcat git setup command."""
 
@@ -473,11 +463,6 @@ class TestGitSetup:
         assert "All checks passed" in result.stdout
 
 
-# ---------------------------------------------------------------------------
-# dcat git merge-driver
-# ---------------------------------------------------------------------------
-
-
 class TestGitMergeDriver:
     """Test dcat git merge-driver subcommand."""
 
@@ -533,11 +518,6 @@ class TestGitMergeDriver:
         """Merge-driver command should not appear in git help output."""
         result = runner.invoke(app, ["git", "--help"], catch_exceptions=False)
         assert "merge-driver" not in result.stdout
-
-
-# ---------------------------------------------------------------------------
-# dcat prime --opinionated
-# ---------------------------------------------------------------------------
 
 
 class TestPrimeGitHealth:

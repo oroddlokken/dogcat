@@ -70,7 +70,6 @@ class InboxStorage(EventEmitterMixin):
         # the batch() context manager flushes everything in one locked write.
         self._batch_records: list[dict[str, Any]] | None = None
 
-        # Initialize event log for inbox change tracking
         from dogcat.event_log import InboxEventLog
 
         self._event_log = InboxEventLog(self.dogcats_dir)
@@ -164,7 +163,13 @@ class InboxStorage(EventEmitterMixin):
                 self._append(pending)
 
     def _save(self) -> None:
-        """Compact: rewrite the entire file with only current state."""
+        """Compact: rewrite the file with the current proposals and nothing else.
+
+        Event records in ``inbox.jsonl`` do not survive this rewrite — see
+        :meth:`_save_locked`. Only the corrupt-last-line path in
+        :meth:`_append` calls it, so history loss is bounded to files that
+        already contain garbage.
+        """
         with self._file_lock():
             self._save_locked()
 
@@ -174,6 +179,12 @@ class InboxStorage(EventEmitterMixin):
         Use this from inside an existing ``self._file_lock()`` context to
         avoid re-entering the advisory lock (which would deadlock since
         ``advisory_file_lock`` opens a fresh fd each time).
+
+        Diverges from :meth:`JSONLStorage._save_locked` on purpose: that one
+        goes through ``compact_snapshot``, which carries the event records
+        over into the rewritten file. ``_write`` below serializes
+        ``self._proposals`` only, because the inbox never loads events into
+        memory — so every event line in the file is lost on rewrite.
         """
 
         def _write(tmp_file: IO[bytes]) -> int:
@@ -191,6 +202,15 @@ class InboxStorage(EventEmitterMixin):
 
         When :meth:`batch` is active the records are buffered and written
         when the batch context exits.
+
+        Do not add the ``should_compact`` branch that
+        :meth:`JSONLStorage._append` ends with. The two methods look like
+        they drifted apart, but the omission is load-bearing: a rewrite here
+        keeps proposals and drops every event record (see
+        :meth:`_save_locked`), so ratio-triggered compaction would erase the
+        inbox history a few hundred appends into a busy store. The one
+        rewrite that does run is the corrupt-line repair below, which trades
+        that history for a parseable file.
         """
         if self._batch_records is not None:
             self._batch_records.extend(records)
@@ -209,8 +229,6 @@ class InboxStorage(EventEmitterMixin):
     def _proposal_record(proposal: Proposal) -> dict[str, Any]:
         """Serialize a proposal to a dict for appending."""
         return proposal_to_dict(proposal)
-
-    # Event emission helpers
 
     # _emit_event / _build_event_record / _append_with_event are provided by
     # EventEmitterMixin (dogcat._events), shared with JSONLStorage.
@@ -259,9 +277,9 @@ class InboxStorage(EventEmitterMixin):
     def _resolve_or_raise(self, proposal_id: str, *, label: str = "Proposal") -> str:
         """Resolve ``proposal_id`` to a full id or raise ``ValueError``.
 
-        Mirror of :meth:`JSONLStorage._resolve_or_raise` for the inbox so
-        the close / delete / get paths share one ``resolve-or-fail``
-        sentence instead of repeating it.
+        Mirror of :meth:`JSONLStorage._resolve_or_raise` for the inbox: the
+        close / delete / get paths all enter through here, so the not-found
+        message has one wording.
         """
         resolved = self.resolve_id(proposal_id)
         if resolved is None:

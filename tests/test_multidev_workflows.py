@@ -19,9 +19,7 @@ if TYPE_CHECKING:
     from conftest import GitRepo
 
 
-# ---------------------------------------------------------------------------
 # Multi-developer helpers
-# ---------------------------------------------------------------------------
 
 
 @contextmanager
@@ -89,11 +87,6 @@ def _label_issue(repo: GitRepo, full_id: str, label: str) -> None:
     if issue:
         s.update(full_id, {"labels": [*issue.labels, label]})
         repo.commit_all(f"Label {full_id} with {label}")
-
-
-# ---------------------------------------------------------------------------
-# Test scenarios
-# ---------------------------------------------------------------------------
 
 
 class TestMultiDevWorkflows:

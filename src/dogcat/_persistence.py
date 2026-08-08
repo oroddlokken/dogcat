@@ -7,10 +7,8 @@ domain-aware snapshot writer that serializes the current in-memory state
 (issues + dependencies + links) and preserves the append-only event records
 from the existing file.
 
-Extracted from the ``_write`` closure formerly nested inside
-:meth:`dogcat.storage.JSONLStorage._save_locked` so the ~85-line rewrite body
-is a module-level free function taking explicit state — independently testable
-without constructing a storage instance or holding the file lock.
+It takes state explicitly rather than reading a storage instance, so it can be
+tested without constructing a store or holding the file lock.
 """
 
 from __future__ import annotations

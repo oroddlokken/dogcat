@@ -164,7 +164,6 @@ def validate_issue_record(
     errors: list[ValidationError] = []
     full_id = f"{record.get('namespace', '?')}-{record.get('id', '?')}"
 
-    # Required fields
     errors.extend(
         ValidationError(
             level="error",
@@ -174,7 +173,6 @@ def validate_issue_record(
         if field not in record
     )
 
-    # Status validation
     status = record.get("status")
     if status is not None and status not in _VALID_STATUSES:
         errors.append(
@@ -184,7 +182,6 @@ def validate_issue_record(
             ),
         )
 
-    # Issue type validation
     issue_type = record.get("issue_type")
     if issue_type is not None and issue_type not in _VALID_TYPES:
         errors.append(
@@ -195,7 +192,6 @@ def validate_issue_record(
             ),
         )
 
-    # Priority validation
     priority = record.get("priority")
     if priority is not None and (
         not isinstance(priority, int)
@@ -374,7 +370,6 @@ def validate_proposal_record(
     errors: list[ValidationError] = []
     full_id = f"{record.get('namespace', '?')}-inbox-{record.get('id', '?')}"
 
-    # Required fields
     errors.extend(
         ValidationError(
             level="error",
@@ -386,7 +381,6 @@ def validate_proposal_record(
         if field not in record
     )
 
-    # Status validation
     status = record.get("status")
     if status is not None and status not in _VALID_PROPOSAL_STATUSES:
         errors.append(
@@ -471,9 +465,6 @@ def _detect_cycles(
                 stack.append((neighbor, iter(graph.get(neighbor, set()))))
 
     return errors
-
-
-# Post-merge concurrent edit detection
 
 
 def _load_issues_at_ref(

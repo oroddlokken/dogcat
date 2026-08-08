@@ -19,9 +19,7 @@ if TYPE_CHECKING:
     from conftest import GitRepo
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _run_doctor(repo: GitRepo) -> tuple[int, str]:
@@ -54,11 +52,6 @@ def _truncate_jsonl(repo: GitRepo) -> None:
         # Truncate the second line (incomplete JSON)
         lines[1] = lines[1][: len(lines[1]) // 2]
         repo.storage_path.write_text("\n".join(lines))
-
-
-# ---------------------------------------------------------------------------
-# Test scenarios
-# ---------------------------------------------------------------------------
 
 
 class TestManualConflictRecovery:
@@ -228,9 +221,7 @@ class TestManualConflictRecovery:
             assert feature_issue is not None, f"Feature feature{i} missing"
 
 
-# ---------------------------------------------------------------------------
 # Helper functions
-# ---------------------------------------------------------------------------
 
 
 def _all_valid_json(repo: GitRepo) -> bool:

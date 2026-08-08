@@ -2,63 +2,21 @@
 
 Every record written to ``issues.jsonl`` and ``inbox.jsonl`` carries a
 ``dcat_version`` field — the value of :data:`dogcat._version.version`
-at the moment the record was serialized. This module documents how
-that field is intended to be used and provides a load-time check that
-warns when a database has been touched by a newer tool than the one
-currently running.
+at the moment the record was serialized.
 
-What ``dcat_version`` is
-------------------------
+Two facts drive everything here. First, ``dcat_version`` is the **tool
+version that wrote the record**, not a separate schema number; each record
+keeps its own copy because the log is append-only, so old records carry the
+version current when they were appended even after a rewrite. Second, only
+the leading ``MAJOR.MINOR.PATCH`` triple is ever compared — these are PEP 440
+strings (``0.11.7.post1.dev4+gabcd1234``) whose pre/post/dev/local segments
+are build provenance, not schema drift. A version the regex cannot parse is
+treated as older and ignored.
 
-It is the **tool version that wrote the record**, not a separate
-schema-version number. The two co-evolve: when we change the JSONL
-shape, we ship a new tool release, and the new release-version is
-recorded as ``dcat_version``. Each record keeps its own copy because
-the JSONL log is append-only — older records hold the version that
-was current when they were appended, even after newer code rewrites
-the file.
-
-Compatibility expectations
---------------------------
-
-- **Older records, newer tool**: always supported. The tool reads
-  every historical version of the schema; migrations live in
-  :mod:`dogcat.models` (e.g. ``_migrate_namespace``,
-  ``_migrate_issue_type``).
-- **Newer records, older tool**: best-effort. Unknown record types or
-  fields are skipped/ignored where possible (see ``classify_record``
-  and the ``data.get(key, default)`` pattern in ``dict_to_issue``),
-  but new semantics may not be honored. A startup warning is emitted
-  by :func:`warn_if_records_from_newer_version` so users aren't
-  surprised.
-- **Breaking changes**: bump the ``MAJOR`` component of the tool
-  version. Until that happens, the schema is considered backward-
-  compatible — readers can ignore the ``dcat_version`` value for
-  parsing decisions.
-
-Comparison rules
-----------------
-
-Versions are PEP 440 strings (e.g. ``0.11.7.post1.dev4+gabcd1234``).
-For the "newer than current" check we only compare the leading
-``MAJOR.MINOR.PATCH`` triple — pre/post/dev/local segments don't
-indicate schema drift, just build provenance, and dragging in
-``packaging.version`` for a single warning is overkill. If the regex
-doesn't match (malformed version), the record is treated as
-"unknown / older" and ignored.
-
-Adding a new schema-affecting change
-------------------------------------
-
-1. Update the writer (``issue_to_dict``, ``proposal_to_dict``,
-   storage append helpers) and bump the package version.
-2. Update the reader to migrate or default the new field.
-3. If older readers cannot safely ignore the change, raise
-   :data:`SCHEMA_BREAKING_THRESHOLD` to the new MAJOR.MINOR (so the
-   warning kicks in instead of silently corrupting state). Today the
-   threshold is unused because no breaking change has shipped — the
-   constant is documented here so future commits know where to put
-   one.
+Older records with a newer tool always work; migrations live in
+:mod:`dogcat.models`. Newer records with an older tool are best-effort —
+unknown types and fields are skipped where possible, and
+:func:`warn_if_records_from_newer_version` warns at load.
 """
 
 from __future__ import annotations
@@ -77,10 +35,10 @@ logger = logging.getLogger(__name__)
 
 VersionTuple = tuple[int, int, int]
 
-# Bump this only when a schema change is *not* backward compatible —
-# i.e. an older tool would corrupt or misinterpret records written by
-# the new tool. None means "no breaking change has shipped"; readers
-# only warn when records are strictly newer than the running tool.
+# Set to the MAJOR.MINOR of a schema change an older tool would corrupt or
+# misinterpret, so it warns instead of proceeding. None means no such change
+# has shipped, and readers then only warn on records strictly newer than the
+# running tool.
 SCHEMA_BREAKING_THRESHOLD: VersionTuple | None = None
 
 _VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)")

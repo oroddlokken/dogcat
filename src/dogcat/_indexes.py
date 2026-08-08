@@ -1,8 +1,5 @@
 """Lookup indexes derived from issue/dependency/link source lists.
 
-Extracted from ``storage.py`` so the index-rebuild rules live in one place
-and storage code can stay focused on persistence concerns.
-
 The indexes are *derived* state — every entry in them is reproducible from
 ``issues``, ``dependencies``, and ``links``. Any mutation of those lists
 that should be reflected in lookups must be followed by a full rebuild via

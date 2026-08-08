@@ -85,8 +85,7 @@ def _remove_dep_with_check(
     ``"{subject} does not block {target}"``.
 
     Raises ``ValueError`` if the target doesn't resolve or if the
-    expected dependency isn't there. Centralizes the two near-identical
-    blocks the CLI used to spell out inline.
+    expected dependency isn't there.
     """
     resolved_target = storage.resolve_id(target_partial_id)
     if resolved_target is None:

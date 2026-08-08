@@ -1,10 +1,9 @@
 """Shared atomic file primitives for JSONL append-only stores.
 
 Both :class:`dogcat.storage.JSONLStorage` and :class:`dogcat.inbox.InboxStorage`
-use the same durability pattern: write to a tempfile in the same directory,
-fsync, then ``replace()`` the target. Centralising it here means a single
-place to harden (e.g. directory-fsync after rename) and a single place to
-test.
+need the same durability pattern: write to a tempfile in the same directory,
+fsync, then ``replace()`` the target. Keeping it here gives one place to harden
+it (e.g. adding a directory-fsync after the rename).
 
 Locking is left to callers: each store has its own
 :meth:`_file_lock` context, and the lifetimes / re-entrancy rules differ
@@ -34,6 +33,11 @@ def atomic_rewrite_jsonl(
     ``write_fn`` receives an open binary file handle, writes records to it,
     and returns the number of lines written. After fsync, the tempfile is
     renamed onto ``target``. On any failure the tempfile is unlinked.
+
+    Raises:
+        RuntimeError: Wrapping any ``OSError`` from the write, fsync or
+            rename, with the original attached via ``from``. A caller that
+            guards a save with ``except OSError`` catches nothing here.
     """
     # Capture the existing mode of ``target`` BEFORE we write, so the
     # tempfile rename doesn't silently demote a 0644-shared file to
@@ -86,6 +90,11 @@ def append_jsonl_payload(target: Path, payload: bytes) -> None:
     prior truncated write), a newline is prepended to ``payload`` so the
     next record starts on its own line and doesn't concatenate with the
     corrupt tail.
+
+    Raises:
+        RuntimeError: Wrapping any ``OSError`` from the append or fsync, as
+            in :func:`atomic_rewrite_jsonl` — ``except OSError`` around a
+            call to this catches nothing.
     """
     try:
         if target.exists() and target.stat().st_size > 0:

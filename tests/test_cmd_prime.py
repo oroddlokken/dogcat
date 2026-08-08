@@ -180,8 +180,8 @@ class TestPrimeDocumentsRealFlags:
 class TestGuideStatesTheDeferredParentException:
     """`dcat guide` must not call parent-child purely organizational.
 
-    `get_ready_work` drops every issue with a deferred ancestor
-    (deps.py:93) and `_collapse_deferred_subtrees` hides them from
+    `get_ready_work` (deps.py) drops every issue with a deferred ancestor
+    and `_collapse_deferred_subtrees` hides them from
     `dcat list` unless --expand. Defer an epic and its children vanish
     from both, which "children are NOT blocked by their parent" denies.
     (dogcat-5epn)

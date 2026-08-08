@@ -105,8 +105,9 @@ _ALL_BY_VALUES = ("status", "type", "priority", "label")
 class ChartSeries:
     """One grouping dimension's chart data (counts + display metadata).
 
-    Replaces the unlabeled 5-tuple ``_chart_data`` used to return, which was
-    unpacked positionally at two call sites.
+    ``symbols`` is the only nullable field. Only ``--by status`` has a glyph
+    per value; type, label and priority pass ``None`` rather than an empty
+    dict, so a renderer must test it before indexing.
     """
 
     counts: dict[str, int]

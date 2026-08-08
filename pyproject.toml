@@ -146,7 +146,7 @@ ignore = [
   # module, because each sits inside the function that needs it. `python -X
   # importtime` puts textual.app alone at ~360ms against dogcat.cli's ~605ms,
   # so hoisting these to module scope would roughly double what every `dcat`
-  # invocation pays. Several also break import cycles inside cli/. (colophon-59t5)
+  # invocation pays. Several also break import cycles inside cli/.
   "PLC0415", # Import outside top-level
 ]
 

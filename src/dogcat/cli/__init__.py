@@ -33,6 +33,20 @@ def _global_options(
         help="Run as if dcat was started in PATH.",
     ),
 ) -> None:
+    """Run before every subcommand; leaves three process-wide effects.
+
+    1. ``-C/--repo`` resolves strictly and ``os.chdir()``s the *process*
+       before the subcommand runs, exiting 1 when the path is missing or is
+       not a directory. Every later cwd-relative lookup — store walk-up,
+       git toplevel, ``.dogcatrc`` — sees the new directory, so a test that
+       invokes the CLI with ``-C`` moves its own cwd unless it restores it.
+    2. ``--json`` resets and then sets the module-global state in
+       ``._json_state`` that every command reads back through ``is_json()``.
+       It is global, not per-invocation: in-process runners (CliRunner, the
+       web app) inherit whatever the previous invocation set until the next
+       call resets it.
+    3. A bare ``dcat`` with no subcommand prints help and exits 0.
+    """
     from ._json_state import reset_json, set_json
 
     reset_json()

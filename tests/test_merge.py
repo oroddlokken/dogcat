@@ -24,9 +24,7 @@ if TYPE_CHECKING:
     from conftest import GitRepo
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _create_issue_on_branch(
@@ -86,11 +84,6 @@ def _has_conflict_markers(repo: GitRepo) -> bool:
     """Return True if the JSONL file contains git conflict markers."""
     raw = repo.storage_path.read_text()
     return "<<<<<<<" in raw or "=======" in raw
-
-
-# ---------------------------------------------------------------------------
-# Test scenarios
-# ---------------------------------------------------------------------------
 
 
 class TestMergeBranches:

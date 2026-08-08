@@ -17,7 +17,6 @@ def parse_labels(raw: str) -> list[str]:
     return [lbl for lbl in re.split(r"[,\s]+", raw) if lbl]
 
 
-# Default values
 DEFAULT_TYPE = "task"
 DEFAULT_PRIORITY = 2
 
@@ -35,10 +34,11 @@ MAX_PREVIEW_SUBTASKS = 3
 SPLIT_PANE_MIN_COLS = 200
 SPLIT_PANE_MIN_ROWS = 40
 
-# Maximum estimated token count for `dcat prime` output.
-# Measured with a conservative char-based estimator (chars / 4) that over-counts
-# vs real Claude BPE tokenisation, so staying under this limit guarantees the
-# actual token footprint is even smaller.
+# Tripwire on `dcat prime` output size, measured with utils.estimate_tokens.
+# That estimator is chars/4 over codepoints and uncalibrated against any real
+# tokenizer, and prime's output is dense in box-drawing glyphs — so this is a
+# guard against the output growing unnoticed, not a token budget you can
+# spend to the last unit.
 MAX_PRIME_TOKENS = 1500
 MAX_PRIME_TOKENS_OPINIONATED = 2000
 
@@ -277,6 +277,16 @@ DEFAULT_BRANCH_NAMES: frozenset[str] = frozenset({"main", "master"})
 # These are the only namespace shape rules in the codebase. Promoted out of
 # the route module so the CLI / IDGenerator / config can reuse the same
 # regex when we extend strict-namespace enforcement to other surfaces.
+# All three magnitudes were chosen by feel, not measured — no benchmark or
+# incident set them, so they are movable. What is not movable is their reach:
+# validate_issue, the TUI save path and the web propose form all enforce them,
+# so raising one widens what every surface accepts at once.
+#
+# What each bounds: a title is a one-line summary that has to stay legible in
+# `dcat list`; a description is free-form prose that ends up on a single JSONL
+# line; a namespace is an ID prefix. MAX_NAMESPACE_LEN additionally derives the
+# ``* 4`` pre-normalization reject in web/propose/routes.py (that multiplier's
+# own rationale is at that site), so changing it moves two limits.
 MAX_TITLE_LEN = 500
 MAX_DESC_LEN = 50_000
 MAX_NAMESPACE_LEN = 64

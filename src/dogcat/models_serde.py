@@ -1,9 +1,7 @@
 """JSONL (de)serialization for the domain models.
 
-Split out of :mod:`dogcat.models` so the dataclass definitions and
-the serialization helpers live in separate modules. This holds the issue /
-proposal dict<->object converters, the ``_migrate_*`` backward-compat helpers,
-and ``classify_record``.
+Holds the issue / proposal dict<->object converters, the ``_migrate_*``
+backward-compat helpers, and ``classify_record``.
 
 Import direction is one-way at the source level — this module imports the
 dataclasses from :mod:`dogcat.models`. For backward compatibility ``models``
@@ -152,7 +150,20 @@ def _migrate_original_type(data: dict[str, Any]) -> str | None:
 
 
 def dict_to_issue(data: dict[str, Any]) -> Issue:
-    """Convert a dictionary to an Issue, deserializing datetimes."""
+    """Convert a dictionary to an Issue, deserializing datetimes.
+
+    Raises:
+        KeyError: A required key is absent — ``title``, ``created_at``,
+            ``updated_at``, or any of a comment dict's own required fields.
+        ValueError: ``datetime.fromisoformat`` rejected a timestamp.
+
+    This is the same failure set :func:`precheck_issue_record` mirrors, and
+    the two are pinned together by a consistency test in
+    ``tests/test_models.py``. ``LazyIssueMap`` calls this at first access on
+    records the precheck already accepted, and assumes it cannot raise there
+    — so any new raise added here has to be added to the precheck in the same
+    change, or load-time validation stops catching it.
+    """
     namespace, issue_id = _migrate_namespace(data)
 
     created_at = datetime.fromisoformat(data["created_at"])

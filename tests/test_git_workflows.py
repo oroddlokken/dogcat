@@ -19,9 +19,7 @@ if TYPE_CHECKING:
     from conftest import GitRepo
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _install_merge_driver(repo: GitRepo) -> None:
@@ -88,11 +86,6 @@ def _verify_jsonl_integrity(repo: GitRepo) -> JSONLStorage:
     assert not _has_conflict_markers(repo), "JSONL contains conflict markers"
     assert _all_valid_json(repo), "JSONL contains invalid JSON"
     return JSONLStorage(str(repo.storage_path))
-
-
-# ---------------------------------------------------------------------------
-# Test scenarios
-# ---------------------------------------------------------------------------
 
 
 class TestCherryPick:

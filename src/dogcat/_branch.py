@@ -1,9 +1,9 @@
 """Git default-branch detection for compaction safety.
 
-Storage avoids auto-compacting on feature branches (it would create noisy
-diffs). Deciding whether the working tree is on a default branch is a
-self-contained responsibility extracted from ``JSONLStorage`` so the god
-class shrinks toward cohesive units.
+Storage avoids auto-compacting on feature branches, where a whole-file rewrite
+would land as an all-lines-changed diff and conflict with every other branch.
+This module answers only the question that gates it: is the working tree on a
+default branch?
 """
 
 from __future__ import annotations

@@ -1,11 +1,9 @@
 """Centralized helpers for git subprocess calls.
 
-Multiple modules used to spell out their own ``subprocess.run(["git", ...])``
-incantations, which made test mocking awkward (you had to patch the right
-module's ``subprocess`` import) and led to subtle inconsistencies in error
-handling. This module concentrates the calls so there's one place to harden
-behavior (e.g. capturing stderr, normalizing missing-binary handling) and a
-single mock target for tests.
+Every ``git`` subprocess in the tree goes through here, which gives one place
+to harden behavior (capturing stderr, normalizing missing-binary handling,
+the timeout) and one mock target for tests. Spelling out a
+``subprocess.run(["git", ...])`` elsewhere forfeits both.
 
 Each helper returns ``None`` (or an empty result) when git is unavailable or
 the operation legitimately has no answer (e.g. ``repo_root`` outside a

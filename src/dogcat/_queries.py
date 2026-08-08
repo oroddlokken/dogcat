@@ -1,9 +1,9 @@
 """Pure read queries over the in-memory issue state.
 
-Extracted from :class:`~dogcat.storage.JSONLStorage` so the query logic with
-actual branching — the ``list`` filter
-ladder, the child lookup, and the dangling-dependency scan — can be tested
-directly against plain dicts/lists rather than only through a constructed store.
+Holds the read paths with real branching — the ``list`` filter ladder, the
+child lookup, the dangling-dependency scan — as free functions, so they can be
+tested directly against plain dicts/lists rather than through a constructed
+store.
 
 The store's remaining getters (``get_dependencies``/``get_dependents``/
 ``get_links``/``get_incoming_links``) are single-expression index reads

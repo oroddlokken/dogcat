@@ -10,7 +10,7 @@ file carries what those commands do not tell you.
 `XDG_CACHE_HOME` and `XDG_CONFIG_HOME`. Storage and config resolution walk *up* from the cwd, so a
 test that chdirs back into the checkout, or shells out with `cwd=` pointing at the repo root,
 escapes the isolation and writes to this repo's real `.dogcats/`. Conftest's own docstring records
-what happens without the guards: 66 failures and writes into the live `config.local.toml`.
+what happens without the guards: failures in bulk, and writes into the live `config.local.toml`.
 
 Pass an explicit `--dogcats-dir` (see `tests/cli_test_helpers.py`) or take the `git_repo` /
 `temp_dogcats_dir` fixtures rather than relying on the cwd.

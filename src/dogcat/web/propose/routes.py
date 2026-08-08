@@ -58,7 +58,12 @@ def _normalize_namespace(value: str) -> str:
 
 
 def _is_valid_namespace(value: str) -> bool:
-    """Return True if ``value`` is a well-formed namespace identifier."""
+    """Module-local alias so tests can monkeypatch the check per-route.
+
+    The rule itself lives in :func:`dogcat.constants.is_valid_namespace` —
+    read it there for the ASCII whitelist, the 1-64 cap, and the requirement
+    that callers NFKC-normalize before calling. Do not restate the rule here.
+    """
     return is_valid_namespace(value)
 
 

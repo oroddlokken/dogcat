@@ -10,10 +10,6 @@ from typing import Any
 
 from dogcat.merge_driver import merge_jsonl
 
-# ---------------------------------------------------------------------------
-# Test scenarios
-# ---------------------------------------------------------------------------
-
 
 class TestMergeEdgeCases:
     """Edge-case file states and merge scenarios."""

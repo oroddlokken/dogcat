@@ -581,15 +581,15 @@ class TestConfigKeys:
         _init_with_namespace(dogcats_dir, "proj")
         config = load_config(str(dogcats_dir))
 
-        # _cmd_web.py:112 — `config.allow_creating_namespaces is True`
+        # _cmd_web.py — `config.allow_creating_namespaces is True`
         assert _KNOWN_KEYS["allow_creating_namespaces"]["default"] == (
             config.allow_creating_namespaces is True
         )
-        # _cmd_docs.py:1135 — unset means enabled
+        # _cmd_docs.py, `if config.git_tracking is False` — unset means enabled
         assert _KNOWN_KEYS["git_tracking"]["default"] == (
             config.git_tracking if config.git_tracking is not None else True
         )
-        # _cmd_read.py:538 — `not config.disable_legend_colors`
+        # _cmd_read.py — `not config.disable_legend_colors`
         assert _KNOWN_KEYS["disable_legend_colors"]["default"] == bool(
             config.disable_legend_colors
         )

@@ -2,10 +2,7 @@
 
 Pure functions that translate domain objects (:class:`~dogcat.models.Dependency`,
 :class:`~dogcat.models.Link`) to and from their on-disk JSONL dict form, plus the
-archive-membership decision for a single raw JSONL line. Extracted from
-:class:`~dogcat.storage.JSONLStorage` so the god class shrinks toward cohesive
-units and the serialization / classification rules live in one place and are
-independently testable.
+archive-membership decision for a single raw JSONL line.
 
 Issue serialization already lives in :func:`dogcat.models.issue_to_dict` /
 :func:`dogcat.models.dict_to_issue`; this module covers the dependency and link

@@ -153,7 +153,6 @@ def _run_git_checks() -> tuple[bool, dict[str, HealthCheck]]:
     checks: dict[str, HealthCheck] = {}
     all_passed = True
 
-    # Check 1: Are we in a git repo?
     repo_root = _git_repo_root()
     in_git_repo = repo_root is not None
     checks["git_repo"] = HealthCheck(
@@ -168,7 +167,6 @@ def _run_git_checks() -> tuple[bool, dict[str, HealthCheck]]:
     # Resolve paths relative to repo root (fall back to CWD if not in a repo)
     root = repo_root or Path()
 
-    # Check 2: Is .issues.lock in .gitignore?
     lock_ignored = False
     gitignore = root / ".gitignore"
     if gitignore.exists():
@@ -183,7 +181,6 @@ def _run_git_checks() -> tuple[bool, dict[str, HealthCheck]]:
     if not lock_ignored:
         all_passed = False
 
-    # Check 3: Is .dogcats/ entirely in .gitignore? (informational)
     dogcats_ignored = False
     if gitignore.exists():
         lines = gitignore.read_text().splitlines()
@@ -196,7 +193,6 @@ def _run_git_checks() -> tuple[bool, dict[str, HealthCheck]]:
         optional=True,
     )
 
-    # Check 4: Is the merge driver configured with the correct command?
     import dogcat.git as git_helpers
 
     driver_value = git_helpers.get_config(MERGE_DRIVER_GIT_KEY) or ""
@@ -214,7 +210,6 @@ def _run_git_checks() -> tuple[bool, dict[str, HealthCheck]]:
     if not driver_correct:
         all_passed = False
 
-    # Check 5: Does .gitattributes have the merge driver entry?
     gitattrs = root / ".gitattributes"
     has_gitattrs = False
     if gitattrs.exists():
@@ -395,7 +390,13 @@ def register(app: typer.Typer) -> None:
 
                 merged = merge_jsonl(base, ours, theirs)
 
-                # Atomic write via tempfile + rename
+                # Atomic write via tempfile + rename, hand-rolled rather than
+                # routed through _jsonl_io.atomic_rewrite_jsonl. That skips
+                # the helper's mode preservation (and its fsync): the rename
+                # lands NamedTemporaryFile's 0600, so on a store shared at
+                # 0644 this leaves issues.jsonl readable only by whoever
+                # rebased. No record of why the helper was not used — treat
+                # the divergence as unexplained, not as a reviewed choice.
                 with tempfile.NamedTemporaryFile(
                     mode="wb",
                     dir=jsonl_path.parent,
@@ -441,7 +442,11 @@ def register(app: typer.Typer) -> None:
         """JSONL merge driver invoked by git during merge conflicts.
 
         Exit 0 on success (merged result written to ours file).
-        Exit 1 on failure so git falls back to its default merge strategy.
+
+        Exit 1 on failure, which git treats as a conflict on this path: it
+        leaves the ours file exactly as it found it and marks the path
+        conflicted. No fallback merge runs, so the file holds ours-side
+        records only and staging it discards every record from theirs.
         """
         import logging
 
@@ -462,6 +467,10 @@ def register(app: typer.Typer) -> None:
             merged = merge_jsonl(base_records, ours_records, theirs_records)
 
             # Write to temp file + rename so a crash never leaves a partial ours file.
+            # Same unexplained divergence as `dcat git rebase` above: not
+            # _jsonl_io.atomic_rewrite_jsonl, so no mode preservation and no
+            # fsync. On a 0644-shared store the merged file comes back 0600
+            # and only the merging user can read it afterwards.
             import tempfile
 
             with tempfile.NamedTemporaryFile(
@@ -478,7 +487,9 @@ def register(app: typer.Typer) -> None:
             tmp_path.replace(ours_path)
         except Exception:
             logging.getLogger("dogcat.merge_driver").exception(
-                "Merge driver failed, falling back to git's default merge",
+                "Merge driver failed. Git will mark this path conflicted and leave it "
+                "holding ours-side records only — staging it as-is discards every "
+                "record from the other branch.",
             )
             if tmp_path is not None:
                 tmp_path.unlink(missing_ok=True)
