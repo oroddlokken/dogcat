@@ -1,5 +1,6 @@
 """Tests for dependency tracking and ready work detection."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -11,7 +12,7 @@ from dogcat.deps import (
     has_blockers,
     would_create_cycle,
 )
-from dogcat.models import Issue
+from dogcat.models import Issue, issue_to_dict
 from dogcat.storage import JSONLStorage
 
 
@@ -411,26 +412,35 @@ class TestDeepDependencyChain:
     def _build_deep_chain(storage: JSONLStorage, depth: int) -> JSONLStorage:
         """Create ``depth`` issues with t-i{n} blocks t-i{n+1}.
 
-        Drives the chain from real on-disk JSONL input: we append issue
-        records via the public API, then write dependency records
-        directly to the file, then re-load. This avoids paying the
-        per-call cycle-prevention cost in ``add_dependency`` (each call
-        is O(N), making 10k of them O(N²) and unusable as test setup)
-        while keeping the test honest at the public-API boundary.
-        (dogcat-308p)
-        """
-        for i in range(depth):
-            storage.create(Issue(id=f"i{i}", namespace="t", title=f"Issue {i}"))
+        Drives the chain from real on-disk JSONL input: both the issue
+        and the dependency records are written straight to the file, then
+        re-loaded. Issue records go through ``issue_to_dict`` — the same
+        serializer ``storage.create()`` uses — so the reloaded graph is
+        indistinguishable from one built via the public API.
 
+        Bypassing the public API here is what makes the setup usable:
+        ``add_dependency`` pays an O(N) cycle check per call, so 10k of
+        them is O(N²) (dogcat-308p), and ``create()`` fsyncs every append,
+        costing ~40s for 10k issues. These tests target recursion depth in
+        ``deps.py``, not ``create()`` throughput.
+        """
+        lines = [
+            json.dumps(
+                issue_to_dict(Issue(id=f"i{i}", namespace="t", title=f"Issue {i}"))
+            )
+            + "\n"
+            for i in range(depth)
+        ]
+        lines += [
+            '{"record_type": "dependency", '
+            f'"issue_id": "t-i{i}", '
+            f'"depends_on_id": "t-i{i + 1}", '
+            '"type": "blocks", '
+            '"created_at": "2026-04-25T12:00:00+00:00"}\n'
+            for i in range(depth - 1)
+        ]
         with storage.path.open("a") as f:
-            for i in range(depth - 1):
-                f.write(
-                    '{"record_type": "dependency", '
-                    f'"issue_id": "t-i{i}", '
-                    f'"depends_on_id": "t-i{i + 1}", '
-                    '"type": "blocks", '
-                    '"created_at": "2026-04-25T12:00:00+00:00"}\n'
-                )
+            f.writelines(lines)
         # Reload from disk to pick up the dep records.
         return JSONLStorage(str(storage.path))
 
