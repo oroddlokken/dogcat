@@ -24,11 +24,13 @@ from ._completions import (
 )
 from ._formatting import (
     DeferredView,
+    format_event,
     format_issue_brief,
     format_issue_full,
     format_issue_table,
     format_issue_tree,
     format_proposal_brief,
+    get_event_legend,
     get_legend,
 )
 from ._helpers import (
@@ -56,6 +58,7 @@ from ._list_options import (
 )
 
 if TYPE_CHECKING:
+    from dogcat.event_log import EventRecord
     from dogcat.models import Issue
     from dogcat.storage import JSONLStorage
 
@@ -456,6 +459,32 @@ def _render_issue_show(issue: Issue, storage: JSONLStorage) -> str:
     return "\n".join(output_lines)
 
 
+def _read_issue_events(issue_full_id: str, storage: JSONLStorage) -> list[EventRecord]:
+    """Read every event for one issue, oldest-first.
+
+    Unlimited on purpose: a single issue's audit trail is short enough that
+    truncating it would hide more than it saves.
+    """
+    from dogcat.event_log import EventLog
+
+    events = EventLog(storage.dogcats_dir).read(issue_id=issue_full_id)
+    events.reverse()  # read() returns newest-first
+    return events
+
+
+def _render_issue_history(issue: Issue, storage: JSONLStorage) -> str:
+    """Render the History section appended by `dcat show --include-history`."""
+    events = _read_issue_events(issue.full_id, storage)
+    if not events:
+        return "\nHistory:\n  No events recorded"
+    lines = ["\nHistory:"]
+    for event in events:
+        if not event.title:
+            event.title = issue.title
+        lines.extend(f"  {line}" for line in format_event(event).split("\n"))
+    return "\n".join(lines)
+
+
 def _render_list_json(issues: list[Issue], final_limit: int | None) -> None:
     """Emit list results as a JSON array of issue dicts (respecting --limit)."""
     from dogcat.models import issue_to_dict
@@ -768,6 +797,11 @@ def register(app: typer.Typer) -> None:
             help="Issue ID(s) to show",
             autocompletion=complete_issue_ids,
         ),
+        include_history: bool = typer.Option(
+            False,
+            "--include-history",
+            help="Append the issue's full event history",
+        ),
         json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
         dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
     ) -> None:
@@ -777,6 +811,10 @@ def register(app: typer.Typer) -> None:
         order, separated by a horizontal rule labeled with the next ID.
         Missing IDs are reported but do not abort the rest of the run.
         In JSON mode, each issue is emitted as one line of NDJSON.
+
+        With --include-history, every event recorded for the issue is
+        appended in chronological order, as `dcat history --issue <id>`
+        shows it. In JSON mode the events land under a `history` key.
         """
         set_json(json_output)
         storage = get_storage(dogcats_dir)
@@ -797,16 +835,28 @@ def register(app: typer.Typer) -> None:
                 continue
 
             if is_json():
+                from dogcat.event_log import _serialize
                 from dogcat.models import issue_to_dict
 
-                typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
+                payload = issue_to_dict(issue)
+                if include_history:
+                    payload["history"] = [
+                        _serialize(e)
+                        for e in _read_issue_events(issue.full_id, storage)
+                    ]
+                typer.echo(orjson.dumps(payload).decode())
             else:
                 if shown > 0:
                     typer.echo()
                     typer.echo(_issue_separator(issue.full_id))
                     typer.echo()
                 typer.echo(_render_issue_show(issue, storage))
+                if include_history:
+                    typer.echo(_render_issue_history(issue, storage))
             shown += 1
+
+        if include_history and shown and not is_json():
+            typer.echo(get_event_legend())
 
         if has_errors:
             raise typer.Exit(1)

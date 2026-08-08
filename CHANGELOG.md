@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`dcat show <id> --include-history` appends the issue's audit trail to its details**, so reading what changed no longer costs a second `dcat history --issue <id>` invocation. Events render exactly as `dcat history` renders them, oldest-first, with the symbol legend printed once at the end. There is no limit: a single issue's trail is short enough that truncating it would hide more than it saves. With `--json` the events land under a `history` key on the issue object instead of a separate stream, and with several IDs each issue gets its own section (closes dogcat-5j6h).
+
 ### Changed
 
 - **No more imports of the private `typer._click` module.** The typer 0.27 bump (dogcat-1sxv) left two references to typer's vendored click fork, which carries no stability guarantee. The CLI-command-order test now builds its context from the public `typer.Context` (a subclass of the vendored base, so `list_commands` accepts it at runtime), and `SortedGroup.list_commands` annotates `ctx` as `Any` — typer 0.27.1 exports no public name for the vendored base `Context`, and `typer.Context` would narrow the override (closes dogcat-3kay).

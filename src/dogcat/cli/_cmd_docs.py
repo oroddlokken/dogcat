@@ -1007,6 +1007,7 @@ Allowed issue types, priorities, and statuses:
   dcat update <id> --remove-depends-on <id>  - Remove a dependency
   dcat update <id> --remove-blocks <id>      - Remove a blocks relationship
   dcat show <id> [<id> ...]                  - View one or more issues
+  dcat show <id> --include-history           - View an issue with its events
   dcat random                                - Show one random issue (same filters)
   dcat search <query>                        - Search issues (supports --type filter)
   dcat close <id>                            - Mark issue as closed

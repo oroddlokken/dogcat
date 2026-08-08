@@ -518,6 +518,178 @@ class TestCLIShow:
         assert result.exit_code == 1
         assert "mutually exclusive" in result.output
 
+    def test_show_include_history_lists_events(self, tmp_path: Path) -> None:
+        """--include-history appends every event, oldest-first, plus a legend."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create_result = runner.invoke(
+            app,
+            ["create", "Tracked issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+        runner.invoke(
+            app,
+            [
+                "update",
+                issue_id,
+                "--status",
+                "in_progress",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["show", issue_id, "--include-history", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "History:" in result.stdout
+        assert "open -> in_progress" in result.stdout
+        assert "Event: + Created" in result.stdout
+        # History comes after the issue body
+        assert result.stdout.index("Tracked issue") < result.stdout.index("History:")
+        # Oldest-first: the create event precedes the status change
+        section = result.stdout[result.stdout.index("History:") :]
+        assert section.index("issue_type: task") < section.index("open -> in_progress")
+
+    def test_show_without_flag_has_no_history(self, tmp_path: Path) -> None:
+        """Default show output is unchanged."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create_result = runner.invoke(
+            app,
+            ["create", "Quiet issue", "--dogcats-dir", str(dogcats_dir)],
+        )
+        issue_id = create_result.stdout.split(": ")[0].split()[-1]
+
+        result = runner.invoke(
+            app,
+            ["show", issue_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "History:" not in result.stdout
+        assert "Event: + Created" not in result.stdout
+
+    def test_show_include_history_json_nests_events(self, tmp_path: Path) -> None:
+        """--include-history --json nests events under a history key."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create_result = runner.invoke(
+            app,
+            ["create", "JSON issue", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        created = json.loads(create_result.stdout)
+        full_id = f"{created['namespace']}-{created['id']}"
+        runner.invoke(
+            app,
+            [
+                "update",
+                full_id,
+                "--priority",
+                "1",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "show",
+                full_id,
+                "--include-history",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["title"] == "JSON issue"
+        history = data["history"]
+        assert len(history) == 2
+        assert [e["event_type"] for e in history] == ["created", "updated"]
+        assert all(e["issue_id"] == full_id for e in history)
+        # Oldest-first
+        assert history[0]["timestamp"] <= history[1]["timestamp"]
+
+    def test_show_json_omits_history_without_flag(self, tmp_path: Path) -> None:
+        """JSON payload has no history key unless asked for."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        create_result = runner.invoke(
+            app,
+            ["create", "Plain JSON", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        created = json.loads(create_result.stdout)
+        full_id = f"{created['namespace']}-{created['id']}"
+
+        result = runner.invoke(
+            app,
+            ["show", full_id, "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "history" not in json.loads(result.stdout)
+
+    def test_show_include_history_per_issue(self, tmp_path: Path) -> None:
+        """Each ID in a multi-ID show gets its own history section."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        first = runner.invoke(
+            app,
+            ["create", "Alpha issue", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        second = runner.invoke(
+            app,
+            ["create", "Beta issue", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        first_data = json.loads(first.stdout)
+        second_data = json.loads(second.stdout)
+        first_full = f"{first_data['namespace']}-{first_data['id']}"
+        second_full = f"{second_data['namespace']}-{second_data['id']}"
+
+        result = runner.invoke(
+            app,
+            [
+                "show",
+                first_full,
+                second_full,
+                "--include-history",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert result.stdout.count("History:") == 2
+        # Legend is printed once, at the end
+        assert result.stdout.count("Event: + Created") == 1
+
+    def test_render_issue_history_empty(self, tmp_path: Path) -> None:
+        """An issue with no recorded events reports that, not a bare header."""
+        from dogcat.cli._cmd_read import _render_issue_history
+        from dogcat.cli._helpers import get_storage
+
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        create_result = runner.invoke(
+            app,
+            ["create", "Eventless", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        created = json.loads(create_result.stdout)
+
+        storage = get_storage(str(dogcats_dir))
+        issue = storage.get(f"{created['namespace']}-{created['id']}")
+        assert issue is not None
+        issue.id = "nosuch"  # point at an ID the event log has never seen
+
+        assert "No events recorded" in _render_issue_history(issue, storage)
+
     def test_show_displays_parent(self, tmp_path: Path) -> None:
         """Test that show displays parent for child issues."""
         dogcats_dir = tmp_path / ".dogcats"
