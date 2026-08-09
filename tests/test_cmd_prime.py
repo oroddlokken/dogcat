@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 from typer.testing import CliRunner
@@ -15,6 +16,17 @@ if TYPE_CHECKING:
     import pytest
 
 runner = CliRunner()
+
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text: str) -> str:
+    """Drop the escape codes Rich emits, which split `--flag` tokens apart.
+
+    Rich force-enables colour when it sees GITHUB_ACTIONS=true, so help
+    output carries them in CI and nowhere else.
+    """
+    return _ANSI_ESCAPE.sub("", text)
 
 
 class TestPrimeNoLocalNoGlobal:
@@ -139,22 +151,21 @@ class TestPrimeDocumentsRealFlags:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Every --flag prime attributes to create/update must exist on both."""
-        import re
-
         monkeypatch.chdir(tmp_path)
         (tmp_path / ".dogcats").mkdir()
 
         prime = runner.invoke(app, ["prime"])
         assert prime.exit_code == 0
 
+        primed = _strip_ansi(prime.output)
         marker = "`dcat create` and `dcat update` both support"
-        start = prime.output.index(marker)
-        paragraph = prime.output[start : prime.output.index("\n\n", start)]
+        start = primed.index(marker)
+        paragraph = primed[start : primed.index("\n\n", start)]
         flags = set(re.findall(r"--[a-z][a-z-]+", paragraph))
         assert flags, "flag paragraph parsed empty — the marker text moved"
 
         for command in ("create", "update"):
-            rendered = runner.invoke(app, [command, "--help"]).output
+            rendered = _strip_ansi(runner.invoke(app, [command, "--help"]).output)
             # Typer wraps long option lines, so compare against the text with
             # line breaks and padding removed.
             flat = " ".join(rendered.split())
@@ -281,7 +292,7 @@ class TestEnumOptionHelpMatchesTheParsers:
         ellipsis, which silently hid `minimal` from the priority list.
         """
         result = runner.invoke(app, [*args, "--help"], env={"COLUMNS": "200"})
-        return " ".join(result.output.split())
+        return " ".join(_strip_ansi(result.output).split())
 
     def test_status_help_lists_every_user_facing_status(self) -> None:
         """Both --status helps carry the full STATUS_OPTIONS set."""
@@ -339,13 +350,13 @@ class TestSharedOptionAliasesSurviveDecorators:
     @staticmethod
     def _flags(*args: str) -> str:
         result = runner.invoke(app, [*args, "--help"], env={"COLUMNS": "200"})
-        return " ".join(result.output.split())
+        return " ".join(_strip_ansi(result.output).split())
 
     def test_ns_shimmed_commands_keep_the_json_flag(self) -> None:
         """defer, close and the status shortcuts all use --json."""
         for command in ("defer", "close", "reopen", "in-progress", "in-review"):
             flat = self._flags(command)
-            assert "--json " in flat or "--json│" in flat or "--json" in flat
+            assert "--json" in flat, f"dcat {command} --help does not offer --json"
             assert "--json-output" not in flat, (
                 f"dcat {command} regenerated a default option instead of using JsonOpt"
             )
