@@ -144,6 +144,27 @@ STATUS_VALUES_HELP = ", ".join(value for _label, value in STATUS_OPTIONS)
 TYPE_VALUES_HELP = ", ".join(value for _label, value in TYPE_OPTIONS)
 PRIORITY_VALUES_HELP = "0-4, p0-p4, or " + "/".join(PRIORITY_NAMES)
 
+SELECTABLE_STATUSES: frozenset[str] = frozenset(
+    value for _label, value in STATUS_OPTIONS
+)
+
+
+def parse_status_value(value: str) -> str:
+    """Return ``value`` if a user may select it as a status, else raise ValueError.
+
+    Narrower than ``Status(value)``: the enum also carries ``tombstone`` and
+    ``unknown``, and neither may be reached from ``--status``. ``tombstone``
+    there sets the absorbing status without the ``deleted_*`` fields and
+    without the confirmation ``dcat delete`` asks for, leaving an issue no
+    command can move again; ``unknown`` is the forward-compat sentinel for a
+    status a newer dcat wrote, so writing it is never meaningful. (dogcat-vsp8)
+    """
+    if value not in SELECTABLE_STATUSES:
+        msg = f"Invalid status '{value}'. Valid values: {STATUS_VALUES_HELP}."
+        raise ValueError(msg)
+    return value
+
+
 # Inbox proposal statuses (display_label, value)
 INBOX_STATUS_OPTIONS = [
     ("Open", "open"),
@@ -173,12 +194,31 @@ MERGE_DRIVER_CMD = "dcat git merge-driver %O %A %B"
 MERGE_DRIVER_NAME = "dogcat JSONL merge driver"
 MERGE_DRIVER_GIT_KEY = "merge.dcat-jsonl.driver"
 MERGE_DRIVER_GIT_NAME_KEY = "merge.dcat-jsonl.name"
+# The driver's name as it appears on the right of a .gitattributes entry and
+# in `git check-attr merge` output — the same "dcat-jsonl" that sits in the
+# middle of the two git config keys above.
+MERGE_DRIVER_ATTR = "dcat-jsonl"
 # ``**`` is required: a gitattributes glob without it does not cross a
 # directory separator, so ".dogcats/*.jsonl" left the tracked
 # .dogcats/archive/*.jsonl files on git's default text merge, free to
 # take conflict markers. ``**/`` matches zero or more directories, so
 # this one pattern covers both issues.jsonl and archive/. (dogcat-1xgi)
 GITATTRIBUTES_ENTRY = ".dogcats/**/*.jsonl merge=dcat-jsonl"
+# Entries dcat itself wrote before that widening. `dcat git setup` rewrites one
+# of these in place instead of appending beside it, so upgrading leaves exactly
+# one dogcat entry rather than one per upgrade (dogcat-12v8). Only dcat's own
+# spellings belong here — a hand-written pattern is the user's, and setup
+# leaves it alone.
+GITATTRIBUTES_LEGACY_ENTRIES = (".dogcats/*.jsonl merge=dcat-jsonl",)
+# Paths `dcat git check` hands to `git check-attr merge`. Neither has to exist;
+# check-attr applies the pattern rules to any name. The archive probe is the
+# whole point of the pair: it is what a narrow pre-widening entry misses, and
+# asking git beats reading the file because it also accepts an equivalent
+# pattern the user wrote by hand (dogcat-3lnu).
+GITATTRIBUTES_PROBE_PATHS = (
+    ".dogcats/issues.jsonl",
+    ".dogcats/archive/closed.jsonl",
+)
 
 # Fields tracked in the event log (content fields only)
 TRACKED_FIELDS: frozenset[str] = frozenset(

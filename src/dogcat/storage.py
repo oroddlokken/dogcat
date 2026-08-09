@@ -193,6 +193,12 @@ class JSONLStorage(EventEmitterMixin):
         self._issues: LazyIssueMap = LazyIssueMap()
         self._dependencies: list[Dependency] = []
         self._links: list[Link] = []
+        # Records whose record_type is set to something this dcat does not
+        # model — a kind written by a newer release. Held as raw dicts and
+        # re-emitted by every whole-file rewrite; nothing else reads them.
+        # They are NOT _bad_lines: those are unparseable input, and landing
+        # there is what used to delete these on the next write (dogcat-68ij).
+        self._preserved: list[dict[str, Any]] = []
         # Indexes for O(1) dependency/link lookups
         self._deps_by_issue: dict[str, list[Dependency]] = {}
         self._deps_by_depends_on: dict[str, list[Dependency]] = {}
@@ -248,10 +254,15 @@ class JSONLStorage(EventEmitterMixin):
         Skipped lines are recorded on ``self._bad_lines`` so doctor can
         surface the count and ``dcat repair-jsonl`` can preserve them
         in a ``.bad`` sidecar before compaction drops them.
+
+        A record carrying a ``record_type`` this dcat does not model goes to
+        ``self._preserved`` instead — it is well-formed JSON we simply cannot
+        interpret, so it is neither parsed nor treated as damage.
         """
         self._issues.clear()
         self._dependencies.clear()
         self._links.clear()
+        self._preserved = []
         self._bad_lines = []
 
         # Use sets keyed by identity tuple for efficient add/remove replay
@@ -310,6 +321,15 @@ class JSONLStorage(EventEmitterMixin):
                     parse_link_record(data, link_map)
                 elif rtype == "dependency":
                     parse_dependency_record(data, dep_map)
+                elif rtype == "unknown":
+                    # An explicit record_type outside the known set: a kind a
+                    # newer dcat writes. Held verbatim and re-emitted by every
+                    # rewrite. Parsing it as an issue is what used to erase it
+                    # — it fails on the missing title, lands in _bad_lines,
+                    # and the next _append compacts it away (dogcat-68ij).
+                    # A record with NO record_type is field-sniffed into
+                    # issue/dependency/link and never reaches this branch.
+                    self._preserved.append(data)
                 else:
                     # Default: treat as an issue record (last-write-wins).
                     self._parse_issue_record(data)
@@ -424,6 +444,7 @@ class JSONLStorage(EventEmitterMixin):
                 dependencies=self._dependencies,
                 links=self._links,
                 source=self.path,
+                preserved=self._preserved,
                 prune_event_ids=_prune_event_ids,
                 rename_event_ids=_rename_event_ids,
             )

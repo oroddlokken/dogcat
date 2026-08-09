@@ -113,8 +113,9 @@ class ArchiveClassification:
     """Whether a JSONL line belongs in the archive, and its record type.
 
     ``record_type`` is the classified kind (``"issue"``, ``"dependency"``,
-    ``"link"``, ``"event"``) when known, or ``None`` for a line that couldn't
-    be parsed or classified. Callers use it to count archived deps/links.
+    ``"link"``, ``"event"``, or ``"unknown"`` for a kind this dcat does not
+    model), or ``None`` for a line that couldn't be parsed. Callers use it to
+    count archived deps/links.
     """
 
     archive: bool
@@ -133,6 +134,12 @@ def classify_archived_line(
     key (e.g. a link row without ``from_id``, or an issue without ``id``), is
     kept in the source partition rather than raising — a single bad row must
     not abort the whole archive under the lock.
+
+    A record whose ``record_type`` this dcat does not model is kept too. It
+    used to fall through to the issue branch, so one that happened to carry a
+    ``namespace``/``id`` matching an archived issue was moved into the archive
+    file as if it were that issue's record — a kind we cannot interpret is a
+    kind we cannot confirm is finished with (dogcat-68ij).
     """
     try:
         data = orjson.loads(stripped)
@@ -152,6 +159,8 @@ def classify_archived_line(
             )
         elif rtype == "event":
             archive = data.get("issue_id") in archivable_ids
+        elif rtype == "unknown":
+            archive = False
         else:
             # Issue record — resolve full_id from the raw dict.
             if "namespace" in data:

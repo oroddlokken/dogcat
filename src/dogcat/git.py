@@ -165,6 +165,40 @@ def is_path_ignored(path: str, *, cwd: str | Path | None = None) -> bool:
     return result.returncode == 0
 
 
+def check_attr(
+    attr: str,
+    paths: list[str],
+    *,
+    cwd: str | Path | None = None,
+) -> dict[str, str] | None:
+    """Return ``attr``'s effective value per path, or None when git can't answer.
+
+    ``paths`` are resolved relative to ``cwd``, so pass the repo root to get
+    repo-root-relative matching — the same relative path resolves differently
+    from a subdirectory. A path need not exist: ``git check-attr`` applies the
+    .gitattributes rules to any name, which is what lets a caller probe a
+    directory holding no files yet.
+
+    Values are git's own spelling, so a path with no rule reads
+    ``"unspecified"`` rather than being absent from the mapping.
+    """
+    if not paths:
+        return {}
+    result = _run(["check-attr", "-z", attr, "--", *paths], cwd=cwd)
+    if result is None or result.returncode != 0:
+        return None
+    out = result.stdout
+    if not isinstance(out, str):
+        return None
+    # -z emits NUL-separated (path, attr, value) triples, trailing NUL included,
+    # which keeps paths containing colons or newlines parseable.
+    fields = out.split("\0")
+    return {
+        fields[i]: fields[i + 2]
+        for i in range(0, len(fields) - 2, 3)  # -2: a trailing partial is padding
+    }
+
+
 def user_email(cwd: str | Path | None = None) -> str | None:
     """Return ``git config user.email``, or None when unset / unavailable."""
     result = _run(["config", "user.email"], cwd=cwd)

@@ -15,6 +15,7 @@ from dogcat.constants import (
     STATUS_VALUES_HELP,
     TYPE_VALUES_HELP,
     parse_labels,
+    parse_status_value,
 )
 from dogcat.models import IssueType, Status
 
@@ -57,7 +58,8 @@ def _resolve_create_overrides(
 
     Explicit ``--priority`` / ``--type`` / ``--status`` win over their
     shorthand equivalents, which in turn win over the package defaults.
-    Returns ``(final_priority, final_type, initial_status)``.
+    Returns ``(final_priority, final_type, initial_status)``. Raises
+    ``ValueError`` for a ``--status`` outside the selectable set.
     """
     final_priority = (
         priority
@@ -72,7 +74,7 @@ def _resolve_create_overrides(
         else (shorthand_type if shorthand_type is not None else DEFAULT_TYPE)
     )
     if status:
-        initial_status = Status(status)
+        initial_status = Status(parse_status_value(status))
     elif shorthand_status:
         initial_status = Status(shorthand_status)
     else:

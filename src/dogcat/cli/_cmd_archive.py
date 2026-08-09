@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -19,6 +20,43 @@ from ._list_options import (
     DogcatsDirOpt,
     JsonOpt,
 )
+
+
+def _reserve_archive_path(archive_dir: Path, stem: str) -> Path:
+    """Claim an unused ``<stem>.jsonl`` in ``archive_dir``, suffixing ``-2``, ``-3`` on.
+
+    ``stem`` carries a timestamp with second resolution, so two archive runs
+    inside one second land on the same name. The writers below replace the
+    destination rather than appending to it, so the second run would drop the
+    first run's records from the archive after they had already left
+    ``issues.jsonl`` — unrecoverable (dogcat-4vfu).
+
+    The candidate is created with ``O_EXCL`` so two concurrent processes cannot
+    both claim one name; the storage lock does not cover this choice. That
+    leaves a zero-byte file behind when the run turns out to write nothing, so
+    callers pair this with :func:`_discard_empty_archive`.
+    """
+    attempt = 1
+    while True:
+        suffix = "" if attempt == 1 else f"-{attempt}"
+        candidate = archive_dir / f"{stem}{suffix}.jsonl"
+        try:
+            candidate.touch(exist_ok=False)
+        except FileExistsError:
+            attempt += 1
+            continue
+        return candidate
+
+
+def _discard_empty_archive(path: Path) -> None:
+    """Drop a reserved archive file that no record was written to.
+
+    Only ever removes a zero-byte file, which by construction is one this run
+    reserved and did not fill.
+    """
+    with contextlib.suppress(OSError):
+        if path.stat().st_size == 0:
+            path.unlink()
 
 
 def _archive_inbox(
@@ -61,7 +99,7 @@ def _archive_inbox(
 
     closed_ids = {p.full_id for p in closed}
     inbox_path = inbox.get_file_path()
-    archive_path = archive_dir / f"inbox-closed-{timestamp}.jsonl"
+    archive_path = _reserve_archive_path(archive_dir, f"inbox-closed-{timestamp}")
 
     def classify(stripped: bytes) -> bool:
         try:
@@ -83,7 +121,11 @@ def _archive_inbox(
             classify,
         )
 
-    return len(closed) if archived_count > 0 else 0
+    if archived_count == 0:
+        _discard_empty_archive(archive_path)
+        return 0
+
+    return len(closed)
 
 
 def register(app: typer.Typer) -> None:
@@ -222,9 +264,10 @@ def register(app: typer.Typer) -> None:
             archive_dir = Path(actual_dogcats_dir) / "archive"
             archive_dir.mkdir(exist_ok=True)
             timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
-            archive_path = archive_dir / f"closed-{timestamp}.jsonl"
+            archive_path = _reserve_archive_path(archive_dir, f"closed-{timestamp}")
 
             stats = storage.archive({i.full_id for i in archivable}, archive_path)
+            _discard_empty_archive(archive_path)
 
             inbox_archived = _archive_inbox(
                 actual_dogcats_dir,

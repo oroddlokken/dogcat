@@ -13,6 +13,7 @@ from dogcat.constants import (
     STATUS_VALUES_HELP,
     TYPE_VALUES_HELP,
     parse_labels,
+    parse_status_value,
 )
 from dogcat.models import UpdateRequest, set_manual_flag
 
@@ -130,6 +131,8 @@ def _build_update_request(
     Building the request (rather than an untyped dict) rejects unknown field
     names at construction time. ``duplicate_of``/``parent`` accept ``""`` to
     clear the field, or a partial ID that is resolved against ``storage``.
+    ``status`` is checked here rather than in ``storage._coerce_status``,
+    which accepts every ``Status`` member including the two sentinels.
     """
     from ._helpers import require_resolved_id
 
@@ -137,7 +140,7 @@ def _build_update_request(
     if title is not None:
         request.title = title
     if status is not None:
-        request.status = status
+        request.status = parse_status_value(status)
     if priority is not None:
         request.priority = priority
     if issue_type is not None:

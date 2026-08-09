@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -11,8 +13,11 @@ import orjson
 from dogcat.models import Issue
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+
     import pytest
     from conftest import GitRepo
+    from typer.testing import Result
 
 
 def _has_conflict_markers(path: Path) -> bool:
@@ -21,15 +26,65 @@ def _has_conflict_markers(path: Path) -> bool:
     return "<<<<<<<" in raw or "=======" in raw
 
 
-def _run_dcat_rebase() -> tuple[int, str]:
-    """Run `dcat git rebase` via CLI invoke."""
+def _invoke_dcat_rebase() -> Result:
+    """Run `dcat git rebase` via CLI invoke, returning the whole Result.
+
+    ``Result.output`` interleaves stdout and stderr, so the per-file report
+    and ``echo_error``'s stderr both land in it.
+    """
     from typer.testing import CliRunner
 
     from dogcat.cli import app
 
-    runner = CliRunner()
-    result = runner.invoke(app, ["git", "rebase"], catch_exceptions=False)
+    return CliRunner().invoke(app, ["git", "rebase"], catch_exceptions=False)
+
+
+def _run_dcat_rebase() -> tuple[int, str]:
+    """Run `dcat git rebase` via CLI invoke."""
+    result = _invoke_dcat_rebase()
     return result.exit_code, result.output
+
+
+def _conflict_bytes() -> bytes:
+    """Two issue records in conflict — resolvable, so a resolve is expected."""
+    issue_a = orjson.dumps(
+        {"record_type": "issue", "id": "a", "namespace": "test", "title": "A"}
+    )
+    issue_b = orjson.dumps(
+        {"record_type": "issue", "id": "b", "namespace": "test", "title": "B"}
+    )
+    return (
+        b"<<<<<<< HEAD\n" + issue_a + b"\n=======\n" + issue_b + b"\n>>>>>>> branch\n"
+    )
+
+
+@contextmanager
+def _store_lock_held(dogcats_dir: Path) -> Generator[None, None, None]:
+    """Hold the store's advisory lock in a thread for the duration of the body.
+
+    A separate thread, not a separate process: ``flock`` is per open file
+    description, so a second ``open`` in this process contends with it just
+    as another ``dcat`` would.
+    """
+    from dogcat.constants import LOCK_FILENAME
+    from dogcat.locking import advisory_file_lock
+
+    holding = threading.Event()
+    release = threading.Event()
+
+    def hold_lock() -> None:
+        with advisory_file_lock(dogcats_dir / LOCK_FILENAME):
+            holding.set()
+            release.wait(10)
+
+    holder = threading.Thread(target=hold_lock)
+    holder.start()
+    try:
+        assert holding.wait(10), "lock holder thread never acquired the lock"
+        yield
+    finally:
+        release.set()
+        holder.join(10)
 
 
 def _in_repo(repo: GitRepo) -> os.PathLike[str]:
@@ -270,6 +325,313 @@ class TestGitRebase:
 
         assert exit_code == 0
         assert repo.storage_path.stat().st_mode & 0o777 == 0o644
+
+
+class TestGitRebaseSafety:
+    """The advisory lock, the unreadable-file paths, and the skip report.
+
+    All of it is about `dcat git rebase` not making a bad situation worse:
+    it overwrites whole files, so it has to exclude concurrent writers, and
+    it must never exit 0 next to a file that still holds markers
+    (dogcat-1n4x). The failure path has to stay legible too — the user is
+    mid-rebase, so a traceback or a name they cannot act on is its own cost
+    (dogcat-3qw3).
+    """
+
+    def test_waits_for_the_store_lock(
+        self,
+        git_repo: GitRepo,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A concurrent holder of the store lock blocks the resolve.
+
+        Without the lock, an append from another dcat process lands in a
+        file this command is about to replace wholesale and is lost — the
+        one case AGENTS.md promises concurrent dcat processes are safe from.
+        """
+        repo = git_repo
+        monkeypatch.chdir(repo.path)
+        monkeypatch.setenv("DCAT_LOCK_TIMEOUT_SECS", "0.2")
+
+        repo.storage_path.write_bytes(_conflict_bytes())
+
+        with _store_lock_held(repo.dogcats_dir):
+            result = _invoke_dcat_rebase()
+
+        assert result.exit_code != 0
+        # Never got as far as the rewrite, so the conflict is still there.
+        assert _has_conflict_markers(repo.storage_path)
+
+    def test_lock_timeout_is_reported_not_raised(
+        self,
+        git_repo: GitRepo,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Failing to get the lock names the lock file instead of tracing back.
+
+        This fires mid-rebase, and the likely cause is a lock file left by a
+        process that is already gone — something the user can clear once
+        they are told where it is. A traceback tells them nothing and looks
+        like dcat crashed on their conflicted store. (dogcat-3qw3)
+        """
+        from dogcat.constants import LOCK_FILENAME
+
+        repo = git_repo
+        monkeypatch.chdir(repo.path)
+        monkeypatch.setenv("DCAT_LOCK_TIMEOUT_SECS", "0.2")
+
+        repo.storage_path.write_bytes(_conflict_bytes())
+
+        with _store_lock_held(repo.dogcats_dir):
+            result = _invoke_dcat_rebase()
+
+        assert result.exit_code == 1
+        # A clean typer.Exit, not a RuntimeError escaping the command.
+        assert isinstance(result.exception, SystemExit)
+        assert str(repo.dogcats_dir / LOCK_FILENAME) in result.output
+        assert "remove the lock file" in result.output
+        assert "Traceback" not in result.output
+
+    def test_vanished_file_is_skipped_silently(
+        self,
+        git_repo: GitRepo,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A file gone by the time it is read costs neither output nor exit code.
+
+        rglob returns a snapshot, and a compaction tempfile in it can be
+        renamed away before the loop reaches it. That name was never the
+        user's business, so reporting it mid-rebase — and failing the
+        command over it — gave them something they could not act on.
+        (dogcat-3qw3)
+        """
+        repo = git_repo
+
+        archive = repo.dogcats_dir / "archive" / "closed-2026-01-01T00-00-00.jsonl"
+        archive.parent.mkdir(parents=True)
+        conflict = _conflict_bytes()
+        # Sorts after archive/, so the resolve above it has already happened.
+        vanishing = repo.dogcats_dir / "zz-vanishing.jsonl"
+        archive.write_bytes(conflict)
+        vanishing.write_bytes(conflict)
+
+        real_read_bytes = Path.read_bytes
+
+        def read_bytes_after_vanishing(self: Path) -> bytes:
+            if self.name == vanishing.name:
+                self.unlink()
+            return real_read_bytes(self)
+
+        monkeypatch.setattr(Path, "read_bytes", read_bytes_after_vanishing)
+
+        old_cwd = _in_repo(repo)
+        try:
+            exit_code, output = _run_dcat_rebase()
+        finally:
+            os.chdir(old_cwd)
+
+        assert exit_code == 0, output
+        assert f"Resolved {archive.name}" in output
+        assert vanishing.name not in output
+        assert not _has_conflict_markers(archive)
+
+    def test_unreadable_file_is_still_an_error(
+        self,
+        git_repo: GitRepo,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A file that exists but will not open is reported and exits 1.
+
+        The vanished-file skip keys on FileNotFoundError alone. A
+        permissions or I/O failure names a file that is still sitting there,
+        possibly still holding conflict markers, so it has to stay loud.
+        (dogcat-3qw3)
+        """
+        repo = git_repo
+
+        unreadable = repo.dogcats_dir / "zz-unreadable.jsonl"
+        unreadable.write_bytes(_conflict_bytes())
+
+        real_read_bytes = Path.read_bytes
+
+        def read_bytes_denied(self: Path) -> bytes:
+            if self.name == unreadable.name:
+                raise PermissionError(13, "Permission denied")
+            return real_read_bytes(self)
+
+        monkeypatch.setattr(Path, "read_bytes", read_bytes_denied)
+
+        old_cwd = _in_repo(repo)
+        try:
+            exit_code, output = _run_dcat_rebase()
+        finally:
+            os.chdir(old_cwd)
+
+        assert exit_code == 1
+        assert unreadable.name in output
+        assert "Permission denied" in output
+        assert _has_conflict_markers(unreadable)
+
+    def test_unparseable_conflict_is_reported_not_skipped(
+        self,
+        git_repo: GitRepo,
+    ) -> None:
+        """Markers with no readable records exit non-zero and name the file.
+
+        The skip itself is right — there is nothing to merge — but it used
+        to print "No JSONL conflicts found" and exit 0 while the file still
+        held <<<<<<<, sending the user into `git rebase --continue` on it.
+        """
+        repo = git_repo
+        repo.storage_path.write_bytes(
+            b"<<<<<<< HEAD\nnot-json\n=======\nalso-not-json\n>>>>>>> branch\n",
+        )
+
+        old_cwd = _in_repo(repo)
+        try:
+            exit_code, output = _run_dcat_rebase()
+        finally:
+            os.chdir(old_cwd)
+
+        assert exit_code == 1
+        assert "issues.jsonl" in output
+        assert "No JSONL conflicts found" not in output
+        assert _has_conflict_markers(repo.storage_path)
+
+
+class TestGitRebaseThreeWayBase:
+    """Where the common ancestor comes from, and what happens without one.
+
+    Git's default merge.conflictStyle writes no ||||||| section, so the
+    markers alone never carry a base and the dep/link merge degrades to a
+    union that restores deletions. (dogcat-5cvm)
+    """
+
+    def test_dependency_removal_survives_a_real_rebase(
+        self,
+        git_repo: GitRepo,
+    ) -> None:
+        """A `dcat dep remove` on the rebased branch is not resurrected.
+
+        The base comes from index stage 1, which git populates for every
+        conflicted path while the rebase is in progress. Nothing here sets
+        merge.conflictStyle, so this is the default-config path that used
+        to silently restore the dependency.
+        """
+        repo = git_repo
+
+        s = repo.storage()
+        s.create(Issue(id="x", namespace="test", title="X"))
+        s.create(Issue(id="y", namespace="test", title="Y"))
+        s.add_dependency("test-x", "test-y", "blocks")
+        repo.commit_all("Seed two issues and a dependency")
+
+        # Upstream: an unrelated edit, so the rebase has to replay onto it.
+        repo.create_branch("upstream")
+        s = repo.storage()
+        s.update("test-y", {"title": "Y edited upstream"})
+        repo.commit_all("Edit Y upstream")
+
+        repo.switch_branch("main")
+        repo.create_branch("feature")
+        s = repo.storage()
+        s.remove_dependency("test-x", "test-y")
+        repo.commit_all("Drop the dependency")
+
+        rebase = repo.git("rebase", "upstream", check=False)
+        assert rebase.returncode != 0, "expected the rebase to conflict"
+        assert _has_conflict_markers(repo.storage_path)
+
+        old_cwd = _in_repo(repo)
+        try:
+            exit_code, output = _run_dcat_rebase()
+        finally:
+            os.chdir(old_cwd)
+
+        assert exit_code == 0, output
+        assert not _has_conflict_markers(repo.storage_path)
+
+        s = repo.storage()
+        assert s.get_dependencies("test-x") == []
+
+    def test_warns_when_no_base_is_reachable(
+        self,
+        git_repo: GitRepo,
+    ) -> None:
+        """Markers outside a conflicted operation get a union + a warning.
+
+        There is no stage 1 to read here, so the resolve cannot honor a
+        deletion. It says so rather than reporting a clean resolve.
+        """
+        repo = git_repo
+
+        dep = orjson.dumps(
+            {
+                "record_type": "dependency",
+                "issue_id": "test-x",
+                "depends_on_id": "test-y",
+                "type": "blocks",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            }
+        )
+        other = orjson.dumps(
+            {"record_type": "issue", "id": "z", "namespace": "test", "title": "Z"}
+        )
+        repo.storage_path.write_bytes(
+            b"<<<<<<< HEAD\n" + dep + b"\n=======\n" + other + b"\n>>>>>>> branch\n",
+        )
+
+        old_cwd = _in_repo(repo)
+        try:
+            exit_code, output = _run_dcat_rebase()
+        finally:
+            os.chdir(old_cwd)
+
+        assert exit_code == 0, output
+        assert "Resolved issues.jsonl" in output
+        assert "no common ancestor" in output
+        assert not _has_conflict_markers(repo.storage_path)
+
+    def test_unknown_record_kinds_survive_the_resolve(
+        self,
+        git_repo: GitRepo,
+    ) -> None:
+        """A record kind this dcat does not know is still in the file after.
+
+        `dcat git rebase` writes merge_jsonl's output over the file, so the
+        preservation guarantee from dogcat-68ij only holds if this caller
+        keeps it too.
+        """
+        repo = git_repo
+
+        future = orjson.dumps(
+            {"record_type": "milestone", "id": "m1", "name": "v9"},
+        )
+        issue = orjson.dumps(
+            {"record_type": "issue", "id": "a", "namespace": "test", "title": "A"}
+        )
+        repo.storage_path.write_bytes(
+            future
+            + b"\n<<<<<<< HEAD\n"
+            + issue
+            + b"\n=======\n"
+            + issue
+            + b"\n>>>>>>> b\n",
+        )
+
+        old_cwd = _in_repo(repo)
+        try:
+            exit_code, output = _run_dcat_rebase()
+        finally:
+            os.chdir(old_cwd)
+
+        assert exit_code == 0, output
+        records = [
+            orjson.loads(line)
+            for line in repo.storage_path.read_bytes().splitlines()
+            if line.strip()
+        ]
+        assert any(r.get("record_type") == "milestone" for r in records)
 
 
 class TestParseConflictedJsonl:

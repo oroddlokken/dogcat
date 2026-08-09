@@ -59,6 +59,30 @@ def _proposal_record(**kwargs: Any) -> dict[str, Any]:
     return defaults
 
 
+def _dep_record(**kwargs: Any) -> dict[str, Any]:
+    """Build a minimal dependency record dict."""
+    defaults: dict[str, Any] = {
+        "record_type": "dependency",
+        "issue_id": "test-a",
+        "depends_on_id": "test-b",
+        "type": "blocks",
+    }
+    defaults.update(kwargs)
+    return defaults
+
+
+def _link_record(**kwargs: Any) -> dict[str, Any]:
+    """Build a minimal link record dict."""
+    defaults: dict[str, Any] = {
+        "record_type": "link",
+        "from_id": "test-a",
+        "to_id": "test-b",
+        "link_type": "relates_to",
+    }
+    defaults.update(kwargs)
+    return defaults
+
+
 @st.composite
 def timestamp_strategy(draw: Any) -> str:
     """Generate ISO 8601 timestamps with varying dates."""
@@ -112,7 +136,60 @@ def unique_event_list_strategy(draw: Any) -> list[dict[str, Any]]:
     return events
 
 
+# Both sides draw identities from one small pool so keys collide often, and
+# vary created_by/created_at so a collision is not byte-identical — a
+# convergence property over identical records cannot see a side-label
+# resolution (dogcat-4ol3, same trap as the issue generator above).
+_DEP_IDENTITIES = [("test-a", "test-b"), ("test-a", "test-c"), ("test-d", "test-e")]
+_LINK_IDENTITIES = [("test-a", "test-b"), ("test-b", "test-c"), ("test-c", "test-a")]
+
+
+@st.composite
+def dep_side_strategy(draw: Any) -> list[dict[str, Any]]:
+    """Generate one branch's dependency records over the shared identity pool."""
+    records: list[dict[str, Any]] = []
+    for issue_id, depends_on_id in _DEP_IDENTITIES:
+        action = draw(st.sampled_from(["absent", "add", "remove"]))
+        if action == "absent":
+            continue
+        record = _dep_record(
+            issue_id=issue_id,
+            depends_on_id=depends_on_id,
+            created_by=draw(st.sampled_from(["alice", "bob"])),
+            created_at=draw(timestamp_strategy()),
+        )
+        if action == "remove":
+            record["op"] = "remove"
+        records.append(record)
+    return records
+
+
+@st.composite
+def link_side_strategy(draw: Any) -> list[dict[str, Any]]:
+    """Generate one branch's link records over the shared identity pool."""
+    records: list[dict[str, Any]] = []
+    for from_id, to_id in _LINK_IDENTITIES:
+        action = draw(st.sampled_from(["absent", "add", "remove"]))
+        if action == "absent":
+            continue
+        record = _link_record(
+            from_id=from_id,
+            to_id=to_id,
+            created_by=draw(st.sampled_from(["alice", "bob"])),
+            created_at=draw(timestamp_strategy()),
+        )
+        if action == "remove":
+            record["op"] = "remove"
+        records.append(record)
+    return records
+
+
 # Helper functions
+
+
+def _of_kind(records: list[dict[str, Any]], record_type: str) -> list[dict[str, Any]]:
+    """Filter merged output to one record kind, preserving output order."""
+    return [r for r in records if r.get("record_type") == record_type]
 
 
 def _records_equal(rec1: dict[str, Any], rec2: dict[str, Any]) -> bool:
@@ -218,6 +295,37 @@ class TestMergeConvergence:
         result1_issues = [r for r in result1 if r.get("record_type") == "issue"]
         result2_issues = [r for r in result2 if r.get("record_type") == "issue"]
         assert _record_set_equal(result1_issues, result2_issues)
+
+    @given(dep_side_strategy(), dep_side_strategy(), dep_side_strategy())
+    def test_dependency_convergence(
+        self,
+        base: list[dict[str, Any]],
+        ours: list[dict[str, Any]],
+        theirs: list[dict[str, Any]],
+    ) -> None:
+        """Deps merge to the same records on the same lines in either order.
+
+        Equality here is list equality, not set equality: the deps block is
+        file content, so two collaborators whose merges agree on the records
+        but not on their order still get diverging commits (dogcat-4ol3).
+        """
+        forward = _of_kind(merge_jsonl(base, ours, theirs), "dependency")
+        backward = _of_kind(merge_jsonl(base, theirs, ours), "dependency")
+
+        assert forward == backward
+
+    @given(link_side_strategy(), link_side_strategy(), link_side_strategy())
+    def test_link_convergence(
+        self,
+        base: list[dict[str, Any]],
+        ours: list[dict[str, Any]],
+        theirs: list[dict[str, Any]],
+    ) -> None:
+        """Links merge to the same records on the same lines in either order."""
+        forward = _of_kind(merge_jsonl(base, ours, theirs), "link")
+        backward = _of_kind(merge_jsonl(base, theirs, ours), "link")
+
+        assert forward == backward
 
 
 class TestMergeMonotonicityUpdatedAt:

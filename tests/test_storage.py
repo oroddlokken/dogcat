@@ -2953,3 +2953,140 @@ class TestCompactionPreservesRelationFields:
         assert getattr(rl.link_type, "value", rl.link_type) == "relates_to"
         assert rl.created_by == "bob@example.com"
         assert rl.created_at.isoformat() == link.created_at.isoformat()
+
+
+UNKNOWN_LINE = b'{"record_type":"attachment","id":"u1","payload":"from the future"}'
+
+
+def _unknown_lines(path: Path) -> list[bytes]:
+    """Return the raw lines of the store carrying an unmodelled record_type."""
+    known = {b'"issue"', b'"dependency"', b'"link"', b'"event"', b'"proposal"'}
+    out: list[bytes] = []
+    for raw in path.read_bytes().splitlines():
+        if not raw.strip():
+            continue
+        record = orjson.loads(raw)
+        rt = record.get("record_type")
+        if rt is not None and orjson.dumps(rt) not in known:
+            out.append(raw.strip())
+    return out
+
+
+class TestPreservedUnknownRecords:
+    """A record_type this dcat does not model survives every write path.
+
+    The merge driver stopped erasing these in dogcat-68ij, but the storage
+    layer still did: ``_load`` sent them to the issue parser, which raised on
+    the missing title, so they landed in ``_bad_lines``, set
+    ``_needs_compaction``, and the next append rewrote the file without them.
+    """
+
+    def test_unknown_record_is_not_a_bad_line(self, storage: JSONLStorage) -> None:
+        """It is well-formed JSON, so it is not damage and forces no rewrite."""
+        storage.create(Issue(id="a", title="A"))
+        with storage.path.open("ab") as fh:
+            fh.write(UNKNOWN_LINE + b"\n")
+
+        reloaded = JSONLStorage(str(storage.path))
+
+        assert reloaded._bad_lines == []
+        assert reloaded._needs_compaction is False
+        assert reloaded._preserved == [orjson.loads(UNKNOWN_LINE)]
+
+    def test_unknown_record_survives_an_append(self, storage: JSONLStorage) -> None:
+        """A create() after the record was appended does not delete it.
+
+        This is the exact sequence that used to erase it: the load flags
+        ``_needs_compaction``, and ``_append`` opens with a full rewrite.
+        """
+        storage.create(Issue(id="a", title="A"))
+        with storage.path.open("ab") as fh:
+            fh.write(UNKNOWN_LINE + b"\n")
+
+        reloaded = JSONLStorage(str(storage.path))
+        reloaded.create(Issue(id="b", title="B"))
+
+        assert _unknown_lines(storage.path) == [UNKNOWN_LINE]
+        assert JSONLStorage(str(storage.path)).get("dc-b") is not None
+
+    def test_unknown_record_survives_compaction(self, storage: JSONLStorage) -> None:
+        """The full-rewrite path emits it too."""
+        storage.create(Issue(id="a", title="A"))
+        with storage.path.open("ab") as fh:
+            fh.write(UNKNOWN_LINE + b"\n")
+
+        reloaded = JSONLStorage(str(storage.path))
+        reloaded._save()
+
+        assert _unknown_lines(storage.path) == [UNKNOWN_LINE]
+
+    def test_load_save_round_trip_is_byte_equivalent(
+        self, storage: JSONLStorage
+    ) -> None:
+        """The record comes back out exactly as it went in.
+
+        Byte-equality holds for orjson-serialized input, which is what every
+        dcat writes. A hand-formatted line with extra whitespace round-trips
+        as the same record, not the same bytes.
+        """
+        storage.create(Issue(id="a", title="A"))
+        with storage.path.open("ab") as fh:
+            fh.write(UNKNOWN_LINE + b"\n")
+
+        for _ in range(2):
+            JSONLStorage(str(storage.path))._save()
+
+        assert _unknown_lines(storage.path) == [UNKNOWN_LINE]
+
+    def test_two_rewrites_order_preserved_records_identically(
+        self, storage: JSONLStorage
+    ) -> None:
+        """Sorted by canonical serialization, so a rewrite is stable."""
+        storage.create(Issue(id="a", title="A"))
+        with storage.path.open("ab") as fh:
+            for rid in ("u3", "u1", "u2"):
+                fh.write(b'{"record_type":"attachment","id":"' + rid.encode() + b'"}\n')
+
+        JSONLStorage(str(storage.path))._save()
+        first = _unknown_lines(storage.path)
+        JSONLStorage(str(storage.path))._save()
+
+        assert _unknown_lines(storage.path) == first
+        assert [orjson.loads(ln)["id"] for ln in first] == ["u1", "u2", "u3"]
+
+    def test_unknown_record_survives_prune(self, storage: JSONLStorage) -> None:
+        """prune_tombstones rewrites the file; the record is still there."""
+        storage.create(Issue(id="a", title="A"))
+        storage.delete("dc-a")
+        with storage.path.open("ab") as fh:
+            fh.write(UNKNOWN_LINE + b"\n")
+
+        reloaded = JSONLStorage(str(storage.path))
+        assert reloaded.prune_tombstones() == ["dc-a"]
+
+        assert _unknown_lines(storage.path) == [UNKNOWN_LINE]
+
+    def test_record_without_record_type_is_still_sniffed(
+        self, storage: JSONLStorage
+    ) -> None:
+        """Only an explicit unmodelled record_type is preserved.
+
+        A record with no ``record_type`` at all is field-sniffed into
+        issue/dependency/link, and real stores written before the field
+        existed depend on that. It must not divert to _preserved.
+        """
+        storage.create(Issue(id="a", title="A"))
+        with storage.path.open("ab") as fh:
+            fh.write(
+                b'{"namespace":"dc","id":"b","title":"Sniffed","status":"open",'
+                b'"priority":2,"issue_type":"task",'
+                b'"created_at":"2026-01-01T00:00:00+00:00",'
+                b'"updated_at":"2026-01-01T00:00:00+00:00"}\n'
+            )
+
+        reloaded = JSONLStorage(str(storage.path))
+
+        assert reloaded._preserved == []
+        issue = reloaded.get("dc-b")
+        assert issue is not None
+        assert issue.title == "Sniffed"

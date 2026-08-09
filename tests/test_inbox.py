@@ -1,9 +1,12 @@
 """Tests for inbox proposal system (data model and storage)."""
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
+import orjson
 import pytest
 
+from dogcat.inbox import InboxStorage
 from dogcat.models import (
     Proposal,
     ProposalStatus,
@@ -983,3 +986,224 @@ class TestInboxLoadStrictness:
         s = InboxStorage(dogcats_dir=str(dogcats))
         assert len(s.list()) == 1
         assert s._needs_compaction is True
+
+
+# A kind no released dcat writes, standing in for one a future release does.
+UNKNOWN_LINE = b'{"record_type":"reaction","id":"r1","target":"test-inbox-aaa1"}'
+
+
+def _unknown_lines(inbox_path: Path) -> list[bytes]:
+    """Return the raw inbox lines carrying an unmodelled record_type."""
+    known = {"issue", "dependency", "link", "event", "proposal"}
+    out: list[bytes] = []
+    for raw in inbox_path.read_bytes().splitlines():
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        record = orjson.loads(stripped)
+        rtype = record.get("record_type")
+        if rtype is not None and rtype not in known:
+            out.append(stripped)
+    return out
+
+
+def _event_ids(inbox_path: Path) -> list[str]:
+    """Return the ``issue_id`` of every event line, in file order."""
+    out: list[str] = []
+    for raw in inbox_path.read_bytes().splitlines():
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        record = orjson.loads(stripped)
+        if record.get("record_type") == "event":
+            out.append(record["issue_id"])
+    return out
+
+
+class TestInboxPreservedRecords:
+    """Records InboxStorage cannot model survive a whole-file rewrite.
+
+    dogcat-5ao0: ``_save_locked`` rebuilt the file from ``self._proposals``
+    alone, so every other line vanished. The merge driver had just stopped
+    erasing unmodelled kinds (dogcat-68ij), which left a store that could
+    accept a newer release's records over a merge and then delete them on the
+    next prune or namespace rename.
+    """
+
+    @pytest.fixture
+    def inbox_dir(self, tmp_path: Path) -> Path:
+        """Create a temporary .dogcats directory."""
+        dogcats = tmp_path / ".dogcats"
+        dogcats.mkdir()
+        return dogcats
+
+    def _seeded(self, inbox_dir: Path) -> InboxStorage:
+        """One live proposal, one tombstone, one unmodelled record.
+
+        The unmodelled line is appended raw because no dcat command writes a
+        kind this dcat does not know — a merge from a newer release is how it
+        reaches a real store. Returns a freshly loaded store, so what the
+        assertions see came off disk.
+        """
+        store = InboxStorage(dogcats_dir=str(inbox_dir))
+        store.create(Proposal(id="aaa1", title="Keep", namespace="test"))
+        store.create(Proposal(id="bbb2", title="Drop", namespace="test"))
+        store.delete("test-inbox-bbb2")
+        with store.path.open("ab") as fh:
+            fh.write(UNKNOWN_LINE + b"\n")
+        return InboxStorage(dogcats_dir=str(inbox_dir))
+
+    def test_unknown_record_is_not_a_bad_line(self, inbox_dir: Path) -> None:
+        """It is well-formed JSON, so it is not damage and forces no rewrite."""
+        store = self._seeded(inbox_dir)
+
+        assert store._bad_lines == []
+        assert store._needs_compaction is False
+        assert store._preserved == [orjson.loads(UNKNOWN_LINE)]
+
+    def test_unknown_record_survives_prune(self, inbox_dir: Path) -> None:
+        """prune_tombstones rewrites the file whenever it removes anything."""
+        store = self._seeded(inbox_dir)
+
+        assert store.prune_tombstones() == ["test-inbox-bbb2"]
+
+        assert _unknown_lines(store.path) == [UNKNOWN_LINE]
+
+    def test_unknown_record_survives_namespace_rename(self, inbox_dir: Path) -> None:
+        """rename_namespace rewrites unconditionally."""
+        store = self._seeded(inbox_dir)
+
+        assert store.rename_namespace("test", "renamed") == 2
+
+        assert _unknown_lines(store.path) == [UNKNOWN_LINE]
+
+    def test_unknown_record_survives_the_corrupt_line_repair(
+        self, inbox_dir: Path
+    ) -> None:
+        """The _needs_compaction path in _append rewrites before appending."""
+        store = self._seeded(inbox_dir)
+        with store.path.open("ab") as fh:
+            fh.write(b"{half-written")
+
+        repaired = InboxStorage(dogcats_dir=str(inbox_dir))
+        assert repaired._needs_compaction is True
+        repaired.create(Proposal(id="ccc3", title="Triggers the rewrite"))
+
+        assert _unknown_lines(store.path) == [UNKNOWN_LINE]
+
+    def test_unknown_record_is_not_double_written(self, inbox_dir: Path) -> None:
+        """Held in memory or copied from the file, never both."""
+        store = self._seeded(inbox_dir)
+        store.prune_tombstones()
+
+        InboxStorage(dogcats_dir=str(inbox_dir)).rename_namespace("test", "renamed")
+
+        assert _unknown_lines(store.path) == [UNKNOWN_LINE]
+
+    def test_round_trip_is_byte_equivalent(self, inbox_dir: Path) -> None:
+        """The record comes back out exactly as it went in.
+
+        Byte-equality holds for orjson-serialized input, which is what every
+        dcat writes. A hand-formatted line with extra whitespace round-trips
+        as the same record, not the same bytes.
+        """
+        store = self._seeded(inbox_dir)
+        for _ in range(2):
+            InboxStorage(dogcats_dir=str(inbox_dir))._save()
+
+        assert _unknown_lines(store.path) == [UNKNOWN_LINE]
+
+    def test_two_rewrites_order_preserved_records_identically(
+        self, inbox_dir: Path
+    ) -> None:
+        """Sorted by canonical serialization, so a rewrite is stable."""
+        store = self._seeded(inbox_dir)
+        with store.path.open("ab") as fh:
+            for rid in ("u3", "u1", "u2"):
+                fh.write(b'{"record_type":"reaction","id":"' + rid.encode() + b'"}\n')
+
+        InboxStorage(dogcats_dir=str(inbox_dir))._save()
+        first = _unknown_lines(store.path)
+        InboxStorage(dogcats_dir=str(inbox_dir))._save()
+
+        assert _unknown_lines(store.path) == first
+        assert [orjson.loads(ln)["id"] for ln in first] == ["r1", "u1", "u2", "u3"]
+
+    def test_record_without_record_type_is_preserved(self, inbox_dir: Path) -> None:
+        """Diverges from JSONLStorage, where the same record is sniffed.
+
+        Field-sniffing never yields a proposal, so a record with no
+        ``record_type`` is not loadable here. Preserving the raw line is the
+        only way it survives — unlike the issue store, this one has nothing
+        to sniff it into.
+        """
+        store = self._seeded(inbox_dir)
+        sniffable = b'{"namespace":"test","id":"zzz9","title":"No record_type"}'
+        with store.path.open("ab") as fh:
+            fh.write(sniffable + b"\n")
+
+        reloaded = InboxStorage(dogcats_dir=str(inbox_dir))
+        assert reloaded.get("test-inbox-zzz9") is None
+        reloaded.prune_tombstones()
+
+        assert sniffable in store.path.read_bytes().splitlines()
+
+
+class TestInboxEventsSurviveRewrite:
+    """Event lines in inbox.jsonl are carried over, not deleted.
+
+    dcat writes them itself (``InboxEventLog`` appends to ``inbox.jsonl``),
+    and the rewrite paths used to drop every one because the inbox never
+    loads events into memory. dogcat-5ao0 copies them from the file being
+    replaced, the way ``JSONLStorage`` always has.
+    """
+
+    @pytest.fixture
+    def inbox_dir(self, tmp_path: Path) -> Path:
+        """Create a temporary .dogcats directory."""
+        dogcats = tmp_path / ".dogcats"
+        dogcats.mkdir()
+        return dogcats
+
+    def test_events_survive_a_prune(self, inbox_dir: Path) -> None:
+        """The live proposal keeps its created event across the rewrite."""
+        store = InboxStorage(dogcats_dir=str(inbox_dir))
+        store.create(Proposal(id="aaa1", title="Keep", namespace="test"))
+        store.create(Proposal(id="bbb2", title="Drop", namespace="test"))
+        store.delete("test-inbox-bbb2")
+
+        store.prune_tombstones()
+
+        assert _event_ids(store.path) == ["test-inbox-aaa1"]
+
+    def test_pruned_proposal_events_go_with_it(self, inbox_dir: Path) -> None:
+        """A prune erases the record permanently, so its history goes too."""
+        store = InboxStorage(dogcats_dir=str(inbox_dir))
+        store.create(Proposal(id="bbb2", title="Drop", namespace="test"))
+        store.delete("test-inbox-bbb2")
+
+        store.prune_tombstones()
+
+        assert _event_ids(store.path) == []
+
+    def test_events_follow_a_namespace_rename(self, inbox_dir: Path) -> None:
+        """Event issue_ids are remapped, not left pointing at the old id."""
+        store = InboxStorage(dogcats_dir=str(inbox_dir))
+        store.create(Proposal(id="aaa1", title="Keep", namespace="test"))
+
+        store.rename_namespace("test", "renamed")
+
+        assert _event_ids(store.path) == ["renamed-inbox-aaa1"]
+
+    def test_events_are_not_double_written(self, inbox_dir: Path) -> None:
+        """Two rewrites leave one copy of each event, not two or four."""
+        store = InboxStorage(dogcats_dir=str(inbox_dir))
+        store.create(Proposal(id="aaa1", title="Keep", namespace="test"))
+        store.close("test-inbox-aaa1")
+
+        before = _event_ids(store.path)
+        InboxStorage(dogcats_dir=str(inbox_dir))._save()
+        InboxStorage(dogcats_dir=str(inbox_dir))._save()
+
+        assert len(before) == 2
+        assert _event_ids(store.path) == before
