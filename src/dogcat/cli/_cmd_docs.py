@@ -1285,10 +1285,12 @@ Mark `--manual` when a step requires a human in the loop —
 credentials, deploys, hardware, visual confirmation, GUI keystrokes:
   dcat update <id> --manual
 
-`--manual` means HITL, not "agent skips". When you are in session
-with a user, drive manual issues like any other: do the analysis,
-frame the hypothesis, hand the user one concrete action at a time,
-take their result, iterate.
+`--manual` means HITL, not "agent skips". The filter exists so
+autonomous-batch runs (no human present to consult) move past these.
+When you are in session with a user, drive manual issues like any
+other: do the analysis, frame the hypothesis, hand the user one
+concrete action at a time, take their result, iterate. The human is
+your hands for steps you can't reach; the rest is still your job.
 
 ## Comment-Based Filtering
 
