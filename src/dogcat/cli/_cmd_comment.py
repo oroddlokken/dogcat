@@ -8,6 +8,10 @@ import typer
 from ._completions import complete_comment_actions, complete_issue_ids
 from ._helpers import get_default_operator, get_storage, with_ns_shim
 from ._json_state import echo_error, is_json, set_json
+from ._list_options import (
+    DogcatsDirOpt,
+    JsonOpt,
+)
 
 
 def register(app: typer.Typer) -> None:
@@ -40,8 +44,8 @@ def register(app: typer.Typer) -> None:
             help="Comment ID (for delete)",
         ),
         author: str = typer.Option(None, "--by", help="Comment author name"),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Manage issue comments.
 

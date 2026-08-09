@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import IO, TYPE_CHECKING, Any
 
 import typer
 
 from dogcat.config import load_config
 from dogcat.constants import (
     GITATTRIBUTES_ENTRY,
+    GITATTRIBUTES_LEGACY_ENTRIES,
+    GITATTRIBUTES_PROBE_PATHS,
+    MERGE_DRIVER_ATTR,
     MERGE_DRIVER_CMD,
     MERGE_DRIVER_GIT_KEY,
     MERGE_DRIVER_GIT_NAME_KEY,
@@ -18,10 +22,32 @@ from dogcat.constants import (
 from ._health import HealthCheck
 from ._helpers import SortedGroup, find_dogcats_dir
 from ._json_state import echo_error, is_json, set_json
+from ._list_options import (
+    JsonOpt,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
+def _write_records(
+    records: list[dict[str, Any]],
+) -> Callable[[IO[bytes]], int]:
+    """Return a write_fn for ``atomic_rewrite_jsonl`` that dumps ``records``."""
+    import orjson
+
+    def writer(f: IO[bytes]) -> int:
+        for record in records:
+            f.write(orjson.dumps(record))
+            f.write(b"\n")
+        return len(records)
+
+    return writer
+
 
 # Sub-app for 'dcat git' subcommands
 git_app = typer.Typer(
-    help="Git integration commands.",
+    help="Install and check the JSONL merge driver; resolve conflicts.",
     no_args_is_help=True,
     cls=SortedGroup,
 )
@@ -44,12 +70,12 @@ _GIT_GUIDE_TEXT = """\
 
 ── Merge Driver ───────────────────────────────────────────────────────────
 
-  Dogcat includes a custom JSONL merge driver that auto-resolves most
-  merge conflicts. Install it with:
+  Dogcat includes a JSONL merge driver that auto-resolves most merge
+  conflicts. Install it with:
 
     $ dcat git setup
 
-  This configures git to use dogcat's merge driver for .dogcats/*.jsonl
+  This configures git to use dogcat's merge driver for .dogcats/**/*.jsonl
   files. Without the driver, git's default text merge will conflict
   whenever two branches both modify the issue file.
 
@@ -83,15 +109,23 @@ _GIT_GUIDE_TEXT = """\
 
 ── Resolving Merge Conflicts ───────────────────────────────────────────────
 
-  With the merge driver installed, conflicts are rare. If they happen
-  (e.g. during a rebase where the driver isn't invoked):
+  The merge driver runs on merge, not on rebase — a rebase can still
+  leave conflict markers in the JSONL. When that happens:
 
     $ dcat git rebase
 
-  This auto-resolves JSONL conflicts using the same semantic logic as
-  the merge driver, then stages the resolved files. Continue with:
+  This auto-resolves JSONL conflicts using the same record-level logic
+  as the merge driver, then stages the resolved files. Continue with:
 
     $ git rebase --continue
+
+  One caveat, and it only affects dependencies and links. Telling a row
+  one branch deleted from a row the other branch added needs the common
+  ancestor. The command reads it from index stage 1 while the rebase is
+  conflicted, or from the ||||||| section if you run with
+  merge.conflictStyle=diff3. Where neither exists it merges both sides
+  as a union — which puts a deleted dependency back — and says so per
+  file. Issues, proposals and events are unaffected.
 
 ── Using .gitignore ────────────────────────────────────────────────────────
 
@@ -99,22 +133,13 @@ _GIT_GUIDE_TEXT = """\
 
     echo ".dogcats/" >> .gitignore
 
-  Scenarios where ignoring makes sense:
-    - Personal TODO tracking you don't want to share
-    - Experimenting with dogcat before adopting it team-wide
-    - Repos where issues are tracked elsewhere (e.g., GitHub Issues)
-
 ── Best Practices ──────────────────────────────────────────────────────────
 
-  1. Commit issue changes with related code
-     When you close a bug, commit the fix and the issue update together.
-     This keeps your history meaningful:
+  1. Commit issue changes with related code:
        $ git add src/fix.py .dogcats/
        $ git commit -m "Fix login timeout bug"
 
-  2. Review .dogcats/ diffs in PRs
-     Include .dogcats/ changes in code review. They document what was
-     done and why.
+  2. Review .dogcats/ diffs in PRs.
 
 ── Quick Reference ─────────────────────────────────────────────────────────
 
@@ -127,21 +152,119 @@ _GIT_GUIDE_TEXT = """\
 
 ── CI Validation ──────────────────────────────────────────────────────
 
-  Add a CI step to validate issue data on pull requests. Dogcat ships
-  a ready-made GitHub Actions workflow at:
-
-    .github/workflows/validate-issues.yml
-
-  It runs 'dcat doctor' whenever .dogcats/ files change, catching
-  broken JSON, invalid references, and corrupt data before merge.
-
-  To use it in your own project, copy the workflow file and ensure
-  dogcat is installable (e.g. via pyproject.toml or requirements.txt).
-
-  For other CI systems, the key command is:
+  Add a CI step that runs this whenever .dogcats/ files change:
 
     dcat doctor          # exits 0 on success, 1 on errors
+
+  It catches broken JSON, invalid references and corrupt data before
+  merge. Make sure dogcat is installable in CI (e.g. via pyproject.toml
+  or requirements.txt).
+
+  The dogcat source repo carries a GitHub Actions workflow that does
+  exactly this, at .github/workflows/validate-issues.yml. It is not
+  part of the installed package — clone the repo to copy it, or write
+  the step yourself from the command above.
 """
+
+
+def _stage1_base_records(
+    jsonl_path: Path,
+    repo_root: Path | None,
+) -> list[dict[str, Any]] | None:
+    """Read the merge base for ``jsonl_path`` out of index stage 1.
+
+    While a merge or rebase is conflicted, git keeps the common ancestor of
+    every conflicted path in stage 1 of the index. That is the only place to
+    get it under git's default ``merge.conflictStyle``, which writes no
+    ``|||||||`` section — and without a base the dep/link merge cannot tell a
+    row one side deleted from a row the other side added, so it restores
+    deletions (dogcat-5cvm).
+
+    Returns None when there is no stage 1 to read: no conflicted operation in
+    progress, an add/add conflict where the path has no ancestor, a store
+    outside the repository, or git unavailable.
+    """
+    if repo_root is None:
+        return None
+
+    import dogcat.git as git_helpers
+    from dogcat.merge_driver import parse_jsonl_bytes
+
+    try:
+        relative = jsonl_path.resolve().relative_to(repo_root.resolve())
+    except ValueError:
+        return None
+    ref = f":1:{relative.as_posix()}"
+    raw = git_helpers.show_file(ref, cwd=repo_root)
+    if raw is None:
+        return None
+    return parse_jsonl_bytes(raw, ref)
+
+
+def _needs_a_base(records: list[dict[str, Any]]) -> bool:
+    """Report whether ``records`` hold a kind whose merge consults the base.
+
+    Dependencies and links are the only ones: the others resolve by union or
+    by last-writer-wins, so a missing base costs them nothing.
+    """
+    from dogcat.models import classify_record
+
+    return any(classify_record(r) in ("dependency", "link") for r in records)
+
+
+def _install_gitattributes_entry(content: str) -> tuple[str, str]:
+    """Return ``(new_content, action)`` for installing :data:`GITATTRIBUTES_ENTRY`.
+
+    ``action`` is one of ``"present"``, ``"replaced"`` or ``"added"``.
+
+    A line dcat itself wrote before the pattern was widened is rewritten in
+    place, and a duplicate of the current entry is dropped, so an upgraded
+    checkout ends with exactly one dogcat entry instead of accumulating one
+    per upgrade (dogcat-12v8). Every other line survives untouched, including
+    a hand-written pattern equivalent to ours — the worst case there is a
+    second visible line rather than a rule of the user's silently deleted.
+
+    Each surviving line keeps its own terminator, so a CRLF file stays CRLF
+    and a mixed-ending file is left as mixed as it arrived. Rejoining on LF
+    instead turned the one-line rewrite into a whole-file diff on a CRLF
+    checkout (dogcat-5xyt); picking one dominant ending would do the same to
+    the minority lines of a mixed file. ``content`` must therefore reach here
+    untranslated — read the file with ``newline=""``, since ``read_text()``
+    folds CRLF to LF before this function can see it.
+    """
+    kept: list[str] = []
+    endings: list[str] = []
+    seen_entry = False
+    changed = False
+    for raw in content.splitlines(keepends=True):
+        text = raw.rstrip("\r\n")
+        ending = raw[len(text) :]
+        if ending:
+            endings.append(ending)
+        normalized = " ".join(text.split())
+        if normalized in GITATTRIBUTES_LEGACY_ENTRIES:
+            normalized = GITATTRIBUTES_ENTRY
+            text = GITATTRIBUTES_ENTRY
+            changed = True
+        if normalized == GITATTRIBUTES_ENTRY:
+            if seen_entry:
+                changed = True
+                continue
+            seen_entry = True
+        kept.append(text + ending)
+
+    if not seen_entry:
+        # Only the appended line needs an ending invented, so the dominant one
+        # is the whole of the guess here; ties and an empty file go to LF.
+        crlf = endings.count("\r\n")
+        newline = "\r\n" if crlf > len(endings) - crlf else "\n"
+        # A file already ending in a newline would get a blank line from an
+        # unconditional separator; one not ending in a newline needs it.
+        separator = "" if not content or content.endswith(("\n", "\r")) else newline
+        return f"{content}{separator}{GITATTRIBUTES_ENTRY}{newline}", "added"
+    if not changed:
+        return content, "present"
+    return "".join(kept), "replaced"
 
 
 def _git_repo_root() -> Path | None:
@@ -149,6 +272,42 @@ def _git_repo_root() -> Path | None:
     import dogcat.git as git_helpers
 
     return git_helpers.repo_root()
+
+
+def _gitattributes_coverage(root: Path) -> str:
+    """Classify how far .gitattributes carries the JSONL merge driver.
+
+    Returns ``"full"`` (every probe path resolves to the driver),
+    ``"partial"`` (some do, some don't — what a pre-widening
+    ``.dogcats/*.jsonl`` entry produces, since a glob without ``**`` does not
+    cross a directory separator) or ``"none"``.
+
+    Asks ``git check-attr`` rather than reading the file, because the text
+    reads the same either way: the narrow entry still contains
+    ``merge=dcat-jsonl``, so a substring test calls it configured while the
+    archive files merge with git's default text driver (dogcat-3lnu). Going
+    through git also accepts a pattern the user wrote by hand that has the
+    same effect as :data:`GITATTRIBUTES_ENTRY`.
+
+    Falls back to that substring test only when git cannot answer at all
+    (no git binary, or not in a repository), where it can distinguish
+    ``"none"`` from ``"full"`` and nothing finer.
+    """
+    import dogcat.git as git_helpers
+
+    values = git_helpers.check_attr("merge", list(GITATTRIBUTES_PROBE_PATHS), cwd=root)
+    if values is not None:
+        covered = sum(
+            values.get(path) == MERGE_DRIVER_ATTR for path in GITATTRIBUTES_PROBE_PATHS
+        )
+        if covered == len(GITATTRIBUTES_PROBE_PATHS):
+            return "full"
+        return "partial" if covered else "none"
+
+    gitattrs = root / ".gitattributes"
+    if gitattrs.exists() and f"merge={MERGE_DRIVER_ATTR}" in gitattrs.read_text():
+        return "full"
+    return "none"
 
 
 def _run_git_checks() -> tuple[bool, dict[str, HealthCheck]]:
@@ -161,7 +320,6 @@ def _run_git_checks() -> tuple[bool, dict[str, HealthCheck]]:
     checks: dict[str, HealthCheck] = {}
     all_passed = True
 
-    # Check 1: Are we in a git repo?
     repo_root = _git_repo_root()
     in_git_repo = repo_root is not None
     checks["git_repo"] = HealthCheck(
@@ -176,7 +334,6 @@ def _run_git_checks() -> tuple[bool, dict[str, HealthCheck]]:
     # Resolve paths relative to repo root (fall back to CWD if not in a repo)
     root = repo_root or Path()
 
-    # Check 2: Is .issues.lock in .gitignore?
     lock_ignored = False
     gitignore = root / ".gitignore"
     if gitignore.exists():
@@ -191,7 +348,6 @@ def _run_git_checks() -> tuple[bool, dict[str, HealthCheck]]:
     if not lock_ignored:
         all_passed = False
 
-    # Check 3: Is .dogcats/ entirely in .gitignore? (informational)
     dogcats_ignored = False
     if gitignore.exists():
         lines = gitignore.read_text().splitlines()
@@ -204,7 +360,6 @@ def _run_git_checks() -> tuple[bool, dict[str, HealthCheck]]:
         optional=True,
     )
 
-    # Check 4: Is the merge driver configured with the correct command?
     import dogcat.git as git_helpers
 
     driver_value = git_helpers.get_config(MERGE_DRIVER_GIT_KEY) or ""
@@ -222,21 +377,24 @@ def _run_git_checks() -> tuple[bool, dict[str, HealthCheck]]:
     if not driver_correct:
         all_passed = False
 
-    # Check 5: Does .gitattributes have the merge driver entry?
-    gitattrs = root / ".gitattributes"
-    has_gitattrs = False
-    if gitattrs.exists():
-        has_gitattrs = "merge=dcat-jsonl" in gitattrs.read_text()
+    coverage = _gitattributes_coverage(root)
+    if coverage == "partial":
+        attrs_failure = ".gitattributes merge driver entry misses .dogcats/archive/"
+        attrs_fix = (
+            f"Run 'dcat git setup' to widen the entry to '{GITATTRIBUTES_ENTRY}'"
+        )
+    else:
+        attrs_failure = ".gitattributes is missing JSONL merge driver entry"
+        attrs_fix = (
+            f"Run 'dcat git setup' or add '{GITATTRIBUTES_ENTRY}' to .gitattributes"
+        )
     checks["gitattributes"] = HealthCheck(
-        description=".gitattributes has JSONL merge driver entry",
-        fail_description=".gitattributes is missing JSONL merge driver entry",
-        passed=has_gitattrs,
-        fix=(
-            "Run 'dcat git setup' or add"
-            " '.dogcats/*.jsonl merge=dcat-jsonl' to .gitattributes"
-        ),
+        description=".gitattributes covers every .dogcats JSONL file",
+        fail_description=attrs_failure,
+        passed=coverage == "full",
+        fix=attrs_fix,
     )
-    if not has_gitattrs:
+    if coverage != "full":
         all_passed = False
 
     return all_passed, checks
@@ -253,7 +411,7 @@ def register(app: typer.Typer) -> None:
 
     @git_app.command("check")
     def git_check(
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+        json_output: JsonOpt = False,
     ) -> None:
         """Check git-related configuration for dogcat."""
         set_json(json_output)
@@ -308,7 +466,7 @@ def register(app: typer.Typer) -> None:
                     typer.echo(typer.style(f"  Fix: {check.fix}", fg="yellow"))
                 typer.echo()
             if all_passed:
-                typer.echo(typer.style("\n✓ All checks passed!", fg="green"))
+                typer.echo(typer.style("\n✓ All checks passed", fg="green"))
             else:
                 typer.echo(
                     typer.style(
@@ -342,27 +500,41 @@ def register(app: typer.Typer) -> None:
         gitattrs = repo_root / ".gitattributes"
         entry = GITATTRIBUTES_ENTRY
         if gitattrs.exists():
-            content = gitattrs.read_text()
-            if entry not in content:
-                with gitattrs.open("a") as f:
-                    f.write(f"\n{entry}\n")
-                typer.echo(f"✓ Added '{entry}' to .gitattributes")
-            else:
+            # newline="" on both sides: read_text() would fold CRLF to LF
+            # before the helper sees it, and write_text() would re-expand LF
+            # to os.linesep on Windows, doubling the \r it just preserved.
+            with gitattrs.open(newline="") as handle:
+                updated, action = _install_gitattributes_entry(handle.read())
+            if action == "present":
                 typer.echo("✓ .gitattributes already configured")
+            else:
+                with gitattrs.open("w", newline="") as handle:
+                    handle.write(updated)
+                if action == "replaced":
+                    typer.echo(
+                        f"✓ Replaced the pre-widening entry with '{entry}' "
+                        "in .gitattributes"
+                    )
+                else:
+                    typer.echo(f"✓ Added '{entry}' to .gitattributes")
         else:
             gitattrs.write_text(f"# Dogcat JSONL merge driver\n{entry}\n")
             typer.echo(f"✓ Created .gitattributes with '{entry}'")
 
         typer.echo("✓ Merge driver configured in local git config")
-        typer.echo("\nDone! The merge driver will auto-resolve JSONL conflicts.")
+        typer.echo(
+            "\nDone! The merge driver auto-resolves most JSONL conflicts on "
+            "merge. Rebases don't invoke it — run 'dcat git rebase' if one "
+            "conflicts."
+        )
 
     @git_app.command("rebase")
     def git_rebase() -> None:
         """Auto-resolve JSONL merge conflicts in .dogcats/ files.
 
-        Scans .dogcats/*.jsonl files for git conflict markers, resolves them
-        using the semantic merge driver logic, writes the clean result, and
-        stages the resolved files with git add.
+        Scans .dogcats/**/*.jsonl files for git conflict markers, merges each
+        one with the same record-level logic as the merge driver, writes the
+        clean result, and stages it with git add.
 
         Use this after a git rebase or pull --rebase leaves conflicts in
         the JSONL files:
@@ -370,11 +542,21 @@ def register(app: typer.Typer) -> None:
             git pull --rebase
             dcat git rebase
             git rebase --continue
+
+        The merge is three-way only where the common ancestor is
+        recoverable — from the ||||||| section git writes under
+        merge.conflictStyle=diff3/zdiff3, or from index stage 1 while the
+        conflicted operation is still in progress. With neither, it degrades
+        to a union of the two sides, which restores a dependency or link one
+        branch deleted. That case is named per file rather than resolved
+        silently (dogcat-5cvm).
         """
-        import tempfile
+        from contextlib import ExitStack
 
-        import orjson
-
+        import dogcat.git as git_helpers
+        from dogcat._jsonl_io import atomic_rewrite_jsonl
+        from dogcat.constants import LOCK_FILENAME
+        from dogcat.locking import advisory_file_lock
         from dogcat.merge_driver import merge_jsonl, parse_conflicted_jsonl
 
         dogcats_dir = Path(find_dogcats_dir())
@@ -382,58 +564,115 @@ def register(app: typer.Typer) -> None:
             echo_error("No .dogcats directory found")
             raise typer.Exit(1)
 
+        repo_root = _git_repo_root()
         resolved: list[str] = []
         errors: list[str] = []
+        unresolved: list[str] = []
+        without_base: list[str] = []
 
-        for jsonl_path in sorted(dogcats_dir.glob("*.jsonl")):
-            raw = jsonl_path.read_bytes()
-            # Quick check for conflict markers
-            if b"<<<<<<<" not in raw:
-                continue
-
+        # One lock around the whole scan, not one per file. Every resolve
+        # below replaces its file wholesale, so a concurrent dcat append
+        # landing between two iterations is lost exactly as surely as one
+        # landing mid-file. JSONLStorage and InboxStorage take this same
+        # lock path, so holding it here covers both (dogcat-1n4x).
+        with ExitStack() as stack:
             try:
-                base, ours, theirs = parse_conflicted_jsonl(raw)
-                if not ours and not theirs:
-                    # No actual conflict sections found
+                stack.enter_context(advisory_file_lock(dogcats_dir / LOCK_FILENAME))
+            except RuntimeError as exc:
+                # Only the acquisition is caught. A RuntimeError from the scan
+                # below is a real failure and belongs in the per-file errors.
+                # The lock's own message names the path and the remediation,
+                # so it is passed through rather than restated (dogcat-3qw3).
+                echo_error(str(exc))
+                raise typer.Exit(1) from exc
+
+            # rglob, not glob: archive/*.jsonl is tracked and now carries the
+            # merge driver, but a rebase never invokes the driver, so those
+            # files can still take conflict markers. (dogcat-1xgi)
+            for jsonl_path in sorted(dogcats_dir.rglob("*.jsonl")):
+                try:
+                    raw = jsonl_path.read_bytes()
+                except FileNotFoundError:
+                    # The snapshot rglob returned can name a file that is gone
+                    # by the time we reach it — realistically a compaction
+                    # tempfile, never a file the user knows about. Silent, and
+                    # it must not reach `errors`: there is nothing to act on
+                    # and exit 1 mid-rebase is not free (dogcat-3qw3).
+                    continue
+                except OSError as exc:  # noqa: PERF203
+                    # Present but unreadable — permissions, I/O — is a real
+                    # problem and stays an error.
+                    errors.append(f"{jsonl_path.name}: {exc}")
                     continue
 
-                merged = merge_jsonl(base, ours, theirs)
+                try:
+                    if b"<<<<<<<" not in raw:
+                        continue
 
-                # Atomic write via tempfile + rename
-                with tempfile.NamedTemporaryFile(
-                    mode="wb",
-                    dir=jsonl_path.parent,
-                    delete=False,
-                    suffix=".jsonl",
-                ) as tmp:
-                    for record in merged:
-                        tmp.write(orjson.dumps(record))
-                        tmp.write(b"\n")
-                    tmp_path = Path(tmp.name)
+                    base, ours, theirs = parse_conflicted_jsonl(raw)
+                    if not ours and not theirs:
+                        # Markers are present but nothing parsed out of the
+                        # sections. Nothing to merge, so the skip stands —
+                        # but it is reported, because exit 0 next to a file
+                        # still holding <<<<<<< sends the user into
+                        # 'git rebase --continue' on broken content.
+                        unresolved.append(jsonl_path.name)
+                        continue
 
-                tmp_path.replace(jsonl_path)
+                    if not base:
+                        stage1 = _stage1_base_records(jsonl_path, repo_root)
+                        if stage1 is not None:
+                            base = stage1
+                        elif _needs_a_base(ours) or _needs_a_base(theirs):
+                            without_base.append(jsonl_path.name)
 
-                # Stage the resolved file
-                import dogcat.git as git_helpers
+                    merged = merge_jsonl(base, ours, theirs)
 
-                if not git_helpers.add_paths([str(jsonl_path)]):
-                    msg = f"git add failed for {jsonl_path}"
-                    raise RuntimeError(msg)
-                resolved.append(jsonl_path.name)
-            except Exception as exc:
-                errors.append(f"{jsonl_path.name}: {exc}")
+                    atomic_rewrite_jsonl(
+                        jsonl_path,
+                        jsonl_path.parent,
+                        _write_records(merged),
+                    )
 
-        if not resolved and not errors:
+                    if not git_helpers.add_paths([str(jsonl_path)]):
+                        msg = f"git add failed for {jsonl_path}"
+                        raise RuntimeError(msg)
+                    resolved.append(jsonl_path.name)
+                except Exception as exc:  # noqa: PERF203
+                    errors.append(f"{jsonl_path.name}: {exc}")
+
+        if not resolved and not errors and not unresolved:
             typer.echo("No JSONL conflicts found in .dogcats/")
             raise typer.Exit(0)
 
         for name in resolved:
             typer.echo(typer.style(f"✓ Resolved {name}", fg="green"))
 
+        for name in without_base:
+            typer.echo(
+                typer.style(
+                    f"! {name}: no common ancestor available, so both sides were "
+                    "merged as a union — a dependency or link deleted on one "
+                    "branch may be back. Check with 'dcat doctor --post-merge'.",
+                    fg="yellow",
+                ),
+            )
+
+        for name in unresolved:
+            typer.echo(
+                typer.style(
+                    f"✗ {name}: conflict markers present but no records could be "
+                    "read from them — the file is still unresolved. Do not run "
+                    "'git rebase --continue'; inspect it with "
+                    "'dcat repair-jsonl --dry-run'.",
+                    fg="red",
+                ),
+            )
+
         for err in errors:
             typer.echo(typer.style(f"✗ {err}", fg="red"))
 
-        if errors:
+        if errors or unresolved:
             raise typer.Exit(1)
 
     @git_app.command("merge-driver", hidden=True)
@@ -445,15 +684,17 @@ def register(app: typer.Typer) -> None:
         """JSONL merge driver invoked by git during merge conflicts.
 
         Exit 0 on success (merged result written to ours file).
-        Exit 1 on failure so git falls back to its default merge strategy.
+
+        Exit 1 on failure, which git treats as a conflict on this path: it
+        leaves the ours file exactly as it found it and marks the path
+        conflicted. No fallback merge runs, so the file holds ours-side
+        records only and staging it discards every record from theirs.
         """
         import logging
 
-        import orjson
-
+        from dogcat._jsonl_io import atomic_rewrite_jsonl
         from dogcat.merge_driver import _parse_jsonl, merge_jsonl
 
-        tmp_path: Path | None = None
         try:
             base_path = Path(base)
             ours_path = Path(ours)
@@ -465,34 +706,24 @@ def register(app: typer.Typer) -> None:
 
             merged = merge_jsonl(base_records, ours_records, theirs_records)
 
-            # Write to temp file + rename so a crash never leaves a partial ours file.
-            import tempfile
-
-            with tempfile.NamedTemporaryFile(
-                mode="wb",
-                dir=ours_path.parent,
-                delete=False,
-                suffix=".jsonl",
-            ) as tmp:
-                for record in merged:
-                    tmp.write(orjson.dumps(record))
-                    tmp.write(b"\n")
-                tmp_path = Path(tmp.name)
-
-            tmp_path.replace(ours_path)
+            atomic_rewrite_jsonl(
+                ours_path,
+                ours_path.parent,
+                _write_records(merged),
+            )
         except Exception:
             logging.getLogger("dogcat.merge_driver").exception(
-                "Merge driver failed, falling back to git's default merge",
+                "Merge driver failed. Git will mark this path conflicted and leave it "
+                "holding ours-side records only — staging it as-is discards every "
+                "record from the other branch.",
             )
-            if tmp_path is not None:
-                tmp_path.unlink(missing_ok=True)
             raise typer.Exit(1)
 
         raise typer.Exit(0)
 
     @app.command()
     def guide() -> None:
-        """Show a user-friendly guide to using dcat.
+        """Show a guide to using dcat.
 
         Displays a walkthrough of dcat's core features and workflows,
         written for users rather than AI agents.
@@ -502,7 +733,7 @@ def register(app: typer.Typer) -> None:
 ║                           DCAT USER GUIDE                                ║
 ╚════════════════════════════════════════════════════════════════════════════╝
 
-  dcat is a lightweight, git-friendly issue tracker that lives inside
+  dcat is a git-friendly issue tracker that lives inside
   your repository. Issues are stored in a single .dogcats/issues.jsonl
   file — no server, no database, no setup beyond "dcat init".
 
@@ -642,9 +873,14 @@ def register(app: typer.Typer) -> None:
 
     dcat create "Child task" --parent <parent_id>
 
-  Parent-child is purely organizational — children are NOT blocked by
-  their parent. If a child genuinely needs its parent to finish first,
-  add an explicit dependency:
+  Parent-child is organizational — a child of an open parent is never
+  blocked by it. One exception is a deferred parent: its children drop
+  out of 'dcat ready' entirely, and 'dcat list' collapses them under
+  the parent, previewing up to 3 and counting the rest, until you pass
+  --expand.
+
+  If a child genuinely needs its parent to finish first, add an
+  explicit dependency:
 
     dcat dep <child_id> add --depends-on <parent_id>
 
@@ -719,7 +955,7 @@ def register(app: typer.Typer) -> None:
 
   Add labels to an issue:
 
-    dcat label <id> add "backend"
+    dcat label <id> add -l "backend"
 
   Add a comment to an issue:
 
@@ -752,25 +988,19 @@ def register(app: typer.Typer) -> None:
     dcat update <id> --manual       # mark existing issue as manual
     dcat update <id> --no-manual    # remove the manual flag
 
-  `--agent-only` excludes these from list/ready, so autonomous-batch
-  runs (no human available to consult) skip past them. In an
-  interactive session the agent still drives the ticket — analysis,
-  hypothesis, exact next action — and uses the user as hands for
-  the HITL steps. The Manual checkbox in the TUI editor (dcat edit)
-  toggles the same flag.
+  `--agent-only` excludes these from list/ready. The Manual checkbox
+  in the TUI editor (dcat edit) toggles the same flag.
 
 ── Snooze ──────────────────────────────────────────────────────────────────
 
   Temporarily hide an issue from list/ready without changing its status.
-  Useful for "I know about this but don't want to deal with it right now."
 
     dcat snooze <id> 7d              # hide for 7 days
     dcat snooze <id> 2w              # hide for 2 weeks
     dcat snooze <id> 1m              # hide for ~1 month (30 days)
     dcat unsnooze <id>               # reveal early
 
-  The issue keeps its original status (open, in_progress, etc.) and
-  reappears automatically when the snooze expires. No manual action needed.
+  The issue reappears automatically when the snooze expires.
 
   See what's currently snoozed:
 
@@ -798,8 +1028,8 @@ def register(app: typer.Typer) -> None:
 
 ── Git Integration ─────────────────────────────────────────────────────────
 
-  Dogcat includes a custom JSONL merge driver that auto-resolves most
-  merge conflicts when multiple branches modify issues.
+  Dogcat includes a JSONL merge driver that auto-resolves most merge
+  conflicts when multiple branches modify issues.
 
   Install the merge driver:
 
@@ -822,7 +1052,7 @@ def register(app: typer.Typer) -> None:
     dcat config set <key> <value>         # set a value
     dcat config keys                      # list available keys
 
-── Useful Commands ─────────────────────────────────────────────────────────
+── More Commands ───────────────────────────────────────────────────────────
 
   dcat graph       Visualize the dependency graph as ASCII
   dcat graph <id>  Show subgraph reachable from an issue
@@ -836,7 +1066,6 @@ def register(app: typer.Typer) -> None:
   dcat archive     Archive closed issues to reduce startup load
   dcat prune       Permanently remove deleted issues
   dcat stream      Stream issue changes in real-time (JSONL)
-  dcat features    List feature flags and their status
   dcat version     Show the dogcat version
   dcat demo        Generate demo issues for testing
 
@@ -877,7 +1106,6 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Show dogcat workflow guide and best practices for AI agents.
 
-        This command displays guidance for effective dogcat usage and workflows.
         Git health checks are included automatically when in a git repo.
         Disable with: dcat config set git_tracking false
         """
@@ -928,7 +1156,7 @@ def register(app: typer.Typer) -> None:
   Store: {Path(dogcats_dir).resolve()}
   Namespace: {namespace} (derived from the project root name)
   Lists default to this namespace plus any global visible_namespaces.
-  To give this project its own database: dcat init
+  To give this project its own store: dcat init
   To point it at an existing shared store: dcat init --use-existing-folder <path>
 """
 
@@ -976,13 +1204,13 @@ DOGCAT WORKFLOW GUIDE
 ## Quick Start
 
 Allowed issue types, priorities, and statuses:
-  Types: bug, chore, epic, feature, question, story, task
+  Types: task, bug, feature, story, chore, epic, question
   Priorities: 0 (Critical), 1 (High), 2 (Medium, default), 3 (Low), 4 (Minimal)
   Statuses: draft, open, in_progress, in_review, blocked, deferred, closed
 
 `dcat create` and `dcat update` both support --title, --description,
 --priority, --acceptance, --notes, --labels, --parent, --manual,
---design, --external-ref, --depends-on, --blocks, --duplicate-of, --editor
+--design, --external-ref, --depends-on, --blocks, --duplicate-of
 
 1. Create: $ dcat create "Title" --type bug --priority 1 -d "Description"
 
@@ -990,14 +1218,14 @@ Allowed issue types, priorities, and statuses:
    $ dcat list                  - All open issues
    $ dcat list <parent_id>     - Children of a parent
    $ dcat ready                - Ready to work (no blockers)
-   $ dcat blocked              - All blocked issues
+   $ dcat blocked              - Blocked by an unfinished dependency
    Use --namespace <ns> or --all-namespaces to filter.
 
 3. Update: $ dcat update <id> --status in_progress
 
 4. Close:  $ dcat close <id> --reason "Fixed"
 
-## Essential Commands
+## Commands
 
   dcat create <title>                        - Create a new issue
   dcat create <title> --depends-on <id>      - Create with dependency
@@ -1050,8 +1278,8 @@ If unsure about scope, ask the user before creating the breakdown.
 ## Agent Integration
 
 `--agent-only` filters in list/ready exclude issues marked `--manual`:
-  dcat ready --agent-only   # autonomous-workable
-  dcat list --agent-only    # autonomous-workable
+  dcat ready --agent-only
+  dcat list --agent-only
 
 Mark `--manual` when a step requires a human in the loop —
 credentials, deploys, hardware, visual confirmation, GUI keystrokes:
@@ -1064,7 +1292,7 @@ other: do the analysis, frame the hypothesis, hand the user one
 concrete action at a time, take their result, iterate. The human is
 your hands for steps you can't reach; the rest is still your job.
 
-## Comment-based filtering
+## Comment-Based Filtering
 
 List-style commands (list, ready, blocked, pr, snoozed, search, stale,
 recently-closed, recently-added, etc.) accept --has-comments and
@@ -1092,7 +1320,7 @@ Freeform tags shown in list/show, filter with --label.
 Temporarily hide issues from list/ready without changing status:
   dcat snooze <id> 7d             - Snooze for 7 days
   dcat snooze <id> 2w             - Snooze for 2 weeks
-  dcat snooze <id> --until 2026-04-01  - Snooze until a date
+  dcat snooze <id> 2026-04-01     - Snooze until a date
   dcat unsnooze <id>              - Remove snooze early
   dcat snoozed                    - List currently snoozed issues
   dcat list --include-snoozed     - Show snoozed issues in list
@@ -1140,7 +1368,7 @@ Proposals are lightweight (cross-repo) requests (accept, reject, or ignore).
             git_dir = git_helpers._run(["rev-parse", "--git-dir"])
             if git_dir is not None and git_dir.returncode == 0:
                 all_passed, checks = _run_git_checks()
-                output_parts.append("## dogcat health check\n")
+                output_parts.append("## Dogcat Health Check\n")
                 for check in checks.values():
                     is_optional = check.optional
                     if check.passed:

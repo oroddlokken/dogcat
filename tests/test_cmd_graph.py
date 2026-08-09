@@ -27,9 +27,7 @@ class TestGraph:
         assert result.exit_code == 0, result.stdout
         return result.stdout.split(": ")[0].split()[-1]
 
-    # ------------------------------------------------------------------
     # Empty graph
-    # ------------------------------------------------------------------
 
     def test_no_issues(self, tmp_path: Path) -> None:
         """Empty tracker produces no graph."""
@@ -46,9 +44,7 @@ class TestGraph:
         assert result.exit_code == 0
         assert "No dependency graph to display" in result.stdout
 
-    # ------------------------------------------------------------------
     # Blocking dependency edges
-    # ------------------------------------------------------------------
 
     def test_blocking_dep(self, tmp_path: Path) -> None:
         """A blocks B should render with ▶ arrow."""
@@ -90,9 +86,7 @@ class TestGraph:
         assert "Second" in result.stdout
         assert "Third" in result.stdout
 
-    # ------------------------------------------------------------------
     # Parent-child edges
-    # ------------------------------------------------------------------
 
     def test_parent_child(self, tmp_path: Path) -> None:
         """Parent-child relationships use ── connectors."""
@@ -107,9 +101,7 @@ class TestGraph:
         # Should contain tree connector (not the blocks arrow)
         assert "──" in result.stdout
 
-    # ------------------------------------------------------------------
     # Mixed edges
-    # ------------------------------------------------------------------
 
     def test_mixed_edges(self, tmp_path: Path) -> None:
         """Graph with both parent-child and blocking edges."""
@@ -129,9 +121,7 @@ class TestGraph:
         assert "Child" in result.stdout
         assert "External blocker" in result.stdout
 
-    # ------------------------------------------------------------------
     # Subgraph by issue ID
-    # ------------------------------------------------------------------
 
     def test_subgraph(self, tmp_path: Path) -> None:
         """Dcat graph <id> shows only the reachable subgraph."""
@@ -158,9 +148,7 @@ class TestGraph:
         result = runner.invoke(app, ["graph", "nonexistent", "--dogcats-dir", dd])
         assert result.exit_code == 1
 
-    # ------------------------------------------------------------------
     # DAG convergence (visited dedup)
-    # ------------------------------------------------------------------
 
     def test_dag_convergence_ref(self, tmp_path: Path) -> None:
         """When two paths converge on the same node, second shows (ref:)."""
@@ -186,9 +174,7 @@ class TestGraph:
         # Leaf should appear once fully and once as (ref: ...).
         assert "ref:" in result.stdout
 
-    # ------------------------------------------------------------------
     # Filters
-    # ------------------------------------------------------------------
 
     def test_agent_only(self, tmp_path: Path) -> None:
         """--agent-only hides manual issues."""
@@ -210,9 +196,7 @@ class TestGraph:
         # After filtering out Manual, Auto has no relationship left.
         assert "Manual" not in result.stdout
 
-    # ------------------------------------------------------------------
     # JSON output
-    # ------------------------------------------------------------------
 
     def test_json_output(self, tmp_path: Path) -> None:
         """JSON output contains nodes and edges."""

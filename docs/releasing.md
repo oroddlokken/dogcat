@@ -30,7 +30,5 @@ Hand edits cover only structural changes: a new runtime dependency, a changed en
 changed command structure. Wait for user confirmation before making one, and tell the user when a
 CLI change requires it.
 
-The formula lives in a separate repo. On this machine it is checked out at
-`../personal/homebrew-tap/Formula/dogcat.rb`; the sibling directory `../homebrew-tap` is an
-unrelated tap and holds no `Formula/` directory. Confirm the path before editing rather than
-assuming a sibling checkout exists.
+The formula lives in a separate repo. Confirm the path before editing rather than assuming a
+sibling checkout exists — more than one nearby directory can look like the tap.

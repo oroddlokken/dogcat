@@ -8,6 +8,7 @@ import pytest
 from typer.testing import CliRunner
 
 from dogcat.cli import app
+from dogcat.constants import STATUS_OPTIONS
 
 runner = CliRunner()
 
@@ -712,7 +713,7 @@ class TestCLICreate:
         )
         assert result.exit_code == 1
         # Error message goes to stderr, captured in result.output
-        assert "not found" in result.output
+        assert "matched no issue" in result.output
 
         # Verify no issue was created
         result = runner.invoke(
@@ -747,7 +748,7 @@ class TestCLICreate:
         )
         assert result.exit_code == 1
         # Error message goes to stderr, captured in result.output
-        assert "not found" in result.output
+        assert "matched no issue" in result.output
 
         # Verify no issue was created
         result = runner.invoke(
@@ -902,7 +903,7 @@ class TestCLICreate:
             ],
         )
         assert result.exit_code == 1
-        assert "Parent issue nonexistent not found" in result.output
+        assert "Parent issue 'nonexistent' matched no issue" in result.output
 
     def test_create_auto_populates_owner_and_created_by(self, tmp_path: Path) -> None:
         """Test that create auto-populates owner and created_by from git config."""
@@ -1296,3 +1297,95 @@ class TestCreateBodyAlias:
         )
         assert result.exit_code == 1
         assert "Cannot use both" in result.stderr
+
+
+class TestCreateStatusValidation:
+    """Test that --status on create only accepts user-selectable statuses."""
+
+    @pytest.mark.parametrize("sentinel", ["tombstone", "unknown"])
+    def test_create_rejects_sentinel_status(
+        self,
+        tmp_path: Path,
+        sentinel: str,
+    ) -> None:
+        """Neither Status sentinel may be written through --status."""
+        from dogcat.storage import JSONLStorage
+
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "Sentinel status",
+                "--status",
+                sentinel,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code != 0
+        assert f"Invalid status '{sentinel}'" in result.stderr
+        # The message has to name the alternatives, not just reject.
+        assert "in_progress" in result.stderr
+        assert JSONLStorage(str(dogcats_dir / "issues.jsonl")).list() == []
+
+    @pytest.mark.parametrize("sentinel", ["tombstone", "unknown"])
+    def test_c_alias_rejects_sentinel_status(
+        self,
+        tmp_path: Path,
+        sentinel: str,
+    ) -> None:
+        """The quick-create alias shares the check, not just `create`."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            ["c", "Sentinel status", "-s", sentinel, "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code != 0
+        assert f"Invalid status '{sentinel}'" in result.stderr
+
+    @pytest.mark.parametrize(
+        "status",
+        [value for _label, value in STATUS_OPTIONS],
+    )
+    def test_create_accepts_every_selectable_status(
+        self,
+        tmp_path: Path,
+        status: str,
+    ) -> None:
+        """Every value the help and completion offer still round-trips."""
+        from dogcat.storage import JSONLStorage
+
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                f"Status {status}",
+                "--status",
+                status,
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0, result.stderr
+        issue_id = json.loads(result.stdout)["id"]
+        stored = JSONLStorage(str(dogcats_dir / "issues.jsonl")).get(issue_id)
+        assert stored is not None
+        assert stored.status.value == status
+
+    def test_status_completion_omits_sentinels(self) -> None:
+        """Completion, help text and parser have to offer the same set."""
+        from dogcat.cli._completions import complete_statuses
+
+        offered = {value for value, _help in complete_statuses("")}
+        assert offered == {value for _label, value in STATUS_OPTIONS}
+        assert "tombstone" not in offered
+        assert "unknown" not in offered

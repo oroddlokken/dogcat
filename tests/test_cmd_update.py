@@ -3,9 +3,11 @@
 import json
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from dogcat.cli import app
+from dogcat.constants import STATUS_OPTIONS
 
 runner = CliRunner()
 
@@ -388,7 +390,7 @@ class TestCLIUpdate:
             ],
         )
         assert result.exit_code == 1
-        assert "Parent issue nonexistent not found" in result.output
+        assert "Parent issue 'nonexistent' matched no issue" in result.output
 
     def test_update_duplicate_of_with_partial_id_resolves_to_full(
         self,
@@ -482,7 +484,7 @@ class TestCLIUpdate:
             ],
         )
         assert result.exit_code == 1
-        assert "Duplicate target nonexistent not found" in result.output
+        assert "Duplicate target 'nonexistent' matched no issue" in result.output
 
     def test_update_auto_populates_updated_by(self, tmp_path: Path) -> None:
         """Test that update auto-populates updated_by from git config."""
@@ -1139,3 +1141,140 @@ class TestUpdateMultipleIssues:
         for line in lines:
             data = json.loads(line)
             assert data["status"] == "in_progress"
+
+
+def _create_issue_id(dogcats_dir: Path, title: str) -> str:
+    """Init if needed, create ``title``, and return the new issue's full id."""
+    result = runner.invoke(
+        app,
+        ["create", title, "--json", "--dogcats-dir", str(dogcats_dir)],
+    )
+    assert result.exit_code == 0, result.stderr
+    return str(json.loads(result.stdout)["id"])
+
+
+class TestUpdateStatusValidation:
+    """Test that --status on update only accepts user-selectable statuses."""
+
+    @pytest.mark.parametrize("sentinel", ["tombstone", "unknown"])
+    def test_update_rejects_sentinel_status(
+        self,
+        tmp_path: Path,
+        sentinel: str,
+    ) -> None:
+        """A sentinel status must not reach storage.
+
+        ``--status tombstone`` used to set the absorbing status with no
+        ``deleted_at``/``deleted_by``/``deleted_reason``, after which update,
+        close and reopen all refused the issue. (dogcat-vsp8)
+        """
+        from dogcat.storage import JSONLStorage
+
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        issue_id = _create_issue_id(dogcats_dir, "Live issue")
+
+        result = runner.invoke(
+            app,
+            [
+                "update",
+                issue_id,
+                "--status",
+                sentinel,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code != 0
+        assert f"Invalid status '{sentinel}'" in result.stderr
+        assert "in_progress" in result.stderr
+
+        stored = JSONLStorage(str(dogcats_dir / "issues.jsonl")).get(issue_id)
+        assert stored is not None
+        assert stored.status.value == "open"
+
+    @pytest.mark.parametrize("sentinel", ["tombstone", "unknown"])
+    def test_update_rejects_sentinel_before_any_write(
+        self,
+        tmp_path: Path,
+        sentinel: str,
+    ) -> None:
+        """A multi-id update rejects up front, leaving no id half-updated."""
+        from dogcat.storage import JSONLStorage
+
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        ids = [_create_issue_id(dogcats_dir, f"Issue {n}") for n in range(2)]
+
+        result = runner.invoke(
+            app,
+            ["update", *ids, "--status", sentinel, "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code != 0
+
+        storage = JSONLStorage(str(dogcats_dir / "issues.jsonl"))
+        for issue_id in ids:
+            stored = storage.get(issue_id)
+            assert stored is not None
+            assert stored.status.value == "open"
+
+    @pytest.mark.parametrize(
+        "status",
+        [value for _label, value in STATUS_OPTIONS],
+    )
+    def test_update_accepts_every_selectable_status(
+        self,
+        tmp_path: Path,
+        status: str,
+    ) -> None:
+        """Every value the help and completion offer still round-trips."""
+        from dogcat.storage import JSONLStorage
+
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        issue_id = _create_issue_id(dogcats_dir, f"Status {status}")
+
+        result = runner.invoke(
+            app,
+            [
+                "update",
+                issue_id,
+                "--status",
+                status,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0, result.stderr
+        stored = JSONLStorage(str(dogcats_dir / "issues.jsonl")).get(issue_id)
+        assert stored is not None
+        assert stored.status.value == status
+
+    def test_delete_still_tombstones(self, tmp_path: Path) -> None:
+        """`dcat delete` stays the one route to a tombstone."""
+        from dogcat.storage import JSONLStorage
+
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        issue_id = _create_issue_id(dogcats_dir, "Issue to delete")
+
+        result = runner.invoke(
+            app,
+            [
+                "delete",
+                issue_id,
+                "--reason",
+                "obsolete",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0, result.stderr
+
+        storage = JSONLStorage(str(dogcats_dir / "issues.jsonl"))
+        stored = storage.get(issue_id)
+        assert stored is not None
+        assert stored.status.value == "tombstone"
+        # The fields --status tombstone left empty are what delete fills in.
+        assert stored.deleted_at is not None
+        assert stored.deleted_reason == "obsolete"

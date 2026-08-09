@@ -3,7 +3,8 @@
 Flags are checked via environment variables: DCAT_FEATURE_<NAME>=1
 (also accepts 'true', 'yes', case-insensitive).
 
-The FeatureFlag enum is the single source of truth for all flags.
+The FeatureFlag enum is where a flag gets registered. It is empty today, so
+nothing in this module is reachable — see :class:`FeatureFlag`.
 """
 
 from __future__ import annotations
@@ -15,10 +16,15 @@ _TRUTHY_VALUES = frozenset({"1", "true", "yes"})
 
 
 class FeatureFlag(str, Enum):
-    """Registry of all feature flags.
+    """Registry of all feature flags — intentionally empty.
 
-    Each member's value is the suffix used in the env var name:
-    DCAT_FEATURE_<VALUE>.
+    The emptiness is a decision, not an oversight: dogcat-15vs removed the
+    ``dcat guide`` copy that advertised flags and deliberately kept the enum
+    with no members. So :func:`feature_enabled` is currently unreachable and
+    ``dcat features`` always takes its empty branch.
+
+    Add a member here to register a flag. Its value is the suffix in the env
+    var name: ``DCAT_FEATURE_<VALUE>``.
     """
 
 

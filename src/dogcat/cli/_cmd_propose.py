@@ -12,6 +12,10 @@ from dogcat.constants import DEFAULT_NAMESPACE
 from ._completions import complete_namespaces
 from ._helpers import find_dogcats_dir, get_default_operator
 from ._json_state import echo_error, is_json, set_json
+from ._list_options import (
+    ByOpt,
+    JsonOpt,
+)
 
 
 def _resolve_target_dogcats(to: str) -> str:
@@ -48,11 +52,7 @@ def register(app: typer.Typer) -> None:
             "-d",
             help="Proposal description",
         ),
-        by: str | None = typer.Option(
-            None,
-            "--by",
-            help="Who is proposing (default: auto-detected)",
-        ),
+        by: ByOpt = None,
         to: str | None = typer.Option(
             None,
             "--to",
@@ -65,11 +65,7 @@ def register(app: typer.Typer) -> None:
             help="Namespace for the proposal",
             autocompletion=complete_namespaces,
         ),
-        json_output: bool = typer.Option(
-            False,
-            "--json",
-            help="Output as JSON",
-        ),
+        json_output: JsonOpt = False,
     ) -> None:
         """Send a proposal to a repo's inbox (fire-and-forget).
 

@@ -18,6 +18,13 @@ them. Run `git status .dogcats/` before `git reset --hard`, `git checkout -- .`,
 NEVER force-push `main`. The event log only grows, so a rewritten `main` drops records
 collaborators have already merged and nothing recovers them once their clones re-sync.
 
+Nothing in this repo enforces the rules below. There is no `.claude/` directory, no
+`permissions.deny` list and no hooks, and that is a decision rather than an omission: the
+guardrails have to hold for Codex and any other agent that reads this file, and a deny-list
+that only Claude Code honours would read as protection that is not there. It would also block
+the maintainer from the four rewrite commands on the rare occasion they are wanted. Treat every
+rule here as binding on you, not on the harness (dogcat-1xgi).
+
 Make every issue and proposal mutation through a `dcat` command. Editing the JSONL by any other
 route corrupts the audit log, which the merge driver and compaction both read in order. The routes
 that count as editing it directly: a Python or `jq` one-liner that appends a line, `sed -i`, opening
@@ -25,6 +32,10 @@ the file in an editor, hand-resolving a merge conflict inside it, restoring it w
 `git checkout`/`git restore`/`git stash`, and pasting records out of `.dogcats/archive/` back into
 `issues.jsonl`. For conflict markers run `uv run dcat git rebase`; for a damaged file run
 `uv run dcat repair-jsonl --dry-run` first, because the next append silently drops unparseable lines.
+`dcat git rebase` exits non-zero and names any file it could not resolve — that file still holds
+`<<<<<<<`, so do not run `git rebase --continue` until it does. A yellow line naming a file means it
+merged without a common ancestor and may have restored a dependency or link the other branch
+deleted; check with `uv run dcat doctor --post-merge`.
 Test fixtures under `tests/` may serialize records straight to a temp store — that precedent does
 not extend to this repo's own `.dogcats/`.
 
@@ -96,14 +107,19 @@ when a command in the middle fails.
 ## Data files
 
 `.dogcats/issues.jsonl` holds `issue`, `dependency`, `link` and `event` records, loaded by
-`JSONLStorage` in `src/dogcat/storage.py`. `.dogcats/inbox.jsonl` holds `proposal` records
+`JSONLStorage` in `src/dogcat/storage.py`. It also carries, untouched, any record whose
+`record_type` this dcat does not model — a kind written by a newer release. `JSONLStorage._preserved`
+holds them and every rewrite re-emits them, so a line you do not recognise is data, not debris: do
+not delete it, and add the same pass-through to any new code that rewrites the file (dogcat-68ij).
+`.dogcats/inbox.jsonl` holds `proposal` records
 submitted from the web UI or `dcat propose --to`, managed by `src/dogcat/inbox.py`; a proposal
 moves `open` → `closed` → `tombstone` and never back. Triage them with `dcat inbox`, whose
 reference `dcat prime --opinionated --inbox` prints.
 
 The store is not permanently append-only. Once appended lines exceed `COMPACTION_RATIO`, `_append`
 rewrites the whole file with current state only, and that rewrite runs on a default branch alone
-(`storage.py:475`). A large all-lines-changed diff on `issues.jsonl` after merging to `main` is a
+(the `should_compact` branch in `JSONLStorage._append`). A large all-lines-changed diff on
+`issues.jsonl` after merging to `main` is a
 compaction, not corruption — leave it. Writes take an advisory lock, so concurrent `dcat` processes
 are safe and concurrent hand-edits are not.
 
@@ -113,7 +129,7 @@ Work commits directly to `main`. Commit only when the user asks, and push only w
 a push to `main` runs CI, and a push of a `release/v*` branch starts the publish pipeline.
 Stage `.dogcats/` alongside the code change it belongs to.
 
-The JSONL merge driver is live in this checkout: `.gitattributes` maps `.dogcats/*.jsonl` to
+The JSONL merge driver is live in this checkout: `.gitattributes` maps `.dogcats/**/*.jsonl` to
 `merge=dcat-jsonl`, and local git config binds that to `dcat git merge-driver`. It resolves `dcat`
 from PATH rather than from `src/`, so editing `merge_driver.py` changes nothing about the next merge
 unless dcat is installed from this source. When `dcat` is missing from PATH the driver exits
@@ -147,7 +163,8 @@ Read the matching file before working in that area, and update it in the same ch
 - `docs/releasing.md` — `just release-prep`, PyPI, the Homebrew formula
 - `docs/web-ui.md` — CSP, static assets, deferred imports, the node toolchain
 - `docs/merge-coverage.md` — the claim-to-test matrix for `src/dogcat/merge_driver.py`
-- `docs/sharing-a-database.md` — storage resolution and namespaces
+- `docs/sharing-a-database.md` — storage resolution, namespaces, environment overrides
+- `docs/id-collisions.md` — the math behind `ID_LENGTH_THRESHOLDS`, read before re-tuning one
 
 When a change makes a rule here wrong — a renamed `just` target, a moved path, a changed CLI flag —
 fix this file in the same commit.

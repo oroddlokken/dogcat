@@ -8,6 +8,9 @@ the merge driver is installed.
 from __future__ import annotations
 
 import logging
+import os
+import subprocess
+import sys
 from typing import TYPE_CHECKING, Any
 
 import orjson
@@ -66,6 +69,23 @@ def _proposal_record(**kwargs: Any) -> dict[str, Any]:
     return defaults
 
 
+def _unknown_record(**kwargs: Any) -> dict[str, Any]:
+    """Build a record of a kind this dcat does not know.
+
+    Models what a newer dcat writes into issues.jsonl: an explicit
+    ``record_type`` outside ``_KNOWN_RECORD_TYPES``, which is the only input
+    ``classify_record`` reports as ``"unknown"``.
+    """
+    defaults: dict[str, Any] = {
+        "record_type": "attachment",
+        "id": "u1",
+        "issue_id": "test-x",
+        "payload": "from the future",
+    }
+    defaults.update(kwargs)
+    return defaults
+
+
 def _dep_record(**kwargs: Any) -> dict[str, Any]:
     """Build a minimal dependency record dict."""
     defaults: dict[str, Any] = {
@@ -76,11 +96,6 @@ def _dep_record(**kwargs: Any) -> dict[str, Any]:
     }
     defaults.update(kwargs)
     return defaults
-
-
-# ---------------------------------------------------------------------------
-# Unit tests for merge_jsonl()
-# ---------------------------------------------------------------------------
 
 
 class TestMergeJSONL:
@@ -298,6 +313,123 @@ class TestMergeJSONL:
         assert len(issues) == 1
         assert issues[0]["status"] == "closed"
 
+    def test_equal_timestamps_converge_across_argument_order(self) -> None:
+        """Same rank + same updated_at resolves the same way in both orders.
+
+        The tie-break was `new_ts >= old_ts`, which resolves by arrival
+        order: merging ours-then-theirs kept theirs, theirs-then-ours kept
+        ours. Two collaborators merging the same pair of branches in
+        opposite directions ended up with different content, which is
+        exactly what the "convergent across argument order" claim denies.
+        (dogcat-1xgi)
+        """
+        ts = "2026-01-02T00:00:00+00:00"
+        base = [_issue_record(id="tie", title="Original")]
+        ours = [_issue_record(id="tie", title="From ours", updated_at=ts)]
+        theirs = [_issue_record(id="tie", title="From theirs", updated_at=ts)]
+
+        forward = [
+            r for r in merge_jsonl(base, ours, theirs) if r["record_type"] == "issue"
+        ]
+        backward = [
+            r for r in merge_jsonl(base, theirs, ours) if r["record_type"] == "issue"
+        ]
+
+        assert len(forward) == 1
+        assert forward == backward, (
+            "merge is not convergent: argument order changed the winner"
+        )
+        # Stable across repeat calls too, not just symmetric.
+        assert forward == [
+            r for r in merge_jsonl(base, ours, theirs) if r["record_type"] == "issue"
+        ]
+
+    def test_equal_timestamp_proposals_converge_across_argument_order(self) -> None:
+        """Proposals carried the identical positional tie-break. (dogcat-1xgi)."""
+        ts = "2026-03-01T00:00:00+00:00"
+        base = [_proposal_record(id="p1", title="Original")]
+        ours = [_proposal_record(id="p1", title="From ours", updated_at=ts)]
+        theirs = [_proposal_record(id="p1", title="From theirs", updated_at=ts)]
+
+        forward = [
+            r for r in merge_jsonl(base, ours, theirs) if r["record_type"] == "proposal"
+        ]
+        backward = [
+            r for r in merge_jsonl(base, theirs, ours) if r["record_type"] == "proposal"
+        ]
+        assert len(forward) == 1
+        assert forward == backward
+
+    def test_draft_loses_to_every_active_status(self) -> None:
+        """`draft` ranks below the five active statuses, even when newer.
+
+        _ISSUE_STATUS_RANK (merge_driver.py) puts draft at 0 and the active
+        statuses at 1, but `draft` appeared in no merge test.
+        The draft record carries the later timestamp, so only the rank can
+        decide it. (dogcat-1xgi)
+        """
+        for active in ("open", "in_progress", "in_review", "blocked", "deferred"):
+            base = [_issue_record(id="d1", status="draft")]
+            ours = [
+                _issue_record(
+                    id="d1",
+                    status="draft",
+                    title="Still a draft",
+                    updated_at="2026-06-01T00:00:00+00:00",
+                )
+            ]
+            theirs = [
+                _issue_record(
+                    id="d1",
+                    status=active,
+                    title="Promoted",
+                    updated_at="2026-01-01T00:00:00+00:00",
+                )
+            ]
+
+            for a, b in ((ours, theirs), (theirs, ours)):
+                issues = [
+                    r for r in merge_jsonl(base, a, b) if r["record_type"] == "issue"
+                ]
+                assert len(issues) == 1
+                assert issues[0]["status"] == active, (
+                    f"draft beat {active} despite ranking below it"
+                )
+
+    def test_active_statuses_share_a_rank_and_fall_through_to_timestamp(self) -> None:
+        """Any two of the five active statuses tie on rank, so time decides.
+
+        `test_issue_same_status_falls_back_to_updated_at` uses the *same*
+        status on both sides, so equivalence across the five was never
+        checked — a rank typo promoting one of them would not have failed
+        a test. (dogcat-1xgi)
+        """
+        from itertools import permutations
+
+        active = ("open", "in_progress", "in_review", "blocked", "deferred")
+        for earlier, later in permutations(active, 2):
+            base = [_issue_record(id="a1")]
+            ours = [
+                _issue_record(
+                    id="a1", status=earlier, updated_at="2026-01-01T00:00:00+00:00"
+                )
+            ]
+            theirs = [
+                _issue_record(
+                    id="a1", status=later, updated_at="2026-02-01T00:00:00+00:00"
+                )
+            ]
+
+            issues = [
+                r
+                for r in merge_jsonl(base, ours, theirs)
+                if r["record_type"] == "issue"
+            ]
+            assert issues[0]["status"] == later, (
+                f"{earlier} vs {later}: later timestamp did not win, so the "
+                f"two do not share a rank"
+            )
+
     def test_issue_same_status_falls_back_to_updated_at(self) -> None:
         """Same status: the record with the later updated_at still wins."""
         base: list[dict[str, Any]] = []
@@ -366,8 +498,7 @@ class TestMergeJSONL:
                 updated_at="2026-04-25T10:00:00Z",
             )
         ]
-        # Same instant, different formatting; theirs is iterated last so
-        # on tie it wins.
+        # Same instant, different formatting.
         theirs = [
             _issue_record(
                 id="x",
@@ -376,11 +507,19 @@ class TestMergeJSONL:
                 updated_at="2026-04-25T10:00:00+00:00",
             )
         ]
-        result = merge_jsonl(base, ours, theirs)
-        issues = [r for r in result if r.get("record_type") == "issue"]
+        issues = [
+            r for r in merge_jsonl(base, ours, theirs) if r["record_type"] == "issue"
+        ]
         assert len(issues) == 1
-        # Tied timestamps: theirs (iterated last) wins under the deterministic rule.
-        assert issues[0]["title"] == "Offset form"
+        # The point of the test is that neither format reads as *later* than
+        # the other, so this is a tie. Which side a tie resolves to is the
+        # tie-break's business, and it must not depend on argument order
+        # (dogcat-1xgi) — so assert the two orders agree rather than naming
+        # a winner here.
+        swapped = [
+            r for r in merge_jsonl(base, theirs, ours) if r["record_type"] == "issue"
+        ]
+        assert issues == swapped
 
     def test_issue_pdt_vs_utc_picks_absolute_later(self) -> None:
         """PDT (-07) vs UTC: pick the absolute-later record."""
@@ -534,11 +673,6 @@ class TestMergeJSONL:
         assert len(links) == 1
 
 
-# ---------------------------------------------------------------------------
-# Unit tests for _parse_jsonl() logging and conflict marker detection
-# ---------------------------------------------------------------------------
-
-
 class TestParseJSONLLogging:
     """Verify _parse_jsonl logs warnings for malformed lines and conflict markers."""
 
@@ -599,11 +733,6 @@ class TestParseJSONLLogging:
         assert _parse_jsonl(f) == []
 
 
-# ---------------------------------------------------------------------------
-# Tests for merge driver CLI entry point error handling
-# ---------------------------------------------------------------------------
-
-
 class TestMergeDriverCLI:
     """Verify git_merge_driver CLI has proper error handling."""
 
@@ -639,7 +768,11 @@ class TestMergeDriverCLI:
         assert ids == {"a", "b"}
 
     def test_merge_driver_failure_exits_nonzero(self, tmp_path: Path) -> None:
-        """When merge logic fails, exits 1 so git falls back."""
+        """When merge logic fails, exits 1 so git marks the path conflicted.
+
+        Non-zero is not a request for git's default merge — git runs no
+        fallback and leaves the ours file untouched.
+        """
         from unittest.mock import patch
 
         from typer.testing import CliRunner
@@ -692,16 +825,56 @@ class TestMergeDriverCLI:
             if ln.strip():
                 orjson.loads(ln)
 
+    def test_merge_driver_preserves_file_mode(self, tmp_path: Path) -> None:
+        """A 0644-shared store keeps mode 0644 after the driver rewrites it.
 
-# ---------------------------------------------------------------------------
+        The driver replaces the ours file via a tempfile rename, and a
+        tempfile is created 0600 — so without carrying the original mode
+        across, a merge leaves the store readable only by whoever merged.
+        (dogcat-64nd)
+        """
+        from typer.testing import CliRunner
+
+        from dogcat.cli import app
+
+        base = tmp_path / "base.jsonl"
+        ours = tmp_path / "ours.jsonl"
+        theirs = tmp_path / "theirs.jsonl"
+
+        base.write_text("")
+        ours.write_text(
+            '{"record_type":"issue","namespace":"t","id":"a","title":"A","status":"open","priority":2,"issue_type":"task","updated_at":"2026-01-01T00:00:00+00:00"}\n'
+        )
+        theirs.write_text(
+            '{"record_type":"issue","namespace":"t","id":"b","title":"B","status":"open","priority":2,"issue_type":"task","updated_at":"2026-01-01T00:00:00+00:00"}\n'
+        )
+        ours.chmod(0o644)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            app, ["git", "merge-driver", str(base), str(ours), str(theirs)]
+        )
+        assert result.exit_code == 0
+        assert ours.stat().st_mode & 0o777 == 0o644
+
+
 # Integration tests: merge driver with real git repos
-# ---------------------------------------------------------------------------
 
 
 def _install_merge_driver(repo: GitRepo) -> None:
-    """Configure the dcat-jsonl merge driver in a git repo."""
+    """Configure the dcat-jsonl merge driver in a git repo.
+
+    The narrow pre-widening pattern here is deliberate, and the same choice
+    is made by the `_install_merge_driver` twins in the other git test
+    modules. Everything they merge lives in `.dogcats/issues.jsonl`, which
+    that pattern already covers, so keeping them on it is free coverage of
+    the configuration every user upgraded from an older dcat is still
+    running until they re-run `dcat git setup`. Do not "fix" them to
+    GITATTRIBUTES_ENTRY — the widened pattern is exercised where it
+    matters, by tests/test_git_commands.py::TestArchiveFileMerging, which
+    is the only place a file below `.dogcats/` is in play. (dogcat-5tc1)
+    """
     repo.git("config", "merge.dcat-jsonl.driver", MERGE_DRIVER_CMD)
-    # Write .gitattributes
     attrs = repo.path / ".gitattributes"
     attrs.write_text(".dogcats/*.jsonl merge=dcat-jsonl\n")
     repo.commit_all("Add merge driver config")
@@ -850,9 +1023,7 @@ class TestMergeDriverIntegration:
         assert len(storage.all_links) >= 1
 
 
-# ---------------------------------------------------------------------------
 # E2E test: full git merge workflow using dcat CLI
-# ---------------------------------------------------------------------------
 
 
 def _cli_invoke(dogcats_dir: Path, args: list[str]) -> str:
@@ -1017,11 +1188,6 @@ class TestGitMergeWorkflowE2E:
         assert contested_id in concurrent_ids
 
 
-# ---------------------------------------------------------------------------
-# Unit test: event dedup key granularity
-# ---------------------------------------------------------------------------
-
-
 class TestEventDedupKey:
     """Verify that the event dedup key distinguishes distinct events."""
 
@@ -1068,3 +1234,400 @@ class TestEventDedupKey:
         result = merge_jsonl(base, ours, theirs)
         events = [r for r in result if r.get("record_type") == "event"]
         assert len(events) == 1
+
+
+def _unknowns(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return the records of unrecognised kinds, in output order."""
+    known = {"issue", "proposal", "dependency", "link", "event"}
+    return [r for r in records if r.get("record_type") not in known]
+
+
+class TestUnknownRecordKinds:
+    """Records of kinds this dcat does not understand survive the merge.
+
+    The merger used to assemble its result from the five known kinds only,
+    and both callers overwrite the target file with that result — so a
+    record written by a newer dcat was erased, not merely unmerged
+    (dogcat-68ij).
+    """
+
+    def test_unknown_record_from_theirs_survives(self) -> None:
+        """A kind only theirs knows about is still in the merged output."""
+        base: list[dict[str, Any]] = []
+        ours = [_issue_record(id="a1")]
+        theirs = [_issue_record(id="a1"), _unknown_record()]
+
+        result = merge_jsonl(base, ours, theirs)
+        assert _unknowns(result) == [_unknown_record()]
+
+    def test_unknown_record_from_ours_survives(self) -> None:
+        """Side symmetry: an unknown kind only ours carries also survives."""
+        base: list[dict[str, Any]] = []
+        ours = [_unknown_record()]
+        theirs = [_issue_record(id="a1")]
+
+        assert _unknowns(merge_jsonl(base, ours, theirs)) == [_unknown_record()]
+
+    def test_unknown_record_on_both_sides_appears_once(self) -> None:
+        """Both sides carrying the same unknown record collapse to one row."""
+        base: list[dict[str, Any]] = []
+        ours = [_unknown_record()]
+        theirs = [_unknown_record()]
+
+        assert len(_unknowns(merge_jsonl(base, ours, theirs))) == 1
+
+    def test_unknown_record_idempotent(self) -> None:
+        """Merging a set containing an unknown record with itself is a no-op."""
+        records = [_issue_record(id="a1"), _unknown_record()]
+
+        once = merge_jsonl(records, records, records)
+        twice = merge_jsonl(once, once, once)
+
+        assert _unknowns(once) == [_unknown_record()]
+        assert twice == once
+
+    def test_unknown_records_converge_across_argument_order(self) -> None:
+        """merge(base, ours, theirs) == merge(base, theirs, ours) for unknowns."""
+        base = [_unknown_record(id="shared")]
+        ours = [_unknown_record(id="shared"), _unknown_record(id="ours-only")]
+        theirs = [_unknown_record(id="shared"), _unknown_record(id="theirs-only")]
+
+        forward = _unknowns(merge_jsonl(base, ours, theirs))
+        backward = _unknowns(merge_jsonl(base, theirs, ours))
+
+        assert forward == backward
+        assert {r["id"] for r in forward} == {"shared", "ours-only", "theirs-only"}
+
+    def test_unknown_record_absent_from_one_side_is_not_deleted(self) -> None:
+        """Base is deliberately not consulted for unknown kinds.
+
+        Deps and links treat "in base, absent from this side" as a deletion.
+        Unknown kinds do not: a tool that cannot parse the kind cannot tell
+        an edit from a delete, and keeping a stale copy is recoverable where
+        dropping the only copy is not.
+        """
+        base = [_unknown_record()]
+        ours: list[dict[str, Any]] = []
+        theirs = [_unknown_record()]
+
+        assert _unknowns(merge_jsonl(base, ours, theirs)) == [_unknown_record()]
+
+    def test_unknown_records_sort_last_after_events(self) -> None:
+        """Unknown records land after the events, keeping compaction order."""
+        base: list[dict[str, Any]] = []
+        ours = [_unknown_record(), _issue_record(id="a1")]
+        theirs = [_event_record(), _dep_record()]
+
+        result = merge_jsonl(base, ours, theirs)
+        kinds = [r.get("record_type") for r in result]
+        assert kinds == ["issue", "dependency", "event", "attachment"]
+
+    def test_unknown_records_do_not_perturb_known_kinds(self) -> None:
+        """Adding an unknown record changes nothing about the five known kinds."""
+        base = [_issue_record(id="s1", title="Original")]
+        ours = [_issue_record(id="s1", updated_at="2026-01-02T00:00:00+00:00")]
+        theirs = [_issue_record(id="s1", updated_at="2026-01-03T00:00:00+00:00")]
+
+        without = merge_jsonl(base, ours, theirs)
+        with_unknown = merge_jsonl(base, [*ours, _unknown_record()], theirs)
+
+        assert [r for r in with_unknown if r.get("record_type") == "issue"] == [
+            r for r in without if r.get("record_type") == "issue"
+        ]
+
+    def test_unknown_record_survives_the_merge_driver_command(
+        self, tmp_path: Path
+    ) -> None:
+        """End-to-end: the driver writes the unknown record back to the ours file.
+
+        The unit tests above prove the record is in the returned list; only
+        this one proves it is still in the file the caller overwrote.
+        """
+        from typer.testing import CliRunner
+
+        from dogcat.cli import app
+
+        base = tmp_path / "base.jsonl"
+        ours = tmp_path / "ours.jsonl"
+        theirs = tmp_path / "theirs.jsonl"
+
+        base.write_text("")
+        ours.write_text(
+            '{"record_type":"issue","namespace":"t","id":"a","title":"A",'
+            '"status":"open","priority":2,"issue_type":"task",'
+            '"updated_at":"2026-01-01T00:00:00+00:00"}\n'
+        )
+        theirs.write_text(
+            '{"record_type":"issue","namespace":"t","id":"b","title":"B",'
+            '"status":"open","priority":2,"issue_type":"task",'
+            '"updated_at":"2026-01-01T00:00:00+00:00"}\n'
+            '{"record_type":"attachment","id":"u1","payload":"from the future"}\n'
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(
+            app, ["git", "merge-driver", str(base), str(ours), str(theirs)]
+        )
+        assert result.exit_code == 0
+
+        merged = [
+            orjson.loads(ln) for ln in ours.read_text().splitlines() if ln.strip()
+        ]
+        assert {r["id"] for r in merged} == {"a", "b", "u1"}
+        assert _unknowns(merged) == [
+            {"record_type": "attachment", "id": "u1", "payload": "from the future"}
+        ]
+
+    def test_unknown_record_survives_a_real_git_merge(self, git_repo: GitRepo) -> None:
+        """End-to-end through git: an unknown record outlives a driver-run merge.
+
+        The record is appended to the JSONL directly because no dcat command
+        writes a kind dcat does not know — that is the scenario. This is a
+        temp-store fixture, not the repo's own .dogcats/.
+        """
+        repo = git_repo
+        _install_merge_driver(repo)
+
+        s = repo.storage()
+        s.create(Issue(id="seed", namespace="test", title="Seed"))
+        repo.commit_all("Seed issue")
+
+        # Branch A: a newer dcat appends a kind this dcat cannot parse.
+        repo.create_branch("branch-a")
+        with repo.storage_path.open("a") as fh:
+            fh.write('{"record_type":"attachment","id":"u1","payload":"future"}\n')
+        repo.commit_all("Record from a newer dcat on branch-a")
+
+        # Branch B: ordinary work on the same file.
+        repo.switch_branch("main")
+        repo.create_branch("branch-b")
+        s = repo.storage()
+        s.create(Issue(id="b1", namespace="test", title="Issue B1"))
+        repo.commit_all("Add issue on branch-b")
+
+        repo.switch_branch("main")
+        assert repo.merge("branch-a").returncode == 0
+        result_b = repo.merge("branch-b")
+        assert result_b.returncode == 0, f"Merge failed: {result_b.stdout}"
+
+        assert _all_valid_json(repo)
+        merged = [orjson.loads(ln) for ln in repo.read_jsonl_lines()]
+        assert _unknowns(merged) == [
+            {"record_type": "attachment", "id": "u1", "payload": "future"}
+        ]
+        # The known kinds still load out of the same file.
+        storage = JSONLStorage(str(repo.storage_path))
+        assert {i.full_id for i in storage.list()} == {"test-seed", "test-b1"}
+
+    def test_unknown_record_survives_merge_then_local_write(
+        self, git_repo: GitRepo
+    ) -> None:
+        """The whole scenario: merge a newer branch, then keep working.
+
+        Surviving the merge is not enough. The next local write used to
+        delete the record — the load routed it to the issue parser, flagged
+        the store for compaction, and ``_append`` opened with a full rewrite
+        that emitted only the kinds this dcat models (dogcat-68ij).
+        """
+        repo = git_repo
+        _install_merge_driver(repo)
+
+        s = repo.storage()
+        s.create(Issue(id="seed", namespace="test", title="Seed"))
+        repo.commit_all("Seed issue")
+
+        repo.create_branch("branch-a")
+        with repo.storage_path.open("a") as fh:
+            fh.write('{"record_type":"attachment","id":"u1","payload":"future"}\n')
+        repo.commit_all("Record from a newer dcat on branch-a")
+
+        repo.switch_branch("main")
+        repo.create_branch("branch-b")
+        s = repo.storage()
+        s.create(Issue(id="b1", namespace="test", title="Issue B1"))
+        repo.commit_all("Add issue on branch-b")
+
+        repo.switch_branch("main")
+        assert repo.merge("branch-a").returncode == 0
+        assert repo.merge("branch-b").returncode == 0
+
+        # Ordinary work after the merge: create, update, close.
+        s = repo.storage()
+        s.create(Issue(id="c1", namespace="test", title="Issue C1"))
+        s.update("test-c1", {"title": "Issue C1 renamed"})
+        s.close("test-seed")
+        # And a full compaction rewrite on top.
+        s._save()
+
+        merged = [orjson.loads(ln) for ln in repo.read_jsonl_lines()]
+        assert _unknowns(merged) == [
+            {"record_type": "attachment", "id": "u1", "payload": "future"}
+        ]
+        storage = JSONLStorage(str(repo.storage_path))
+        assert storage.get("test-c1") is not None
+        assert storage._bad_lines == []
+
+
+def _link_record(**kwargs: Any) -> dict[str, Any]:
+    """Build a minimal link record dict."""
+    defaults: dict[str, Any] = {
+        "record_type": "link",
+        "from_id": "test-a",
+        "to_id": "test-b",
+        "link_type": "relates_to",
+    }
+    defaults.update(kwargs)
+    return defaults
+
+
+def _kind(records: list[dict[str, Any]], record_type: str) -> list[dict[str, Any]]:
+    """Filter merged output down to one record kind, preserving order."""
+    return [r for r in records if r.get("record_type") == record_type]
+
+
+# Runs in a fresh interpreter so PYTHONHASHSEED actually takes effect: string
+# hashing is randomized per process, so an in-process loop would reuse one seed
+# and see a stable order even from the unsorted key union (dogcat-4ol3).
+_ORDER_PROBE = """
+import orjson, sys
+from dogcat.merge_driver import merge_jsonl
+
+def dep(issue_id, depends_on_id):
+    return {
+        "record_type": "dependency",
+        "issue_id": issue_id,
+        "depends_on_id": depends_on_id,
+        "type": "blocks",
+    }
+
+keys = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel"]
+base = [dep(f"test-{k}", "test-target") for k in keys[:4]]
+ours = [dep(f"test-{k}", "test-target") for k in keys[:6]]
+theirs = [dep(f"test-{k}", "test-target") for k in keys[2:]]
+merged = merge_jsonl(base, ours, theirs)
+sys.stdout.buffer.write(orjson.dumps(merged))
+"""
+
+
+class TestDependencyLinkConvergence:
+    """Deps and links merge to the same bytes regardless of side or process.
+
+    Both halves were false until dogcat-4ol3: the key union was an unsorted
+    ``set`` union, and a key present on both sides resolved to ``theirs``.
+    """
+
+    def test_dep_output_order_is_stable_across_processes(self) -> None:
+        """Byte-identical output under three different hash seeds."""
+        outputs: list[bytes] = []
+        for seed in ("1", "2", "3"):
+            proc = subprocess.run(  # noqa: S603
+                [sys.executable, "-c", _ORDER_PROBE],
+                capture_output=True,
+                check=True,
+                env={**os.environ, "PYTHONHASHSEED": seed},
+            )
+            outputs.append(proc.stdout)
+
+        assert len(outputs[0]) > 0
+        assert outputs[0] == outputs[1] == outputs[2]
+
+    def test_dep_output_order_matches_sorted_identity_tuples(self) -> None:
+        """The stable order is the sorted key order, not an arbitrary one."""
+        names = ["golf", "alpha", "echo", "bravo", "delta"]
+        ours = [_dep_record(issue_id=f"test-{n}") for n in names]
+
+        deps = _kind(merge_jsonl([], ours, []), "dependency")
+
+        assert [d["issue_id"] for d in deps] == sorted(f"test-{n}" for n in names)
+
+    def test_deps_converge_across_argument_order(self) -> None:
+        """merge(base, ours, theirs) == merge(base, theirs, ours) for deps."""
+        base = [_dep_record(issue_id="test-shared")]
+        ours = [
+            _dep_record(issue_id="test-shared"),
+            _dep_record(issue_id="test-ours-only"),
+        ]
+        theirs = [
+            _dep_record(issue_id="test-shared"),
+            _dep_record(issue_id="test-theirs-only"),
+        ]
+
+        forward = _kind(merge_jsonl(base, ours, theirs), "dependency")
+        backward = _kind(merge_jsonl(base, theirs, ours), "dependency")
+
+        assert forward == backward
+        assert {d["issue_id"] for d in forward} == {
+            "test-shared",
+            "test-ours-only",
+            "test-theirs-only",
+        }
+
+    def test_links_converge_across_argument_order(self) -> None:
+        """merge(base, ours, theirs) == merge(base, theirs, ours) for links."""
+        base = [_link_record(from_id="test-shared")]
+        ours = [_link_record(from_id="test-shared"), _link_record(from_id="test-ours")]
+        theirs = [
+            _link_record(from_id="test-shared"),
+            _link_record(from_id="test-theirs"),
+        ]
+
+        forward = _kind(merge_jsonl(base, ours, theirs), "link")
+        backward = _kind(merge_jsonl(base, theirs, ours), "link")
+
+        assert forward == backward
+        assert {ln["from_id"] for ln in forward} == {
+            "test-shared",
+            "test-ours",
+            "test-theirs",
+        }
+
+    def test_dep_added_on_both_sides_keeps_the_same_record_either_way(self) -> None:
+        """Two branches running the same ``dcat dep add`` keep one audit trail.
+
+        The records differ only in ``created_at``/``created_by``, which is what
+        made resolving to ``theirs`` invisible in the graph and still divergent
+        on disk.
+        """
+        alice = _dep_record(created_by="alice@example.com", created_at="2026-01-01")
+        bob = _dep_record(created_by="bob@example.com", created_at="2026-01-02")
+
+        forward = _kind(merge_jsonl([], [alice], [bob]), "dependency")
+        backward = _kind(merge_jsonl([], [bob], [alice]), "dependency")
+
+        assert len(forward) == 1
+        assert forward == backward
+
+    def test_link_added_on_both_sides_keeps_the_same_record_either_way(self) -> None:
+        """Same content tie-break for links."""
+        alice = _link_record(created_by="alice@example.com", created_at="2026-01-01")
+        bob = _link_record(created_by="bob@example.com", created_at="2026-01-02")
+
+        forward = _kind(merge_jsonl([], [alice], [bob]), "link")
+        backward = _kind(merge_jsonl([], [bob], [alice]), "link")
+
+        assert len(forward) == 1
+        assert forward == backward
+
+    def test_deletion_still_wins_over_silence_both_directions(self) -> None:
+        """Sorting and the tie-break leave the three-way deletion rule alone."""
+        kept = _dep_record(issue_id="test-kept")
+        dropped = _dep_record(issue_id="test-dropped")
+        base = [kept, dropped]
+        ours = [kept]
+        theirs = [kept, dropped]
+
+        forward = _kind(merge_jsonl(base, ours, theirs), "dependency")
+        backward = _kind(merge_jsonl(base, theirs, ours), "dependency")
+
+        assert [d["issue_id"] for d in forward] == ["test-kept"]
+        assert forward == backward
+
+    def test_unknown_records_still_survive_a_dep_merge(self) -> None:
+        """The dogcat-68ij guarantee is untouched by the dep/link changes."""
+        base = [_dep_record()]
+        ours = [_dep_record(), _unknown_record(id="u1")]
+        theirs = [_dep_record(), _unknown_record(id="u2")]
+
+        merged = merge_jsonl(base, ours, theirs)
+
+        assert {r["id"] for r in _unknowns(merged)} == {"u1", "u2"}

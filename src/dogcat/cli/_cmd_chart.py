@@ -31,6 +31,10 @@ from ._completions import (
 )
 from ._helpers import apply_common_filters, get_storage
 from ._json_state import echo_error, is_json, set_json
+from ._list_options import (
+    DogcatsDirOpt,
+    JsonOpt,
+)
 
 # Ordered keys for each grouping dimension
 _STATUS_ORDER = [v for _, v in STATUS_OPTIONS]
@@ -101,8 +105,9 @@ _ALL_BY_VALUES = ("status", "type", "priority", "label")
 class ChartSeries:
     """One grouping dimension's chart data (counts + display metadata).
 
-    Replaces the unlabeled 5-tuple ``_chart_data`` used to return, which was
-    unpacked positionally at two call sites.
+    ``symbols`` is the only nullable field. Only ``--by status`` has a glyph
+    per value; type, label and priority pass ``None`` rather than an empty
+    dict, so a renderer must test it before indexing.
     """
 
     counts: dict[str, int]
@@ -219,8 +224,8 @@ def register(app: typer.Typer) -> None:
             "--agent-only",
             help="Only show issues available for agents",
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Show issue distribution as a bar chart.
 

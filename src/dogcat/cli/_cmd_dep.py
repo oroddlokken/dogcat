@@ -13,6 +13,11 @@ from ._completions import (
 )
 from ._helpers import get_storage, with_ns_shim
 from ._json_state import echo_error, is_json, set_json
+from ._list_options import (
+    ByOpt,
+    DogcatsDirOpt,
+    JsonOpt,
+)
 
 
 def register(app: typer.Typer) -> None:
@@ -45,9 +50,9 @@ def register(app: typer.Typer) -> None:
             help="Dependency type",
             autocompletion=complete_dep_types,
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        by: str = typer.Option(None, "--by", help="Who is making this change"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        by: ByOpt = None,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Manage issue dependencies."""
         set_json(json_output)
@@ -138,9 +143,9 @@ def register(app: typer.Typer) -> None:
             help="Link type",
             autocompletion=complete_link_types,
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        by: str = typer.Option(None, "--by", help="Who is making this change"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        by: ByOpt = None,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Manage issue links (general relationships)."""
         set_json(json_output)

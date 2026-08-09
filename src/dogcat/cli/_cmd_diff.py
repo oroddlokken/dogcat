@@ -14,6 +14,10 @@ from dogcat.constants import TRACKED_FIELDS, TRACKED_PROPOSAL_FIELDS
 from ._formatting import format_event, get_event_legend
 from ._helpers import get_storage
 from ._json_state import echo_error, is_json, set_json
+from ._list_options import (
+    DogcatsDirOpt,
+    JsonOpt,
+)
 
 
 def _get_git_root(cwd: Path | None = None) -> Path | None:
@@ -242,7 +246,7 @@ def register(app: typer.Typer) -> None:
 
     @app.command("diff")
     def diff(
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+        json_output: JsonOpt = False,
         verbose: bool = typer.Option(
             False,
             "--verbose",
@@ -259,7 +263,7 @@ def register(app: typer.Typer) -> None:
             "--unstaged",
             help="Compare working tree against staged",
         ),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Show issue and proposal changes in the git working tree.
 

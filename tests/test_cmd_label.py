@@ -311,4 +311,6 @@ class TestLabelsCommand:
 
         result = runner.invoke(app, ["labels", "--dogcats-dir", str(dogcats_dir)])
         assert result.exit_code == 0
-        assert "No labels found" in result.stdout
+        # Both label empty states now read "No labels"; the two used to
+        # differ by one word for the same condition. (dogcat-1rpm)
+        assert "No labels" in result.stdout

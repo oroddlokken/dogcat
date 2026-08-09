@@ -130,9 +130,9 @@ The issue gets a `frontend-xxxx` ID and shows up in the frontend repo's default 
 
 dogcat resolves the storage directory in this order (first match wins):
 
-1. **Local `.dogcats/`** in the current directory
-2. **Walk-up from the cwd toward the filesystem root.** At each ancestor directory, `.dogcatrc` is checked *before* `.dogcats/`, so a `.dogcatrc` sitting beside a `.dogcats/` directory wins. This walk-up is what makes `dcat` work from a subdirectory of a repo. It is bounded (see `get_rc_walkup_boundary`) and refuses a `.dogcatrc` whose target is owned by another user.
-3. **Global `default_storage`** from `$XDG_CONFIG_HOME/dogcat/config.toml` (default `~/.config/dogcat/config.toml`), tried only once the walk-up reaches the root.
+1. **Walk up from the cwd, checking `.dogcatrc` before `.dogcats/` at each level.** The cwd is just the first level of that walk, not a separate step: a `.dogcatrc` in the current directory beats a `.dogcats/` in the same directory. That ordering is deliberate — a repo wired to a shared store keeps a local `.dogcats/` holding only `config.local.toml`, so preferring the directory would silently strand it on an empty store. The walk is what makes `dcat` work from a subdirectory of a repo. It stops at `get_rc_walkup_boundary` (git toplevel, else `$HOME`) rather than at the filesystem root, and it refuses a `.dogcatrc` whose target is owned by another user. Both of those guards have an environment escape hatch — see the table below.
+2. **The main worktree's `.dogcats/`**, when the cwd is inside a linked git worktree. `git rev-parse --git-common-dir` resolves the main worktree root and `.dogcats/` there is used if present.
+3. **Global `default_storage`** from `$XDG_CONFIG_HOME/dogcat/config.toml` (default `~/.config/dogcat/config.toml`), tried only after both of the above come up empty.
 
 Within the chosen storage directory, config is merged in this order (later wins):
 
@@ -145,3 +145,14 @@ Repo-local settings (namespace, visible_namespaces) always take precedence.
 When storage resolves via the global fallback (no local `.dogcats/`, no `.dogcatrc`), the namespace is the slug of the git repo-root directory name when the cwd is inside a repo (so `myrepo/src/` yields `myrepo`, never `src`), or the slug of the cwd folder name when outside any repo — falling back to the shared store's `config.toml` namespace when that name isn't sluggable. Repos that reach the same store through a `.dogcatrc` — or the store's own home directory — are *not* in fallback mode and use the normal config chain above. dcat prints a one-time notice on stderr whenever the global fallback is used, so writes to the shared store are never silent.
 
 Only two keys are read from the global config file: `default_storage` and `visible_namespaces`. `dcat config set --global` rejects anything else.
+
+## Environment overrides
+
+Four variables change store behaviour with nothing in `config.toml` to show for it. The first two are escape hatches: they disable a security check, so set them per-command rather than in a shell profile.
+
+| Env var | Default | Effect |
+| --- | --- | --- |
+| `DCAT_UNSAFE_CROSS_USER=1` | unset | Accept a `.dogcatrc` whose target is owned by another user. Intended for shared CI, where the ownership check has no signal. |
+| `DCAT_RC_WALKUP_UNRESTRICTED=1` | unset | Drop the `get_rc_walkup_boundary` limit and walk to the filesystem root, so any ancestor `.dogcatrc` — including a planted `/tmp/.dogcatrc` — can re-root the store. |
+| `DCAT_LOCK_TIMEOUT_SECS` | `30` | How long a write waits for the advisory lock. Raise it for a store on slow shared storage. |
+| `DCAT_GIT_TIMEOUT_SECS` | `10` | Per-`git`-subprocess timeout. Raise it when a stalled NFS `$HOME` or credential helper makes git calls hang. |

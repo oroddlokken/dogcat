@@ -19,9 +19,7 @@ if TYPE_CHECKING:
     from conftest import GitRepo
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _install_merge_driver(repo: GitRepo) -> None:
@@ -49,11 +47,6 @@ def _force_compaction(repo: GitRepo) -> None:
     """Force a full-file compaction on the current branch."""
     s = repo.storage()
     s._save()
-
-
-# ---------------------------------------------------------------------------
-# Test scenarios
-# ---------------------------------------------------------------------------
 
 
 class TestConcurrentCompaction:

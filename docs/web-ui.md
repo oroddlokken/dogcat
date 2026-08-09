@@ -22,7 +22,8 @@ surrounding Python instead.
 ## Content Security Policy
 
 The propose server sends `default-src 'none'; style-src 'self'; script-src 'self'`
-(`constants.py:291`). No inline `<script>`, no `onclick=` attributes, no inline `style=` attributes,
+(`WEB_CSP_HEADER` in `constants.py`). No inline `<script>`, no `onclick=` attributes, no inline
+`style=` attributes,
 and no CDN URLs — the browser drops them silently, and a test asserts the policy carries no
 `unsafe-inline`. New behavior goes in `propose.js`; new styling goes in `propose.css`.
 
@@ -33,9 +34,16 @@ The propose server is FastAPI plus Jinja2: one template
 `src/dogcat/web/static/` and mount at `/static`, so reference them as
 `{{ url_for('static', path='css/propose.css') }}`.
 
-`dcat web propose` binds `127.0.0.1` by default and has no authentication; CSRF nonces cap abuse but
-do not identify the submitter. It also blocks until quit, so verify web behavior with `TestClient`
-rather than by starting the server (see `docs/testing.md`).
+`dcat web propose` binds `127.0.0.1` unless `DCAT_WEB_HOST` overrides it, and has no
+authentication; CSRF nonces cap abuse but do not identify the submitter. An exported
+`DCAT_WEB_HOST=0.0.0.0` therefore puts an unauthenticated submission form on every interface with
+nothing on the command line to say so. It also blocks until quit, so verify web behavior with
+`TestClient` rather than by starting the server (see `docs/testing.md`).
+
+| Env var | Default | Effect |
+| --- | --- | --- |
+| `DCAT_WEB_HOST` | `127.0.0.1` | Bind address. A CLI `--host` still wins. |
+| `DCAT_WEB_PORT` | `48042` | Bind port. A CLI `--port` still wins; an unparseable value warns and falls back. |
 
 ## Deferred imports
 

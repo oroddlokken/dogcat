@@ -13,6 +13,10 @@ from ._completions import complete_issue_ids
 from ._formatting import format_event, get_event_legend
 from ._helpers import get_storage
 from ._json_state import echo_error, is_json, set_json
+from ._list_options import (
+    DogcatsDirOpt,
+    JsonOpt,
+)
 
 if TYPE_CHECKING:
     from dogcat.event_log import EventRecord
@@ -83,14 +87,14 @@ def register(app: typer.Typer) -> None:
             "--limit",
             help="Number of events to show",
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+        json_output: JsonOpt = False,
         verbose: bool = typer.Option(
             False,
             "--verbose",
             "-v",
             help="Show full content of long-form fields",
         ),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Show change history as a chronological timeline."""
         set_json(json_output)
@@ -204,14 +208,14 @@ def register(app: typer.Typer) -> None:
             "--limit",
             help="Number of events to show",
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+        json_output: JsonOpt = False,
         verbose: bool = typer.Option(
             False,
             "--verbose",
             "-v",
             help="Show full content of long-form fields",
         ),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Alias for history."""
         history(

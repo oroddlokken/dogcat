@@ -8,6 +8,11 @@ import typer
 from ._completions import complete_closed_issue_ids
 from ._helpers import apply_to_each, get_default_operator, get_storage, with_ns_shim
 from ._json_state import is_json, set_json
+from ._list_options import (
+    ByOpt,
+    DogcatsDirOpt,
+    JsonOpt,
+)
 
 
 def register(app: typer.Typer) -> None:
@@ -27,13 +32,9 @@ def register(app: typer.Typer) -> None:
             "-r",
             help="Reason for reopening",
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        reopened_by: str | None = typer.Option(
-            None,
-            "--by",
-            help="Who is reopening this",
-        ),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        reopened_by: ByOpt = None,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Reopen one or more closed issues."""
         set_json(json_output)

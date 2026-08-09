@@ -11,7 +11,7 @@ import typer
 from ._helpers import SortedGroup
 
 cache_app = typer.Typer(
-    help="Manage the dogcat local cache.",
+    help="Inspect and clean ~/.cache/dogcat (honours XDG_CACHE_HOME).",
     no_args_is_help=True,
     cls=SortedGroup,
 )
@@ -42,12 +42,12 @@ def register(app: typer.Typer) -> None:
         """
         cache_dir = _get_cache_dir()
         if not cache_dir.exists():
-            typer.echo("Cache directory does not exist, nothing to clean.")
+            typer.echo("Cache directory does not exist, nothing to clean")
             return
 
         entries = [p for p in cache_dir.iterdir() if p.is_dir()]
         if not entries:
-            typer.echo("Cache is already empty.")
+            typer.echo("Cache is already empty")
             return
 
         removed = 0
@@ -76,12 +76,12 @@ def register(app: typer.Typer) -> None:
         """List cache entries and their origin projects."""
         cache_dir = _get_cache_dir()
         if not cache_dir.exists():
-            typer.echo("Cache directory does not exist.")
+            typer.echo("Cache directory does not exist")
             return
 
         entries = sorted(p for p in cache_dir.iterdir() if p.is_dir())
         if not entries:
-            typer.echo("Cache is empty.")
+            typer.echo("Cache is empty")
             return
 
         for entry in entries:

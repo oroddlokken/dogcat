@@ -15,6 +15,11 @@ from dogcat.config import (
 from ._completions import complete_namespaces
 from ._helpers import get_storage
 from ._json_state import echo_error, is_json, set_json
+from ._list_options import (
+    ByOpt,
+    DogcatsDirOpt,
+    JsonOpt,
+)
 
 
 def register(app: typer.Typer) -> None:
@@ -31,9 +36,9 @@ def register(app: typer.Typer) -> None:
             ...,
             help="New namespace name",
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        by: str = typer.Option(None, "--by", help="Who is performing the rename"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        by: ByOpt = None,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Rename a namespace, updating all issues and references."""
         try:

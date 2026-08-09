@@ -49,7 +49,7 @@ class TestCLIStatus:
             ["status", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
-        assert "Prefix: test" in result.stdout
+        assert "Namespace: test" in result.stdout
         assert "Total issues: 2" in result.stdout
         assert "open" in result.stdout
         assert "closed" in result.stdout
@@ -73,7 +73,7 @@ class TestCLIStatus:
             ["status", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
-        assert "Prefix: empty" in result.stdout
+        assert "Namespace: empty" in result.stdout
         assert "Total issues: 0" in result.stdout
 
     def test_status_json_output(self, tmp_path: Path) -> None:
@@ -438,7 +438,7 @@ class TestCLICommandAliases:
             ["b", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
-        assert "No blocked issues" in result.stdout
+        assert "No issues blocked by dependencies" in result.stdout
 
     def test_d_alias_shows_deferred(self, tmp_path: Path) -> None:
         """Test that 'd' shows deferred issues."""

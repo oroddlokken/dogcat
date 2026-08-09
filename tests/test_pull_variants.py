@@ -19,9 +19,7 @@ if TYPE_CHECKING:
     from conftest import GitRepo
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _install_merge_driver(repo: GitRepo) -> None:
@@ -127,11 +125,6 @@ def _assert_lww_winner(
             f"LWW lost {field_name}: merged={getattr(merged, field_name)!r}"
             f" winner={getattr(winner, field_name)!r}"
         )
-
-
-# ---------------------------------------------------------------------------
-# Test scenarios
-# ---------------------------------------------------------------------------
 
 
 class TestGitPullMerge:

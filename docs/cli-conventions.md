@@ -14,8 +14,8 @@ split is deliberate:
   is the user-facing subset and omits `tombstone` and `unknown`. Validate against the enum; render
   from the options list.
 - **Config keys** — three registries exist and already disagree: `_KNOWN_CONFIG_KEYS`
-  (`config.py:215`, runtime), `_KNOWN_KEYS` (`cli/_cmd_config.py:39`, CLI help and completion), and
-  `GLOBAL_CONFIG_KEYS` (`global_config.py:33`, the two keys the global file accepts). Adding a key
+  (`config.py`, runtime), `_KNOWN_KEYS` (`cli/_cmd_config.py`, CLI help and completion), and
+  `GLOBAL_CONFIG_KEYS` (`global_config.py`, the two keys the global file accepts). Adding a key
   means touching all three.
 - **Labels** — no label constant exists. Labels are free-form and discovered from the store.
 - **Paths** — `constants.py` owns the names, and `config.py` re-declares `DOGCATS_DIR_NAME` and adds
@@ -34,7 +34,7 @@ you just added is missing from `dcat --help`, look for an exception inside `regi
 time before suspecting Typer.
 
 A command that takes an issue ID and uses `complete_issue_ids` needs the `@with_ns_shim` decorator
-(`cli/_helpers.py:40`); it injects the hidden `-A` / `--namespace` options the completer reads out of
+(`cli/_helpers.py`); it injects the hidden `-A` / `--namespace` options the completer reads out of
 the Click context. Without it, completion ignores namespace visibility.
 
 Any command accepting `--json` calls `set_json(json_output)` from `_json_state`. `--json` also exists
@@ -47,7 +47,7 @@ Every CLI option whose values come from a fixed set — status, type, priority, 
 labels, config keys, export formats, dep and link types — registers an `autocompletion=` callback via
 Typer. Shared completers live in `src/dogcat/cli/_completions.py` and return `list[tuple[str, str]]`
 (value, description) pairs. A completer used by exactly one command may stay in that command's module
-(`_complete_by_values` in `_cmd_chart.py:146` is the current example); move it to `_completions.py`
+(`_complete_by_values` in `_cmd_chart.py` is the current example); move it to `_completions.py`
 the moment a second command needs it.
 
 Two options deliberately have no callback: `dcat init --namespace` names a namespace that does not

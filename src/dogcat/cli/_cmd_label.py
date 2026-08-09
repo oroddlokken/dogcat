@@ -11,6 +11,11 @@ from dogcat.models import UpdateRequest
 from ._completions import complete_issue_ids, complete_labels, complete_subcommands
 from ._helpers import get_storage, with_ns_shim
 from ._json_state import echo_error, is_json, set_json
+from ._list_options import (
+    ByOpt,
+    DogcatsDirOpt,
+    JsonOpt,
+)
 
 
 def register(app: typer.Typer) -> None:
@@ -36,9 +41,9 @@ def register(app: typer.Typer) -> None:
             help="Label to add/remove",
             autocompletion=complete_labels,
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        by: str = typer.Option(None, "--by", help="Who is managing labels"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        by: ByOpt = None,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Manage issue labels."""
         try:
@@ -115,8 +120,8 @@ def register(app: typer.Typer) -> None:
 
     @app.command("labels")
     def labels_list(
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """List all labels used across issues with counts."""
         set_json(json_output)
@@ -141,7 +146,7 @@ def register(app: typer.Typer) -> None:
                 for lbl, count in sorted(label_counts.items()):
                     typer.echo(f"  {lbl} ({count})")
             else:
-                typer.echo("No labels found")
+                typer.echo("No labels")
 
         except typer.Exit:
             raise
@@ -151,8 +156,8 @@ def register(app: typer.Typer) -> None:
 
     @app.command("namespaces")
     def namespaces_list(
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """List all namespaces used across issues with counts."""
         set_json(json_output)

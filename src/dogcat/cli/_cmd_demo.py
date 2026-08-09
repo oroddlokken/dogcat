@@ -7,6 +7,9 @@ from pathlib import Path
 import typer
 
 from ._helpers import get_storage
+from ._list_options import (
+    DogcatsDirOpt,
+)
 
 
 def register(app: typer.Typer) -> None:
@@ -14,7 +17,7 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     def demo(
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
         force: bool = typer.Option(
             False,
             "--force",

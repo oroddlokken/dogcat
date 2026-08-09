@@ -780,7 +780,7 @@ class TestNewNamespacePersistence:
             # The route catches the RuntimeError and renders the generic
             # error response (form re-rendered, status 200).
             assert first.status_code == 200
-            assert "Failed to submit proposal" in first.text
+            assert "Could not save the proposal" in first.text
 
         # Submitting to the same namespace again must STILL look "new"
         # — that is the whole point of the rollback. Without it, the
@@ -947,7 +947,7 @@ class TestCSRFPerSession:
                 "description": "",
             },
         )
-        assert "Invalid form submission" in resp.text
+        assert "This form expired" in resp.text
 
     def test_csrf_cookie_has_security_flags(self, client: TestClient) -> None:
         """The CSRF cookie is HttpOnly and SameSite=Strict."""
@@ -986,7 +986,7 @@ class TestCSRFPerSession:
                 "description": "",
             },
         )
-        assert "Invalid form submission" in resp.text
+        assert "This form expired" in resp.text
 
 
 class TestCSRFSingleUseAndOriginGuard:
@@ -1022,7 +1022,7 @@ class TestCSRFSingleUseAndOriginGuard:
                 "description": "",
             },
         )
-        assert "Invalid form submission" in replay.text
+        assert "This form expired" in replay.text
 
     def test_malformed_token_rejected_before_compare(self, web_dogcats: Path) -> None:
         """A short / non-base64 cookie value is refused (shape check)."""
@@ -1039,7 +1039,7 @@ class TestCSRFSingleUseAndOriginGuard:
                 "description": "",
             },
         )
-        assert "Invalid form submission" in resp.text
+        assert "This form expired" in resp.text
 
     def test_foreign_origin_rejected(self, client: TestClient) -> None:
         """A POST from a different Origin is rejected even with valid tokens."""
@@ -1054,7 +1054,7 @@ class TestCSRFSingleUseAndOriginGuard:
             },
             headers={"Origin": "https://evil.example.com"},
         )
-        assert "Invalid form submission" in resp.text
+        assert "This form expired" in resp.text
 
 
 class TestOpenApiSchemaDisabled:
@@ -1129,7 +1129,7 @@ class TestBodySizeLimit:
             headers={"Content-Length": str(10 * 1024 * 1024 * 1024)},
         )
         assert resp.status_code == 413
-        assert "Payload Too Large" in resp.text
+        assert "Submission too large" in resp.text
         # Sanity: cap is configured.
         assert MAX_REQUEST_BODY_BYTES == 256 * 1024
 
@@ -1291,6 +1291,38 @@ class TestWebProposeInit:
         result = runner.invoke(cli_app, ["web", "propose"])
         assert result.exit_code == 1
         assert "not initialized" in result.output
+
+    def test_bind_all_interfaces_warning_names_the_exposure(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Binding to 0.0.0.0 warns without reassuring the reader out of it.
+
+        The warning used to say the CSRF and nonce defenses "cap abuse".
+        They stop cross-site posts; they authenticate nobody, and a reader
+        who stops at "cap abuse" has been talked out of rebinding by the
+        one message meant to stop them. (dogcat-58sq)
+        """
+        import uvicorn
+
+        monkeypatch.chdir(tmp_path)
+        runner.invoke(cli_app, ["init"])
+
+        def _no_serve(*_args: object, **_kwargs: object) -> None:
+            return None
+
+        monkeypatch.setattr(uvicorn, "run", _no_serve)
+
+        # noqa S104: binding to all interfaces is the condition under test,
+        # and uvicorn.run is patched out so nothing actually listens.
+        result = runner.invoke(
+            cli_app,
+            ["web", "propose", "--host", "0.0.0.0"],  # noqa: S104
+        )
+
+        assert result.exit_code == 0
+        assert "Nothing authenticates the submitter" in result.output
+        assert "anyone who can reach this port can file proposals" in result.output
+        assert "cap abuse" not in result.output
 
 
 class TestLengthLimits:

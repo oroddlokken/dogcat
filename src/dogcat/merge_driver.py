@@ -24,12 +24,14 @@ suite (``tests/test_merge.py``, ``tests/test_merge_driver.py``).
   silently revert a ``closed`` or ``tombstone`` from the other. The five
   active statuses share one rank.
 - *Idempotent*: merging a record set with itself returns the same set.
-- *Deterministic*: for fixed ``ours`` and ``theirs`` arguments the
-  result is fully determined — ours is iterated first, theirs second,
-  and within a status rank ``new_ts >= old_ts`` is the wins rule, so on
-  equal timestamps theirs wins. Argument order matters because git always
-  assigns ours/theirs unambiguously per merge invocation; both sides of a
-  ``git merge`` invoking this driver see the same labels.
+- *Deterministic and order-independent*: within a status rank the later
+  ``updated_at`` wins. On an exact tie the winner is decided by a
+  canonical serialization of the two records, not by which side was
+  iterated first — so ``merge(base, ours, theirs)`` and
+  ``merge(base, theirs, ours)`` agree. The rule used to be
+  ``new_ts >= old_ts``, which resolved ties by arrival order and meant two
+  collaborators merging the same pair of branches in opposite directions
+  could end up with different content (dogcat-1xgi).
 - *Monotonic within a rank*: among edits at the same finality a later
   edit can only ever be replaced by an even later edit; older versions
   never resurrect. Across ranks a more final status always wins,
@@ -51,9 +53,11 @@ The base set is the common ancestor; ours and theirs each have an
 effective state computed by replaying ``add``/``remove`` ops in
 order. For each key (identity tuple) in the union of base, ours, and theirs:
 
-- Present in **both** sides → keep theirs (representative; both sides
-  agree on identity, and dependency rows have no payload that differs
-  meaningfully).
+- Present in **both** sides → keep the record whose canonical
+  serialization ranks higher. Both sides agree on identity, so the only
+  fields in play are ``created_at``/``created_by``; picking by content
+  rather than by side label is what makes the choice survive a merge
+  run in the opposite direction (dogcat-4ol3).
 - Present in ours, **not** in theirs:
     - If also in base → theirs deleted it; honor the deletion.
     - If not in base → ours added it; keep it.
@@ -66,6 +70,10 @@ order. For each key (identity tuple) in the union of base, ours, and theirs:
   2P-Set-like semantic but without explicit tombstones — the base set
   acts as the boundary between "present, then removed" and "added by
   one side".
+- *Deterministic and order-independent*: the key union is iterated in
+  sorted order and both-sides conflicts resolve on content, so the rows
+  come out identical — same records, same lines — no matter which side
+  was labeled ours or which process ran the merge.
 
 **Events** (union, deduplicated by identity tuple)
 
@@ -73,6 +81,26 @@ order. For each key (identity tuple) in the union of base, ours, and theirs:
   Two events with the same identity from both sides collapse to one.
 - *Strictly grow-only*: events are never removed by merge; the
   resulting list is sorted by ``timestamp`` for stable output.
+
+**Unknown kinds** (union, deduplicated by exact content)
+
+A record whose ``record_type`` is set to something outside
+``_KNOWN_RECORD_TYPES`` — most plausibly a kind written by a newer dcat
+— classifies as ``"unknown"``. Such records pass through the merge
+verbatim, appended after the events. They are deduplicated by canonical
+serialization, since an unknown kind has no identity fields this module
+can key on, and sorted by that same serialization so the output does not
+depend on argument order.
+
+- *Never deleted by this merger*: ``base`` is not consulted, so
+  "present in base, absent from one side" is **not** honored as a
+  deletion the way it is for deps and links. An older tool cannot tell
+  an edit of a kind it does not understand from a delete of it, and
+  keeping a stale copy is recoverable where dropping the only copy is
+  not (dogcat-68ij).
+- The cost of that choice: if one side edits an unknown record, both the
+  pre-edit and post-edit copies survive the merge. The tool that owns
+  the kind has to reconcile them.
 
 **Invariants that hold across all kinds**
 
@@ -93,6 +121,17 @@ order. For each key (identity tuple) in the union of base, ours, and theirs:
   side and drop the other. Per-field merging is out of scope (it would
   need per-field timestamps or event-log-derived state); ``dcat doctor
   --post-merge`` surfaces the dropped edit so the loss is visible.
+- *The three-way merge is only as three-way as its caller.* ``merge_jsonl``
+  trusts ``base_records``; it has no way to tell a genuinely empty common
+  ancestor from one the caller could not find. ``dcat git merge-driver``
+  is handed a real base file by git. ``dcat git rebase`` has to recover
+  one — from a ``|||||||`` section, which git writes only under
+  ``merge.conflictStyle=diff3``/``zdiff3``, or from index stage 1 while
+  the conflicted operation is still in progress. Where it can do neither
+  it passes an empty base, every row reads as "added by one side", and a
+  dependency or link deleted on one branch comes back. That command
+  reports the case per file rather than resolving it silently
+  (dogcat-5cvm).
 - *Octopus merges are not supported.* Git's octopus strategy
   (``git merge a b c``) bypasses per-file merge drivers when any
   branch produces a content conflict and aborts with "Should not be
@@ -100,10 +139,21 @@ order. For each key (identity tuple) in the union of base, ours, and theirs:
   b && git merge c``) work. Exercised by
   ``tests/test_git_workflows.py::test_octopus_merge_aborts_use_sequential``.
 - For dep/link records, ``_dep_key`` / ``_link_key`` are the source of
-  truth for identity and the only fields that matter for graph
-  correctness. The remaining fields (``created_at``, ``created_by``)
-  are audit metadata; collapsing two concurrent ``add`` ops with the
-  same identity to one record is the intended behavior, not a defect.
+  truth for identity. Collapsing two concurrent ``add`` ops with the
+  same identity to one record is the intended behavior, not a defect —
+  but which of the two ``created_at``/``created_by`` pairs survives is
+  decided by content, not by side, so both collaborators keep the same
+  one.
+- *This module and the storage layer break an exact tie differently.*
+  Here, two records for one id with equal ``updated_at`` resolve on
+  canonical serialization; ``JSONLStorage._parse_issue_record`` resolves
+  two lines for one issue id by file position, so the last line wins
+  whatever it contains. A store holding such a pair would have ``dcat
+  show`` and this merger name different winners. Nothing observed
+  produces one — ``datetime.now().astimezone()`` is microsecond
+  resolution and the paths that share a single ``now`` compact rather
+  than append — so the two rules are documented rather than unified
+  (dogcat-4ol3).
 """
 
 from __future__ import annotations
@@ -148,7 +198,14 @@ def parse_conflicted_jsonl(
     included in both ours and theirs.
 
     Returns:
-        (base_records, ours_records, theirs_records)
+        (base_records, ours_records, theirs_records).
+
+        ``([], [], [])`` when ``raw`` carries no ``<<<<<<<`` marker at all —
+        indistinguishable from a genuinely conflicted but empty file, and
+        ``git_rebase`` relies on exactly that conflation in its
+        ``if not ours and not theirs: continue`` guard. Callers that need to
+        tell the two apart must test for the marker themselves before
+        calling.
     """
     # States: "outside", "ours", "base", "theirs"
     state = "outside"
@@ -217,16 +274,18 @@ def parse_conflicted_jsonl(
     return base_records, ours_records, theirs_records
 
 
-def _parse_jsonl(path: Path) -> list[dict[str, Any]]:
-    """Parse a JSONL file into a list of dicts, skipping invalid lines.
+def parse_jsonl_bytes(raw_bytes: bytes, source: str) -> list[dict[str, Any]]:
+    """Parse JSONL bytes into a list of dicts, skipping invalid lines.
 
     Logs warnings for malformed lines and git conflict markers so that
     silent data loss during merges is visible in ``git merge`` output.
+
+    ``source`` names the origin in those warnings. It is a path for a file
+    on disk and a git ref (``:1:.dogcats/issues.jsonl``) for a blob read out
+    of the index, which is why this takes bytes rather than a path.
     """
     records: list[dict[str, Any]] = []
-    if not path.exists():
-        return records
-    for line_num, raw in enumerate(path.read_bytes().splitlines(), 1):
+    for line_num, raw in enumerate(raw_bytes.splitlines(), 1):
         stripped = raw.strip()
         if not stripped:
             continue
@@ -234,7 +293,7 @@ def _parse_jsonl(path: Path) -> list[dict[str, Any]]:
             logger.warning(
                 "Git conflict marker at line %d in %s — file has unresolved conflicts",
                 line_num,
-                path,
+                source,
             )
             continue
         try:
@@ -243,10 +302,21 @@ def _parse_jsonl(path: Path) -> list[dict[str, Any]]:
             logger.warning(
                 "Skipping malformed JSONL at line %d in %s",
                 line_num,
-                path,
+                source,
             )
             continue
     return records
+
+
+def _parse_jsonl(path: Path) -> list[dict[str, Any]]:
+    """Parse a JSONL file into a list of dicts, skipping invalid lines.
+
+    Returns an empty list for a path that does not exist — the merge driver
+    is handed a base file that git leaves absent for an add/add conflict.
+    """
+    if not path.exists():
+        return []
+    return parse_jsonl_bytes(path.read_bytes(), str(path))
 
 
 _MIN_AWARE = datetime.min.replace(tzinfo=timezone.utc)
@@ -377,16 +447,27 @@ def _replay_with_ops(
     return state
 
 
+def _tie_break_key(record: dict[str, Any]) -> bytes:
+    """Content-derived ordering key for an exact rank+timestamp tie.
+
+    Which record this ranks higher is arbitrary — only that it ranks them
+    the same way every time matters, since that is what makes
+    ``merge(base, ours, theirs)`` and ``merge(base, theirs, ours)`` agree.
+    See the module docstring for the ``new_ts >= old_ts`` bug this replaced
+    (dogcat-1xgi). ``full_id`` cannot serve as the key: on an exact tie it is
+    equal on both sides by construction.
+    """
+    return orjson.dumps(record, option=orjson.OPT_SORT_KEYS)
+
+
 def _merge_issues_lww(
     ours_records: list[dict[str, Any]],
     theirs_records: list[dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
     """Merge issues by status finality, then ``updated_at``.
 
-    Status finality (TOMBSTONE > CLOSED > active states > DRAFT) wins over
-    ``updated_at`` so a concurrent edit on one branch cannot silently revert
-    a tombstone or close from the other branch. Within the same rank, the
-    record with the later ``updated_at`` wins.
+    Ranks come from :data:`_ISSUE_STATUS_RANK`; the module docstring has the
+    finality argument.
     """
     issues: dict[str, dict[str, Any]] = {}
     for record in [*ours_records, *theirs_records]:
@@ -397,6 +478,12 @@ def _merge_issues_lww(
         if existing is None:
             issues[fid] = record
             continue
+        # The 1 is the rank of "open" here: an unrecognised status — a
+        # Status.UNKNOWN sentinel from a newer dcat — merges as active, so it
+        # never overrides a close or tombstone and never loses to a draft.
+        # _merge_proposals uses 0 for the same rule; the literals differ only
+        # because that table has no draft tier below open, not because the two
+        # kinds are treated differently. Keep them tied to their own "open".
         new_rank = _ISSUE_STATUS_RANK.get(record.get("status", "open"), 1)
         old_rank = _ISSUE_STATUS_RANK.get(existing.get("status", "open"), 1)
         if new_rank > old_rank:
@@ -404,7 +491,9 @@ def _merge_issues_lww(
         elif new_rank == old_rank:
             new_ts = _parse_iso_ts(record.get("updated_at", ""))
             old_ts = _parse_iso_ts(existing.get("updated_at", ""))
-            if new_ts >= old_ts:
+            if new_ts > old_ts or (
+                new_ts == old_ts and _tie_break_key(record) > _tie_break_key(existing)
+            ):
                 issues[fid] = record
     return issues
 
@@ -415,10 +504,9 @@ def _merge_proposals(
 ) -> dict[str, dict[str, Any]]:
     """Merge proposals by status finality, then ``updated_at`` / ``created_at``.
 
-    Higher status finality always wins (TOMBSTONE > CLOSED > OPEN). Within
-    the same rank, the record with the latest ``updated_at`` (falling back
-    to ``created_at`` for legacy records) wins, so deletions and closures
-    are never reverted by concurrent edits.
+    Ranks come from :data:`_PROPOSAL_STATUS_RANK`; the module docstring has
+    the finality argument. The ``created_at`` fallback covers legacy records
+    written before proposals carried ``updated_at``.
     """
     proposals: dict[str, dict[str, Any]] = {}
     for record in [*ours_records, *theirs_records]:
@@ -429,6 +517,10 @@ def _merge_proposals(
         if existing is None:
             proposals[fid] = record
             continue
+        # 0 is the rank of "open" in _PROPOSAL_STATUS_RANK — same
+        # unknown-merges-as-open rule as _merge_issues_lww, which spells it 1
+        # because its table starts at draft. Normalising the two literals to
+        # match would change which record wins.
         new_rank = _PROPOSAL_STATUS_RANK.get(record.get("status", "open"), 0)
         old_rank = _PROPOSAL_STATUS_RANK.get(existing.get("status", "open"), 0)
         if new_rank > old_rank:
@@ -440,7 +532,9 @@ def _merge_proposals(
             old_ts = _parse_iso_ts(
                 existing.get("updated_at", existing.get("created_at", ""))
             )
-            if new_ts >= old_ts:
+            if new_ts > old_ts or (
+                new_ts == old_ts and _tie_break_key(record) > _tie_break_key(existing)
+            ):
                 proposals[fid] = record
     return proposals
 
@@ -460,6 +554,35 @@ def _merge_events(
     return events
 
 
+def _merge_unknown(
+    ours_records: list[dict[str, Any]],
+    theirs_records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Union records of unrecognised kinds, deduplicated by exact content.
+
+    ``classify_record`` returns ``"unknown"`` only for an explicit
+    ``record_type`` outside its known set; a record with no ``record_type``
+    at all is field-sniffed into issue/dependency/link and never reaches
+    here.
+
+    Identity is the canonical serialization: an unknown kind exposes no
+    identity fields this module can key on, so byte-equal records are one
+    record and everything else is two. That over-keeps and never
+    over-deletes, which is the whole point — see the module docstring for
+    why ``base_records`` is not a parameter (dogcat-68ij).
+
+    Returns:
+        The records sorted by canonical serialization, so the output is
+        independent of which side was labeled ours.
+    """
+    unknown: dict[bytes, dict[str, Any]] = {}
+    for record in [*ours_records, *theirs_records]:
+        if classify_record(record) != "unknown":
+            continue
+        unknown.setdefault(_tie_break_key(record), record)
+    return [unknown[key] for key in sorted(unknown)]
+
+
 def _merge_three_way(
     base_records: list[dict[str, Any]],
     ours_records: list[dict[str, Any]],
@@ -472,20 +595,30 @@ def _merge_three_way(
 
     Replays each side to its effective state, then for each key in the union:
     a deletion by one side wins over a no-op on the other; an add not in base
-    is kept; an add by both sides collapses to theirs (representative).
+    is kept; an add by both sides collapses to the record that ranks higher
+    under :func:`_tie_break_key`, so the surviving audit metadata does not
+    depend on which side was labeled theirs.
+
+    Returns:
+        The merged records keyed by identity tuple, iterating in sorted key
+        order. Sorting is what makes the output byte-stable: the union of
+        three ``set``s of string tuples iterates in an order that Python's
+        per-process hash randomization changes from run to run, so two
+        collaborators merging the same branches produced the same records
+        on different lines (dogcat-4ol3).
     """
     base = _replay_with_ops(base_records, record_type=record_type, key_fn=key_fn)
     ours = _replay_with_ops(ours_records, record_type=record_type, key_fn=key_fn)
     theirs = _replay_with_ops(theirs_records, record_type=record_type, key_fn=key_fn)
 
     merged: dict[tuple[str, ...], dict[str, Any]] = {}
-    for key in set(base) | set(ours) | set(theirs):
+    for key in sorted(set(base) | set(ours) | set(theirs)):
         in_base = key in base
         in_ours = key in ours
         in_theirs = key in theirs
 
         if in_ours and in_theirs:
-            merged[key] = theirs[key]
+            merged[key] = max(ours[key], theirs[key], key=_tie_break_key)
         elif in_ours and not in_theirs:
             if not in_base:
                 merged[key] = ours[key]
@@ -501,14 +634,32 @@ def merge_jsonl(
 ) -> list[dict[str, Any]]:
     """Merge three sets of JSONL records using JSONL-aware semantics.
 
+    Index of what each kind does; the module docstring is the merge algebra.
+
     - Issues: union by full_id, status finality then latest ``updated_at`` wins.
     - Proposals: union by full_id, status finality then latest timestamp wins.
     - Events: union (deduplicated by identity tuple).
     - Dependencies & Links: proper three-way merge using base records.
       A deletion by either side (present in base, absent from that side)
       is honored unless the other side also re-added it.
+    - Unknown kinds: union of both sides, deduplicated by exact content
+      and never deleted. Base is not consulted for them.
 
-    Returns the merged list of records.
+    Returns:
+        The merged records, assembled in compaction order: issues,
+        proposals, dependencies, links, events sorted by absolute
+        timestamp, then records of unrecognised kinds sorted by canonical
+        serialization. This list *is* the file content — both callers
+        (``dcat git merge-driver`` and ``dcat git rebase``) write it over
+        the target verbatim.
+
+        A record the five known kinds do not cover — most plausibly a
+        ``record_type`` written by a newer dcat — survives verbatim
+        rather than being dropped. Because the callers overwrite the
+        file, dropping it here would erase it from the store rather than
+        merely leave it unmerged (dogcat-68ij). Unknown records go last
+        so the known kinds keep the byte-for-byte layout compaction
+        produces.
     """
     issues = _merge_issues_lww(ours_records, theirs_records)
     proposals = _merge_proposals(ours_records, theirs_records)
@@ -528,9 +679,9 @@ def merge_jsonl(
         key_fn=_link_key,
     )
 
-    # Assemble: issues, proposals, deps, links, events (matches compaction order).
-    # Events are sorted by absolute time so cross-timezone records come out in
-    # the right order.
+    # Assemble: issues, proposals, deps, links, events (matches compaction order),
+    # then unknown kinds. Events are sorted by absolute time so cross-timezone
+    # records come out in the right order.
     result: list[dict[str, Any]] = []
     result.extend(issues.values())
     result.extend(proposals.values())
@@ -539,4 +690,5 @@ def merge_jsonl(
     result.extend(
         sorted(events.values(), key=lambda e: _parse_iso_ts(e.get("timestamp", "")))
     )
+    result.extend(_merge_unknown(ours_records, theirs_records))
     return result

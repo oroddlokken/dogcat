@@ -187,12 +187,18 @@ class JSONLStorage(EventEmitterMixin):
         """
         self.path = Path(path)
         self.dogcats_dir = self.path.parent
-        # Lazy map: raw record dicts materialize to Issue on first access
-        # , so ID-targeted commands don't construct the whole
-        # store. Records are validated at load; see _parse_issue_record.
+        # Lazy map: raw record dicts materialize to Issue on first access, so
+        # ID-targeted commands don't construct the whole store. Records are
+        # validated at load; see _parse_issue_record.
         self._issues: LazyIssueMap = LazyIssueMap()
         self._dependencies: list[Dependency] = []
         self._links: list[Link] = []
+        # Records whose record_type is set to something this dcat does not
+        # model — a kind written by a newer release. Held as raw dicts and
+        # re-emitted by every whole-file rewrite; nothing else reads them.
+        # They are NOT _bad_lines: those are unparseable input, and landing
+        # there is what used to delete these on the next write (dogcat-68ij).
+        self._preserved: list[dict[str, Any]] = []
         # Indexes for O(1) dependency/link lookups
         self._deps_by_issue: dict[str, list[Dependency]] = {}
         self._deps_by_depends_on: dict[str, list[Dependency]] = {}
@@ -224,16 +230,14 @@ class JSONLStorage(EventEmitterMixin):
         self._lock_path = self.dogcats_dir / LOCK_FILENAME
         self._needs_compaction = False  # Set when corrupt last line is skipped
         # Bad lines skipped during _load() — preserved (with line number and
-        # reason) so doctor can surface a count and ``dcat admin repair-jsonl``
+        # reason) so doctor can surface a count and ``dcat repair-jsonl``
         # can copy them to a sidecar file before compaction drops them.
         self._bad_lines: list[tuple[int, bytes, str]] = []
 
-        # Initialize event log for change tracking
         from dogcat.event_log import EventLog
 
         self._event_log = EventLog(self.dogcats_dir)
 
-        # Load existing issues if file exists
         if self.path.exists():
             self._load()
 
@@ -248,12 +252,17 @@ class JSONLStorage(EventEmitterMixin):
         Malformed lines (any position) are logged as warnings and skipped so
         the CLI keeps working after a crash, disk-full, or partial write.
         Skipped lines are recorded on ``self._bad_lines`` so doctor can
-        surface the count and ``dcat admin repair-jsonl`` can preserve them
+        surface the count and ``dcat repair-jsonl`` can preserve them
         in a ``.bad`` sidecar before compaction drops them.
+
+        A record carrying a ``record_type`` this dcat does not model goes to
+        ``self._preserved`` instead — it is well-formed JSON we simply cannot
+        interpret, so it is neither parsed nor treated as damage.
         """
         self._issues.clear()
         self._dependencies.clear()
         self._links.clear()
+        self._preserved = []
         self._bad_lines = []
 
         # Use sets keyed by identity tuple for efficient add/remove replay
@@ -312,6 +321,15 @@ class JSONLStorage(EventEmitterMixin):
                     parse_link_record(data, link_map)
                 elif rtype == "dependency":
                     parse_dependency_record(data, dep_map)
+                elif rtype == "unknown":
+                    # An explicit record_type outside the known set: a kind a
+                    # newer dcat writes. Held verbatim and re-emitted by every
+                    # rewrite. Parsing it as an issue is what used to erase it
+                    # — it fails on the missing title, lands in _bad_lines,
+                    # and the next _append compacts it away (dogcat-68ij).
+                    # A record with NO record_type is field-sniffed into
+                    # issue/dependency/link and never reaches this branch.
+                    self._preserved.append(data)
                 else:
                     # Default: treat as an issue record (last-write-wins).
                     self._parse_issue_record(data)
@@ -426,6 +444,7 @@ class JSONLStorage(EventEmitterMixin):
                 dependencies=self._dependencies,
                 links=self._links,
                 source=self.path,
+                preserved=self._preserved,
                 prune_event_ids=_prune_event_ids,
                 rename_event_ids=_rename_event_ids,
             )
@@ -522,7 +541,6 @@ class JSONLStorage(EventEmitterMixin):
             self._default_branch_cache = is_default_branch(self.dogcats_dir)
         return self._default_branch_cache
 
-    # Event emission helpers
     # _emit_event / _build_event_record / _append_with_event are provided by
     # EventEmitterMixin (dogcat._events), shared with InboxStorage.
 
@@ -602,12 +620,10 @@ class JSONLStorage(EventEmitterMixin):
     ) -> Issue:
         """Generate an ID, build an :class:`Issue`, and persist it.
 
-        Encapsulates the four-step pattern (namespace lookup → IDGenerator →
-        ``generate_issue_id`` → build Issue → ``create``) that was previously
-        re-implemented at every call site (CLI ``new``, ``inbox accept``,
-        TUI detail panel, demo). Callers that need to wire dependencies or
-        validate references stay in their own modules — this only owns the
-        construction step.
+        Owns the whole construction step — namespace lookup, IDGenerator,
+        ``generate_issue_id``, building the Issue, ``create`` — so a caller
+        never mints an id itself. Wiring dependencies and validating
+        references stay with the caller.
 
         Every parameter maps onto the :class:`~dogcat.models.Issue` field of
         the same name; see that class for field semantics and defaults
@@ -710,11 +726,10 @@ class JSONLStorage(EventEmitterMixin):
     def _resolve_or_raise(self, issue_id: str, *, label: str = "Issue") -> str:
         """Resolve ``issue_id`` to a full id or raise ``ValueError``.
 
-        Replaces the four-line ``resolved = resolve_id(...); if resolved is
-        None: raise ValueError(...)`` pattern that was repeated across every
-        mutation method (update / close / reopen / delete / dependency /
-        link / comment). ``label`` lets callers surface a more specific
-        noun (``"Parent issue"``, ``"Comment"``) in the error message.
+        Every mutation method (update / close / reopen / delete / dependency
+        / link / comment) enters through here, so the not-found message has
+        one wording. ``label`` swaps in a more specific noun
+        (``"Parent issue"``, ``"Comment"``).
         """
         resolved = self.resolve_id(issue_id)
         if resolved is None:
@@ -748,7 +763,11 @@ class JSONLStorage(EventEmitterMixin):
             issue_id: The ID of the issue to retrieve (supports partial IDs)
 
         Returns:
-            The issue, or None if not found
+            The issue, or None if not found. This is the *live* object held
+            in ``LazyIssueMap``, not a copy — mutating a field on it changes
+            in-memory store state with nothing written to disk, so the next
+            reader sees the edit and a fresh process does not. Go through
+            :meth:`update` to persist, or ``copy.deepcopy`` to experiment.
         """
         resolved_id = self.resolve_id(issue_id)
         if resolved_id:
@@ -767,7 +786,11 @@ class JSONLStorage(EventEmitterMixin):
                 ``owner`` keys. ``None`` returns all issues.
 
         Returns:
-            List of matching issues
+            Matching issues. The list is fresh but the ``Issue`` objects in
+            it are live store state, with the same mutation caveat as
+            :meth:`get`. Note also that ``filters=None`` means *all* issues,
+            tombstoned and closed included — nothing here applies the
+            default visibility the CLI list commands add on top.
         """
         issues = list(self._issues.values())
 
@@ -1073,13 +1096,15 @@ class JSONLStorage(EventEmitterMixin):
             if self.path.exists():
                 self._load()
 
-            # Collect issues to rename
             targets = [i for i in self._issues.values() if i.namespace == old_namespace]
             if not targets:
                 msg = f"No issues found in namespace '{old_namespace}'"
                 raise ValueError(msg)
 
-            # Pre-check for collisions
+            # Collision pre-check must complete before the first mutation
+            # below: this method rewrites ids in place across issues, deps
+            # and links, so raising partway through leaves a half-renamed
+            # store in memory with no rollback.
             for issue in targets:
                 new_full_id = f"{new_namespace}-{issue.id}"
                 if (
@@ -1089,14 +1114,12 @@ class JSONLStorage(EventEmitterMixin):
                     msg = f"Issue with ID {new_full_id} already exists"
                     raise ValueError(msg)
 
-            # Build old→new mapping for all affected IDs
             id_map: dict[str, str] = {}
             for issue in targets:
                 id_map[issue.full_id] = f"{new_namespace}-{issue.id}"
 
             now = datetime.now().astimezone()
 
-            # Update the issues themselves and re-key
             for issue in targets:
                 old_fid = issue.full_id
                 issue.namespace = new_namespace
@@ -1106,7 +1129,6 @@ class JSONLStorage(EventEmitterMixin):
                 del self._issues[old_fid]
                 self._issues[issue.full_id] = issue
 
-            # Cascade to references in *all* issues
             for other in self._issues.values():
                 if other.parent and other.parent in id_map:
                     other.parent = id_map[other.parent]
@@ -1115,14 +1137,12 @@ class JSONLStorage(EventEmitterMixin):
                     other.duplicate_of = id_map[other.duplicate_of]
                     other.updated_at = now
 
-            # Cascade to dependencies
             for dep in self._dependencies:
                 if dep.issue_id in id_map:
                     dep.issue_id = id_map[dep.issue_id]
                 if dep.depends_on_id in id_map:
                     dep.depends_on_id = id_map[dep.depends_on_id]
 
-            # Cascade to links
             for link in self._links:
                 if link.from_id in id_map:
                     link.from_id = id_map[link.from_id]
@@ -1161,10 +1181,11 @@ class JSONLStorage(EventEmitterMixin):
             The closed issue
 
         Raises:
-            ValueError: If the issue doesn't exist, or if it is tombstoned
-                (a deleted issue cannot be closed; use ``dcat reopen``
-                first). Closing an already-closed issue is idempotent and
-                does not raise.
+            ValueError: If the issue doesn't exist, or if it is tombstoned.
+                A tombstone is terminal — :meth:`reopen` gates on
+                ``Status.CLOSED``, so there is no route back from it.
+                Closing an already-closed issue is idempotent and does not
+                raise.
         """
         resolved_id = self._resolve_or_raise(issue_id)
 
@@ -1175,8 +1196,8 @@ class JSONLStorage(EventEmitterMixin):
         # always gated on Status.CLOSED.
         if issue.status == Status.TOMBSTONE:
             msg = (
-                f"Issue {issue.full_id} is tombstoned; "
-                f"cannot close a deleted issue. Use 'dcat reopen' first."
+                f"Issue {issue.full_id} is deleted (tombstoned) and cannot be "
+                f"closed. A tombstone is permanent; no command restores it."
             )
             raise ValueError(msg)
         if issue.status == Status.CLOSED:
@@ -1621,6 +1642,20 @@ class JSONLStorage(EventEmitterMixin):
         a concurrent ``dcat new`` cannot append between the read and the atomic
         replace (which would silently overwrite the new record). Updates the
         in-memory state via :meth:`remove_archived` after the rewrite lands.
+
+        Args:
+            archivable_ids: Issue IDs to move. Ids that are not in the store
+                are not an error; they simply match no line.
+            archive_path: Destination JSONL. Its parent directory is created
+                as a side effect of this call.
+
+        Returns:
+            :class:`ArchiveStats`, whose three counts are not alike.
+            ``dependencies`` and ``links`` are counted from the lines that
+            actually moved, but ``issues`` is ``len(archivable_ids)`` — the
+            number *requested*. It stays non-zero on a run that archived
+            nothing at all, so do not read it as a success signal; check
+            whether the archive file grew instead.
         """
         dep_count = 0
         link_count = 0
@@ -1668,12 +1703,21 @@ class JSONLStorage(EventEmitterMixin):
         for issue_id in archived_ids:
             self._issues.pop(issue_id, None)
 
+        # `or` is deliberate, not an `and` typo. classify_archived_line moves
+        # an edge to the archive only when BOTH endpoints are archived, so a
+        # half-archived edge is still in issues.jsonl and must stay in memory
+        # too; De Morgan turns that both-endpoints rule into this `or`. With
+        # `and`, every edge that kept a live endpoint is dropped here and
+        # memory no longer matches the file the archive just rewrote.
         self._dependencies = [
             dep
             for dep in self._dependencies
             if dep.issue_id not in archived_ids or dep.depends_on_id not in archived_ids
         ]
 
+        # Same both-endpoints rule as the dependency filter above: `or` keeps
+        # links that retain one live endpoint, matching what the rewrite left
+        # on disk. `and` would drop them and desync memory from the file.
         self._links = [
             link
             for link in self._links
@@ -1686,12 +1730,19 @@ class JSONLStorage(EventEmitterMixin):
 
     @property
     def all_dependencies(self) -> list[Dependency]:
-        """Return all dependency records."""
+        """Return all dependency records as a new list.
+
+        The list is a copy, so appending to it does not add a dependency;
+        the ``Dependency`` objects in it are the live ones.
+        """
         return list(self._dependencies)
 
     @property
     def all_links(self) -> list[Link]:
-        """Return all link records."""
+        """Return all link records as a new list.
+
+        Copy semantics as in :attr:`all_dependencies`.
+        """
         return list(self._links)
 
     def check_id_uniqueness(self) -> bool:

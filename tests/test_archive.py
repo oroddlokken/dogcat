@@ -1,9 +1,11 @@
 """Tests for the archive command."""
 
 import json
+from datetime import datetime, timezone, tzinfo
 from pathlib import Path
 
 import orjson
+import pytest
 from typer.testing import CliRunner
 
 from dogcat.cli import app
@@ -70,7 +72,7 @@ class TestArchiveBasic:
         assert result.exit_code == 0
         assert "Will archive 1 issue(s)" in result.stdout
         assert "Test issue" in result.stdout
-        assert "dry run - no changes made" in result.stdout
+        assert "(dry run)" in result.stdout
 
         # Verify no archive was created
         archive_dir = dogcats_dir / "archive"
@@ -1053,3 +1055,202 @@ class TestArchiveReadback:
             if check.get("optional"):
                 continue
             assert check["passed"], f"check {name!r} failed after archive: {check}"
+
+
+class TestArchivePreservesUnknownRecords:
+    """A record_type this dcat does not model stays in the live store.
+
+    It used to fall through ``classify_archived_line``'s issue branch, so one
+    carrying a namespace/id that matched an archived issue was moved into the
+    archive file as if it belonged to that issue. Nothing was lost, but the
+    record left the store a newer dcat would look for it in (dogcat-68ij).
+    """
+
+    def test_unknown_record_stays_in_issues_jsonl(self, tmp_path: Path) -> None:
+        """Its id matches the archived issue — the one case that used to move."""
+        dogcats_dir = tmp_path / ".dogcats"
+        init_repo(dogcats_dir)
+        issue_id = create_issue(dogcats_dir, "To archive")
+        close_issue(dogcats_dir, issue_id)
+
+        namespace, _, hash_id = issue_id.partition("-")
+        unknown = {
+            "record_type": "attachment",
+            "namespace": namespace,
+            "id": hash_id,
+            "payload": "from the future",
+        }
+        issues_path = dogcats_dir / "issues.jsonl"
+        with issues_path.open("ab") as fh:
+            fh.write(orjson.dumps(unknown) + b"\n")
+
+        result = runner.invoke(
+            app, ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)]
+        )
+        assert result.exit_code == 0, result.stdout
+
+        def _records(path: Path) -> list[dict[str, object]]:
+            return [
+                orjson.loads(ln) for ln in path.read_bytes().splitlines() if ln.strip()
+            ]
+
+        archive_file = next(iter((dogcats_dir / "archive").glob("closed-*.jsonl")))
+        assert unknown in _records(issues_path)
+        assert unknown not in _records(archive_file)
+        # The issue itself still archived normally.
+        assert JSONLStorage(str(issues_path)).get(issue_id) is None
+
+
+FROZEN_ARCHIVE_TIME = datetime(2026, 8, 9, 2, 19, 58, tzinfo=timezone.utc)
+FROZEN_ARCHIVE_STAMP = "2026-08-09T02-19-58"
+
+
+class _FrozenClock:
+    """Stands in for ``datetime`` inside the archive command."""
+
+    @staticmethod
+    def now(tz: tzinfo | None = None) -> datetime:
+        """Return the pinned instant, in ``tz`` when one is supplied."""
+        return FROZEN_ARCHIVE_TIME if tz is None else FROZEN_ARCHIVE_TIME.astimezone(tz)
+
+
+def freeze_archive_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the archive command's clock so every run derives one filename.
+
+    The collision under test needs two runs inside the same wall-clock second.
+    Racing a real clock would make the test flaky in the direction that hides
+    the bug, so the clock is removed instead.
+    """
+    from dogcat.cli import _cmd_archive
+
+    monkeypatch.setattr(_cmd_archive, "datetime", _FrozenClock)
+
+
+class TestArchiveSameSecondCollision:
+    """Two archive runs in one second must not overwrite each other (dogcat-4vfu).
+
+    The filename carried second resolution and the writer replaces the
+    destination rather than appending, so the second run's rename dropped the
+    first run's records — which had already left ``issues.jsonl``, so nothing
+    could recover them.
+    """
+
+    def test_two_runs_in_one_second_keep_both_issue_batches(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Both archived issues are still readable after the second run."""
+        dogcats_dir = tmp_path / ".dogcats"
+        init_repo(dogcats_dir)
+        freeze_archive_clock(monkeypatch)
+
+        first_id = create_issue(dogcats_dir, "First batch")
+        close_issue(dogcats_dir, first_id)
+        first_run = runner.invoke(
+            app, ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)]
+        )
+        assert first_run.exit_code == 0, first_run.stdout
+
+        second_id = create_issue(dogcats_dir, "Second batch")
+        close_issue(dogcats_dir, second_id)
+        second_run = runner.invoke(
+            app, ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)]
+        )
+        assert second_run.exit_code == 0, second_run.stdout
+
+        archive_dir = dogcats_dir / "archive"
+        archive_files = sorted(archive_dir.glob("closed-*.jsonl"))
+        assert len(archive_files) == 2, archive_files
+
+        archived_ids: set[str] = set()
+        for archive_file in archive_files:
+            archived_ids |= {i.full_id for i in JSONLStorage(str(archive_file)).list()}
+        assert archived_ids == {first_id, second_id}
+
+        # The name reservation must not leave a placeholder behind.
+        empty = [p for p in archive_dir.iterdir() if p.stat().st_size == 0]
+        assert not empty, empty
+
+    def test_two_runs_in_one_second_keep_both_inbox_batches(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``_archive_inbox`` builds its name the same way and needs the same fix."""
+        dogcats_dir = tmp_path / ".dogcats"
+        init_repo(dogcats_dir)
+        freeze_archive_clock(monkeypatch)
+
+        for title in ("First proposal", "Second proposal"):
+            issue_id = create_issue(dogcats_dir, f"Issue for {title}")
+            close_issue(dogcats_dir, issue_id)
+            prop_id = _create_proposal(tmp_path, title)
+            runner.invoke(
+                app, ["inbox", "close", prop_id, "--dogcats-dir", str(dogcats_dir)]
+            )
+            result = runner.invoke(
+                app, ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)]
+            )
+            assert result.exit_code == 0, result.stdout
+
+        archive_dir = dogcats_dir / "archive"
+        inbox_archives = sorted(archive_dir.glob("inbox-closed-*.jsonl"))
+        assert len(inbox_archives) == 2, inbox_archives
+
+        titles: set[str] = set()
+        for archive_file in inbox_archives:
+            for raw in archive_file.read_bytes().splitlines():
+                if raw.strip():
+                    titles.add(str(orjson.loads(raw).get("title", "")))
+        assert titles == {"First proposal", "Second proposal"}
+
+    def test_existing_archive_file_is_not_truncated(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A file already sitting on the chosen name keeps its bytes."""
+        dogcats_dir = tmp_path / ".dogcats"
+        init_repo(dogcats_dir)
+        freeze_archive_clock(monkeypatch)
+
+        archive_dir = dogcats_dir / "archive"
+        archive_dir.mkdir(exist_ok=True)
+        occupied = archive_dir / f"closed-{FROZEN_ARCHIVE_STAMP}.jsonl"
+        occupied.write_bytes(b'{"record_type": "event", "id": "already-here"}\n')
+        before = occupied.read_bytes()
+
+        issue_id = create_issue(dogcats_dir, "Needs a fresh name")
+        close_issue(dogcats_dir, issue_id)
+        result = runner.invoke(
+            app, ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)]
+        )
+        assert result.exit_code == 0, result.stdout
+
+        assert occupied.read_bytes() == before
+        fresh = [p for p in archive_dir.glob("closed-*.jsonl") if p != occupied]
+        assert len(fresh) == 1, fresh
+        assert JSONLStorage(str(fresh[0])).get(issue_id) is not None
+
+    def test_single_run_keeps_the_unsuffixed_name(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Collision handling must not rename the ordinary one-run case."""
+        dogcats_dir = tmp_path / ".dogcats"
+        init_repo(dogcats_dir)
+        freeze_archive_clock(monkeypatch)
+
+        issue_id = create_issue(dogcats_dir, "Only batch")
+        close_issue(dogcats_dir, issue_id)
+        result = runner.invoke(
+            app, ["archive", "--yes", "--dogcats-dir", str(dogcats_dir)]
+        )
+        assert result.exit_code == 0, result.stdout
+
+        archive_dir = dogcats_dir / "archive"
+        expected = archive_dir / f"closed-{FROZEN_ARCHIVE_STAMP}.jsonl"
+        assert sorted(archive_dir.glob("closed-*.jsonl")) == [expected]
+        assert f"closed-{FROZEN_ARCHIVE_STAMP}.jsonl" in result.stdout

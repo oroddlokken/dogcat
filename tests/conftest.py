@@ -32,7 +32,7 @@ def _isolate_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     Storage and config resolution walk up from the current directory,
     so tests run from the checkout inherit the developer's real
     filesystem context: an untracked .dogcatrc above (or at) the
-    checkout root redirects every walk-up, failing 66 tests and — via
+    checkout root redirects every walk-up, failing tests in bulk and — via
     the repo-local config overlay — making tests WRITE to the real
     .dogcats/config.local.toml. Tests that need a specific cwd chdir
     themselves. (dogcat-mbk1)

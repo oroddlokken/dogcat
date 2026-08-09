@@ -557,6 +557,88 @@ class TestConfigKeys:
         assert "Default" in result.stdout
         assert "Description" in result.stdout
 
+    def test_config_keys_bool_defaults_match_resolution(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Each declared bool default must match what an unset store resolves to.
+
+        `dcat config keys` states the default for an operator reading a
+        table; `dcat config get` now reports the same value for an unset key
+        (dogcat-1w21, dogcat-4uy5), so a wrong row here is wrong twice. The
+        allow_creating_namespaces row printed `true` while every consumer
+        resolved it to False.
+
+        The three bool keys each resolve through their own idiom, and they
+        do not agree: git_tracking treats unset as *enabled*. So this pins
+        them one at a time rather than assuming a shared rule. (dogcat-2l8k)
+        """
+        from dogcat.cli._cmd_config import _KNOWN_KEYS
+
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = tmp_path / ".dogcats"
+        _init_with_namespace(dogcats_dir, "proj")
+        config = load_config(str(dogcats_dir))
+
+        # _cmd_web.py — `config.allow_creating_namespaces is True`
+        assert _KNOWN_KEYS["allow_creating_namespaces"]["default"] == (
+            config.allow_creating_namespaces is True
+        )
+        # _cmd_docs.py, `if config.git_tracking is False` — unset means enabled
+        assert _KNOWN_KEYS["git_tracking"]["default"] == (
+            config.git_tracking if config.git_tracking is not None else True
+        )
+        # _cmd_read.py — `not config.disable_legend_colors`
+        assert _KNOWN_KEYS["disable_legend_colors"]["default"] == bool(
+            config.disable_legend_colors
+        )
+
+        # The machine-readable twin `dcat config get` reports must agree.
+        for key in (
+            "allow_creating_namespaces",
+            "git_tracking",
+            "disable_legend_colors",
+        ):
+            assert _KNOWN_KEYS[key]["unset_value"] is _KNOWN_KEYS[key]["default"]
+
+        # And the value actually rendered to the operator.
+        result = runner.invoke(app, ["config", "keys", "--json"])
+        assert result.exit_code == 0
+        assert (
+            json.loads(result.stdout)["allow_creating_namespaces"]["default"] is False
+        )
+
+    def test_every_known_key_declares_how_it_resolves_when_unset(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A new key must state its unset resolution, in one of three ways.
+
+        `dcat config get` reads `unset_value` / `unset_computed` and falls
+        back to "no value" when neither is present — silently, so a key
+        added without either would report nothing and look broken rather
+        than fail. `default` must not be reused for this: it is table prose
+        ("auto-detected"), which is the bug dogcat-4uy5 fixed.
+        """
+        from dogcat.cli._cmd_config import _KNOWN_KEYS, _UNSET_RESOLVERS
+
+        monkeypatch.chdir(tmp_path)
+        _init_with_namespace(tmp_path / ".dogcats", "proj")
+
+        no_value_keys = {"inbox_remote", "default_storage"}
+        for key, info in _KNOWN_KEYS.items():
+            if key in no_value_keys:
+                assert "unset_value" not in info
+                assert not info.get("unset_computed")
+                continue
+            if info.get("unset_computed"):
+                assert key in _UNSET_RESOLVERS
+                continue
+            assert "unset_value" in info, f"{key} declares no unset resolution"
+            assert isinstance(info["unset_value"], bool | list | str)
+
     def test_config_keys_json(
         self,
         tmp_path: Path,
@@ -651,8 +733,13 @@ class TestConfigGlobalFlag:
         )
         result = runner.invoke(app, ["config", "unset", "--global", "default_storage"])
         assert result.exit_code == 0
+        # Exit 0, matching the repo path on a known-but-unset key. The key
+        # is gone, which --json says with "set": false and the plain path
+        # says by printing no value at all. (dogcat-4uy5)
         result = runner.invoke(app, ["config", "get", "--global", "default_storage"])
-        assert result.exit_code != 0
+        assert result.exit_code == 0
+        assert result.stdout == ""
+        assert "unset" in result.stderr
 
     def test_list_shows_global_source(
         self,
@@ -782,8 +869,14 @@ class TestConfigUnsetLocalShared:
         result = runner.invoke(app, ["config", "unset", "git_tracking"])
         assert result.exit_code == 0
 
+        # A known-but-unset key now reports what it resolves to and says it
+        # is unset, rather than erroring like an unknown key (dogcat-1w21).
+        # stdout is the bare value so `$(...)` captures it; the annotation
+        # is on stderr (dogcat-4uy5).
         result = runner.invoke(app, ["config", "get", "git_tracking"])
-        assert result.exit_code != 0
+        assert result.exit_code == 0
+        assert result.stdout == "true\n"
+        assert "unset" in result.stderr
 
     def test_unset_local_removes_key(
         self,
@@ -802,3 +895,300 @@ class TestConfigUnsetLocalShared:
         local_file = dogcats_dir / "config.local.toml"
         if local_file.exists():
             assert "mylocal" not in local_file.read_text()
+
+
+class TestConfigGetUnsetKnownKey:
+    """`dcat config get` on a known-but-unset key reports its default.
+
+    It used to exit 1 with "not found in config", treating a documented
+    key the same as a typo — which left `dcat config keys` as the only
+    surface stating a default. (dogcat-1w21)
+
+    The first cut of that feature printed `_KNOWN_KEYS[key]["default"]`,
+    which is prose for the `dcat config keys` table: `namespace` reported
+    the literal "auto-detected". These pin the payload, not just the exit
+    code. (dogcat-4uy5)
+    """
+
+    def test_unset_known_key_reports_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Exit 0, print the resolved value, and mark it unset on stderr."""
+        monkeypatch.chdir(tmp_path)
+        _init_with_namespace(tmp_path / ".dogcats", "proj")
+
+        result = runner.invoke(app, ["config", "get", "allow_creating_namespaces"])
+        assert result.exit_code == 0
+        assert result.stdout == "false\n"
+        assert "unset" in result.stderr
+
+    def test_unset_known_key_json_marks_it_unset(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--json distinguishes "unset" from "set" without changing shape."""
+        monkeypatch.chdir(tmp_path)
+        _init_with_namespace(tmp_path / ".dogcats", "proj")
+
+        result = runner.invoke(
+            app, ["config", "get", "allow_creating_namespaces", "--json"]
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data == {"allow_creating_namespaces": False, "set": False}
+
+    def test_unknown_key_still_errors(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A typo must not silently succeed."""
+        monkeypatch.chdir(tmp_path)
+        _init_with_namespace(tmp_path / ".dogcats", "proj")
+
+        result = runner.invoke(app, ["config", "get", "no_such_key"])
+        assert result.exit_code != 0
+
+    def test_unknown_key_still_errors_with_json(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The unknown-key error survives --json, which reshapes stderr."""
+        monkeypatch.chdir(tmp_path)
+        _init_with_namespace(tmp_path / ".dogcats", "proj")
+
+        result = runner.invoke(app, ["config", "get", "no_such_key", "--json"])
+        assert result.exit_code != 0
+        assert json.loads(result.stderr)["error"]
+
+    def test_unset_namespace_reports_the_resolved_namespace(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A store that never set `namespace` still has one; report it.
+
+        `get_namespace` falls back to the most common prefix among existing
+        issues, then to the directory name — so `NS=$(dcat config get
+        namespace)` must yield that, not the string "auto-detected".
+        """
+        from dogcat.config import get_namespace
+
+        project = tmp_path / "myproject"
+        project.mkdir()
+        dogcats_dir = project / ".dogcats"
+        dogcats_dir.mkdir()
+        (dogcats_dir / "issues.jsonl").touch()
+        monkeypatch.chdir(project)
+
+        expected = get_namespace(str(dogcats_dir))
+        assert expected == "myproject"
+
+        result = runner.invoke(app, ["config", "get", "namespace"])
+        assert result.exit_code == 0
+        assert result.stdout == f"{expected}\n"
+        assert "auto-detected" not in result.stdout
+        assert "unset" in result.stderr
+
+    def test_unset_namespace_json_carries_the_resolved_namespace(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The same value reaches --json, under the shared shape."""
+        project = tmp_path / "myproject"
+        project.mkdir()
+        dogcats_dir = project / ".dogcats"
+        dogcats_dir.mkdir()
+        (dogcats_dir / "issues.jsonl").touch()
+        monkeypatch.chdir(project)
+
+        result = runner.invoke(app, ["config", "get", "namespace", "--json"])
+        assert result.exit_code == 0
+        assert json.loads(result.stdout) == {"namespace": "myproject", "set": False}
+
+    def test_unset_key_with_no_resolvable_value_prints_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`inbox_remote` has no fallback, so no value is invented for it.
+
+        stdout stays empty so `$(...)` captures nothing rather than the
+        table's "(none)"; the explanation goes to stderr.
+        """
+        monkeypatch.chdir(tmp_path)
+        _init_with_namespace(tmp_path / ".dogcats", "proj")
+
+        result = runner.invoke(app, ["config", "get", "inbox_remote"])
+        assert result.exit_code == 0
+        assert result.stdout == ""
+        assert "no resolved value" in result.stderr
+
+        result = runner.invoke(app, ["config", "get", "inbox_remote", "--json"])
+        assert result.exit_code == 0
+        assert json.loads(result.stdout) == {"inbox_remote": None, "set": False}
+
+
+class TestConfigGetShapeSymmetry:
+    """Set and unset `dcat config get` agree on shape and types.
+
+    The unset path used to emit `{key: null, "set": false, "default": "..."}`
+    against the set path's `{key: value}`, and stringified bool defaults —
+    so `.default` was a string where the set value was a JSON bool, and
+    reading `data["set"]` raised KeyError on the set path. (dogcat-4uy5)
+    """
+
+    @staticmethod
+    def _init(tmp_path: Path) -> Path:
+        dogcats_dir = tmp_path / ".dogcats"
+        _init_with_namespace(dogcats_dir, "proj")
+        return dogcats_dir
+
+    def test_bool_key_json_keys_and_types_match_across_paths(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Same keys, and a bool stays a JSON bool on both paths."""
+        monkeypatch.chdir(tmp_path)
+        self._init(tmp_path)
+
+        unset = runner.invoke(app, ["config", "get", "git_tracking", "--json"])
+        assert unset.exit_code == 0
+        unset_data = json.loads(unset.stdout)
+
+        runner.invoke(app, ["config", "set", "git_tracking", "false"])
+        was_set = runner.invoke(app, ["config", "get", "git_tracking", "--json"])
+        assert was_set.exit_code == 0
+        set_data = json.loads(was_set.stdout)
+
+        assert unset_data.keys() == set_data.keys()
+        assert unset_data == {"git_tracking": True, "set": False}
+        assert set_data == {"git_tracking": False, "set": True}
+
+    def test_bool_key_text_renders_lowercase_on_both_paths(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`true`/`false`, not Python's `True`/`False`, so set can read it back."""
+        monkeypatch.chdir(tmp_path)
+        self._init(tmp_path)
+
+        unset = runner.invoke(app, ["config", "get", "git_tracking"])
+        assert unset.stdout == "true\n"
+
+        runner.invoke(app, ["config", "set", "git_tracking", "false"])
+        was_set = runner.invoke(app, ["config", "get", "git_tracking"])
+        assert was_set.stdout == "false\n"
+
+    def test_list_key_shape_matches_across_paths(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A list key stays a list in JSON and comma-joined in text.
+
+        Unset used to print the table copy "[] (show all)" against the set
+        path's "a, b".
+        """
+        monkeypatch.chdir(tmp_path)
+        dogcats_dir = self._init(tmp_path)
+
+        unset = runner.invoke(app, ["config", "get", "visible_namespaces"])
+        assert unset.exit_code == 0
+        assert unset.stdout == "\n"
+        assert "show all" not in unset.stdout
+        unset_json = runner.invoke(
+            app, ["config", "get", "visible_namespaces", "--json"]
+        )
+        assert json.loads(unset_json.stdout) == {
+            "visible_namespaces": [],
+            "set": False,
+        }
+
+        _set_ns_config(dogcats_dir, "visible_namespaces", ["a", "b"])
+        was_set = runner.invoke(app, ["config", "get", "visible_namespaces"])
+        assert was_set.stdout == "a, b\n"
+        set_json_result = runner.invoke(
+            app, ["config", "get", "visible_namespaces", "--json"]
+        )
+        assert json.loads(set_json_result.stdout) == {
+            "visible_namespaces": ["a", "b"],
+            "set": True,
+        }
+
+
+class TestConfigGetGlobalKeys:
+    """`dcat config get` and the global config file."""
+
+    def test_global_default_storage_is_reported_by_the_repo_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`default_storage` lives only in the global file; read it there.
+
+        `load_config` never opens the global file, so `key not in config`
+        was always true and a global value steering storage resolution for
+        every repo on the machine reported "(unset)" — the opposite of the
+        truth. (dogcat-4uy5)
+        """
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        shared = tmp_path / "shared" / ".dogcats"
+        shared.mkdir(parents=True)
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".dogcats").mkdir()
+        monkeypatch.chdir(repo)
+
+        assert (
+            runner.invoke(
+                app, ["config", "set", "--global", "default_storage", str(shared)]
+            ).exit_code
+            == 0
+        )
+
+        result = runner.invoke(app, ["config", "get", "default_storage"])
+        assert result.exit_code == 0
+        assert result.stdout == f"{shared}\n"
+        assert result.stderr == ""
+
+        as_json = runner.invoke(app, ["config", "get", "default_storage", "--json"])
+        assert json.loads(as_json.stdout) == {
+            "default_storage": str(shared),
+            "set": True,
+        }
+
+    def test_repo_value_wins_over_global_for_a_shared_key(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Repo config beats the global file, as `dcat config list` merges it."""
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        repo = tmp_path / "repo"
+        dogcats_dir = repo / ".dogcats"
+        _init_with_namespace(dogcats_dir, "proj")
+        monkeypatch.chdir(repo)
+
+        runner.invoke(
+            app, ["config", "set", "--global", "visible_namespaces", "fromglobal"]
+        )
+        _set_ns_config(dogcats_dir, "visible_namespaces", ["fromrepo"])
+
+        result = runner.invoke(app, ["config", "get", "visible_namespaces", "--json"])
+        assert result.exit_code == 0
+        assert json.loads(result.stdout) == {
+            "visible_namespaces": ["fromrepo"],
+            "set": True,
+        }
+
+    def test_global_and_local_agree_on_a_known_unset_key(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`--global` used to exit 1 where the repo path exits 0."""
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        repo = tmp_path / "repo"
+        _init_with_namespace(repo / ".dogcats", "proj")
+        monkeypatch.chdir(repo)
+
+        local = runner.invoke(app, ["config", "get", "git_tracking", "--json"])
+        global_ = runner.invoke(
+            app, ["config", "get", "--global", "git_tracking", "--json"]
+        )
+        assert local.exit_code == global_.exit_code == 0
+        assert json.loads(local.stdout) == json.loads(global_.stdout)
+
+    def test_global_path_still_errors_on_an_unknown_key(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The known/unknown split holds on `--global` too."""
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        repo = tmp_path / "repo"
+        _init_with_namespace(repo / ".dogcats", "proj")
+        monkeypatch.chdir(repo)
+
+        result = runner.invoke(app, ["config", "get", "--global", "no_such_key"])
+        assert result.exit_code == 1

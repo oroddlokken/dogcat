@@ -37,11 +37,6 @@ def _check_perf_budget(merge_time: float) -> None:
     )
 
 
-# ---------------------------------------------------------------------------
-# Test scenarios
-# ---------------------------------------------------------------------------
-
-
 class TestMergeScale:
     """Scale tests for the merge driver."""
 

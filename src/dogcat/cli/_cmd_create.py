@@ -8,7 +8,15 @@ import orjson
 import typer
 
 from dogcat.config import get_namespace
-from dogcat.constants import DEFAULT_PRIORITY, DEFAULT_TYPE, parse_labels
+from dogcat.constants import (
+    DEFAULT_PRIORITY,
+    DEFAULT_TYPE,
+    PRIORITY_VALUES_HELP,
+    STATUS_VALUES_HELP,
+    TYPE_VALUES_HELP,
+    parse_labels,
+    parse_status_value,
+)
 from dogcat.models import IssueType, Status
 
 from ._completions import (
@@ -30,6 +38,11 @@ from ._helpers import (
     get_storage,
 )
 from ._json_state import echo_error, is_json, set_json
+from ._list_options import (
+    ByOpt,
+    DogcatsDirOpt,
+    JsonOpt,
+)
 
 
 def _resolve_create_overrides(
@@ -45,7 +58,8 @@ def _resolve_create_overrides(
 
     Explicit ``--priority`` / ``--type`` / ``--status`` win over their
     shorthand equivalents, which in turn win over the package defaults.
-    Returns ``(final_priority, final_type, initial_status)``.
+    Returns ``(final_priority, final_type, initial_status)``. Raises
+    ``ValueError`` for a ``--status`` outside the selectable set.
     """
     final_priority = (
         priority
@@ -60,7 +74,7 @@ def _resolve_create_overrides(
         else (shorthand_type if shorthand_type is not None else DEFAULT_TYPE)
     )
     if status:
-        initial_status = Status(status)
+        initial_status = Status(parse_status_value(status))
     elif shorthand_status:
         initial_status = Status(shorthand_status)
     else:
@@ -196,7 +210,7 @@ def register(app: typer.Typer) -> None:
             None,
             "--priority",
             "-p",
-            help="Priority (0-4, p0-p4, or critical/high/medium/low/minimal)",
+            help=f"Priority ({PRIORITY_VALUES_HELP})",
             parser=_parse_priority_value,
             metavar="PRIORITY",
             autocompletion=complete_priorities,
@@ -205,14 +219,14 @@ def register(app: typer.Typer) -> None:
             None,
             "--type",
             "-t",
-            help="Issue type (task, bug, feature, story, chore, epic, question)",
+            help=f"Issue type ({TYPE_VALUES_HELP})",
             autocompletion=complete_types,
         ),
         status: str | None = typer.Option(
             None,
             "--status",
             "-s",
-            help="Initial status (draft, open, in_progress, blocked, deferred)",
+            help=f"Initial status ({STATUS_VALUES_HELP})",
             autocompletion=complete_statuses,
         ),
         owner: str | None = typer.Option(
@@ -261,12 +275,8 @@ def register(app: typer.Typer) -> None:
             help="Parent issue ID (makes this a child issue)",
             autocompletion=complete_issue_ids,
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        created_by: str | None = typer.Option(
-            None,
-            "--by",
-            help="Who is creating this",
-        ),
+        json_output: JsonOpt = False,
+        created_by: ByOpt = None,
         design: str | None = typer.Option(None, "--design", help="Design notes"),
         external_ref: str | None = typer.Option(
             None,
@@ -291,7 +301,7 @@ def register(app: typer.Typer) -> None:
             help="Mark issue as manual (not for agents)",
         ),
         allow_shorthands: bool = typer.Option(False, hidden=True),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Create a new issue (implementation)."""
         set_json(json_output)
@@ -484,8 +494,8 @@ def register(app: typer.Typer) -> None:
         arg2: str | None = typer.Argument(None, help=_ARG_HELP_SHORTHAND),
         arg3: str | None = typer.Argument(None, help=_ARG_HELP_SHORTHAND),
         arg4: str | None = typer.Argument(None, help=_ARG_HELP_SHORTHAND),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
+        json_output: JsonOpt = False,
     ) -> None:
         """Open an interactive Textual form to create a new issue.
 

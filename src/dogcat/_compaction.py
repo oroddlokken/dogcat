@@ -1,8 +1,7 @@
-"""Append-only JSONL compaction policy.
+"""Append-only JSONL compaction policy: when a rewrite is worth its cost.
 
-Extracted from ``storage.py`` to keep the compaction trigger logic in one
-place where it can be reasoned about (and tested) independently of the
-storage class.
+Policy only — the snapshot writer is :mod:`dogcat._persistence` and the
+atomic file primitives are :mod:`dogcat._jsonl_io`.
 """
 
 from __future__ import annotations

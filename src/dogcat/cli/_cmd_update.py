@@ -8,7 +8,13 @@ from typing import TYPE_CHECKING
 import orjson
 import typer
 
-from dogcat.constants import parse_labels
+from dogcat.constants import (
+    PRIORITY_VALUES_HELP,
+    STATUS_VALUES_HELP,
+    TYPE_VALUES_HELP,
+    parse_labels,
+    parse_status_value,
+)
 from dogcat.models import UpdateRequest, set_manual_flag
 
 from ._completions import (
@@ -29,6 +35,11 @@ from ._helpers import (
     parse_duration,
 )
 from ._json_state import echo_error, is_json, set_json
+from ._list_options import (
+    ByOpt,
+    DogcatsDirOpt,
+    JsonOpt,
+)
 
 if TYPE_CHECKING:
     from dogcat.storage import JSONLStorage
@@ -75,8 +86,7 @@ def _remove_dep_with_check(
     ``"{subject} does not block {target}"``.
 
     Raises ``ValueError`` if the target doesn't resolve or if the
-    expected dependency isn't there. Centralizes the two near-identical
-    blocks the CLI used to spell out inline.
+    expected dependency isn't there.
     """
     resolved_target = storage.resolve_id(target_partial_id)
     if resolved_target is None:
@@ -121,6 +131,8 @@ def _build_update_request(
     Building the request (rather than an untyped dict) rejects unknown field
     names at construction time. ``duplicate_of``/``parent`` accept ``""`` to
     clear the field, or a partial ID that is resolved against ``storage``.
+    ``status`` is checked here rather than in ``storage._coerce_status``,
+    which accepts every ``Status`` member including the two sentinels.
     """
     from ._helpers import require_resolved_id
 
@@ -128,7 +140,7 @@ def _build_update_request(
     if title is not None:
         request.title = title
     if status is not None:
-        request.status = status
+        request.status = parse_status_value(status)
     if priority is not None:
         request.priority = priority
     if issue_type is not None:
@@ -181,14 +193,14 @@ def register(app: typer.Typer) -> None:
             None,
             "--status",
             "-s",
-            help="New status (draft, open, in_progress, in_review, blocked, deferred)",
+            help=f"New status ({STATUS_VALUES_HELP})",
             autocompletion=complete_statuses,
         ),
         priority: int | None = typer.Option(
             None,
             "--priority",
             "-p",
-            help="New priority (0-4 or p0-p4)",
+            help=f"New priority ({PRIORITY_VALUES_HELP})",
             parser=_parse_priority_value,
             metavar="PRIORITY",
             autocompletion=complete_priorities,
@@ -197,7 +209,7 @@ def register(app: typer.Typer) -> None:
             None,
             "--type",
             "-t",
-            help="New issue type (task, bug, feature, story, chore, epic, question)",
+            help=f"New issue type ({TYPE_VALUES_HELP})",
             autocompletion=complete_types,
         ),
         description: str | None = typer.Option(
@@ -307,13 +319,9 @@ def register(app: typer.Typer) -> None:
             "--unsnooze",
             help="Remove snooze from issue",
         ),
-        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-        updated_by: str | None = typer.Option(
-            None,
-            "--by",
-            help="Who is updating this",
-        ),
-        dogcats_dir: str = typer.Option(".dogcats", help="Path to .dogcats directory"),
+        json_output: JsonOpt = False,
+        updated_by: ByOpt = None,
+        dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Update one or more issues."""
         set_json(json_output)

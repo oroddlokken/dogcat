@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from textual.widgets import Button, OptionList
+from textual.widgets import Button, OptionList, Static
 
 from dogcat.models import Issue
 from dogcat.tui.dashboard import ConfirmDeleteScreen, DogcatTUI
@@ -359,6 +359,29 @@ class TestDashboardDeleteAction:
             assert any(isinstance(s, ConfirmDeleteScreen) for s in app.screen_stack)
 
     @pytest.mark.asyncio
+    async def test_confirm_hint_does_not_promise_recovery(self) -> None:
+        """The hint above Delete must not name a command that undoes it.
+
+        ``storage.delete`` writes ``Status.TOMBSTONE`` and ``reopen`` gates on
+        ``Status.CLOSED``, so the dialog's earlier "recoverable with dcat
+        reopen" hint sent the user after a command that raises. (dogcat-2k0k)
+        """
+        issue = _make_issue(id="abc1", title="Deletable issue")
+        storage = _make_storage([issue])
+        app = DogcatTUI(storage)
+
+        async with app.run_test() as pilot:
+            app.action_delete_issue()
+            await pilot.pause()
+
+            confirm_screen = next(
+                s for s in app.screen_stack if isinstance(s, ConfirmDeleteScreen)
+            )
+            hint = str(confirm_screen.query_one("#confirm-hint", Static).render())
+            assert "No command restores a deleted issue." in hint
+            assert "reopen" not in hint
+
+    @pytest.mark.asyncio
     async def test_confirm_yes_deletes(self) -> None:
         """Confirming Yes on the dialog calls storage.delete."""
         issue = _make_issue(id="abc1", title="To delete")
@@ -461,11 +484,6 @@ class TestDashboardDeleteAction:
 
             storage.delete.assert_not_called()
             assert not any(isinstance(s, ConfirmDeleteScreen) for s in app.screen_stack)
-
-
-# ---------------------------------------------------------------------------
-# E2E test: TUI with real storage backend
-# ---------------------------------------------------------------------------
 
 
 class TestTUIWithRealStorage:

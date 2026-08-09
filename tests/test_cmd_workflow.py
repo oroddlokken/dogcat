@@ -346,7 +346,49 @@ class TestCLIBlocked:
             ["blocked", "--dogcats-dir", str(dogcats_dir)],
         )
         assert result.exit_code == 0
-        assert "No blocked issues" in result.stdout
+        assert "No issues blocked by dependencies" in result.stdout
+
+    def test_blocked_status_alone_is_not_the_blocked_list(self, tmp_path: Path) -> None:
+        """`--status blocked` and `dcat blocked` are different sets.
+
+        `get_blocked_issues` keys off unfinished dependencies and ignores
+        the issue's own status, while `get_ready_work` filters to
+        OPEN/IN_PROGRESS. So an issue set to the `blocked` status with no
+        dependencies falls out of both lists, and the old header "Blocked
+        (N):" invited the reader to compare two counts that never
+        described the same set. (dogcat-57vc)
+        """
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        create = runner.invoke(
+            app,
+            [
+                "create",
+                "Stuck on something external",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        issue_id = create.stdout.split(": ")[0].split()[-1]
+        runner.invoke(
+            app,
+            [
+                "update",
+                issue_id,
+                "--status",
+                "blocked",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        blocked = runner.invoke(app, ["blocked", "--dogcats-dir", str(dogcats_dir)])
+        ready = runner.invoke(app, ["ready", "--dogcats-dir", str(dogcats_dir)])
+
+        # Present in neither list, so the header must not claim otherwise.
+        assert "No issues blocked by dependencies" in blocked.stdout
+        assert issue_id not in ready.stdout
+        assert "Blocked (" not in blocked.stdout
 
     def test_blocked_shows_issue_details(self, tmp_path: Path) -> None:
         """Test blocked output includes title, type, and priority."""

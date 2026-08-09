@@ -10,7 +10,7 @@ import typer
 from ._helpers import SortedGroup
 
 app = typer.Typer(
-    help="dogcat - lightweight, file-based issue tracking "
+    help="dogcat - file-based issue tracking "
     "and memory upgrade for AI agents (and humans!)",
     no_args_is_help=True,
     cls=SortedGroup,
@@ -33,6 +33,20 @@ def _global_options(
         help="Run as if dcat was started in PATH.",
     ),
 ) -> None:
+    """Run before every subcommand; leaves three process-wide effects.
+
+    1. ``-C/--repo`` resolves strictly and ``os.chdir()``s the *process*
+       before the subcommand runs, exiting 1 when the path is missing or is
+       not a directory. Every later cwd-relative lookup — store walk-up,
+       git toplevel, ``.dogcatrc`` — sees the new directory, so a test that
+       invokes the CLI with ``-C`` moves its own cwd unless it restores it.
+    2. ``--json`` resets and then sets the module-global state in
+       ``._json_state`` that every command reads back through ``is_json()``.
+       It is global, not per-invocation: in-process runners (CliRunner, the
+       web app) inherit whatever the previous invocation set until the next
+       call resets it.
+    3. A bare ``dcat`` with no subcommand prints help and exits 0.
+    """
     from ._json_state import reset_json, set_json
 
     reset_json()
@@ -105,8 +119,11 @@ def _register_command_module(name: str) -> None:
         mod.register(app)
     except Exception as exc:  # noqa: BLE001
         _logger.warning(
+            # No global -v exists (the root callback defines only --json and
+            # -C/--repo), and %s above already carries the exception.
             "Failed to load CLI command module %r: %s. "
-            "The rest of dcat will still work; rerun with -v for details.",
+            "The rest of dcat still works; that module's commands are "
+            "unavailable.",
             name,
             exc,
         )

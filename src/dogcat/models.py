@@ -55,7 +55,14 @@ _UNKNOWN_STATUS_EMOJI = "?"
 
 
 class Status(str, Enum):
-    """Issue status enumeration."""
+    """Issue status enumeration.
+
+    Two members are not user-selectable. ``TOMBSTONE`` is a deletion, not a
+    kind of ``CLOSED`` — a closed issue reopens and a tombstone does not, so
+    filters that mean "finished" must name both. ``UNKNOWN`` is the
+    forward-compat sentinel for a status written by a newer dcat, so it can
+    appear on a loaded record while never being written by this one.
+    """
 
     DRAFT = "draft"
     OPEN = "open"
@@ -186,7 +193,7 @@ class Dependency:
     created_by: str | None = None
 
     def to_export_dict(self) -> dict[str, Any]:
-        """Serialize to the ``dcat admin export`` shape.
+        """Serialize to the ``dcat export`` shape.
 
         Same field set as the JSONL record but without the storage-only
         ``record_type`` / ``dcat_version`` envelope, so the export path and
@@ -215,7 +222,7 @@ class Link:
     created_by: str | None = None
 
     def to_export_dict(self) -> dict[str, Any]:
-        """Serialize to the ``dcat admin export`` shape.
+        """Serialize to the ``dcat export`` shape.
 
         Mirror of :meth:`Dependency.to_export_dict` for links.
         """
@@ -234,7 +241,7 @@ class Issue:
 
     id: str  # The hash part only (e.g., "4kzj")
     title: str
-    namespace: str = DEFAULT_NAMESPACE  # The namespace/prefix (e.g., "dc")
+    namespace: str = DEFAULT_NAMESPACE
     description: str | None = None
     status: Status = Status.OPEN
     priority: int = 2  # 0-4 range, lower is higher priority
@@ -411,8 +418,13 @@ class UpdateRequest:
     ``duplicate_of``), so the ``UNSET`` sentinel is required to distinguish
     "leave alone" from "clear".
 
-    Field names mirror :data:`JSONLStorage.UPDATABLE_FIELDS`; passing an
-    unknown field is impossible because the dataclass schema rejects it.
+    Field names are a *subset* of :data:`JSONLStorage.UPDATABLE_FIELDS`, not
+    a mirror of it. Seven updatable fields have no slot here — ``closed_at``,
+    ``closed_by``, ``deleted_at``, ``deleted_by``, ``deleted_reason``,
+    ``original_type`` and ``comments`` — because they belong to the
+    close/delete/comment paths rather than to a user edit. Setting one means
+    passing a plain dict to :meth:`JSONLStorage.update`; via this class the
+    dataclass schema rejects the name outright.
     """
 
     title: Any = UNSET
@@ -506,9 +518,13 @@ def strip_control_bytes(text: str | None) -> str | None:
     r"""Strip C0/C1 control bytes from ``text`` (keep ``\\t`` and ``\\n``).
 
     Defense against terminal-escape injection via title/description/etc.
-    Used by validate_issue/validate_proposal so the storage layer can never
-    persist a record carrying ``\\x1b[2J`` or other prompt-injection payloads.
-    Render-side has a complementary escape helper as defense-in-depth.
+    Reaches the store through ``validate_issue`` / ``validate_proposal``,
+    which run on the create and update paths only. Three routes bypass it:
+    :meth:`JSONLStorage.close` and :meth:`JSONLStorage.delete` set
+    ``closed_reason`` / ``deleted_reason`` and append without validating, and
+    records arriving by merge or compaction are never re-validated. So a
+    stored record can still carry ``\\x1b[2J``; render every field through
+    :func:`sanitize_for_terminal` rather than trusting this strip.
     """
     if text is None:
         return None
@@ -652,9 +668,7 @@ def validate_proposal(proposal: Proposal) -> None:
     )
 
 
-# ---------------------------------------------------------------------------
 # Backward-compatible re-exports
-# ---------------------------------------------------------------------------
 # The JSONL (de)serialization helpers moved to dogcat.models_serde. Callers
 # still do ``from dogcat.models import issue_to_dict`` (tests also import the
 # ``_migrate_*`` helpers), so expose the names here. models_serde imports the

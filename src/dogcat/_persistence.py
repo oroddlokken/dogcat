@@ -7,10 +7,8 @@ domain-aware snapshot writer that serializes the current in-memory state
 (issues + dependencies + links) and preserves the append-only event records
 from the existing file.
 
-Extracted from the ``_write`` closure formerly nested inside
-:meth:`dogcat.storage.JSONLStorage._save_locked` so the ~85-line rewrite body
-is a module-level free function taking explicit state — independently testable
-without constructing a storage instance or holding the file lock.
+It takes state explicitly rather than reading a storage instance, so it can be
+tested without constructing a store or holding the file lock.
 """
 
 from __future__ import annotations
@@ -39,6 +37,7 @@ def compact_snapshot(
     dependencies: Iterable[Dependency],
     links: Iterable[Link],
     source: Path,
+    preserved: Iterable[dict[str, Any]] = (),
     prune_event_ids: set[str] | None = None,
     rename_event_ids: dict[str, str] | None = None,
 ) -> int:
@@ -47,7 +46,8 @@ def compact_snapshot(
     Emits one JSONL line per issue, dependency, and link (dropping superseded
     issue records and removed deps/links, since ``issues``/``dependencies``/
     ``links`` are already the resolved current state), then copies the event
-    records from ``source`` so the audit log survives compaction.
+    records from ``source`` so the audit log survives compaction, then the
+    records of kinds this dcat does not model.
 
     Args:
         out: Open binary file handle to write the snapshot to (typically the
@@ -58,10 +58,21 @@ def compact_snapshot(
         source: The existing store file to read preserved event records from.
             Read while ``out`` (a separate tempfile) is written, so reading the
             soon-to-be-replaced file is safe.
+        preserved: Records whose ``record_type`` this dcat does not model
+            (``JSONLStorage._preserved``). Written last, sorted by canonical
+            serialization so a rewrite is stable, and emitted with their own
+            key order so a record round-trips byte-for-byte. Omitting them
+            here deletes them on the next compaction, which is the storage
+            half of dogcat-68ij. Not read from ``source``: the caller has
+            already resolved them, and a rewrite driven by in-memory state
+            must not resurrect a record another process removed.
         prune_event_ids: If set, drop event records whose ``issue_id`` is in
             this set (used by ``prune_tombstones``).
         rename_event_ids: If set, rewrite ``issue_id`` in event records
             according to this old→new mapping (used by ``change_namespace``).
+            Not applied to ``preserved`` records — the id fields of a kind we
+            do not model cannot be located, so a namespace rename leaves them
+            pointing at the old namespace.
     """
     line_count = 0
     for issue in issues:
@@ -89,6 +100,16 @@ def compact_snapshot(
         prune_event_ids=prune_event_ids,
         rename_event_ids=rename_event_ids,
     )
+
+    # Sorted by canonical serialization, matching how merge_jsonl orders the
+    # same records, so two rewrites of one store agree byte for byte.
+    for record in sorted(
+        preserved, key=lambda r: orjson.dumps(r, option=orjson.OPT_SORT_KEYS)
+    ):
+        out.write(orjson.dumps(record))
+        out.write(b"\n")
+        line_count += 1
+
     return line_count
 
 

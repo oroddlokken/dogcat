@@ -4,10 +4,9 @@
 # requires-python = ">=3.10"
 # dependencies = [
 #   "typer",
-#   "pydantic",
 #   "rich",
 #   "orjson",
-#   "textual>=8.0.0",
+#   "textual>=8.2.8",
 #   "watchdog",
 #   "tomli",
 #   "tomli_w",

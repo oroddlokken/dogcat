@@ -40,14 +40,26 @@ _ARG_HELP_SHORTHAND = (
 def with_ns_shim(func: Callable[..., Any]) -> Callable[..., Any]:
     """Decorate a Typer command with hidden --namespace / --all-namespaces options.
 
-    Why: these flags are owned by the global Typer callback, but Typer parses
-    options at the level they appear on the command line. Without per-command
-    shim params, ``dcat close ISSUE --namespace ns`` errors out because
-    ``close`` doesn't declare them. The shim accepts and discards the values;
-    the actual filter is applied by ``get_namespace_filter()`` reading the
-    process state set by the global callback.
+    Why: Typer parses options at the level they appear on the command line, so
+    without these params ``dcat close ISSUE --namespace ns`` errors out with
+    "no such option". The shim buys two things — the invocation parses, and
+    ``_ns_filter_from_ctx`` (cli/_completions.py) can read the values off
+    ``ctx.params`` while generating completions for that command.
+
+    It buys nothing at runtime: ``wrapper`` pops both values and drops them,
+    and the decorated command never sees a namespace. If you are chasing why
+    ``--namespace`` had no effect on a mutation command, this is why — there
+    is no global namespace state anywhere for it to set.
     """
-    sig = inspect.signature(func)
+    # Canonical statement of the eval_str rule; _make_alias below points here.
+    # eval_str resolves ``from __future__ import annotations`` strings against
+    # the decorated function's own module. That matters because for options
+    # declared via the Annotated aliases in cli/_list_options, the
+    # ``typer.Option`` metadata lives in the annotation.
+    # Left as strings, Typer resolves them against *this* module's globals —
+    # which do not import those aliases — and silently regenerates a default
+    # ``--param-name`` option, turning --json into --json-output. (dogcat-1fr8)
+    sig = inspect.signature(func, eval_str=True)
     shim_params = [
         inspect.Parameter(
             "all_namespaces",
@@ -78,8 +90,8 @@ def with_ns_shim(func: Callable[..., Any]) -> Callable[..., Any]:
 
     wrapper.__signature__ = sig.replace(parameters=new_params)  # type: ignore[attr-defined]
     wrapper.__annotations__ = {
-        **func.__annotations__,
-        "all_namespaces": "bool",
+        **get_type_hints(func, include_extras=True),
+        "all_namespaces": bool,
         "namespace": "str | None",
     }
     return wrapper
@@ -106,12 +118,7 @@ def _make_alias(
     import copy
 
     defaults = param_defaults or {}
-    # eval_str resolves ``from __future__ import annotations`` strings against
-    # the source function's own module. Without it the cloned signature keeps
-    # annotations as bare strings, and for options declared via Annotated
-    # aliases (cli/_list_options) the ``typer.Option`` metadata lives in the
-    # annotation — so Typer would lose the custom flags/help and regenerate a
-    # default ``--param-name`` option.
+    # eval_str for the reason spelled out in with_ns_shim above.
     sig = inspect.signature(source_fn, eval_str=True)
     new_params = [p for name, p in sig.parameters.items() if name not in exclude_params]
 
@@ -133,13 +140,10 @@ def _make_alias(
     wrapper.__signature__ = sig.replace(parameters=new_params)  # type: ignore[attr-defined]
     wrapper.__doc__ = doc
     wrapper.__module__ = source_fn.__module__
-    # Copy the source's RESOLVED type hints, not the raw
-    # ``from __future__ import annotations`` strings. The wrapper's code object
-    # lives in *this* module, so Typer's ``get_type_hints`` would resolve any
-    # string annotation against ``_helpers``' globals — missing names imported
-    # only into the source command's module (e.g. the shared ``_list_options``
-    # option aliases). Resolving here, in the source function's own module,
-    # yields concrete annotation objects that need no further lookup.
+    # Same annotation problem as above, one layer out: the wrapper's code
+    # object lives in *this* module, so Typer resolving its string annotations
+    # would look them up in ``_helpers``' globals. Resolve them here against
+    # the source function's module and hand Typer concrete objects.
     resolved_hints = get_type_hints(source_fn, include_extras=True)
     wrapper.__annotations__ = {
         name: ann for name, ann in resolved_hints.items() if name not in exclude_params
@@ -152,18 +156,23 @@ def require_resolved_id(
 ) -> str:
     """Resolve a partial id or echo+exit with a clear error.
 
-    Replaces the six-line ``if foo: resolved = storage.resolve_id(foo); if
-    resolved is None: echo_error(...); raise typer.Exit(1); foo = resolved``
-    pattern in CLI commands that accept reference flags (``--depends-on``,
-    ``--blocks``, ``--duplicate-of``, ``--parent``). ``label`` lets each
-    call site surface the role (``"Parent issue"``, ``"Duplicate target"``)
-    in the error message.
+    For CLI commands taking reference flags (``--depends-on``, ``--blocks``,
+    ``--duplicate-of``, ``--parent``): resolves or exits 1 with a message,
+    so the caller gets a full id and never a ``None`` to re-check. ``label``
+    names the role (``"Parent issue"``, ``"Duplicate target"``) in that
+    message.
     """
     from ._json_state import echo_error
 
     resolved = storage.resolve_id(raw_id)
     if resolved is None:
-        echo_error(f"{label} {raw_id} not found")
+        # Closed and cross-namespace issues both resolve, so the only
+        # causes left are a typo or an archived record — neither of which
+        # the bare "not found" named. (dogcat-1jnb)
+        echo_error(
+            f"{label} '{raw_id}' matched no issue. Run 'dcat list --all -A' "
+            f"to see current IDs — archived issues are not searched."
+        )
         raise typer.Exit(1)
     return resolved
 
@@ -628,9 +637,9 @@ _SHORTHAND_KINDS: tuple[tuple[str, frozenset[str], bool], ...] = (
 def _classify_shorthand(value: str) -> str | None:
     """Return the shorthand kind ("priority"/"type"/"status") or None.
 
-    Replaces the older quartet (``_is_priority_shorthand``,
-    ``_is_type_shorthand``, ``_is_status_shorthand``, ``_is_shorthand``) with
-    a single dictionary-driven lookup; callers compare the returned kind.
+    Single lookup over ``_SHORTHAND_KINDS``; callers compare the returned
+    kind rather than asking one predicate per kind. Add a shorthand family
+    to that tuple and every caller picks it up.
     """
     if len(value) != 1:
         return None

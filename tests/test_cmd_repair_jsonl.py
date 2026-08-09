@@ -127,3 +127,22 @@ class TestRepairJsonl:
         issues_check = data["checks"]["issues_jsonl"]
         assert issues_check["passed"] is False
         assert "repair-jsonl" in issues_check["fix"]
+
+    def test_unknown_record_type_is_not_quarantined(self, tmp_path: Path) -> None:
+        """A kind from a newer dcat is not damage, so repair leaves it alone.
+
+        It used to count as a bad line: repair copied it to the ``.bad``
+        sidecar and compacted it out of the store, which is a deletion the
+        user never asked for (dogcat-68ij).
+        """
+        dogcats_dir = _init(tmp_path)
+        issues_path = dogcats_dir / "issues.jsonl"
+        valid = _valid_issue_line()
+        unknown = '{"record_type":"attachment","id":"u1","payload":"future"}'
+        issues_path.write_text(f"{valid}\n{unknown}\n")
+
+        result = runner.invoke(app, ["repair-jsonl", "--dogcats-dir", str(dogcats_dir)])
+        assert result.exit_code == 0, result.stdout
+        assert "No malformed JSONL lines found" in result.stdout
+        assert not (issues_path.with_suffix(issues_path.suffix + ".bad")).exists()
+        assert unknown in issues_path.read_text()

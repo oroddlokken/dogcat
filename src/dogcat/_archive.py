@@ -1,7 +1,6 @@
 """Archive eligibility and partitioning for the issues store.
 
-Extracted from :class:`~dogcat.storage.JSONLStorage`.
-:func:`partition_archivable` is the ~90-line decision over the candidate set; it
+:func:`partition_archivable` decides which of a candidate set may move. It
 reads the issue graph through the :class:`ArchiveQueries` protocol (satisfied by
 ``JSONLStorage``) so it can be exercised against a lightweight fake with no real
 store or file lock. The lock-holding ``archive()`` orchestration and the

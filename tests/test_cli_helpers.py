@@ -142,9 +142,7 @@ class TestApplyToEach:
         assert "delete c" in err_lines[2]
 
 
-# ---------------------------------------------------------------------------
 # apply_common_filters: one focused test per filter clause.
-# ---------------------------------------------------------------------------
 
 
 def _issue(
@@ -394,11 +392,6 @@ class TestApplyCommonFilters:
         assert {i.full_id for i in out} == {parent.full_id, child.full_id}
 
 
-# ---------------------------------------------------------------------------
-# Smaller cross-cuts: the mutually-exclusive checks.
-# ---------------------------------------------------------------------------
-
-
 class TestMutuallyExclusiveChecks:
     """Each check raises typer.BadParameter only on the disallowed combo."""
 
@@ -450,11 +443,6 @@ class TestMutuallyExclusiveChecks:
         )
 
 
-# ---------------------------------------------------------------------------
-# require_resolved_id: resolve happy path + exit on missing.
-# ---------------------------------------------------------------------------
-
-
 class TestRequireResolvedId:
     """The two-line resolve-or-exit helper."""
 
@@ -487,12 +475,7 @@ class TestRequireResolvedId:
             require_resolved_id(storage, "missing-id", label="Parent")
         assert exc.value.exit_code == 1
         # Label propagates into the error message.
-        assert "Parent missing-id not found" in capsys.readouterr().err
-
-
-# ---------------------------------------------------------------------------
-# with_ns_shim: signature is augmented and shim values are dropped on call.
-# ---------------------------------------------------------------------------
+        assert "Parent 'missing-id' matched no issue" in capsys.readouterr().err
 
 
 class TestWithNsShim:
@@ -525,11 +508,6 @@ class TestWithNsShim:
         wrapped = with_ns_shim(cmd)
         wrapped(x=1, namespace="ns", all_namespaces=True)
         assert captured == {"x": 1}
-
-
-# ---------------------------------------------------------------------------
-# _make_alias: signature cloning, exclude_params, param_defaults.
-# ---------------------------------------------------------------------------
 
 
 class TestMakeAlias:

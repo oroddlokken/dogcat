@@ -10,10 +10,6 @@ from typing import Any
 
 from dogcat.merge_driver import merge_jsonl
 
-# ---------------------------------------------------------------------------
-# Test scenarios
-# ---------------------------------------------------------------------------
-
 
 class TestMergeEdgeCases:
     """Edge-case file states and merge scenarios."""
@@ -169,11 +165,15 @@ class TestMergeEdgeCases:
             assert isinstance(issue, dict)
             assert "id" in issue
 
-    def test_unknown_record_types_skipped(self) -> None:
-        """Unknown record types are safely skipped.
+    def test_unknown_record_types_preserved(self) -> None:
+        """Unknown record types pass through instead of being dropped.
 
-        Conservative approach: merge driver ignores unknown types rather than
-        passing them through, preventing corruption with future schema changes.
+        This test asserted the opposite until dogcat-68ij, on the reasoning
+        that skipping an unknown kind was the conservative choice. It is not:
+        both callers overwrite the target file with this list, so skipping
+        erased the record. The kinds this dcat understands merge exactly as
+        before; see ``tests/test_merge_driver.py::TestUnknownRecordKinds``
+        for the dedup, ordering and non-deletion rules.
         """
         base: list[dict[str, Any]] = []
         # Ours: unknown record type
@@ -201,13 +201,12 @@ class TestMergeEdgeCases:
 
         result = merge_jsonl(base, ours, theirs)
 
-        # Unknown records should be skipped (not present in result)
         unknown_records = [
             r for r in result if r.get("record_type") == "future_feature"
         ]
         known_records = [r for r in result if r.get("record_type") == "issue"]
 
-        assert len(unknown_records) == 0, "Unknown record should be safely skipped"
+        assert unknown_records == ours, "Unknown record should survive verbatim"
 
         assert len(known_records) == 1, "Known record should be present"
         assert known_records[0]["id"] == "known"

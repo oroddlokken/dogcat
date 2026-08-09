@@ -14,6 +14,7 @@ from dogcat._diff import tracked_changes
 from dogcat._events import EventEmitterMixin
 from dogcat._id_resolve import resolve_partial_id
 from dogcat._jsonl_io import append_jsonl_payload, atomic_rewrite_jsonl
+from dogcat._persistence import compact_snapshot
 from dogcat._schema import warn_if_records_from_newer_version
 from dogcat.constants import (
     DEFAULT_NAMESPACE,
@@ -26,6 +27,7 @@ from dogcat.locking import advisory_file_lock
 from dogcat.models import (
     Proposal,
     ProposalStatus,
+    classify_record,
     dict_to_proposal,
     proposal_to_dict,
 )
@@ -52,6 +54,12 @@ class InboxStorage(EventEmitterMixin):
         self.dogcats_dir = Path(dogcats_dir)
         self.path = self.dogcats_dir / INBOX_FILENAME
         self._proposals: dict[str, Proposal] = {}
+        # Every line that is not a proposal and not an event: a kind written
+        # by a newer release, or an issue/dependency/link record that reached
+        # inbox.jsonl. Held as raw dicts and re-emitted by every whole-file
+        # rewrite, because the proposal is the only kind this store models and
+        # anything it cannot rebuild from memory it must copy (dogcat-5ao0).
+        self._preserved: list[dict[str, Any]] = []
 
         if create_dir:
             self.dogcats_dir.mkdir(parents=True, exist_ok=True)
@@ -70,7 +78,6 @@ class InboxStorage(EventEmitterMixin):
         # the batch() context manager flushes everything in one locked write.
         self._batch_records: list[dict[str, Any]] | None = None
 
-        # Initialize event log for inbox change tracking
         from dogcat.event_log import InboxEventLog
 
         self._event_log = InboxEventLog(self.dogcats_dir)
@@ -83,8 +90,19 @@ class InboxStorage(EventEmitterMixin):
 
         Malformed lines (any position) are logged and skipped; see
         :meth:`JSONLStorage._load` for the recovery contract.
+
+        Only ``record_type: "proposal"`` becomes a :class:`Proposal`. Event
+        lines are left on disk and copied forward at rewrite time; every
+        other well-formed record goes to ``self._preserved`` so a rewrite
+        cannot delete it. That bucket is wider than
+        :attr:`JSONLStorage._preserved`, which takes only an explicit
+        unmodelled ``record_type``: there, a record with no ``record_type``
+        is field-sniffed into an issue and survives through memory, while
+        here sniffing never yields a proposal, so the same record is
+        unmodelled and only the raw line can carry it across.
         """
         self._proposals.clear()
+        self._preserved = []
         self._bad_lines = []
 
         try:
@@ -110,7 +128,12 @@ class InboxStorage(EventEmitterMixin):
                     raise TypeError(msg)  # noqa: TRY301
                 data = cast("dict[str, Any]", raw_data)
                 parsed_records.append(data)
-                if data.get("record_type") != "proposal":
+                rtype = classify_record(data)
+                if rtype != "proposal":
+                    # Events are re-read from the file by the rewrite path;
+                    # holding them here as well would write each one twice.
+                    if rtype != "event":
+                        self._preserved.append(data)
                     continue
                 proposal = dict_to_proposal(data)
                 self._proposals[proposal.full_id] = proposal
@@ -164,16 +187,41 @@ class InboxStorage(EventEmitterMixin):
                 self._append(pending)
 
     def _save(self) -> None:
-        """Compact: rewrite the entire file with only current state."""
+        """Compact: rewrite the file from current proposals, losing nothing else.
+
+        Only the corrupt-last-line path in :meth:`_append` calls this; the
+        prune and namespace-rename paths hold the lock already and go
+        straight to :meth:`_save_locked`.
+        """
         with self._file_lock():
             self._save_locked()
 
-    def _save_locked(self) -> None:
+    def _save_locked(
+        self,
+        *,
+        _prune_event_ids: set[str] | None = None,
+        _rename_event_ids: dict[str, str] | None = None,
+    ) -> None:
         """Body of :meth:`_save` that assumes the file lock is already held.
 
         Use this from inside an existing ``self._file_lock()`` context to
         avoid re-entering the advisory lock (which would deadlock since
         ``advisory_file_lock`` opens a fresh fd each time).
+
+        Proposals are written from memory; ``compact_snapshot`` then copies
+        the event lines out of the file being replaced and re-emits
+        ``self._preserved``. It is called with no issues, dependencies or
+        links because the inbox holds none — the shared writer is reused so
+        the two stores cannot drift on malformed-line tolerance, on the
+        prune/rename event filters, or on the byte-for-byte preserved
+        round trip.
+
+        Args:
+            _prune_event_ids: If set, drop event records whose ``issue_id``
+                is in this set (used by :meth:`prune_tombstones`).
+            _rename_event_ids: If set, rewrite ``issue_id`` in event records
+                according to this old→new mapping (used by
+                :meth:`rename_namespace`).
         """
 
         def _write(tmp_file: IO[bytes]) -> int:
@@ -182,7 +230,16 @@ class InboxStorage(EventEmitterMixin):
                 tmp_file.write(orjson.dumps(proposal_to_dict(proposal)))
                 tmp_file.write(b"\n")
                 count += 1
-            return count
+            return count + compact_snapshot(
+                tmp_file,
+                issues=(),
+                dependencies=(),
+                links=(),
+                source=self.path,
+                preserved=self._preserved,
+                prune_event_ids=_prune_event_ids,
+                rename_event_ids=_rename_event_ids,
+            )
 
         atomic_rewrite_jsonl(self.path, self.dogcats_dir, _write)
 
@@ -191,6 +248,15 @@ class InboxStorage(EventEmitterMixin):
 
         When :meth:`batch` is active the records are buffered and written
         when the batch context exits.
+
+        There is no ``should_compact`` branch here, unlike
+        :meth:`JSONLStorage._append`. The omission used to be load-bearing —
+        a rewrite dropped every event record, so ratio-triggered compaction
+        would have erased the inbox history a few hundred appends into a busy
+        store. :meth:`_save_locked` carries events over since dogcat-5ao0, so
+        adding the branch is now a question of whether the inbox grows enough
+        to be worth compacting, not a data-loss bug. It was left out of that
+        change rather than decided against.
         """
         if self._batch_records is not None:
             self._batch_records.extend(records)
@@ -209,8 +275,6 @@ class InboxStorage(EventEmitterMixin):
     def _proposal_record(proposal: Proposal) -> dict[str, Any]:
         """Serialize a proposal to a dict for appending."""
         return proposal_to_dict(proposal)
-
-    # Event emission helpers
 
     # _emit_event / _build_event_record / _append_with_event are provided by
     # EventEmitterMixin (dogcat._events), shared with JSONLStorage.
@@ -259,9 +323,9 @@ class InboxStorage(EventEmitterMixin):
     def _resolve_or_raise(self, proposal_id: str, *, label: str = "Proposal") -> str:
         """Resolve ``proposal_id`` to a full id or raise ``ValueError``.
 
-        Mirror of :meth:`JSONLStorage._resolve_or_raise` for the inbox so
-        the close / delete / get paths share one ``resolve-or-fail``
-        sentence instead of repeating it.
+        Mirror of :meth:`JSONLStorage._resolve_or_raise` for the inbox: the
+        close / delete / get paths all enter through here, so the not-found
+        message has one wording.
         """
         resolved = self.resolve_id(proposal_id)
         if resolved is None:
@@ -486,7 +550,10 @@ class InboxStorage(EventEmitterMixin):
                 del self._proposals[pid]
 
             if tombstone_ids:
-                self._save_locked()
+                # The proposal is erased, so its events go with it — keeping
+                # them would leave the title and author of a record the user
+                # asked to remove permanently. Mirrors JSONLStorage.
+                self._save_locked(_prune_event_ids=set(tombstone_ids))
 
         return tombstone_ids
 
@@ -515,14 +582,16 @@ class InboxStorage(EventEmitterMixin):
                 return 0
 
             now = datetime.now().astimezone()
+            id_map: dict[str, str] = {}
             for proposal in targets:
                 old_fid = proposal.full_id
                 proposal.namespace = new_namespace
                 proposal.updated_at = now
                 del self._proposals[old_fid]
                 self._proposals[proposal.full_id] = proposal
+                id_map[old_fid] = proposal.full_id
 
-            self._save_locked()
+            self._save_locked(_rename_event_ids=id_map)
         return len(targets)
 
     def count(self, *, status: ProposalStatus | None = None) -> int:
