@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 import sys
 from dataclasses import dataclass, field
@@ -34,6 +35,50 @@ LOCAL_CONFIG_FILENAME = "config.local.toml"
 
 # Directory name for repo-local config (next to .dogcatrc)
 DOGCATS_DIR_NAME = ".dogcats"
+
+
+# --- Per-process memos -------------------------------------------------
+#
+# One `dcat list` reaches get_rc_walkup_boundary and load_config 4-5 times
+# each, and a Tab press pays the same again; the boundary forks git and each
+# load re-parses 2-3 TOML files (dogcat-2s9r). The memos below are keyed on a
+# stat signature rather than on the path alone, so a config edit made by
+# another process is picked up by the next read — that matters for `dcat tui`
+# and `dcat web`, which live long enough to outlast an edit.
+#
+# Path -> (stat signature, value). One entry per path, so a long-running
+# process holds a bounded number of them.
+_toml_cache: dict[str, tuple[tuple[int, int, int] | None, dict[str, Any]]] = {}
+_detected_namespace_cache: dict[
+    str, tuple[tuple[int, int, int] | None, str | None]
+] = {}
+# (start dir, HOME) -> boundary. Not stat-keyed: the git toplevel of a fixed
+# directory does not move within a process.
+_boundary_cache: dict[tuple[str, str | None], Path | None] = {}
+
+
+def _stat_signature(path: Path) -> tuple[int, int, int] | None:
+    """Return (mtime_ns, size, inode) for ``path``, or None when unreadable.
+
+    None is a valid cache key: it means "absent", and a file that appears
+    later gets a signature, so the memo misses and reloads.
+    """
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size, st.st_ino)
+
+
+def clear_caches() -> None:
+    """Drop every per-process memo in this module.
+
+    Writes invalidate their own entry, so this is for tests and for callers
+    that mutate config through a route this module cannot see.
+    """
+    _toml_cache.clear()
+    _detected_namespace_cache.clear()
+    _boundary_cache.clear()
 
 
 def parse_dogcatrc(rc_path: str | Path) -> Path:
@@ -99,14 +144,31 @@ def get_rc_walkup_boundary(start: Path | None = None) -> Path | None:
 
     Set ``DCAT_RC_WALKUP_UNRESTRICTED=1`` to opt back into the legacy
     "walk to filesystem root" behavior.
+
+    The result is memoized per process, keyed on the start directory and on
+    ``$HOME`` (the fallback), because the rev-parse fork otherwise runs 4-5
+    times per command (dogcat-2s9r). Call :func:`clear_caches` if a
+    repository is created underneath a directory already queried.
     """
     import os
-    import subprocess
 
     if os.environ.get("DCAT_RC_WALKUP_UNRESTRICTED"):
         return None
 
     cwd = start if start is not None else Path.cwd()
+    home = os.environ.get("HOME")
+    cache_key = (str(cwd), home)
+    if cache_key in _boundary_cache:
+        return _boundary_cache[cache_key]
+    boundary = _compute_rc_walkup_boundary(cwd, home)
+    _boundary_cache[cache_key] = boundary
+    return boundary
+
+
+def _compute_rc_walkup_boundary(cwd: Path, home: str | None) -> Path | None:
+    """Ask git for the toplevel above ``cwd``, falling back to ``$HOME``."""
+    import subprocess
+
     try:
         result = subprocess.run(  # noqa: S603  # fixed argv, no shell
             ["git", "-C", str(cwd), "rev-parse", "--show-toplevel"],  # noqa: S607
@@ -125,7 +187,6 @@ def get_rc_walkup_boundary(start: Path | None = None) -> Path | None:
                 return Path(top).resolve()
     except (OSError, subprocess.SubprocessError):
         pass
-    home = os.environ.get("HOME")
     if home:
         return Path(home).resolve()
     return None
@@ -384,6 +445,25 @@ def _validate_config_shape(payload: dict[str, Any], source: str) -> dict[str, An
 def _load_toml(path: Path) -> dict[str, Any]:
     """Load a single TOML file, returning empty dict on missing/invalid.
 
+    Memoized on the file's (mtime_ns, size, inode), so repeated reads within
+    one command parse once while an edit from another process still lands on
+    the next call. The result is deep-copied out: callers merge into it and
+    hand its lists to :class:`DogcatConfig`, and a mutation reaching the
+    stored dict would poison every later read.
+    """
+    key = str(path)
+    signature = _stat_signature(path)
+    cached = _toml_cache.get(key)
+    if cached is not None and cached[0] == signature:
+        return copy.deepcopy(cached[1])
+    payload = _parse_toml(path)
+    _toml_cache[key] = (signature, payload)
+    return copy.deepcopy(payload)
+
+
+def _parse_toml(path: Path) -> dict[str, Any]:
+    """Read and validate one TOML file, uncached.
+
     Parse errors are surfaced as a logger warning so that a typo in
     config.toml doesn't silently degrade to "all defaults" — the user
     needs a signal that their settings aren't being honored. ``dcat
@@ -559,6 +639,11 @@ def atomic_write_toml(path: Path, payload: dict[str, Any]) -> None:
         # ``os.replace`` is the atomic primitive on POSIX; the tests
         # patch it directly, so we keep the call site intentional.
         os.replace(tmp_name, path)  # noqa: PTH105
+        # Drop the memo here rather than in save_config / save_local_config:
+        # this is the single choke point every config write passes through,
+        # and a rewrite landing inside one mtime tick would otherwise leave
+        # the caller reading its own pre-write value (dogcat-2s9r).
+        _toml_cache.pop(str(path), None)
     except BaseException:
         with contextlib.suppress(OSError):
             tmp_path.unlink()
@@ -717,6 +802,12 @@ def set_namespace(dogcats_dir: str, namespace: str) -> None:
 def _detect_namespace_from_issues(dogcats_dir: str) -> str | None:
     """Detect prefix from existing issues in storage.
 
+    Runs on every ``get_namespace`` call for a store whose config sets no
+    namespace, and reads every line of issues.jsonl to do it — a second full
+    parse on top of the one storage already did, 1-2 times per command
+    (dogcat-48ti). Memoized on the file's (mtime_ns, size, inode), so an
+    append re-detects and a repeated call inside one command does not.
+
     Args:
         dogcats_dir: Path to .dogcats directory
 
@@ -724,6 +815,18 @@ def _detect_namespace_from_issues(dogcats_dir: str) -> str | None:
         Most common prefix, or None if no issues exist
     """
     issues_path = Path(dogcats_dir) / "issues.jsonl"
+    key = str(issues_path)
+    signature = _stat_signature(issues_path)
+    cached = _detected_namespace_cache.get(key)
+    if cached is not None and cached[0] == signature:
+        return cached[1]
+    detected = _scan_namespace_from_issues(issues_path)
+    _detected_namespace_cache[key] = (signature, detected)
+    return detected
+
+
+def _scan_namespace_from_issues(issues_path: Path) -> str | None:
+    """Count id prefixes across issues.jsonl and return the most common."""
     if not issues_path.exists():
         return None
 

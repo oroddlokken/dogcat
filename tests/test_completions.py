@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import json
+import shutil
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import pytest
 
 from dogcat.cli._completions import (
+    _ns_filter_from_ctx,
     complete_closed_issue_ids,
     complete_comment_actions,
     complete_config_keys,
@@ -30,7 +34,7 @@ from dogcat.models import Issue, IssueType, Status
 from dogcat.storage import JSONLStorage
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Callable
 
 
 @pytest.fixture
@@ -900,3 +904,373 @@ class TestCompleteConfigValues:
             params: ClassVar[dict[str, Any]] = {}
 
         assert complete_config_values(FakeCtx(), [], "") == []
+
+
+class _AllNamespacesCtx:
+    """Click context stand-in that disables namespace filtering."""
+
+    params: ClassVar[dict[str, Any]] = {"all_namespaces": True}
+
+
+def _ref_issue_ids(
+    storage: JSONLStorage,
+    ctx: Any,
+    incomplete: str,
+    keep: Callable[[str], bool],
+) -> list[tuple[str, str]]:
+    """Complete issue ids the old way, over ``storage.list()``.
+
+    Kept as the oracle: it materializes every Issue, so any field the raw
+    branch of ``iter_completion_fields`` normalizes differently shows up as a
+    diff here rather than as a wrong completion in a user's shell.
+    """
+    ns_filter = _ns_filter_from_ctx(ctx, str(storage.dogcats_dir))
+    results: list[tuple[str, str]] = []
+    for i in storage.list():
+        if not keep(i.status.value):
+            continue
+        if ns_filter is not None and not ns_filter(i.namespace):
+            continue
+        fid = i.full_id
+        short_id = i.id
+        if fid.startswith(incomplete):
+            results.append((fid, i.title))
+        elif short_id.startswith(incomplete):
+            results.append((short_id, i.title))
+    return sorted(results)
+
+
+def _ref_labels(
+    storage: JSONLStorage,
+    ctx: Any,
+    incomplete: str,
+) -> list[tuple[str, str]]:
+    """Collect labels the old way, over ``storage.list()``."""
+    ns_filter = _ns_filter_from_ctx(ctx, str(storage.dogcats_dir))
+    labels: set[str] = set()
+    for issue in storage.list():
+        if ns_filter is None or ns_filter(issue.namespace):
+            labels.update(issue.labels)
+    return [(lbl, "label") for lbl in sorted(labels) if lbl.startswith(incomplete)]
+
+
+def _ref_owners(storage: JSONLStorage, incomplete: str) -> list[tuple[str, str]]:
+    """Collect owners the old way, over ``storage.list()``."""
+    owners: set[str] = set()
+    for issue in storage.list():
+        if issue.owner:
+            owners.add(issue.owner)
+    return [
+        (owner, "owner") for owner in sorted(owners) if owner.startswith(incomplete)
+    ]
+
+
+def _ref_fields(storage: JSONLStorage) -> list[tuple[Any, ...]]:
+    """Completion fields read off fully materialized Issue objects."""
+    return [
+        (i.full_id, i.id, i.namespace, i.status.value, i.title, i.labels, i.owner)
+        for i in storage.list()
+    ]
+
+
+# Records that exercise every normalization ``dict_to_issue`` applies to a
+# completion field. Written as raw JSONL because ``issue_to_dict`` cannot
+# produce a legacy id or an unknown enum value.
+_SPARSE_RECORDS: list[dict[str, Any]] = [
+    {
+        "record_type": "issue",
+        "namespace": "dc",
+        "id": "plain",
+        "title": "Fully populated",
+        "status": "open",
+        "issue_type": "bug",
+        "labels": ["alpha", "beta"],
+        "owner": "someone@example.com",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    },
+    {
+        # No namespace key: the id carries it (legacy format).
+        "record_type": "issue",
+        "id": "legacy-ns-lg01",
+        "title": "Legacy embedded namespace",
+        "status": "open",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    },
+    {
+        # No hyphen at all: namespace falls back to the default.
+        "record_type": "issue",
+        "id": "bare01",
+        "title": "Bare id, no namespace",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    },
+    {
+        # Legacy issue_type=draft rewrites status to draft.
+        "record_type": "issue",
+        "namespace": "dc",
+        "id": "draft1",
+        "title": "Legacy draft type",
+        "status": "open",
+        "issue_type": "draft",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    },
+    {
+        # Legacy draft type on a closed record keeps the closed status.
+        "record_type": "issue",
+        "namespace": "dc",
+        "id": "draft2",
+        "title": "Legacy draft type, closed",
+        "status": "closed",
+        "issue_type": "draft",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    },
+    {
+        # Status from a newer dcat: coerced to the UNKNOWN sentinel.
+        "record_type": "issue",
+        "namespace": "dc",
+        "id": "future",
+        "title": "Unknown status value",
+        "status": "quantum_superposition",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    },
+    {
+        # No status key: defaults to open.
+        "record_type": "issue",
+        "namespace": "dc",
+        "id": "nostat",
+        "title": "Missing status key",
+        "labels": [],
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    },
+    {
+        "record_type": "issue",
+        "namespace": "dc",
+        "id": "tomb01",
+        "title": "Tombstoned",
+        "status": "tombstone",
+        "owner": None,
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    },
+    {
+        "record_type": "issue",
+        "namespace": "other",
+        "id": "clos01",
+        "title": "Closed in another namespace",
+        "status": "closed",
+        "labels": ["alpha"],
+        "owner": "someone@example.com",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    },
+]
+
+
+def _write_sparse_store(dogcats_dir: Path) -> Path:
+    """Write ``_SPARSE_RECORDS`` as raw JSONL and return the store path."""
+    path = dogcats_dir / "issues.jsonl"
+    with path.open("w", encoding="utf-8") as fh:
+        for record in _SPARSE_RECORDS:
+            fh.write(json.dumps(record))
+            fh.write("\n")
+    return path
+
+
+def _real_store_copy(tmp_path: Path) -> Path | None:
+    """Copy this repo's own ``.dogcats/issues.jsonl`` into ``tmp_path``.
+
+    Copied rather than opened in place so a test can never append to, lock or
+    compact the project's real store.
+    """
+    source = Path(__file__).resolve().parent.parent / ".dogcats" / "issues.jsonl"
+    if not source.is_file():
+        return None
+    dest_dir = tmp_path / "real" / ".dogcats"
+    dest_dir.mkdir(parents=True)
+    dest = dest_dir / "issues.jsonl"
+    shutil.copyfile(source, dest)
+    return dest
+
+
+class TestRawFieldCompletionEquivalence:
+    """Raw-dict completers must match the Issue-materializing loops exactly."""
+
+    def test_sparse_records_yield_identical_fields(
+        self,
+        temp_dogcats_dir: Path,
+    ) -> None:
+        """Every normalization dict_to_issue applies is reproduced raw."""
+        path = _write_sparse_store(temp_dogcats_dir)
+
+        raw_side = JSONLStorage(str(path))
+        raw_fields = list(raw_side._issues.iter_completion_fields())
+        # Nothing was constructed to produce them.
+        assert not any(isinstance(v, Issue) for v in raw_side._issues._entries.values())
+
+        assert [tuple(f) for f in raw_fields] == _ref_fields(JSONLStorage(str(path)))
+
+    def test_materialized_entries_yield_identical_fields(
+        self,
+        temp_dogcats_dir: Path,
+    ) -> None:
+        """The Issue branch of the iterator agrees with the raw branch."""
+        path = _write_sparse_store(temp_dogcats_dir)
+
+        raw_side = JSONLStorage(str(path))
+        raw_fields = [tuple(f) for f in raw_side._issues.iter_completion_fields()]
+
+        hot = JSONLStorage(str(path))
+        hot.list()  # force every entry to materialize
+        hot_fields = [tuple(f) for f in hot._issues.iter_completion_fields()]
+
+        assert hot_fields == raw_fields
+
+    def test_mixed_materialization_yields_identical_fields(
+        self,
+        temp_dogcats_dir: Path,
+    ) -> None:
+        """A map with some entries materialized takes both branches."""
+        path = _write_sparse_store(temp_dogcats_dir)
+
+        cold = JSONLStorage(str(path))
+        expected = [tuple(f) for f in cold._issues.iter_completion_fields()]
+
+        mixed = JSONLStorage(str(path))
+        for key in list(mixed._issues)[::2]:
+            _ = mixed._issues[key]
+        assert [tuple(f) for f in mixed._issues.iter_completion_fields()] == expected
+
+    def test_real_store_yields_identical_fields(self, tmp_path: Path) -> None:
+        """The project's own store round-trips through both paths identically."""
+        path = _real_store_copy(tmp_path)
+        if path is None:
+            pytest.skip("no .dogcats/issues.jsonl in this checkout")
+
+        raw_fields = [
+            tuple(f) for f in JSONLStorage(str(path))._issues.iter_completion_fields()
+        ]
+        assert raw_fields  # guard against a vacuous comparison
+        assert raw_fields == _ref_fields(JSONLStorage(str(path)))
+
+    @pytest.mark.parametrize(
+        "incomplete",
+        ["", "dc", "dc-", "dc-d", "legacy", "bare", "zzz"],
+    )
+    def test_issue_id_completers_match_reference(
+        self,
+        temp_dogcats_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        incomplete: str,
+    ) -> None:
+        """complete_issue_ids and complete_closed_issue_ids match the old loop."""
+        path = _write_sparse_store(temp_dogcats_dir)
+        ctx = _AllNamespacesCtx()
+
+        def open_keep(status: str) -> bool:
+            return status not in ("closed", "tombstone")
+
+        def closed_keep(status: str) -> bool:
+            return status == "closed"
+
+        monkeypatch.setattr(
+            "dogcat.cli._completions.get_storage",
+            lambda: JSONLStorage(str(path)),
+        )
+        got_open = complete_issue_ids(ctx, [], incomplete)
+        got_closed = complete_closed_issue_ids(ctx, [], incomplete)
+
+        assert got_open == _ref_issue_ids(
+            JSONLStorage(str(path)), ctx, incomplete, open_keep
+        )
+        assert got_closed == _ref_issue_ids(
+            JSONLStorage(str(path)), ctx, incomplete, closed_keep
+        )
+
+    @pytest.mark.parametrize("incomplete", ["", "a", "al", "zzz"])
+    def test_label_completer_matches_reference(
+        self,
+        temp_dogcats_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        incomplete: str,
+    ) -> None:
+        """complete_labels matches the old loop, including absent label keys."""
+        path = _write_sparse_store(temp_dogcats_dir)
+        ctx = _AllNamespacesCtx()
+
+        monkeypatch.setattr(
+            "dogcat.cli._completions.get_storage",
+            lambda: JSONLStorage(str(path)),
+        )
+        got = complete_labels(ctx, [], incomplete)
+
+        assert got == _ref_labels(JSONLStorage(str(path)), ctx, incomplete)
+
+    @pytest.mark.parametrize("incomplete", ["", "some", "zzz"])
+    def test_owner_completer_matches_reference(
+        self,
+        temp_dogcats_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        incomplete: str,
+    ) -> None:
+        """complete_owners matches the old loop, including null owners."""
+        path = _write_sparse_store(temp_dogcats_dir)
+
+        monkeypatch.setattr(
+            "dogcat.cli._completions.get_storage",
+            lambda: JSONLStorage(str(path)),
+        )
+        got = complete_owners(None, [], incomplete)
+
+        assert got == _ref_owners(JSONLStorage(str(path)), incomplete)
+
+    @pytest.mark.parametrize("incomplete", ["", "d", "o", "zzz"])
+    def test_config_value_namespaces_match_reference(
+        self,
+        temp_dogcats_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        incomplete: str,
+    ) -> None:
+        """complete_config_values namespace branch matches the old loop."""
+        path = _write_sparse_store(temp_dogcats_dir)
+
+        class KeyCtx:
+            params: ClassVar[dict[str, Any]] = {"key": "visible_namespaces"}
+
+        monkeypatch.setattr(
+            "dogcat.cli._completions.get_storage",
+            lambda: JSONLStorage(str(path)),
+        )
+        got = complete_config_values(KeyCtx(), [], incomplete)
+
+        expected_ns = sorted(
+            {i.namespace for i in JSONLStorage(str(path)).list()},
+        )
+        assert got == [
+            (ns, "namespace") for ns in expected_ns if ns.startswith(incomplete)
+        ]
+
+    def test_completers_do_not_materialize_issues(
+        self,
+        temp_dogcats_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The point of the change: no Issue is constructed for a Tab press."""
+        path = _write_sparse_store(temp_dogcats_dir)
+        storage = JSONLStorage(str(path))
+        monkeypatch.setattr(
+            "dogcat.cli._completions.get_storage",
+            lambda: storage,
+        )
+
+        complete_issue_ids(_AllNamespacesCtx(), [], "")
+        complete_closed_issue_ids(_AllNamespacesCtx(), [], "")
+        complete_labels(_AllNamespacesCtx(), [], "")
+        complete_owners(None, [], "")
+
+        assert not any(isinstance(v, Issue) for v in storage._issues._entries.values())

@@ -7,10 +7,12 @@ from typing import TYPE_CHECKING
 
 from typer.testing import CliRunner
 
-from dogcat.cli import app
+from dogcat.cli import _cmd_history, app
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    import pytest
 
 runner = CliRunner()
 
@@ -134,6 +136,73 @@ class TestHistory:
         result = runner.invoke(app, ["history", "--dogcats-dir", str(dogcats_dir)])
         assert result.exit_code == 0
         assert "Closed" in result.stdout
+
+
+class TestHistoryStorageLoad:
+    """Tests for when ``history`` loads the issue store (dogcat-kvq3)."""
+
+    def test_titled_events_never_load_the_store(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Every event carries a title, so the timeline needs no store.
+
+        Reading the log is the whole command here; parsing issues.jsonl a
+        second time to fill in titles that are already there was the cost
+        this drops.
+        """
+        dogcats_dir = _init_repo(tmp_path)
+        _create_issue(dogcats_dir, "Titled event")
+
+        calls: list[str] = []
+        real = _cmd_history.get_storage
+
+        def spy(dogcats_dir: str = ".dogcats", create_dir: bool = False):  # noqa: ANN202
+            calls.append(dogcats_dir)
+            return real(dogcats_dir, create_dir)
+
+        monkeypatch.setattr(_cmd_history, "get_storage", spy)
+        result = runner.invoke(app, ["history", "--dogcats-dir", str(dogcats_dir)])
+
+        assert result.exit_code == 0
+        assert "Titled event" in result.stdout
+        assert calls == []
+
+    def test_issue_filter_loads_the_store(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Resolving a partial --issue still needs the store."""
+        dogcats_dir = _init_repo(tmp_path)
+        issue_id = _create_issue(dogcats_dir, "Filtered")
+
+        calls: list[str] = []
+        real = _cmd_history.get_storage
+
+        def spy(dogcats_dir: str = ".dogcats", create_dir: bool = False):  # noqa: ANN202
+            calls.append(dogcats_dir)
+            return real(dogcats_dir, create_dir)
+
+        monkeypatch.setattr(_cmd_history, "get_storage", spy)
+        result = runner.invoke(
+            app,
+            ["history", "--issue", issue_id, "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        assert result.exit_code == 0
+        assert "Filtered" in result.stdout
+        assert len(calls) == 1
+
+    def test_missing_dogcats_dir_reports_init(self, tmp_path: Path) -> None:
+        """A missing directory still errors instead of printing no history."""
+        result = runner.invoke(
+            app,
+            ["history", "--dogcats-dir", str(tmp_path / "absent")],
+        )
+        assert result.exit_code == 1
+        assert "does not exist" in (result.stderr or result.output)
 
 
 class TestHistoryInbox:

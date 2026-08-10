@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from cli_test_helpers import _create_multi_ns_issues, _set_ns_config
 from typer.testing import CliRunner
 
@@ -2017,3 +2018,166 @@ class TestListCollapseDeferredSubtrees:
         assert "Parent issue" in titles
         assert "Top-level issue" in titles
         assert "Child issue" not in titles
+
+
+class TestListSharedWork:
+    """list resolves its per-command lookups once and orders results once."""
+
+    @staticmethod
+    def _chain(dogcats_dir: Path) -> tuple[str, str, str]:
+        """Build grandparent -> parent -> child and close the two ancestors."""
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        ids: list[str] = []
+        parent: str | None = None
+        for title in ("Grandparent", "Parent", "Child"):
+            args = ["create", title, "--json", "--dogcats-dir", str(dogcats_dir)]
+            if parent is not None:
+                args += ["--parent", parent]
+            data = json.loads(runner.invoke(app, args).stdout)
+            parent = f"{data['namespace']}-{data['id']}"
+            ids.append(parent)
+        for ancestor in ids[:2]:
+            runner.invoke(app, ["close", ancestor, "--dogcats-dir", str(dogcats_dir)])
+        return ids[0], ids[1], ids[2]
+
+    def test_tree_reincludes_closed_ancestors_two_levels_up(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """A closed grandparent comes back too, not just the closed parent."""
+        dogcats_dir = tmp_path / ".dogcats"
+        self._chain(dogcats_dir)
+
+        result = runner.invoke(
+            app,
+            ["list", "--tree", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        lines = [
+            line for line in result.stdout.splitlines() if "parent" in line.lower()
+        ]
+        assert any("Grandparent" in line for line in lines)
+        assert any("Parent" in line and "Grandparent" not in line for line in lines)
+
+        grandparent_line = next(
+            line for line in result.stdout.splitlines() if "Grandparent" in line
+        )
+        parent_line = next(
+            line
+            for line in result.stdout.splitlines()
+            if "Parent" in line and "Grandparent" not in line
+        )
+        child_line = next(
+            line for line in result.stdout.splitlines() if "Child" in line
+        )
+        indent = [
+            len(line) - len(line.lstrip())
+            for line in (grandparent_line, parent_line, child_line)
+        ]
+        assert indent[0] < indent[1] < indent[2]
+
+    def test_tree_reincluded_parents_keep_priority_order(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Re-included ancestors are sorted in with everything else."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+
+        # A low-priority parent, closed, whose child is still open.
+        parent_data = json.loads(
+            runner.invoke(
+                app,
+                [
+                    "create",
+                    "Low parent",
+                    "--priority",
+                    "4",
+                    "--json",
+                    "--dogcats-dir",
+                    str(dogcats_dir),
+                ],
+            ).stdout,
+        )
+        parent_full = f"{parent_data['namespace']}-{parent_data['id']}"
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Low child",
+                "--parent",
+                parent_full,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        runner.invoke(app, ["close", parent_full, "--dogcats-dir", str(dogcats_dir)])
+        runner.invoke(
+            app,
+            [
+                "create",
+                "Critical top",
+                "--priority",
+                "0",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            ["list", "--tree", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert result.stdout.index("Critical top") < result.stdout.index("Low parent")
+
+    def test_include_inbox_resolves_namespace_and_inbox_once(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Issues and the inbox share one namespace resolution and one parse."""
+        import dogcat.config
+        import dogcat.inbox
+
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(
+            app,
+            ["init", "--namespace", "test", "--dogcats-dir", str(dogcats_dir)],
+        )
+        runner.invoke(app, ["create", "An issue", "--dogcats-dir", str(dogcats_dir)])
+        runner.invoke(app, ["propose", "Listed proposal", "--to", str(tmp_path)])
+
+        ns_calls = {"n": 0}
+        real_ns_filter = dogcat.config.get_namespace_filter
+
+        def counting_ns_filter(
+            dogcats_path: str,
+            explicit_namespace: str | None = None,
+        ) -> object:
+            ns_calls["n"] += 1
+            return real_ns_filter(dogcats_path, explicit_namespace)
+
+        inbox_loads = {"n": 0}
+        real_init = dogcat.inbox.InboxStorage.__init__
+
+        def counting_init(
+            self: dogcat.inbox.InboxStorage,
+            *args: object,
+            **kwargs: object,
+        ) -> None:
+            inbox_loads["n"] += 1
+            real_init(self, *args, **kwargs)  # pyright: ignore[reportArgumentType]
+
+        monkeypatch.setattr(dogcat.config, "get_namespace_filter", counting_ns_filter)
+        monkeypatch.setattr(dogcat.inbox.InboxStorage, "__init__", counting_init)
+
+        result = runner.invoke(
+            app,
+            ["list", "--include-inbox", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert "Inbox (1):" in result.stdout
+        assert "Listed proposal" in result.stdout
+        assert ns_calls["n"] == 1
+        assert inbox_loads["n"] == 1

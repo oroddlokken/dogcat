@@ -160,12 +160,13 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from itertools import chain
 from typing import TYPE_CHECKING, Any, cast
 
 import orjson
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
     from pathlib import Path
 
 from dogcat.constants import DEFAULT_NAMESPACE
@@ -428,17 +429,44 @@ def _event_key(record: dict[str, Any]) -> tuple[str, str, str, str, str]:
     )
 
 
+_MERGE_KINDS = ("issue", "proposal", "dependency", "link", "event", "unknown")
+
+
+def _bucket_by_kind(records: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Split records into one list per :func:`classify_record` kind.
+
+    Each merger below consumes its own bucket, so a record is classified
+    once per merge instead of once per merger. Input order is preserved
+    within a bucket, which is what keeps issue and proposal LWW resolving
+    the same way it did when every merger rescanned the full list.
+
+    A kind outside :data:`_MERGE_KINDS` gets a bucket nothing reads, so a
+    record type added to ``_KNOWN_RECORD_TYPES`` without a merger here is
+    dropped from the merged output exactly as it was before — a
+    ``KeyError`` would turn that silent gap into a failed merge.
+
+    ``classify_record`` logs one warning per unrecognised ``record_type``,
+    so the warning count for such a record drops from once per merger to
+    once per side.
+    """
+    buckets: dict[str, list[dict[str, Any]]] = {kind: [] for kind in _MERGE_KINDS}
+    for record in records:
+        buckets.setdefault(classify_record(record), []).append(record)
+    return buckets
+
+
 def _replay_with_ops(
     records: list[dict[str, Any]],
     *,
-    record_type: str,
     key_fn: Callable[[dict[str, Any]], tuple[str, ...]],
 ) -> dict[tuple[str, ...], dict[str, Any]]:
-    """Replay add/remove records of one type to get effective state."""
+    """Replay add/remove records of one kind to get effective state.
+
+    ``records`` is one bucket from :func:`_bucket_by_kind`, so every entry
+    is already of the caller's kind.
+    """
     state: dict[tuple[str, ...], dict[str, Any]] = {}
     for record in records:
-        if classify_record(record) != record_type:
-            continue
         key = key_fn(record)
         if record.get("op", "add") == "remove":
             state.pop(key, None)
@@ -460,24 +488,49 @@ def _tie_break_key(record: dict[str, Any]) -> bytes:
     return orjson.dumps(record, option=orjson.OPT_SORT_KEYS)
 
 
+class _TieBreakCache:
+    """Memoize :func:`_tie_break_key` for the span of one merge call.
+
+    Keyed by ``id(record)`` because a record is an unhashable dict. That is
+    sound only while every record stays alive for the whole call — the
+    caller's three lists and the buckets built from them hold every one, so
+    no id is freed and reused mid-merge. Do not hold an instance past the
+    call that made it.
+    """
+
+    __slots__ = ("_cache",)
+
+    def __init__(self) -> None:
+        self._cache: dict[int, bytes] = {}
+
+    def __call__(self, record: dict[str, Any]) -> bytes:
+        cache = self._cache
+        ident = id(record)
+        cached = cache.get(ident)
+        if cached is None:
+            cached = cache[ident] = _tie_break_key(record)
+        return cached
+
+
 def _merge_issues_lww(
-    ours_records: list[dict[str, Any]],
-    theirs_records: list[dict[str, Any]],
+    records: Iterable[dict[str, Any]],
+    tie_break: Callable[[dict[str, Any]], bytes],
 ) -> dict[str, dict[str, Any]]:
     """Merge issues by status finality, then ``updated_at``.
 
     Ranks come from :data:`_ISSUE_STATUS_RANK`; the module docstring has the
-    finality argument.
+    finality argument. ``records`` is the ours bucket followed by the theirs
+    bucket, so the winner of an exact tie is still decided by ``tie_break``
+    rather than by arrival order.
+
+    ``held`` carries the rank and the parsed ``updated_at`` of the record
+    currently winning each id, so a contended id parses each timestamp once
+    instead of once per challenger.
     """
     issues: dict[str, dict[str, Any]] = {}
-    for record in [*ours_records, *theirs_records]:
-        if classify_record(record) != "issue":
-            continue
+    held: dict[str, tuple[int, datetime]] = {}
+    for record in records:
         fid = _issue_full_id(record)
-        existing = issues.get(fid)
-        if existing is None:
-            issues[fid] = record
-            continue
         # The 1 is the rank of "open" here: an unrecognised status — a
         # Status.UNKNOWN sentinel from a newer dcat — merges as active, so it
         # never overrides a close or tombstone and never loses to a draft.
@@ -485,78 +538,81 @@ def _merge_issues_lww(
         # because that table has no draft tier below open, not because the two
         # kinds are treated differently. Keep them tied to their own "open".
         new_rank = _ISSUE_STATUS_RANK.get(record.get("status", "open"), 1)
-        old_rank = _ISSUE_STATUS_RANK.get(existing.get("status", "open"), 1)
+        existing = issues.get(fid)
+        if existing is None:
+            issues[fid] = record
+            held[fid] = (new_rank, _parse_iso_ts(record.get("updated_at", "")))
+            continue
+        old_rank, old_ts = held[fid]
         if new_rank > old_rank:
             issues[fid] = record
+            held[fid] = (new_rank, _parse_iso_ts(record.get("updated_at", "")))
         elif new_rank == old_rank:
             new_ts = _parse_iso_ts(record.get("updated_at", ""))
-            old_ts = _parse_iso_ts(existing.get("updated_at", ""))
             if new_ts > old_ts or (
-                new_ts == old_ts and _tie_break_key(record) > _tie_break_key(existing)
+                new_ts == old_ts and tie_break(record) > tie_break(existing)
             ):
                 issues[fid] = record
+                held[fid] = (new_rank, new_ts)
     return issues
 
 
 def _merge_proposals(
-    ours_records: list[dict[str, Any]],
-    theirs_records: list[dict[str, Any]],
+    records: Iterable[dict[str, Any]],
+    tie_break: Callable[[dict[str, Any]], bytes],
 ) -> dict[str, dict[str, Any]]:
     """Merge proposals by status finality, then ``updated_at`` / ``created_at``.
 
     Ranks come from :data:`_PROPOSAL_STATUS_RANK`; the module docstring has
     the finality argument. The ``created_at`` fallback covers legacy records
-    written before proposals carried ``updated_at``.
+    written before proposals carried ``updated_at``. ``held`` caches the
+    winner's rank and parsed timestamp, as in :func:`_merge_issues_lww`.
     """
+
+    def _stamp(record: dict[str, Any]) -> datetime:
+        return _parse_iso_ts(record.get("updated_at", record.get("created_at", "")))
+
     proposals: dict[str, dict[str, Any]] = {}
-    for record in [*ours_records, *theirs_records]:
-        if classify_record(record) != "proposal":
-            continue
+    held: dict[str, tuple[int, datetime]] = {}
+    for record in records:
         fid = _proposal_full_id(record)
-        existing = proposals.get(fid)
-        if existing is None:
-            proposals[fid] = record
-            continue
         # 0 is the rank of "open" in _PROPOSAL_STATUS_RANK — same
         # unknown-merges-as-open rule as _merge_issues_lww, which spells it 1
         # because its table starts at draft. Normalising the two literals to
         # match would change which record wins.
         new_rank = _PROPOSAL_STATUS_RANK.get(record.get("status", "open"), 0)
-        old_rank = _PROPOSAL_STATUS_RANK.get(existing.get("status", "open"), 0)
+        existing = proposals.get(fid)
+        if existing is None:
+            proposals[fid] = record
+            held[fid] = (new_rank, _stamp(record))
+            continue
+        old_rank, old_ts = held[fid]
         if new_rank > old_rank:
             proposals[fid] = record
+            held[fid] = (new_rank, _stamp(record))
         elif new_rank == old_rank:
-            new_ts = _parse_iso_ts(
-                record.get("updated_at", record.get("created_at", ""))
-            )
-            old_ts = _parse_iso_ts(
-                existing.get("updated_at", existing.get("created_at", ""))
-            )
+            new_ts = _stamp(record)
             if new_ts > old_ts or (
-                new_ts == old_ts and _tie_break_key(record) > _tie_break_key(existing)
+                new_ts == old_ts and tie_break(record) > tie_break(existing)
             ):
                 proposals[fid] = record
+                held[fid] = (new_rank, new_ts)
     return proposals
 
 
 def _merge_events(
-    ours_records: list[dict[str, Any]],
-    theirs_records: list[dict[str, Any]],
+    records: Iterable[dict[str, Any]],
 ) -> dict[tuple[str, str, str, str, str], dict[str, Any]]:
     """Union events from both sides, deduplicating by identity tuple."""
     events: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
-    for record in [*ours_records, *theirs_records]:
-        if classify_record(record) != "event":
-            continue
-        key = _event_key(record)
-        if key not in events:
-            events[key] = record
+    for record in records:
+        events.setdefault(_event_key(record), record)
     return events
 
 
 def _merge_unknown(
-    ours_records: list[dict[str, Any]],
-    theirs_records: list[dict[str, Any]],
+    records: Iterable[dict[str, Any]],
+    tie_break: Callable[[dict[str, Any]], bytes],
 ) -> list[dict[str, Any]]:
     """Union records of unrecognised kinds, deduplicated by exact content.
 
@@ -576,10 +632,8 @@ def _merge_unknown(
         independent of which side was labeled ours.
     """
     unknown: dict[bytes, dict[str, Any]] = {}
-    for record in [*ours_records, *theirs_records]:
-        if classify_record(record) != "unknown":
-            continue
-        unknown.setdefault(_tie_break_key(record), record)
+    for record in records:
+        unknown.setdefault(tie_break(record), record)
     return [unknown[key] for key in sorted(unknown)]
 
 
@@ -587,8 +641,8 @@ def _merge_three_way(
     base_records: list[dict[str, Any]],
     ours_records: list[dict[str, Any]],
     theirs_records: list[dict[str, Any]],
+    tie_break: Callable[[dict[str, Any]], bytes],
     *,
-    record_type: str,
     key_fn: Callable[[dict[str, Any]], tuple[str, ...]],
 ) -> dict[tuple[str, ...], dict[str, Any]]:
     """Three-way merge for add/remove records (deps, links).
@@ -607,9 +661,9 @@ def _merge_three_way(
         collaborators merging the same branches produced the same records
         on different lines (dogcat-4ol3).
     """
-    base = _replay_with_ops(base_records, record_type=record_type, key_fn=key_fn)
-    ours = _replay_with_ops(ours_records, record_type=record_type, key_fn=key_fn)
-    theirs = _replay_with_ops(theirs_records, record_type=record_type, key_fn=key_fn)
+    base = _replay_with_ops(base_records, key_fn=key_fn)
+    ours = _replay_with_ops(ours_records, key_fn=key_fn)
+    theirs = _replay_with_ops(theirs_records, key_fn=key_fn)
 
     merged: dict[tuple[str, ...], dict[str, Any]] = {}
     for key in sorted(set(base) | set(ours) | set(theirs)):
@@ -618,7 +672,7 @@ def _merge_three_way(
         in_theirs = key in theirs
 
         if in_ours and in_theirs:
-            merged[key] = max(ours[key], theirs[key], key=_tie_break_key)
+            merged[key] = max(ours[key], theirs[key], key=tie_break)
         elif in_ours and not in_theirs:
             if not in_base:
                 merged[key] = ours[key]
@@ -661,21 +715,26 @@ def merge_jsonl(
         so the known kinds keep the byte-for-byte layout compaction
         produces.
     """
-    issues = _merge_issues_lww(ours_records, theirs_records)
-    proposals = _merge_proposals(ours_records, theirs_records)
-    events = _merge_events(ours_records, theirs_records)
+    base = _bucket_by_kind(base_records)
+    ours = _bucket_by_kind(ours_records)
+    theirs = _bucket_by_kind(theirs_records)
+    tie_break = _TieBreakCache()
+
+    issues = _merge_issues_lww(chain(ours["issue"], theirs["issue"]), tie_break)
+    proposals = _merge_proposals(chain(ours["proposal"], theirs["proposal"]), tie_break)
+    events = _merge_events(chain(ours["event"], theirs["event"]))
     merged_deps = _merge_three_way(
-        base_records,
-        ours_records,
-        theirs_records,
-        record_type="dependency",
+        base["dependency"],
+        ours["dependency"],
+        theirs["dependency"],
+        tie_break,
         key_fn=_dep_key,
     )
     merged_links = _merge_three_way(
-        base_records,
-        ours_records,
-        theirs_records,
-        record_type="link",
+        base["link"],
+        ours["link"],
+        theirs["link"],
+        tie_break,
         key_fn=_link_key,
     )
 
@@ -690,5 +749,5 @@ def merge_jsonl(
     result.extend(
         sorted(events.values(), key=lambda e: _parse_iso_ts(e.get("timestamp", "")))
     )
-    result.extend(_merge_unknown(ours_records, theirs_records))
+    result.extend(_merge_unknown(chain(ours["unknown"], theirs["unknown"]), tie_break))
     return result

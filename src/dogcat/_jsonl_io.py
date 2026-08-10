@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import IO, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
 
 def atomic_rewrite_jsonl(
@@ -97,13 +97,16 @@ def append_jsonl_payload(target: Path, payload: bytes) -> None:
             call to this catches nothing.
     """
     try:
-        if target.exists() and target.stat().st_size > 0:
-            with target.open("rb") as check:
-                check.seek(-1, 2)
-                if check.read(1) != b"\n":
-                    payload = b"\n" + payload
-
-        with target.open("ab") as f:
+        # "a+b" rather than "ab" so the trailing-byte probe reuses this
+        # handle instead of a second open(): Python seeks an append-mode
+        # handle to EOF on open, so tell() is the size check, and O_APPEND
+        # forces every write to EOF regardless of where the probe left the
+        # read position.
+        with target.open("a+b") as f:
+            if f.tell() > 0:
+                f.seek(-1, os.SEEK_END)
+                if f.read(1) != b"\n":
+                    f.write(b"\n")
             f.write(payload)
             f.flush()
             os.fsync(f.fileno())
@@ -112,13 +115,59 @@ def append_jsonl_payload(target: Path, payload: bytes) -> None:
         raise RuntimeError(msg) from e
 
 
-def _write_lines(lines: list[bytes]) -> Callable[[IO[bytes]], int]:
-    """Return a write_fn for ``atomic_rewrite_jsonl`` that flushes ``lines``."""
+_READ_CHUNK_SIZE = 1 << 20
+
+# Per-line verdicts recorded by the classify pass and replayed by the two
+# write passes. One byte per line, so the bookkeeping stays proportional to
+# the line count rather than to the file's bytes.
+_DROP = 0
+_KEEP = 1
+_ARCHIVE = 2
+
+
+def _iter_lines(fh: IO[bytes]) -> Iterator[bytes]:
+    r"""Yield lines from ``fh`` with ``bytes.splitlines(keepends=True)`` semantics.
+
+    ``splitlines`` breaks on more separators than ``\n`` (``\r``, ``\v``,
+    ``\f``, ``\x1c``-``\x1e``), so iterating the handle directly would
+    partition a file differently than reading it whole. Holding back the last
+    element of each chunk keeps a separator that straddles a chunk boundary —
+    ``\r`` then ``\n`` — from splitting into two lines.
+
+    Peak memory is one chunk plus the longest line, not the whole file.
+    """
+    chunk_size = _READ_CHUNK_SIZE
+    carry = b""
+    while True:
+        chunk = fh.read(chunk_size)
+        if not chunk:
+            break
+        parts = (carry + chunk).splitlines(keepends=True)
+        carry = parts.pop() if parts else b""
+        yield from parts
+    if carry:
+        yield carry
+
+
+def _replay_verdicts(
+    source: Path,
+    verdicts: bytes,
+    wanted: int,
+    line_count: int,
+) -> Callable[[IO[bytes]], int]:
+    """Return a write_fn streaming ``source``'s ``wanted`` lines into a tempfile.
+
+    ``verdicts`` pairs positionally with ``source``'s lines. ``strict=True``
+    on the zip means a source that changed between the classify pass and this
+    one raises rather than silently writing a truncated file.
+    """
 
     def writer(f: IO[bytes]) -> int:
-        for line in lines:
-            f.write(line if line.endswith(b"\n") else line + b"\n")
-        return len(lines)
+        with source.open("rb") as fh:
+            for verdict, raw_line in zip(verdicts, _iter_lines(fh), strict=True):
+                if verdict == wanted:
+                    f.write(raw_line if raw_line.endswith(b"\n") else raw_line + b"\n")
+        return line_count
 
     return writer
 
@@ -133,10 +182,15 @@ def split_and_rewrite_jsonl(
     """Partition ``source`` into archive vs keep, then atomically rewrite both.
 
     ``classify(stripped_line)`` returns True when a line belongs in the archive
-    file, False when it stays in the source file. Blank lines are dropped on
-    both sides. Lines that fail to be classified (e.g. corrupt JSON whose
-    classifier raises) are the caller's responsibility — they should classify
-    such lines as "keep" so the source isn't quietly losing rows.
+    file, False when it stays in the source file, and is called once per line.
+    Blank lines are dropped on both sides. Lines that fail to be classified
+    (e.g. corrupt JSON whose classifier raises) are the caller's
+    responsibility — they should classify such lines as "keep" so the source
+    isn't quietly losing rows.
+
+    The file is streamed three times — once to classify, once per output file
+    to write — rather than held in memory as three copies. Callers already hold
+    the store's file lock across the whole call, so the passes see one snapshot.
 
     Returns ``(archived_lines, remaining_lines)``. When nothing was classified
     as archive, the source is left untouched and ``(0, 0)`` is returned.
@@ -144,21 +198,34 @@ def split_and_rewrite_jsonl(
     if not source.exists():
         return 0, 0
 
-    archived_lines: list[bytes] = []
-    remaining_lines: list[bytes] = []
-    for raw_line in source.read_bytes().splitlines(keepends=True):
-        stripped = raw_line.strip()
-        if not stripped:
-            continue
-        if classify(stripped):
-            archived_lines.append(raw_line)
-        else:
-            remaining_lines.append(raw_line)
+    verdicts = bytearray()
+    archived_count = 0
+    remaining_count = 0
+    with source.open("rb") as fh:
+        for raw_line in _iter_lines(fh):
+            stripped = raw_line.strip()
+            if not stripped:
+                verdicts.append(_DROP)
+            elif classify(stripped):
+                verdicts.append(_ARCHIVE)
+                archived_count += 1
+            else:
+                verdicts.append(_KEEP)
+                remaining_count += 1
 
-    if not archived_lines:
+    if not archived_count:
         return 0, 0
 
-    atomic_rewrite_jsonl(archive, archive_dir, _write_lines(archived_lines))
-    atomic_rewrite_jsonl(source, source_dir, _write_lines(remaining_lines))
+    frozen = bytes(verdicts)
+    atomic_rewrite_jsonl(
+        archive,
+        archive_dir,
+        _replay_verdicts(source, frozen, _ARCHIVE, archived_count),
+    )
+    atomic_rewrite_jsonl(
+        source,
+        source_dir,
+        _replay_verdicts(source, frozen, _KEEP, remaining_count),
+    )
 
-    return len(archived_lines), len(remaining_lines)
+    return archived_count, remaining_count

@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from textual.widgets import Button, OptionList, Static
+from tui_test_helpers import wait_for_workers
 
 from dogcat.models import Issue
 from dogcat.tui.dashboard import ConfirmDeleteScreen, DogcatTUI
@@ -399,6 +400,8 @@ class TestDashboardDeleteAction:
             delete_btn = confirm_screen.query_one("#confirm-delete", Button)
             delete_btn.press()
             await pilot.pause()
+            # The write runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
 
             storage.delete.assert_called_once_with("dc-abc1")
 
@@ -465,6 +468,8 @@ class TestDashboardDeleteAction:
 
             await pilot.press("y")
             await pilot.pause()
+            # The write runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
 
             storage.delete.assert_called_once_with("dc-abc1")
 
@@ -778,5 +783,7 @@ class TestInlineEditDataLossGuards:
 
             # Save — the post-save reapply must now collapse split mode
             panel.do_save()
+            # The save runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
             await pilot.pause()
             assert not app._split_mode

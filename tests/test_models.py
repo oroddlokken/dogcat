@@ -16,6 +16,7 @@ from dogcat.models import (
     classify_record,
     dict_to_issue,
     issue_to_dict,
+    sanitize_for_terminal,
     validate_issue,
     validate_issue_type,
     validate_priority,
@@ -1143,3 +1144,94 @@ class TestValidateIssueRecordConsistency:
         record["id"] = "legacy-ns-x1"
         full_id = precheck_issue_record(record)
         assert full_id == dict_to_issue(record).full_id == "legacy-ns-x1"
+
+
+def _sanitize_reference(text: str | None) -> str:
+    r"""Per-character sanitizer the regex fast path in models.py replaced.
+
+    Kept as the oracle for the equivalence test below: it is the definition of
+    which code points render as ``\xNN``, independent of the pattern.
+    """
+    if not text:
+        return text or ""
+    out: list[str] = []
+    for ch in text:
+        if ch in {"\t", "\n"}:
+            out.append(ch)
+            continue
+        cp = ord(ch)
+        if cp < 0x20 or cp == 0x7F or 0x80 <= cp <= 0x9F:
+            out.append(f"\\x{cp:02x}")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+_SANITIZE_CORPUS: list[tuple[str, str | None]] = [
+    ("none", None),
+    ("empty", ""),
+    ("clean ascii", "a plain title"),
+    ("clean unicode", "hund og katt æøå \U0001f436 中文"),
+    ("tab and newline", "a\tb\nc"),
+    ("nul", "a\x00b"),
+    ("bel", "\x07ring"),
+    ("backspace", "over\x08write"),
+    ("vertical tab", "a\x0bb"),
+    ("form feed", "a\x0cb"),
+    ("carriage return", "line\rover"),
+    ("escape alone", "\x1b"),
+    ("ansi csi clear", "\x1b[2J\x1b[Hfake prompt"),
+    ("ansi sgr color", "\x1b[31mred\x1b[0m"),
+    ("ansi osc title", "\x1b]0;pwned\x07rest"),
+    ("c1 csi", "\x9bsneaky"),
+    ("c1 osc", "\x9dpwned\x9c"),
+    ("c1 range edges", "\x80\x8f\x9f"),
+    ("del", "a\x7fb"),
+    ("boundary keepers", "\x1f\x20\x7e\x7f\xa0"),
+    ("mixed clean and dirty", "ok \x1b[31mred\x1b[0m ok\ttail\n"),
+    ("dirty then unicode", "\x00å\x9f\U0001f436"),
+    ("only clean punctuation", "id: dc-1x2y -- 100% done!"),
+    ("long clean", "x" * 4096),
+    ("long dirty tail", "x" * 4096 + "\x1b[2J"),
+]
+
+
+class TestSanitizeForTerminal:
+    """The regex fast path must agree with the per-character loop everywhere."""
+
+    @pytest.mark.parametrize(
+        ("label", "text"),
+        _SANITIZE_CORPUS,
+        ids=[label for label, _ in _SANITIZE_CORPUS],
+    )
+    def test_matches_reference_implementation(
+        self, label: str, text: str | None
+    ) -> None:
+        """Fast path and loop produce byte-identical output for every case."""
+        assert sanitize_for_terminal(text) == _sanitize_reference(text), label
+
+    def test_every_code_point_below_0x100_agrees(self) -> None:
+        """Exhaustive sweep of C0, ASCII, DEL and C1 in a clean context."""
+        for cp in range(0x100):
+            probe = f"a{chr(cp)}b"
+            assert sanitize_for_terminal(probe) == _sanitize_reference(probe), (
+                f"disagreement at U+{cp:04X}"
+            )
+
+    def test_clean_input_returns_the_same_object(self) -> None:
+        """The fast path skips rebuilding a string that has nothing to escape."""
+        text = "a plain title å"
+        assert sanitize_for_terminal(text) is text
+
+    def test_no_control_byte_survives_a_dirty_render(self) -> None:
+        """No corpus case leaks a raw byte the terminal would interpret."""
+        for label, text in _SANITIZE_CORPUS:
+            out = sanitize_for_terminal(text)
+            leaked = [ch for ch in out if ch not in {"\t", "\n"} and _is_control(ch)]
+            assert not leaked, f"{label}: leaked {leaked!r}"
+
+
+def _is_control(ch: str) -> bool:
+    """Report whether ``ch`` is a code point that must never render raw."""
+    cp = ord(ch)
+    return cp < 0x20 or cp == 0x7F or 0x80 <= cp <= 0x9F

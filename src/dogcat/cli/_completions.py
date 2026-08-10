@@ -51,8 +51,8 @@ def _complete_issues_by_status(
         storage = get_storage()
         ns_filter = _ns_filter_from_ctx(ctx, str(storage.dogcats_dir))
         results: list[tuple[str, str]] = []
-        for i in storage.list():
-            if not keep(i.status.value):
+        for i in storage._issues.iter_completion_fields():
+            if not keep(i.status):
                 continue
             if ns_filter is not None and not ns_filter(i.namespace):
                 continue
@@ -219,7 +219,7 @@ def complete_labels(
         storage = get_storage()
         ns_filter = _ns_filter_from_ctx(ctx, str(storage.dogcats_dir))
         labels: set[str] = set()
-        for issue in storage.list():
+        for issue in storage._issues.iter_completion_fields():
             if ns_filter is None or ns_filter(issue.namespace):
                 labels.update(issue.labels)
         return [(lbl, "label") for lbl in sorted(labels) if lbl.startswith(incomplete)]
@@ -257,7 +257,7 @@ def complete_owners(
     try:
         storage = get_storage()
         owners: set[str] = set()
-        for issue in storage.list():
+        for issue in storage._issues.iter_completion_fields():
             if issue.owner:
                 owners.add(issue.owner)
         return [
@@ -351,7 +351,7 @@ def complete_config_values(
         try:
             storage = get_storage()
             ns_set: set[str] = set()
-            for issue in storage.list():
+            for issue in storage._issues.iter_completion_fields():
                 ns_set.add(issue.namespace)
             return [
                 (ns, "namespace") for ns in sorted(ns_set) if ns.startswith(incomplete)

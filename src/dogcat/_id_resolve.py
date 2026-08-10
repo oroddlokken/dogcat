@@ -16,7 +16,9 @@ hyphen. This helper picks the safe variant for both.)
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Mapping
+from collections.abc import Set as AbstractSet
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -58,14 +60,24 @@ def resolve_partial_id(
     if not partial_id or not partial_id.strip():
         return None
 
-    id_set = ids if isinstance(ids, set) else set(ids)
+    # Callers pass a whole store's key view (``LazyIssueMap``, the inbox's
+    # proposal dict), and internal references are almost always full ids, so
+    # copying every key into a set before the exact-match test made each
+    # resolve O(n). Sets and mappings answer membership in O(1) and re-iterate
+    # for the fallback scan; anything else may be a one-shot iterator, which
+    # the membership test would consume, so it still gets copied.
+    candidates: Iterable[str] = (
+        cast("Iterable[str]", ids)
+        if isinstance(ids, (AbstractSet, Mapping))
+        else set(ids)
+    )
 
-    if partial_id in id_set:
+    if partial_id in candidates:
         return partial_id
 
     matches = [
         full_id
-        for full_id in id_set
+        for full_id in candidates
         if full_id.endswith(partial_id) or full_id.rsplit("-", 1)[-1] == partial_id
     ]
 

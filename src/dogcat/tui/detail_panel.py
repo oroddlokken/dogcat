@@ -6,6 +6,7 @@ import contextlib
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
+from textual import on, work
 from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
 from textual.message import Message
@@ -36,6 +37,8 @@ from dogcat.models import DependencyType, UpdateRequest, is_manual_issue
 from dogcat.tui.shared import SHARED_CSS, make_issue_label
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from rich.text import Text
     from textual.app import ComposeResult
 
@@ -57,6 +60,21 @@ class _DepPlan:
 
     def is_empty(self) -> bool:
         return not (self.add_deps or self.rem_deps or self.add_blks or self.rem_blks)
+
+
+@dataclass
+class _SaveResult:
+    """Outcome of one storage write, carried back from the worker thread.
+
+    ``warning`` is the create-mode half-success: the issue exists but its
+    dependencies did not commit, so the caller both reports the failure and
+    treats the save as done.
+    """
+
+    issue: Issue | None = None
+    error: str | None = None
+    warning: str | None = None
+    token: int = 0
 
 
 class ParentPickerScreen(ModalScreen[str | None]):
@@ -192,6 +210,13 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
             super().__init__()
             self.editing = editing
 
+    class _SaveComplete(Message, bubble=False):
+        """Internal: a save worker finished. Stays inside the panel."""
+
+        def __init__(self, result: _SaveResult) -> None:
+            super().__init__()
+            self.result = result
+
     BINDINGS: ClassVar = [
         Binding("ctrl+s", "save", "Save", priority=True),
         Binding("e", "enter_edit", "Edit"),
@@ -264,6 +289,11 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
         self._view_mode = view_mode
         self._namespace = namespace
         self._existing_ids = existing_ids or set()
+        self._save_in_flight = False
+        # Bumped on every dispatch and by load_issue(). A result carrying a
+        # stale token belongs to an issue the panel no longer shows, so
+        # applying it would put older state back on screen.
+        self._save_token = 0
 
     @property
     def issue(self) -> Issue:
@@ -562,6 +592,8 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
         if event.button.id == "cancel-btn":
+            if self._busy_saving():
+                return
             self.post_message(self.Cancelled())
         elif event.button.id == "save-btn":
             self.do_save()
@@ -669,11 +701,26 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
 
     def cancel_edit(self) -> None:
         """Revert to view mode by recomposing."""
+        if self._busy_saving():
+            return
         self._view_mode = True
         self.post_message(self.Cancelled())
 
+    def _busy_saving(self) -> bool:
+        """Report whether a save worker is running, notifying if one is.
+
+        A dispatched write cannot be recalled — the worker either holds the
+        advisory lock or is queued for it — so save and cancel both wait for
+        the outcome rather than racing a second write against it.
+        """
+        if not self._save_in_flight:
+            return False
+        self.notify("Save in progress", severity="warning")
+        return True
+
     async def load_issue(self, issue: Issue) -> None:
         """Load a new issue into the panel, recomposing the widget."""
+        self._save_token += 1
         self._issue = issue
         self._view_mode = True
         self._create_mode = False
@@ -685,9 +732,30 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
         raw = value.replace(",", " ").split()
         return [v.strip() for v in raw if v.strip()]
 
+    def _read_dep_inputs(self) -> tuple[list[str], list[str]]:
+        """Read the two dependency fields as ``(depends_on, blocks)`` id lists.
+
+        Widget reads have to happen on the event loop, so create-mode saves
+        take this snapshot before handing the ids to the worker thread.
+        """
+        return (
+            self._parse_dep_ids(self.query_one("#depends-on-input", Input).value),
+            self._parse_dep_ids(self.query_one("#blocks-input", Input).value),
+        )
+
     def _compute_dep_plan(
         self,
         issue_id: str,
+    ) -> tuple[list[str], _DepPlan]:
+        """Read the dep fields and plan the change set against storage."""
+        new_depends_on, new_blocks = self._read_dep_inputs()
+        return self._plan_deps(issue_id, new_depends_on, new_blocks)
+
+    def _plan_deps(
+        self,
+        issue_id: str,
+        new_depends_on: list[str],
+        new_blocks: list[str],
     ) -> tuple[list[str], _DepPlan]:
         """Diff form deps against storage and pre-validate the change set.
 
@@ -699,15 +767,12 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
         agree on full IDs. Pre-validating the entire diff here lets the
         caller refuse to half-apply a form (e.g. commit a title change but
         bail on a bad dep id).
+
+        Reads storage only, so it runs either on the event loop (update mode)
+        or on the worker thread after the issue exists (create mode).
         """
         from dogcat.deps import would_create_cycle
 
-        new_depends_on = self._parse_dep_ids(
-            self.query_one("#depends-on-input", Input).value,
-        )
-        new_blocks = self._parse_dep_ids(
-            self.query_one("#blocks-input", Input).value,
-        )
         old_depends_on = set(self._get_depends_on_ids())
         old_blocks = set(self._get_blocks_ids())
 
@@ -763,7 +828,9 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
             self._storage.remove_dependency(dep_id, issue_id)
 
     def do_save(self) -> None:
-        """Execute the save."""
+        """Validate the form and hand the write to a worker thread."""
+        if self._busy_saving():
+            return
         title = self.query_one("#title-input", Input).value.strip()
         if not title:
             self.notify("Title cannot be empty", severity="error")
@@ -814,60 +881,43 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
         priority_val: Any,
         description: str,
     ) -> None:
-        """Create a new issue from the form values."""
+        """Read the create form and dispatch the write to a worker."""
         from dogcat.models import IssueType, Status
-
-        parent = self._get_selected_parent()
 
         manual_val = self.query_one("#manual-input", Checkbox).value
         metadata: dict[str, Any] = {}
         if manual_val:
             metadata["manual"] = True
 
-        try:
-            issue = self._storage.create_issue(
-                title=title,
-                namespace=self._namespace,
-                description=description or None,
-                status=(
-                    Status(status_val) if isinstance(status_val, str) else Status.OPEN
-                ),
-                priority=priority_val if isinstance(priority_val, int) else 2,
-                issue_type=(
-                    IssueType(type_val) if isinstance(type_val, str) else IssueType.TASK
-                ),
-                owner=self.query_one("#owner-input", Input).value.strip() or None,
-                parent=parent,
-                external_ref=(
-                    self.query_one("#external-ref-input", Input).value.strip() or None
-                ),
-                labels=parse_labels(self.query_one("#labels-input", Input).value),
-                notes=self.query_one("#notes-input", TextArea).text.strip() or None,
-                acceptance=(
-                    self.query_one("#acceptance-input", TextArea).text.strip() or None
-                ),
-                design=self.query_one("#design-input", TextArea).text.strip() or None,
-                metadata=metadata,
-            )
-        except (ValueError, RuntimeError, OSError) as e:
-            self.notify(f"Create failed: {e}", severity="error")
-            return
+        fields: dict[str, Any] = {
+            "title": title,
+            "namespace": self._namespace,
+            "description": description or None,
+            "status": (
+                Status(status_val) if isinstance(status_val, str) else Status.OPEN
+            ),
+            "priority": priority_val if isinstance(priority_val, int) else 2,
+            "issue_type": (
+                IssueType(type_val) if isinstance(type_val, str) else IssueType.TASK
+            ),
+            "owner": self.query_one("#owner-input", Input).value.strip() or None,
+            "parent": self._get_selected_parent(),
+            "external_ref": (
+                self.query_one("#external-ref-input", Input).value.strip() or None
+            ),
+            "labels": parse_labels(self.query_one("#labels-input", Input).value),
+            "notes": self.query_one("#notes-input", TextArea).text.strip() or None,
+            "acceptance": (
+                self.query_one("#acceptance-input", TextArea).text.strip() or None
+            ),
+            "design": self.query_one("#design-input", TextArea).text.strip() or None,
+            "metadata": metadata,
+        }
+        new_depends_on, new_blocks = self._read_dep_inputs()
 
-        # Now that the new issue exists in storage we can validate dep IDs
-        # (cycle checks are vacuous — a fresh issue has no graph edges yet).
-        errors, plan = self._compute_dep_plan(issue.full_id)
-        if errors:
-            self.notify(
-                "Issue created, but dependency error:\n" + "\n".join(errors),
-                severity="error",
-            )
-            self.post_message(self.Saved(issue))
-            return
-        try:
-            self._apply_dep_plan(issue.full_id, plan)
-        except (ValueError, RuntimeError, OSError) as e:
-            self.notify(f"Dependency commit failed: {e}", severity="error")
-        self.post_message(self.Saved(issue))
+        self._save_in_flight = True
+        self._save_token += 1
+        self._run_create(fields, new_depends_on, new_blocks, self._save_token)
 
     def _do_update(
         self,
@@ -878,7 +928,29 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
         description: str,
         dep_plan: _DepPlan,
     ) -> None:
-        """Update an existing issue with changed fields."""
+        """Diff the form against the issue and dispatch the write to a worker."""
+        updates = self._collect_updates(
+            title, type_val, status_val, priority_val, description
+        )
+
+        if not updates and dep_plan.is_empty():
+            self.notify("No changes to save")
+            self.post_message(self.Cancelled())
+            return
+
+        self._save_in_flight = True
+        self._save_token += 1
+        self._run_update(self._issue.full_id, updates, dep_plan, self._save_token)
+
+    def _collect_updates(
+        self,
+        title: str,
+        type_val: Any,
+        status_val: Any,
+        priority_val: Any,
+        description: str,
+    ) -> dict[str, Any]:
+        """Return the changed fields. Reads widgets, so it stays on the loop."""
         updates: dict[str, Any] = {}
 
         # Enum/typed fields keep their isinstance guards (a Select can hold a
@@ -945,19 +1017,116 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
                 self._issue.metadata or {}, manual=manual_val
             )
 
-        if not updates and dep_plan.is_empty():
-            self.notify("No changes to save")
-            self.post_message(self.Cancelled())
-            return
+        return updates
 
+    @work(thread=True, group="dcat-save", exit_on_error=False)
+    def _run_create(
+        self,
+        fields: dict[str, Any],
+        new_depends_on: list[str],
+        new_blocks: list[str],
+        token: int,
+    ) -> None:
+        """Run a create off the event loop."""
+        self._post_outcome(
+            token,
+            lambda: self._commit_create(fields, new_depends_on, new_blocks),
+        )
+
+    @work(thread=True, group="dcat-save", exit_on_error=False)
+    def _run_update(
+        self,
+        issue_id: str,
+        updates: dict[str, Any],
+        dep_plan: _DepPlan,
+        token: int,
+    ) -> None:
+        """Run an update off the event loop."""
+        self._post_outcome(
+            token, lambda: self._commit_update(issue_id, updates, dep_plan)
+        )
+
+    def _post_outcome(
+        self,
+        token: int,
+        commit: Callable[[], _SaveResult],
+    ) -> None:
+        """Run *commit* on the worker thread and hand its outcome back.
+
+        The blanket except is the backstop for anything the commit helpers
+        do not name: without it a bug would strand ``_save_in_flight`` and
+        lock the panel out of saving for the rest of the session.
+        """
+        try:
+            result = commit()
+        except Exception as e:  # noqa: BLE001
+            result = _SaveResult(error=f"Save failed: {type(e).__name__}: {e}")
+        result.token = token
+        self.post_message(self._SaveComplete(result))
+
+    def _commit_create(
+        self,
+        fields: dict[str, Any],
+        new_depends_on: list[str],
+        new_blocks: list[str],
+    ) -> _SaveResult:
+        """Write a new issue and its dependencies. Runs on a worker thread."""
+        try:
+            issue = self._storage.create_issue(**fields)
+        except (ValueError, RuntimeError, OSError) as e:
+            return _SaveResult(error=f"Create failed: {e}")
+
+        # Now that the new issue exists in storage we can validate dep IDs
+        # (cycle checks are vacuous — a fresh issue has no graph edges yet).
+        errors, plan = self._plan_deps(issue.full_id, new_depends_on, new_blocks)
+        if errors:
+            return _SaveResult(
+                issue=issue,
+                warning="Issue created, but dependency error:\n" + "\n".join(errors),
+            )
+        try:
+            self._apply_dep_plan(issue.full_id, plan)
+        except (ValueError, RuntimeError, OSError) as e:
+            return _SaveResult(issue=issue, warning=f"Dependency commit failed: {e}")
+        return _SaveResult(issue=issue)
+
+    def _commit_update(
+        self,
+        issue_id: str,
+        updates: dict[str, Any],
+        dep_plan: _DepPlan,
+    ) -> _SaveResult:
+        """Write changed fields and dependencies. Runs on a worker thread."""
         try:
             if updates:
                 updated = self._storage.update(
-                    self._issue.full_id, UpdateRequest.from_dict(updates)
+                    issue_id, UpdateRequest.from_dict(updates)
                 )
             else:
                 updated = self._issue
-            self._apply_dep_plan(self._issue.full_id, dep_plan)
-            self.post_message(self.Saved(updated))
+            self._apply_dep_plan(issue_id, dep_plan)
         except (ValueError, RuntimeError, OSError) as e:
-            self.notify(f"Save failed: {e}", severity="error")
+            return _SaveResult(error=f"Save failed: {e}")
+        return _SaveResult(issue=updated)
+
+    @on(_SaveComplete)
+    def _on_save_complete(self, event: _SaveComplete) -> None:
+        """Apply a worker outcome back on the event loop."""
+        result = event.result
+        self._save_in_flight = False
+
+        if result.error:
+            self.notify(result.error, severity="error")
+            return
+        if result.warning:
+            self.notify(result.warning, severity="error")
+        if result.issue is None:
+            return
+
+        if result.token != self._save_token:
+            # The panel loaded another issue while the write was in flight.
+            # The write is committed either way, so report it and leave the
+            # newer issue on screen instead of posting Saved for the old one.
+            self.notify(f"Saved {result.issue.full_id}")
+            return
+        self.post_message(self.Saved(result.issue))

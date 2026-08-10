@@ -1,9 +1,12 @@
 """Tests for config module."""
 
+import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
+from dogcat import config as config_module
 from dogcat.config import (
     CONFIG_FILENAME,
     DEFAULT_PREFIX,
@@ -1397,3 +1400,188 @@ class TestDogcatConfig:
         assert set(cfg.keys()) == {"namespace", "custom"}
         assert dict(cfg.items()) == {"namespace": "proj", "custom": "x"}
         assert {**cfg} == {"namespace": "proj", "custom": "x"}
+
+
+class TestConfigCaching:
+    """Per-process memos in config.py (dogcat-2s9r, dogcat-48ti).
+
+    Each test relies on the autouse ``_clear_config_caches`` fixture in
+    conftest, so a memo never crosses a test boundary.
+    """
+
+    def test_repeated_loads_parse_each_file_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Four load_config calls parse config.toml once."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        (dogcats_dir / CONFIG_FILENAME).write_text('namespace = "proj"\n')
+
+        parsed: list[str] = []
+        real_parse = config_module._parse_toml
+
+        def counting_parse(path: Path) -> dict[str, object]:
+            parsed.append(str(path))
+            return real_parse(path)
+
+        monkeypatch.setattr(config_module, "_parse_toml", counting_parse)
+
+        for _ in range(4):
+            assert load_config(str(dogcats_dir)).namespace == "proj"
+
+        assert parsed.count(str(dogcats_dir / CONFIG_FILENAME)) == 1
+
+    def test_save_config_then_load_returns_new_value(self, tmp_path: Path) -> None:
+        """A write followed by a read in the same process sees the new value."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+
+        save_config(str(dogcats_dir), DogcatConfig(namespace="before"))
+        assert load_config(str(dogcats_dir)).namespace == "before"
+
+        save_config(str(dogcats_dir), DogcatConfig(namespace="after"))
+        assert load_config(str(dogcats_dir)).namespace == "after"
+
+    def test_save_local_config_then_load_returns_new_value(
+        self, tmp_path: Path
+    ) -> None:
+        """config.local.toml writes invalidate the merged read too."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        save_config(str(dogcats_dir), DogcatConfig(namespace="shared"))
+
+        assert load_config(str(dogcats_dir)).namespace == "shared"
+
+        save_local_config(str(dogcats_dir), DogcatConfig(namespace="local"))
+        assert load_config(str(dogcats_dir)).namespace == "local"
+
+    def test_set_namespace_is_visible_to_get_namespace(self, tmp_path: Path) -> None:
+        """set_namespace invalidates whatever get_namespace read before it."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+
+        set_namespace(str(dogcats_dir), "first")
+        assert get_namespace(str(dogcats_dir)) == "first"
+
+        set_namespace(str(dogcats_dir), "second")
+        assert get_namespace(str(dogcats_dir)) == "second"
+
+    def test_external_edit_is_picked_up(self, tmp_path: Path) -> None:
+        """An edit by another process lands on the next read (TUI/web case).
+
+        ``os.utime`` moves the mtime forward explicitly so the assertion does
+        not depend on the filesystem's timestamp granularity.
+        """
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        config_path = dogcats_dir / CONFIG_FILENAME
+        config_path.write_text('namespace = "old"\n')
+
+        assert load_config(str(dogcats_dir)).namespace == "old"
+
+        config_path.write_text('namespace = "edited"\n')
+        stat = config_path.stat()
+        os.utime(config_path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+
+        assert load_config(str(dogcats_dir)).namespace == "edited"
+
+    def test_cached_payload_survives_caller_mutation(self, tmp_path: Path) -> None:
+        """Mutating a returned list must not corrupt the next read."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        save_config(
+            str(dogcats_dir),
+            DogcatConfig(namespace="proj", visible_namespaces=["a", "b"]),
+        )
+
+        first = load_config(str(dogcats_dir))
+        assert first.visible_namespaces is not None
+        first.visible_namespaces.append("intruder")
+
+        second = load_config(str(dogcats_dir))
+        assert second.visible_namespaces == ["a", "b"]
+
+    def test_walkup_boundary_forks_git_once(self, tmp_path: Path) -> None:
+        """Repeated boundary lookups for one directory fork git once."""
+        from dogcat.config import get_rc_walkup_boundary
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        calls: list[list[str]] = []
+        completed = type(
+            "CompletedProcess",
+            (),
+            {"returncode": 0, "stdout": str(repo) + "\n"},
+        )()
+
+        def fake_run(argv: list[str], **_kwargs: object) -> object:
+            calls.append(argv)
+            return completed
+
+        with patch("subprocess.run", side_effect=fake_run):
+            for _ in range(4):
+                assert get_rc_walkup_boundary(repo) == repo.resolve()
+
+        assert len(calls) == 1
+
+    def test_walkup_boundary_is_per_directory(self, tmp_path: Path) -> None:
+        """A different start directory is a separate lookup, not a memo hit."""
+        from dogcat.config import get_rc_walkup_boundary
+
+        one = tmp_path / "one"
+        two = tmp_path / "two"
+        one.mkdir()
+        two.mkdir()
+
+        def result_for(top: Path) -> object:
+            return type(
+                "CompletedProcess",
+                (),
+                {"returncode": 0, "stdout": str(top) + "\n"},
+            )()
+
+        with patch("subprocess.run", return_value=result_for(one)):
+            assert get_rc_walkup_boundary(one) == one.resolve()
+        with patch("subprocess.run", return_value=result_for(two)):
+            assert get_rc_walkup_boundary(two) == two.resolve()
+
+    def test_namespace_detection_reads_the_store_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Repeated get_namespace calls parse issues.jsonl once."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        (dogcats_dir / "issues.jsonl").write_text(
+            '{"id": "detected-a1b", "title": "x", "status": "open"}\n'
+        )
+
+        scans: list[str] = []
+        real_scan = config_module._scan_namespace_from_issues
+
+        def counting_scan(path: Path) -> str | None:
+            scans.append(str(path))
+            return real_scan(path)
+
+        monkeypatch.setattr(config_module, "_scan_namespace_from_issues", counting_scan)
+
+        for _ in range(3):
+            assert get_namespace(str(dogcats_dir)) == "detected"
+
+        assert len(scans) == 1
+
+    def test_namespace_detection_reruns_after_the_store_changes(
+        self, tmp_path: Path
+    ) -> None:
+        """Appending an issue re-detects rather than serving the old prefix."""
+        dogcats_dir = tmp_path / ".dogcats"
+        dogcats_dir.mkdir()
+        issues = dogcats_dir / "issues.jsonl"
+        issues.write_text('{"id": "alpha-a1b", "title": "x", "status": "open"}\n')
+
+        assert get_namespace(str(dogcats_dir)) == "alpha"
+
+        with issues.open("a") as f:
+            f.write('{"id": "beta-c2d", "title": "y", "status": "open"}\n')
+            f.write('{"id": "beta-e3f", "title": "z", "status": "open"}\n')
+
+        assert get_namespace(str(dogcats_dir)) == "beta"

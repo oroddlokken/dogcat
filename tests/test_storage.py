@@ -2129,6 +2129,132 @@ class TestCheckIdUniqueness:
         assert s.check_id_uniqueness() is False
 
 
+class TestSingleParsePerCommand:
+    """doctor and prune read the store once, not twice (dogcat-3jxo).
+
+    ``check_id_uniqueness`` and the orphan-event scan in ``prune_tombstones``
+    each walked and orjson-parsed the whole file after ``_load`` had already
+    parsed it in the same process. Both verdicts now come off the load pass.
+    """
+
+    def test_uniqueness_check_does_not_reload_an_unchanged_file(
+        self, storage: JSONLStorage, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Repeat calls parse nothing: the load pass already answered."""
+        storage.create(Issue(id="a", namespace="t", title="A"))
+        fresh = JSONLStorage(str(storage.path))
+
+        loads: list[object] = []
+        real_load = JSONLStorage._load
+
+        def counting_load(self: JSONLStorage, **kwargs: object) -> None:
+            loads.append(kwargs)
+            real_load(self, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(JSONLStorage, "_load", counting_load)
+
+        assert fresh.check_id_uniqueness() is True
+        assert fresh.check_id_uniqueness() is True
+        assert loads == []
+
+    def test_uniqueness_check_reloads_after_an_external_append(
+        self, storage: JSONLStorage
+    ) -> None:
+        """A collision written by another writer is still caught."""
+        storage.create(Issue(id="abcd", namespace="t", title="first"))
+        assert storage.check_id_uniqueness() is True
+
+        with storage.path.open("ab") as fh:
+            fh.write(
+                b'{"record_type": "issue", "id": "abcd", "namespace": "t", '
+                b'"title": "collision", "status": "open", "priority": 2, '
+                b'"created_at": "2001-01-01T00:00:00+00:00", '
+                b'"updated_at": "2001-01-01T00:00:00+00:00"}\n'
+            )
+
+        assert storage.check_id_uniqueness() is False
+
+    def test_collision_counts_a_record_that_fails_the_precheck(
+        self, tmp_path: Path
+    ) -> None:
+        """A malformed duplicate still collides, as the raw scan reported it."""
+        path = tmp_path / "issues.jsonl"
+        path.write_text(
+            '{"record_type": "issue", "id": "abcd", "namespace": "t", '
+            '"title": "first", "status": "open", "priority": 2, '
+            '"created_at": "2026-04-25T12:00:00+00:00", '
+            '"updated_at": "2026-04-25T12:00:00+00:00"}\n'
+            # No title: precheck rejects it, so it lands in _bad_lines.
+            '{"record_type": "issue", "id": "abcd", "namespace": "t", '
+            '"status": "open", "priority": 2, '
+            '"created_at": "2026-04-25T13:00:00+00:00", '
+            '"updated_at": "2026-04-25T13:00:00+00:00"}\n'
+        )
+        s = JSONLStorage(str(path))
+
+        assert len(s._bad_lines) == 1
+        assert s.check_id_uniqueness() is False
+
+    def test_prune_reads_the_store_once_before_the_rewrite(
+        self, storage: JSONLStorage, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Two opens remain: the load pass, and the event copy the rewrite does."""
+        storage.create(Issue(id="keep", namespace="t", title="Keep"))
+        storage.create(Issue(id="gone", namespace="t", title="Gone"))
+        storage.update("t-gone", {"title": "Gone, renamed"})
+        storage.delete("t-gone", reason="x")
+        fresh = JSONLStorage(str(storage.path))
+
+        opened: list[str] = []
+        real_open = Path.open
+
+        def counting_open(self: Path, *args: object, **kwargs: object) -> object:
+            opened.append(str(self))
+            return real_open(self, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Path, "open", counting_open)
+
+        assert fresh.prune_tombstones() == ["t-gone"]
+
+        assert opened.count(str(fresh.path)) == 2
+
+    def test_prune_still_drops_orphaned_events(self, storage: JSONLStorage) -> None:
+        """The orphan verdict is unchanged now that it comes off the load pass."""
+        storage.create(Issue(id="keep", namespace="t", title="Keep"))
+        storage.create(Issue(id="gone", namespace="t", title="Gone"))
+        storage.update("t-gone", {"title": "Gone, renamed"})
+        storage.delete("t-gone", reason="x")
+
+        JSONLStorage(str(storage.path)).prune_tombstones()
+
+        event_ids = {
+            orjson.loads(line)["issue_id"]
+            for line in storage.path.read_bytes().splitlines()
+            if orjson.loads(line).get("record_type") == "event"
+        }
+        assert event_ids == {"t-keep"}
+
+    def test_normal_load_does_not_collect_event_ids(
+        self, storage: JSONLStorage
+    ) -> None:
+        """The event-line fast path stays free for every other command."""
+        storage.create(Issue(id="a", namespace="t", title="A"))
+
+        assert JSONLStorage(str(storage.path))._event_issue_ids is None
+
+    def test_prune_preserves_unmodelled_records(self, storage: JSONLStorage) -> None:
+        """A record kind this dcat does not model survives the prune rewrite."""
+        storage.create(Issue(id="gone", namespace="t", title="Gone"))
+        storage.delete("t-gone", reason="x")
+        unknown = b'{"record_type":"attachment","id":"att1"}'
+        with storage.path.open("ab") as fh:
+            fh.write(unknown + b"\n")
+
+        JSONLStorage(str(storage.path)).prune_tombstones()
+
+        assert unknown in storage.path.read_bytes().splitlines()
+
+
 class TestFindDanglingDependencies:
     """Test find_dangling_dependencies() method."""
 
@@ -2622,6 +2748,96 @@ class TestGetNamespaces:
         result = get_namespaces(storage, include_inbox=False)
         assert result == {"ns-a": NamespaceCounts(issues=1)}
 
+    def test_counts_without_materializing_issues(
+        self,
+        temp_dogcats_dir: Path,
+    ) -> None:
+        """Counting reads raw dicts; no Issue is constructed (dogcat-4qif)."""
+        from dogcat.storage import get_namespaces
+
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        seed = JSONLStorage(str(storage_path), create_dir=True)
+        seed.create(Issue(id="a1", title="A1", namespace="ns-a"))
+        seed.create(Issue(id="b1", title="B1", namespace="ns-b"))
+
+        fresh = JSONLStorage(str(storage_path))
+        get_namespaces(fresh, include_inbox=False)
+
+        entries = fresh._issues._entries.values()
+        assert not any(isinstance(v, Issue) for v in entries)
+
+    def test_counts_a_legacy_record_under_its_migrated_namespace(
+        self,
+        temp_dogcats_dir: Path,
+    ) -> None:
+        """A record with a legacy bare id counts under the migrated namespace.
+
+        The raw path has to reapply the namespace split ``dict_to_issue``
+        does, or a legacy store reports every issue under the wrong key.
+        """
+        from dogcat.storage import NamespaceCounts, get_namespaces
+
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage_path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "record_type": "issue",
+            "id": "ns-legacy-abc1",
+            "title": "Legacy",
+            "status": "open",
+            "issue_type": "task",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+        }
+        storage_path.write_text(json.dumps(record) + "\n")
+
+        result = get_namespaces(JSONLStorage(str(storage_path)), include_inbox=False)
+        assert result == {"ns-legacy": NamespaceCounts(issues=1)}
+
+
+class TestIsEmpty:
+    """``is_empty`` must agree with ``list()`` truthiness (dogcat-1ot9)."""
+
+    def test_true_for_a_fresh_store(self, temp_dogcats_dir: Path) -> None:
+        """A store with no records is empty."""
+        storage = JSONLStorage(str(temp_dogcats_dir / "issues.jsonl"), create_dir=True)
+        assert storage.is_empty() is True
+        assert not storage.list()
+
+    def test_false_once_an_issue_exists(self, temp_dogcats_dir: Path) -> None:
+        """One issue makes the store non-empty."""
+        storage = JSONLStorage(str(temp_dogcats_dir / "issues.jsonl"), create_dir=True)
+        storage.create(Issue(id="a1", title="A1"))
+        assert storage.is_empty() is False
+        assert bool(storage.list()) is True
+
+    def test_false_when_only_a_tombstone_remains(
+        self,
+        temp_dogcats_dir: Path,
+    ) -> None:
+        """A tombstoned-only store is still non-empty, as ``list()`` reports.
+
+        This is the case that separates ``is_empty`` from a visible-issue
+        count: ``dcat list`` must say "no issues match these filters" here,
+        not "no issues yet".
+        """
+        storage = JSONLStorage(str(temp_dogcats_dir / "issues.jsonl"), create_dir=True)
+        storage.create(Issue(id="a1", title="A1"))
+        storage.delete("dc-a1")
+
+        assert storage.is_empty() is False
+        assert bool(storage.list()) is True
+
+    def test_does_not_materialize_issues(self, temp_dogcats_dir: Path) -> None:
+        """The check reads no record; nothing is constructed."""
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        seed = JSONLStorage(str(storage_path), create_dir=True)
+        seed.create(Issue(id="a1", title="A1"))
+
+        fresh = JSONLStorage(str(storage_path))
+        assert fresh.is_empty() is False
+        entries = fresh._issues._entries.values()
+        assert not any(isinstance(v, Issue) for v in entries)
+
     def test_includes_inbox_proposals(self, temp_dogcats_dir: Path) -> None:
         """Inbox proposals are included when include_inbox=True."""
         from dogcat.inbox import InboxStorage
@@ -2909,6 +3125,104 @@ class TestIsDefaultBranch:
         joined = " ".join(rec.getMessage() for rec in caplog.records)
         assert "git rev-parse failed" in joined
         assert "Permission denied" in joined
+
+
+class TestDefaultBranchCheckOutsideLock:
+    """The default-branch fork must not run while the write lock is held.
+
+    Regression for dogcat-681d: ``_append`` called ``_is_default_branch()``
+    inside the lock, so the first append per process held it across a
+    ``git rev-parse`` fork (10s timeout, plus a second fork for
+    ``init.defaultBranch``) while every waiter polled at 50ms.
+    """
+
+    @staticmethod
+    def _instrument(
+        monkeypatch: pytest.MonkeyPatch, *, on_default_branch: bool
+    ) -> "list[str]":
+        """Record lock enter/exit and branch-check calls in call order."""
+        import contextlib
+        from collections.abc import Generator
+
+        from dogcat import storage as storage_mod
+
+        events: list[str] = []
+        real_lock = storage_mod.advisory_file_lock
+
+        @contextlib.contextmanager
+        def tracking_lock(lock_path: Path) -> Generator[None]:
+            with real_lock(lock_path):
+                events.append("lock-enter")
+                try:
+                    yield
+                finally:
+                    events.append("lock-exit")
+
+        def fake_is_default_branch(_dogcats_dir: Path) -> bool:
+            events.append("branch-check")
+            return on_default_branch
+
+        monkeypatch.setattr(storage_mod, "advisory_file_lock", tracking_lock)
+        monkeypatch.setattr("dogcat._branch.is_default_branch", fake_is_default_branch)
+        return events
+
+    @staticmethod
+    def _seed(storage: JSONLStorage, count: int) -> None:
+        for i in range(count):
+            storage.create(Issue(id=f"seed{i}", namespace="t", title=f"seed{i}"))
+
+    @staticmethod
+    def _churn(storage: JSONLStorage, seeded: int, count: int) -> None:
+        """Re-title seeded issues so compaction has superseded records to drop."""
+        for i in range(count):
+            storage.update(f"t-seed{i % seeded}", {"title": f"retitled {i}"})
+
+    def test_branch_check_never_runs_inside_the_lock(
+        self, storage: JSONLStorage, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Every branch check lands at lock depth 0, and compaction still fires."""
+        self._seed(storage, 15)
+        reloaded = JSONLStorage(str(storage.path))
+        events = self._instrument(monkeypatch, on_default_branch=True)
+
+        self._churn(reloaded, 15, 25)
+
+        assert "branch-check" in events
+        depth = 0
+        for event in events:
+            if event == "lock-enter":
+                depth += 1
+            elif event == "lock-exit":
+                depth -= 1
+            else:
+                assert depth == 0, f"branch check ran under the lock: {events}"
+        # Compaction dropped superseded issue records: 15 creates + 25 updates
+        # write 80 lines, and the file holds fewer.
+        assert len(storage.path.read_bytes().splitlines()) < 80
+
+    def test_feature_branch_still_blocks_compaction(
+        self, storage: JSONLStorage, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Warming the memo early must not compact off a default branch."""
+        self._seed(storage, 15)
+        reloaded = JSONLStorage(str(storage.path))
+        events = self._instrument(monkeypatch, on_default_branch=False)
+
+        self._churn(reloaded, 15, 25)
+
+        assert "branch-check" in events
+        # Two records per mutation (issue + event), nothing rewritten away.
+        assert len(storage.path.read_bytes().splitlines()) == 80
+
+    def test_no_branch_check_when_compaction_is_not_due(
+        self, storage: JSONLStorage, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Warming is gated on the same counts, so a small store forks nothing."""
+        events = self._instrument(monkeypatch, on_default_branch=True)
+
+        self._seed(storage, 3)
+
+        assert "branch-check" not in events
 
 
 class TestCompactionPreservesRelationFields:

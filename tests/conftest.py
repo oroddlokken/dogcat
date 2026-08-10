@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from dogcat import config as dogcat_config
 from dogcat import global_config
 from dogcat.storage import JSONLStorage
 
@@ -57,6 +58,18 @@ def _isolate_global_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     """
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
     global_config.reset_resolution_state()
+
+
+@pytest.fixture(autouse=True)
+def _clear_config_caches() -> None:
+    """Empty dogcat.config's per-process memos before each test.
+
+    The memos live at module scope and outlive a test. They key on a stat
+    signature, so a fresh tmp_path never collides — but a test that creates
+    a git repo, or a .dogcatrc, under a directory an earlier test already
+    queried would read the earlier answer.
+    """
+    dogcat_config.clear_caches()
 
 
 @pytest.fixture

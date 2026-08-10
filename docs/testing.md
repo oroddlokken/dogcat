@@ -70,6 +70,13 @@ namespace lookup falls back to defaults on a missing path without erroring. Layo
 `size=` that straddles `SPLIT_PANE_MIN_COLS` / `SPLIT_PANE_MIN_ROWS`. See `tests/test_tui_split_pane.py`
 and `tests/test_tui_dashboard.py`.
 
+Storage mutations run in a Textual thread worker, so a test that asserts on the result has to wait
+for the worker rather than for a repaint. Use `wait_for_workers(app)` from `tests/tui_test_helpers.py`;
+`pilot.pause()` alone returns before the write lands. Wrap it in `asyncio.wait_for` whenever the test
+holds the store lock, since an unbounded wait hangs the suite instead of failing it.
+`tests/test_tui_concurrency.py` holds the advisory lock from the test process to prove the app keeps
+handling keystrokes while a save waits.
+
 ## Web tests
 
 Use `fastapi.testclient.TestClient`, as `tests/test_web_propose.py` does. There is no JavaScript

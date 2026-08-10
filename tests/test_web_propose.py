@@ -1492,6 +1492,126 @@ class TestPersistentInboxStorage:
         assert "After external write" in titles
 
 
+class _StatCountingPath:
+    """Path proxy that counts direct ``.stat()`` calls.
+
+    Delegates everything else to the real Path, so ``reload()`` still works.
+    Its own internals (``exists()`` etc.) go through the real object and do
+    not inflate the count.
+    """
+
+    def __init__(self, real: Path) -> None:
+        self._real = real
+        self.stat_calls = 0
+
+    def stat(self) -> object:
+        self.stat_calls += 1
+        return self._real.stat()
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._real, name)
+
+
+class TestStalenessCheckStatCount:
+    """Regression tests for dogcat-3r6u: one stat() per staleness check."""
+
+    def test_single_stat_call_per_check(self, web_dogcats: Path) -> None:
+        """Each _refresh_inbox_if_stale call stats the inbox file once."""
+        from dogcat.web.propose.routes import _refresh_inbox_if_stale
+
+        inbox = InboxStorage(dogcats_dir=str(web_dogcats))
+        counting = _StatCountingPath(inbox.path)
+        inbox.path = counting  # type: ignore[assignment]
+
+        state: dict[str, float] = {}
+        _refresh_inbox_if_stale(inbox, state)
+        assert counting.stat_calls == 1
+
+        # Unchanged file: still one stat, and no reload.
+        _refresh_inbox_if_stale(inbox, state)
+        assert counting.stat_calls == 2
+
+    def test_check_still_reloads_after_external_write(self, web_dogcats: Path) -> None:
+        """Behavior unchanged: a changed file is picked up on the next check."""
+        from dogcat.models import Proposal
+        from dogcat.web.propose.routes import _refresh_inbox_if_stale
+
+        inbox = InboxStorage(dogcats_dir=str(web_dogcats))
+        state: dict[str, float] = {}
+        _refresh_inbox_if_stale(inbox, state)
+        assert inbox.list() == []
+
+        external = InboxStorage(dogcats_dir=str(web_dogcats))
+        external.create(Proposal(id="ext1", title="external", namespace="testns"))
+
+        _refresh_inbox_if_stale(inbox, state)
+        assert [p.title for p in inbox.list()] == ["external"]
+
+
+class TestGetFallbackInboxOffLoop:
+    """Regression tests for dogcat-119f: GET fallback builds inbox off-loop.
+
+    The fallback only runs when boot-time construction failed, so these tests
+    force ``app.state.inbox`` to None to reach it.
+    """
+
+    def _submit_one(self, client: TestClient, title: str) -> None:
+        client.post(
+            "/",
+            data={
+                "csrf_token": _csrf(client),
+                "namespace": "testns",
+                "title": title,
+                "description": "",
+            },
+        )
+
+    def test_fallback_constructs_inbox_off_the_event_loop(
+        self, web_dogcats: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The fallback constructor runs in a worker thread, not on the loop."""
+        import asyncio
+
+        app = create_app(dogcats_dir=str(web_dogcats))
+        client = TestClient(app)
+        self._submit_one(client, "Fallback probe")
+        full_id = InboxStorage(dogcats_dir=str(web_dogcats)).list()[0].full_id
+
+        app.state.inbox = None
+
+        on_loop: list[bool] = []
+
+        class _ProbeInboxStorage(InboxStorage):
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                try:
+                    asyncio.get_running_loop()
+                except RuntimeError:
+                    on_loop.append(False)
+                else:
+                    on_loop.append(True)
+                super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr("dogcat.inbox.InboxStorage", _ProbeInboxStorage)
+
+        resp = client.get(f"/?submitted=true&id={full_id}")
+        assert resp.status_code == 200
+        assert "Proposal submitted" in resp.text
+        assert "Fallback probe" in resp.text
+        assert on_loop == [False]
+
+    def test_fallback_still_renders_banner(self, web_dogcats: Path) -> None:
+        """With no app.state inbox, the banner still resolves the title."""
+        app = create_app(dogcats_dir=str(web_dogcats))
+        client = TestClient(app)
+        self._submit_one(client, "Banner via fallback")
+        full_id = InboxStorage(dogcats_dir=str(web_dogcats)).list()[0].full_id
+
+        app.state.inbox = None
+        resp = client.get(f"/?submitted=true&id={full_id}")
+        assert resp.status_code == 200
+        assert "Banner via fallback" in resp.text
+
+
 class TestAllowCreatingNamespacesDefault:
     """Regression tests for dogcat-kz1a: getattr default must not flip the policy.
 

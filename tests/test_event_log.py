@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from typing import TYPE_CHECKING
 
 import orjson
@@ -350,6 +352,177 @@ class TestEventLogAppendAndRead:
                     timestamp="2026-02-10T10:00:00+01:00",
                 ),
             )
+
+
+class TestReadScan:
+    """Tests for the raw-line scan behind ``read`` (dogcat-kvq3).
+
+    ``read`` rejects most lines on a byte match and parses only the tail
+    window a ``limit`` can reach, so these pin the cases where the raw
+    match and a full parse could disagree.
+    """
+
+    @staticmethod
+    def _append_events(event_log: EventLog, issue_id: str, count: int) -> None:
+        """Append ``count`` events for ``issue_id`` with ascending timestamps."""
+        for i in range(count):
+            event_log.append(
+                EventRecord(
+                    event_type="updated",
+                    issue_id=issue_id,
+                    timestamp=f"2026-02-{10 + i:02d}T10:00:00+01:00",
+                ),
+            )
+
+    def test_limit_returns_newest_events_not_oldest(self, event_log: EventLog) -> None:
+        """With more events than the limit, the newest survive the cut.
+
+        The scan applies the limit at the tail. A head-limited scan would
+        return the five OLDEST events here and still pass a length check.
+        """
+        for i in range(25):
+            event_log.append(
+                EventRecord(
+                    event_type="updated",
+                    issue_id=f"dc-{i:04d}",
+                    timestamp=f"2026-02-10T10:{i:02d}:00+01:00",
+                ),
+            )
+
+        events = event_log.read(limit=5)
+        assert [e.issue_id for e in events] == [
+            "dc-0024",
+            "dc-0023",
+            "dc-0022",
+            "dc-0021",
+            "dc-0020",
+        ]
+
+    def test_issue_filter_with_limit_returns_newest_matching(
+        self, event_log: EventLog
+    ) -> None:
+        """The limit counts matching events, not scanned lines."""
+        for i in range(10):
+            for issue_id in ("dc-aaaa", "dc-bbbb"):
+                event_log.append(
+                    EventRecord(
+                        event_type="updated",
+                        issue_id=issue_id,
+                        timestamp=f"2026-02-10T10:{i:02d}:00+01:00",
+                    ),
+                )
+
+        events = event_log.read(issue_id="dc-aaaa", limit=3)
+        assert [e.issue_id for e in events] == ["dc-aaaa"] * 3
+        assert [e.timestamp for e in events] == [
+            "2026-02-10T10:09:00+01:00",
+            "2026-02-10T10:08:00+01:00",
+            "2026-02-10T10:07:00+01:00",
+        ]
+
+    def test_non_event_records_are_skipped(self, event_log: EventLog) -> None:
+        """Issue lines are skipped, including one quoting an event record."""
+        with event_log.path.open("ab") as f:
+            f.write(orjson.dumps({"record_type": "issue", "id": "dc-issu"}) + b"\n")
+            f.write(
+                orjson.dumps(
+                    {
+                        "record_type": "issue",
+                        "id": "dc-quot",
+                        "description": 'sample line: {"record_type":"event"}',
+                    }
+                )
+                + b"\n"
+            )
+        event_log.append(
+            EventRecord(
+                event_type="created",
+                issue_id="dc-real",
+                timestamp="2026-02-10T10:00:00+01:00",
+            ),
+        )
+
+        assert [e.issue_id for e in event_log.read()] == ["dc-real"]
+
+    def test_event_line_with_record_type_not_first_is_read(
+        self, event_log: EventLog
+    ) -> None:
+        """Key order is not part of the contract for reading an event line.
+
+        Both writers that could produce one are covered: orjson's compact
+        separators and json.dumps' spaced ones.
+        """
+        with event_log.path.open("ab") as f:
+            f.write(
+                orjson.dumps(
+                    {
+                        "event_type": "updated",
+                        "record_type": "event",
+                        "issue_id": "dc-cmpt",
+                        "timestamp": "2026-02-10T10:00:00+01:00",
+                    }
+                )
+                + b"\n"
+            )
+            f.write(
+                json.dumps(
+                    {
+                        "event_type": "closed",
+                        "record_type": "event",
+                        "issue_id": "dc-spcd",
+                        "timestamp": "2026-02-10T11:00:00+01:00",
+                    }
+                ).encode()
+                + b"\n"
+            )
+
+        assert [e.issue_id for e in event_log.read()] == ["dc-spcd", "dc-cmpt"]
+        assert [e.issue_id for e in event_log.read(issue_id="dc-spcd")] == ["dc-spcd"]
+
+    def test_event_line_without_issue_id_is_skipped(
+        self,
+        event_log: EventLog,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """An event line missing issue_id is skipped, not raised or returned."""
+        with event_log.path.open("ab") as f:
+            f.write(
+                orjson.dumps(
+                    {
+                        "record_type": "event",
+                        "event_type": "updated",
+                        "timestamp": "2026-02-10T09:00:00+01:00",
+                    }
+                )
+                + b"\n"
+            )
+        event_log.append(
+            EventRecord(
+                event_type="created",
+                issue_id="dc-good",
+                timestamp="2026-02-10T10:00:00+01:00",
+            ),
+        )
+
+        with caplog.at_level(logging.WARNING, logger="dogcat.event_log"):
+            events = event_log.read()
+        assert [e.issue_id for e in events] == ["dc-good"]
+        assert "Skipping malformed line 1" in caplog.text
+        assert event_log.read(issue_id="dc-good") == events
+
+    def test_issue_id_inside_a_title_does_not_match(self, event_log: EventLog) -> None:
+        """A raw-byte hit inside an escaped title is rejected after parsing."""
+        event_log.append(
+            EventRecord(
+                event_type="updated",
+                issue_id="dc-othr",
+                timestamp="2026-02-10T10:00:00+01:00",
+                title='pasted: {"issue_id":"dc-zzzz"}',
+            ),
+        )
+
+        assert event_log.read(issue_id="dc-zzzz") == []
+        assert [e.issue_id for e in event_log.read(issue_id="dc-othr")] == ["dc-othr"]
 
 
 class TestDiffMetadata:

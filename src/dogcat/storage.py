@@ -233,6 +233,18 @@ class JSONLStorage(EventEmitterMixin):
         # reason) so doctor can surface a count and ``dcat repair-jsonl``
         # can copy them to a sidecar file before compaction drops them.
         self._bad_lines: list[tuple[int, bytes, str]] = []
+        # Set by _load when two issue records share a full_id but disagree on
+        # created_at — the hash-collision shape check_id_uniqueness reports.
+        # Derived during the load pass so doctor doesn't re-parse the file.
+        self._id_collision = False
+        # (st_mtime_ns, st_size) of the file _load last read, so
+        # check_id_uniqueness can tell whether _id_collision still describes
+        # what is on disk.
+        self._load_stat: tuple[int, int] | None = None
+        # issue_ids seen on event records, collected only when _load is called
+        # with collect_event_issue_ids=True (prune_tombstones). None means the
+        # last load did not collect them.
+        self._event_issue_ids: set[str] | None = None
 
         from dogcat.event_log import EventLog
 
@@ -241,7 +253,7 @@ class JSONLStorage(EventEmitterMixin):
         if self.path.exists():
             self._load()
 
-    def _load(self) -> None:
+    def _load(self, *, collect_event_issue_ids: bool = False) -> None:
         """Load issues from JSONL file into memory.
 
         Replays the append-only log: later issue records override earlier ones
@@ -258,12 +270,24 @@ class JSONLStorage(EventEmitterMixin):
         A record carrying a ``record_type`` this dcat does not model goes to
         ``self._preserved`` instead — it is well-formed JSON we simply cannot
         interpret, so it is neither parsed nor treated as damage.
+
+        Args:
+            collect_event_issue_ids: Gather the ``issue_id`` of every event
+                record into ``self._event_issue_ids``. Off by default because
+                it costs the event-line fast path below — only
+                ``prune_tombstones`` needs it, and collecting it here saves it
+                a second full parse of the file (dogcat-3jxo).
         """
         self._issues.clear()
         self._dependencies.clear()
         self._links.clear()
         self._preserved = []
         self._bad_lines = []
+        self._id_collision = False
+        self._event_issue_ids = set() if collect_event_issue_ids else None
+        # created_at per full_id, kept only for the duration of this pass:
+        # check_id_uniqueness needs the verdict, not the map.
+        created_at_by_id: dict[str, str] = {}
 
         # Use sets keyed by identity tuple for efficient add/remove replay
         dep_map: dict[tuple[str, str, str], Dependency] = {}
@@ -302,7 +326,11 @@ class JSONLStorage(EventEmitterMixin):
             # excluded from the newer-version check below — acceptable, since
             # every dcat mutation that appends an event also appends an
             # issue/dependency/link record carrying the same dcat_version.
-            if line.startswith(EVENT_LINE_PREFIX) and line.endswith(b"}"):
+            if (
+                not collect_event_issue_ids
+                and line.startswith(EVENT_LINE_PREFIX)
+                and line.endswith(b"}")
+            ):
                 continue
 
             try:
@@ -316,6 +344,10 @@ class JSONLStorage(EventEmitterMixin):
                 # ``event`` records are loaded lazily by EventLog.read and
                 # skipped during issue replay.
                 if rtype == "event":
+                    if self._event_issue_ids is not None:
+                        event_issue_id = data.get("issue_id", "")
+                        if event_issue_id:
+                            self._event_issue_ids.add(event_issue_id)
                     continue
                 if rtype == "link":
                     parse_link_record(data, link_map)
@@ -331,6 +363,11 @@ class JSONLStorage(EventEmitterMixin):
                     # issue/dependency/link and never reaches this branch.
                     self._preserved.append(data)
                 else:
+                    # Runs before _parse_issue_record so a record that fails
+                    # the precheck still counts toward the collision verdict,
+                    # matching the raw scan check_id_uniqueness used to do.
+                    if rtype == "issue":
+                        self._track_id_collision(data, created_at_by_id)
                     # Default: treat as an issue record (last-write-wins).
                     self._parse_issue_record(data)
             except (
@@ -353,6 +390,7 @@ class JSONLStorage(EventEmitterMixin):
         self._links = list(link_map.values())
         self._base_lines = line_count
         self._appended_lines = 0
+        self._load_stat = self._current_stat()
         self._rebuild_indexes()
 
         # Warn (once per load) if any record was written by a newer tool than
@@ -369,6 +407,37 @@ class JSONLStorage(EventEmitterMixin):
         """
         full_id = precheck_issue_record(data)
         self._issues.set_raw(full_id, data)
+
+    def _track_id_collision(
+        self, data: dict[str, Any], created_at_by_id: dict[str, str]
+    ) -> None:
+        """Flag two issue records that share a full_id but not a ``created_at``.
+
+        Last-write-wins replay collapses such a pair into one entry, hiding a
+        hash collision (or a hand-edit / merge that duplicated an id). The id
+        is composed from the raw ``namespace``/``id`` fields rather than from
+        :func:`precheck_issue_record`, because the verdict must not depend on
+        the record being well-formed enough to materialize.
+        """
+        issue_id = data.get("id", "")
+        if not issue_id:
+            return
+        namespace = data.get("namespace", "")
+        full_id = f"{namespace}-{issue_id}" if namespace else issue_id
+        created_at = data.get("created_at", "")
+        prior = created_at_by_id.get(full_id)
+        if prior is None:
+            created_at_by_id[full_id] = created_at
+        elif prior != created_at:
+            self._id_collision = True
+
+    def _current_stat(self) -> tuple[int, int] | None:
+        """Return ``(st_mtime_ns, st_size)`` of the store file, None if absent."""
+        try:
+            st = self.path.stat()
+        except OSError:
+            return None
+        return (st.st_mtime_ns, st.st_size)
 
     def _rebuild_indexes(self) -> None:
         """Rebuild dependency, link, and parent indexes from the source lists.
@@ -483,6 +552,15 @@ class JSONLStorage(EventEmitterMixin):
 
         # Pre-serialize so the file write is a single operation
         payload = b"".join(orjson.dumps(r) + b"\n" for r in records)
+
+        # Warm the default-branch memo before taking the lock: the check forks
+        # `git rev-parse` (plus a second fork for init.defaultBranch), and every
+        # waiter polls at 50ms and aborts at 30s while we hold it. The counts
+        # below are the exact ones the locked check sees — nothing between here
+        # and the lock touches them — so the memo is always warm by then and no
+        # subprocess runs inside the lock (dogcat-681d).
+        if should_compact(self._base_lines, self._appended_lines + len(records)):
+            self._is_default_branch()
 
         with self._file_lock():
             append_jsonl_payload(self.path, payload)
@@ -773,6 +851,17 @@ class JSONLStorage(EventEmitterMixin):
         if resolved_id:
             return self._issues.get(resolved_id)
         return None
+
+    def is_empty(self) -> bool:
+        """Report whether the store holds no issue records.
+
+        Counts tombstoned and closed records, matching ``list()`` with no
+        filters, so ``is_empty()`` is false exactly when ``list()`` is
+        truthy. Unlike ``list()`` it materializes nothing, which is the
+        point: callers ask this only to tell an empty store from a
+        filtered-to-empty view (dogcat-1ot9).
+        """
+        return len(self._issues) == 0
 
     def list(
         self,
@@ -1754,39 +1843,25 @@ class JSONLStorage(EventEmitterMixin):
         every issue record sharing a ``full_id`` also shares a single
         ``created_at`` value.
 
+        The verdict comes from the ``_load`` pass, which does the same
+        bookkeeping while it replays the log — walking the file a second time
+        here parsed every line twice per ``dcat doctor`` (dogcat-3jxo). When
+        the file's (mtime, size) no longer matches what that pass read, it is
+        reloaded first, so the answer always describes the file on disk.
+
         Returns:
             True when no collisions are found (or the file does not yet
-            exist). False when at least one collision is detected.
+            exist). False when at least one collision is detected, or the
+            file cannot be read.
         """
         if not self.path.exists():
             return True
-        seen: dict[str, str] = {}
-        try:
-            with self.path.open("rb") as f:
-                for raw_line in f:
-                    line = raw_line.strip()
-                    if not line:
-                        continue
-                    try:
-                        data = orjson.loads(line)
-                    except (orjson.JSONDecodeError, ValueError):
-                        continue
-                    if classify_record(data) != "issue":
-                        continue
-                    namespace = data.get("namespace", "")
-                    issue_id = data.get("id", "")
-                    if not issue_id:
-                        continue
-                    full_id = f"{namespace}-{issue_id}" if namespace else issue_id
-                    created_at = data.get("created_at", "")
-                    prior = seen.get(full_id)
-                    if prior is None:
-                        seen[full_id] = created_at
-                    elif prior != created_at:
-                        return False
-        except OSError:
-            return False
-        return True
+        if self._load_stat != self._current_stat():
+            try:
+                self._load()
+            except RuntimeError:
+                return False
+        return not self._id_collision
 
     def find_dangling_dependencies(self) -> list[Dependency]:
         """Find dependencies that reference non-existent issues.
@@ -1818,12 +1893,17 @@ class JSONLStorage(EventEmitterMixin):
     def prune_tombstones(self) -> list[str]:
         """Permanently remove tombstoned issues and orphaned events from storage.
 
+        The reload asks for event issue_ids so the orphan scan below reads
+        them off that pass instead of parsing the whole file again
+        (dogcat-3jxo). Unmodelled records ride through untouched: ``_load``
+        put them on ``_preserved`` and ``_save_locked`` re-emits them.
+
         Returns:
             List of pruned issue IDs
         """
         with self._file_lock():
             if self.path.exists():
-                self._load()
+                self._load(collect_event_issue_ids=True)
 
             tombstone_ids = [
                 issue_id
@@ -1836,20 +1916,9 @@ class JSONLStorage(EventEmitterMixin):
 
             # Collect IDs to prune: tombstones + any orphaned event references
             prune_ids = set(tombstone_ids)
-            if self.path.exists():
-                with self.path.open("rb") as src:
-                    for src_line in src:
-                        raw_line = src_line.strip()
-                        if not raw_line:
-                            continue
-                        try:
-                            data = orjson.loads(raw_line)
-                        except (orjson.JSONDecodeError, ValueError):
-                            continue
-                        if data.get("record_type") == "event":
-                            eid = data.get("issue_id", "")
-                            if eid and eid not in self._issues:
-                                prune_ids.add(eid)
+            for eid in self._event_issue_ids or ():
+                if eid not in self._issues:
+                    prune_ids.add(eid)
 
             if prune_ids:
                 self._save_locked(_reload=False, _prune_event_ids=prune_ids)
@@ -1891,10 +1960,13 @@ def get_namespaces(
         Dictionary mapping namespace names to counts.
     """
     ns_counts: dict[str, NamespaceCounts] = {}
-    for issue in storage.list():
-        if issue.is_tombstone():
+    # Namespace counts need two fields per record, so they read the raw
+    # dicts rather than paying dict_to_issue for the whole store — this runs
+    # per Tab press on the namespace completer (dogcat-4qif).
+    for fields in storage._issues.iter_completion_fields():  # noqa: SLF001
+        if fields.status == Status.TOMBSTONE.value:
             continue
-        counts = ns_counts.setdefault(issue.namespace, NamespaceCounts())
+        counts = ns_counts.setdefault(fields.namespace, NamespaceCounts())
         counts.issues += 1
 
     if include_inbox:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -18,7 +19,13 @@ from watchdog.events import (
 )
 from watchdog.observers import Observer
 
-from dogcat.models import issue_to_dict, proposal_to_dict
+from dogcat.models import (
+    classify_record,
+    dict_to_issue,
+    dict_to_proposal,
+    issue_to_dict,
+    proposal_to_dict,
+)
 from dogcat.storage import JSONLStorage
 
 if TYPE_CHECKING:
@@ -33,12 +40,49 @@ if TYPE_CHECKING:
 _RETRY_ATTEMPTS = 3
 _RETRY_DELAY_MS = 50  # milliseconds between retries
 
+# Recent-event window kept by StreamWatcher. `dcat stream` runs for days in an
+# agent-heavy setup and every event carries a full per-field changes dict, so an
+# unbounded list retains the whole session's payloads for a reader that does not
+# exist — the streaming path prints each event as it arrives (dogcat-44ry).
+_RECENT_EVENTS_MAXLEN = 100
+
 
 # FieldChange is the canonical dataclass for per-field change records.
 # Defined in event_log.py so non-streaming callers (storage, inbox) can use
 # it without dragging in watchdog. Re-exported here to keep existing imports
 # (`from dogcat.stream import FieldChange`) working.
 from dogcat.event_log import FieldChange  # noqa: E402
+
+
+def _order_touched(
+    touched: dict[str, Any],
+    state: dict[str, Any],
+    rank: dict[str, int],
+) -> dict[str, Any]:
+    """Re-key `touched` into the order a whole-state diff would emit.
+
+    Before dogcat-3h90 the diff ran over `dict(current_state)` merged with
+    the appended records, so events came out in the state's first-insertion
+    order, with records new in this batch last. Consumers read `dcat stream`
+    as a feed, so that order is part of the output contract even though the
+    payloads carry the same fields either way.
+
+    `rank` holds each known id's position in that first-insertion order, which
+    keeps this O(changed log changed) — reading the order back off `state`
+    would put store-sized work back on every filesystem event.
+
+    Args:
+        touched: Records the appended bytes rewrote, in file order
+        state: Current state, keyed by full id
+        rank: First-insertion position of every id in `state`
+
+    Returns:
+        The same mapping, re-keyed into emission order
+    """
+    known = [record_id for record_id in touched if record_id in state]
+    fresh = [record_id for record_id in touched if record_id not in state]
+    known.sort(key=rank.__getitem__)
+    return {record_id: touched[record_id] for record_id in (*known, *fresh)}
 
 
 @dataclass
@@ -88,6 +132,7 @@ class StreamEmitter(FileSystemEventHandler):
         self.by = by
         self.on_event = on_event
         self.current_state: dict[str, Any] = {}
+        self._rank: dict[str, int] = {}
         self._file_position: int = 0
         self._load_current_state()
 
@@ -105,6 +150,17 @@ class StreamEmitter(FileSystemEventHandler):
                 # If we can't load (corrupted file, permission issues, etc.),
                 # start fresh
                 self._file_position = 0
+        self._reindex()
+
+    def _reindex(self) -> None:
+        """Re-record the first-insertion order of `current_state`.
+
+        Runs wherever `current_state` is replaced wholesale rather than
+        updated in place; `_order_touched` reads the result.
+        """
+        self._rank = {
+            record_id: position for position, record_id in enumerate(self.current_state)
+        }
 
     def _compute_diff(
         self,
@@ -235,8 +291,11 @@ class StreamEmitter(FileSystemEventHandler):
         if current_size == self._file_position:
             return
 
-        # Try incremental parse of only the new bytes
-        new_state = dict(self.current_state)
+        # Try incremental parse of only the new bytes. `touched` holds just the
+        # issues the appended lines rewrote, so the diff below costs one
+        # comparison per changed record instead of one per record in the store
+        # (dogcat-3h90).
+        touched: dict[str, Any] = {}
         last_error = None
 
         for attempt in range(_RETRY_ATTEMPTS):
@@ -245,17 +304,17 @@ class StreamEmitter(FileSystemEventHandler):
                     f.seek(self._file_position)
                     new_bytes = f.read()
 
+                touched = {}
                 for raw_line in new_bytes.splitlines():
                     line = raw_line.strip()
                     if not line:
                         continue
                     data = orjson.loads(line)
-                    from dogcat.models import classify_record, dict_to_issue
 
                     rtype = classify_record(data)
                     if rtype == "issue":
                         issue = dict_to_issue(data)
-                        new_state[issue.full_id] = issue_to_dict(issue)
+                        touched[issue.full_id] = issue_to_dict(issue)
 
                 self._file_position = current_size
                 last_error = None
@@ -270,9 +329,22 @@ class StreamEmitter(FileSystemEventHandler):
             self._full_reload()
             return
 
-        # Compute diff and emit events
-        events = self._compute_diff(self.current_state, new_state)
-        self.current_state = new_state
+        # Appended lines only add or rewrite records, so no issue can vanish on
+        # this path: the old side is the touched IDs already known, and the
+        # delete branch of _compute_diff never fires. Removals arrive as a
+        # shrunken file and go through _full_reload.
+        ordered = _order_touched(touched, self.current_state, self._rank)
+        old_subset = {
+            issue_id: self.current_state[issue_id]
+            for issue_id in ordered
+            if issue_id in self.current_state
+        }
+        events = self._compute_diff(old_subset, ordered)
+
+        for issue_id in ordered:
+            if issue_id not in self._rank:
+                self._rank[issue_id] = len(self._rank)
+        self.current_state.update(ordered)
 
         for event_obj in events:
             if self.on_event:
@@ -301,6 +373,7 @@ class StreamEmitter(FileSystemEventHandler):
 
         events = self._compute_diff(self.current_state, new_state)
         self.current_state = new_state
+        self._reindex()
 
         for event_obj in events:
             if self.on_event:
@@ -328,6 +401,7 @@ class InboxStreamEmitter(FileSystemEventHandler):
         self.by = by
         self.on_event = on_event
         self.current_state: dict[str, Any] = {}
+        self._rank: dict[str, int] = {}
         self._file_position: int = 0
         self._load_current_state()
 
@@ -348,6 +422,13 @@ class InboxStreamEmitter(FileSystemEventHandler):
                 self._file_position = self.inbox_path.stat().st_size
             except (ValueError, RuntimeError, OSError):
                 self._file_position = 0
+        self._reindex()
+
+    def _reindex(self) -> None:
+        """Re-record the first-insertion order of `current_state`."""
+        self._rank = {
+            record_id: position for position, record_id in enumerate(self.current_state)
+        }
 
     def _compute_diff(
         self,
@@ -434,8 +515,9 @@ class InboxStreamEmitter(FileSystemEventHandler):
         if current_size == self._file_position:
             return
 
-        # Try incremental parse
-        new_state = dict(self.current_state)
+        # Try incremental parse, narrowed to the proposals the new bytes
+        # rewrote (dogcat-3h90).
+        touched: dict[str, Any] = {}
         last_error = None
 
         for attempt in range(_RETRY_ATTEMPTS):
@@ -444,17 +526,17 @@ class InboxStreamEmitter(FileSystemEventHandler):
                     f.seek(self._file_position)
                     new_bytes = f.read()
 
+                touched = {}
                 for raw_line in new_bytes.splitlines():
                     line = raw_line.strip()
                     if not line:
                         continue
                     data = orjson.loads(line)
-                    from dogcat.models import classify_record, dict_to_proposal
 
                     rtype = classify_record(data)
                     if rtype == "proposal":
                         proposal = dict_to_proposal(data)
-                        new_state[proposal.full_id] = proposal_to_dict(
+                        touched[proposal.full_id] = proposal_to_dict(
                             proposal,
                         )
 
@@ -475,8 +557,18 @@ class InboxStreamEmitter(FileSystemEventHandler):
             self._full_reload()
             return
 
-        events = self._compute_diff(self.current_state, new_state)
-        self.current_state = new_state
+        ordered = _order_touched(touched, self.current_state, self._rank)
+        old_subset = {
+            prop_id: self.current_state[prop_id]
+            for prop_id in ordered
+            if prop_id in self.current_state
+        }
+        events = self._compute_diff(old_subset, ordered)
+
+        for prop_id in ordered:
+            if prop_id not in self._rank:
+                self._rank[prop_id] = len(self._rank)
+        self.current_state.update(ordered)
 
         for event_obj in events:
             if self.on_event:
@@ -509,6 +601,7 @@ class InboxStreamEmitter(FileSystemEventHandler):
 
         events = self._compute_diff(self.current_state, new_state)
         self.current_state = new_state
+        self._reindex()
 
         for event_obj in events:
             if self.on_event:
@@ -533,7 +626,7 @@ class StreamWatcher:
         self.dogcats_dir = self.storage_path.parent
         self.by = by
         self.observer = Observer()
-        self.events: list[StreamEvent] = []
+        self.events: deque[StreamEvent] = deque(maxlen=_RECENT_EVENTS_MAXLEN)
 
     def start(self) -> None:
         """Start watching for changes."""

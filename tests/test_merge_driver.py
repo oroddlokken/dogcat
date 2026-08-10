@@ -16,7 +16,12 @@ from typing import TYPE_CHECKING, Any
 import orjson
 
 from dogcat.constants import MERGE_DRIVER_CMD
-from dogcat.merge_driver import _parse_jsonl, merge_jsonl
+from dogcat.merge_driver import (
+    _parse_jsonl,
+    _tie_break_key,
+    _TieBreakCache,
+    merge_jsonl,
+)
 from dogcat.models import DependencyType, Issue
 from dogcat.storage import JSONLStorage
 
@@ -1631,3 +1636,43 @@ class TestDependencyLinkConvergence:
         merged = merge_jsonl(base, ours, theirs)
 
         assert {r["id"] for r in _unknowns(merged)} == {"u1", "u2"}
+
+
+class TestTieBreakMemo:
+    """The per-call tie-break cache is keyed by ``id(record)``.
+
+    Callers reach ``merge_jsonl`` both ways: ``dcat git merge-driver``
+    parses three files into three sets of distinct dicts, while
+    ``git_rebase`` and the storage tests hand the same list object to more
+    than one argument, so one dict can be reached as ours *and* theirs. An
+    identity-keyed cache is only correct if those two shapes resolve the
+    same way (dogcat-1sbd).
+    """
+
+    def test_aliased_records_merge_like_equal_copies(self) -> None:
+        """One shared dict on both sides gives the same output as two copies."""
+        shared_issue = _issue_record(id="a1")
+        shared_dep = _dep_record()
+        shared_unknown = _unknown_record(id="u1")
+        aliased = merge_jsonl(
+            [shared_dep],
+            [shared_issue, shared_dep, shared_unknown],
+            [shared_issue, shared_dep, shared_unknown],
+        )
+        copied = merge_jsonl(
+            [_dep_record()],
+            [_issue_record(id="a1"), _dep_record(), _unknown_record(id="u1")],
+            [_issue_record(id="a1"), _dep_record(), _unknown_record(id="u1")],
+        )
+
+        assert aliased == copied
+
+    def test_cached_key_matches_the_uncached_one(self) -> None:
+        """The cache returns exactly what ``_tie_break_key`` would compute."""
+        cache = _TieBreakCache()
+        first = _issue_record(id="a1", title="Same")
+        second = _issue_record(id="a1", title="Same")
+
+        assert cache(first) == _tie_break_key(first)
+        assert cache(first) == cache(second)
+        assert cache(second) == _tie_break_key(second)

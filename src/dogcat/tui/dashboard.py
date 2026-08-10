@@ -7,13 +7,16 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from rich.markup import escape
 from rich.text import Text
+from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.css.query import NoMatches
+from textual.message import Message
 from textual.reactive import reactive
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Input, OptionList, Static
+from textual.worker import WorkerCancelled, WorkerFailed
 
 from dogcat.constants import SPLIT_PANE_MIN_COLS, SPLIT_PANE_MIN_ROWS
 from dogcat.tui.shared import make_issue_label
@@ -159,12 +162,23 @@ class DogcatTUI(App[None]):
 
     _split_mode: reactive[bool] = reactive(False)
 
+    class _DeleteComplete(Message, bubble=False):
+        """Internal: the delete worker finished."""
+
+        def __init__(self, issue_id: str, error: str | None) -> None:
+            super().__init__()
+            self.issue_id = issue_id
+            self.error = error
+
     def __init__(self, storage: JSONLStorage, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._storage = storage
         self._issues: list[tuple[Text, str]] = []
         self._blocked_ids: set[str] = set()
         self._last_selected_id: str | None = None
+        # One storage worker at a time: delete and reload both rewrite or
+        # replace in-memory state that the other reads.
+        self._storage_busy = False
 
     def compose(self) -> ComposeResult:
         """Build the dashboard layout."""
@@ -538,13 +552,35 @@ class DogcatTUI(App[None]):
         )
 
     def _do_delete(self, full_id: str) -> None:
-        """Execute the deletion and refresh the list."""
+        """Hand the deletion to a worker thread."""
+        if self._storage_busy:
+            self.notify("Storage is busy; try again", severity="warning")
+            return
+        self._storage_busy = True
+        self._run_delete(full_id)
+
+    @work(thread=True, group="dcat-storage", exit_on_error=False)
+    def _run_delete(self, full_id: str) -> None:
+        """Write the tombstone off the event loop."""
+        error: str | None = None
         try:
             self._storage.delete(full_id)
-            self.notify(f"Deleted {full_id}")
         except (ValueError, RuntimeError, OSError) as e:
-            self.notify(f"Delete failed: {e}", severity="error")
+            error = f"Delete failed: {e}"
+        except Exception as e:  # noqa: BLE001
+            error = f"Delete failed: {type(e).__name__}: {e}"
+        self.post_message(self._DeleteComplete(full_id, error))
+
+    @on(_DeleteComplete)
+    def _on_delete_complete(self, event: _DeleteComplete) -> None:
+        """Refresh the list once the tombstone is on disk."""
+        self._storage_busy = False
+        if event.error is not None:
+            self.notify(event.error, severity="error")
             return
+        self.notify(f"Deleted {event.issue_id}")
+        # Rebuilt from storage rather than from the pre-delete list, so a
+        # write that landed while the worker ran is reflected too.
         self._load_issues()
         option_list = self.query_one("#issue-list", OptionList)
         if option_list.option_count > 0:
@@ -554,6 +590,11 @@ class DogcatTUI(App[None]):
             )
         option_list.focus()
 
+    @work(thread=True, group="dcat-storage", exit_on_error=False)
+    def _run_reload(self) -> None:
+        """Re-read the store off the event loop."""
+        self._storage.reload()
+
     async def action_refresh(self) -> None:
         """Reload issues from disk and refresh the list and detail panel."""
         if self._is_panel_editing():
@@ -562,11 +603,25 @@ class DogcatTUI(App[None]):
                 severity="warning",
             )
             return
+        if self._storage_busy:
+            self.notify("Storage is busy; try again", severity="warning")
+            return
         # Capture the highlighted id before the list reload moves the
         # cursor; if the id is gone after reload, surface that to the
         # user instead of silently jumping to a different issue.
         prev_id = self._get_selected_issue_id()
-        self._storage.reload()
+        self._storage_busy = True
+        try:
+            # Awaiting the worker suspends this action, not the event loop,
+            # so keystrokes and repaints continue while the read runs.
+            await self._run_reload().wait()
+        except WorkerFailed as e:
+            self.notify(f"Refresh failed: {e.error}", severity="error")
+            return
+        except WorkerCancelled:
+            return
+        finally:
+            self._storage_busy = False
         self._load_issues()
         search = self.query_one("#dashboard-search", Input)
         search.value = ""

@@ -8,10 +8,10 @@ from typing import TYPE_CHECKING
 
 import orjson
 import typer
-from rich.console import Console
-from rich.text import Text
 
 if TYPE_CHECKING:
+    from rich.console import Console
+
     from dogcat.models import Issue
 from dogcat.constants import (
     PRIORITY_COLORS,
@@ -63,6 +63,9 @@ def _render_chart(
     console: Console | None = None,
 ) -> None:
     """Render horizontal bar chart to the terminal."""
+    from rich.console import Console
+    from rich.text import Text
+
     console = console or Console()
 
     # Filter to non-zero entries, preserve order
@@ -293,6 +296,8 @@ def register(app: typer.Typer) -> None:
                     output["counts"] = results
                 typer.echo(orjson.dumps(output).decode())
                 return
+
+            from rich.console import Console
 
             console = Console()
             for cat in categories:

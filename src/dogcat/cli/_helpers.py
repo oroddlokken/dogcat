@@ -27,6 +27,8 @@ from dogcat.storage import JSONLStorage
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
+    from dogcat.config import DogcatConfig
+
 
 _type_keys = "/".join(sorted(TYPE_SHORTHANDS.keys()))
 _status_keys = "/".join(sorted(STATUS_SHORTHANDS.keys()))
@@ -739,20 +741,90 @@ def _parse_args_for_create(
     return ParsedCreateArgs(title, priority_sh, type_sh, status_sh)
 
 
+class NamespaceFilters:
+    """The namespace tests one command applies, each resolved at most once.
+
+    ``get_namespace_filter`` and ``get_namespace`` reload config on every
+    call, so ``dcat list --include-inbox`` resolved the same namespace three
+    times over: once for the issue list, once for the local inbox, once for
+    the remote one. Resolution stays lazy because ``show-all`` and ``random``
+    never reach the inbox tests.
+    """
+
+    def __init__(
+        self,
+        dogcats_dir: str,
+        namespace: str | None,
+        *,
+        all_namespaces: bool,
+    ) -> None:
+        self.dogcats_dir = dogcats_dir
+        self.namespace = namespace
+        self.all_namespaces = all_namespaces
+        self._issue_filter: Callable[[str], bool] | None = None
+        self._issue_filter_resolved = False
+        self._inbox_filter: Callable[[str], bool] | None = None
+        self._primary: str | None = None
+
+    def for_issues(self) -> Callable[[str], bool] | None:
+        """Return the issue-list test, or None when nothing is filtered out."""
+        if not self._issue_filter_resolved:
+            from dogcat.config import get_namespace_filter
+
+            self._issue_filter = (
+                None
+                if self.all_namespaces
+                else get_namespace_filter(self.dogcats_dir, self.namespace)
+            )
+            self._issue_filter_resolved = True
+        return self._issue_filter
+
+    def for_inbox(self) -> Callable[[str], bool]:
+        """Return the inbox test: the issue test, or the primary namespace.
+
+        Always a callable, so ``None`` stays available to callers as "not
+        resolved yet" rather than "everything is visible".
+        """
+        if self._inbox_filter is None:
+            if self.all_namespaces:
+                self._inbox_filter = _visible_everywhere
+            else:
+                ns_filter = self.for_issues()
+                if ns_filter is not None:
+                    self._inbox_filter = ns_filter
+                else:
+                    primary = self.primary_namespace()
+                    self._inbox_filter = lambda ns: ns == primary
+        return self._inbox_filter
+
+    def primary_namespace(self) -> str:
+        """Return this store's primary namespace."""
+        if self._primary is None:
+            from dogcat.config import get_namespace
+
+            self._primary = get_namespace(self.dogcats_dir)
+        return self._primary
+
+
+def _visible_everywhere(_namespace: str) -> bool:
+    return True
+
+
 def load_open_inbox_proposals(
     dogcats_dir: str,
     namespace: str | None,
     *,
     all_namespaces: bool,
+    ns_filters: NamespaceFilters | None = None,
 ) -> list[Proposal]:
     """Load open (non-closed) inbox proposals from ``dogcats_dir``.
 
     Filters by namespace using the same precedence as issue listings:
-    explicit ``namespace`` > config visibility > primary namespace.
+    explicit ``namespace`` > config visibility > primary namespace. Pass
+    ``ns_filters`` when the command already resolved that precedence.
     Returns an empty list if the inbox file is missing or unreadable so
     callers can call this unconditionally inside list-style commands.
     """
-    from dogcat.config import get_namespace, get_namespace_filter
     from dogcat.inbox import InboxStorage
 
     try:
@@ -764,11 +836,12 @@ def load_open_inbox_proposals(
     if all_namespaces:
         return proposals
 
-    ns_filter = get_namespace_filter(dogcats_dir, namespace)
-    if ns_filter is not None:
-        return [p for p in proposals if ns_filter(p.namespace)]
-    primary = get_namespace(dogcats_dir)
-    return [p for p in proposals if p.namespace == primary]
+    if ns_filters is None:
+        ns_filters = NamespaceFilters(
+            dogcats_dir, namespace, all_namespaces=all_namespaces
+        )
+    ns_filter = ns_filters.for_inbox()
+    return [p for p in proposals if ns_filter(p.namespace)]
 
 
 def load_remote_inbox_proposals(
@@ -777,23 +850,27 @@ def load_remote_inbox_proposals(
     *,
     all_namespaces: bool,
     show_all: bool = False,
+    config: DogcatConfig | None = None,
+    ns_filters: NamespaceFilters | None = None,
 ) -> tuple[list[Proposal], str | None]:
     """Load proposals from the remote inbox configured in ``inbox_remote``.
 
     Returns ``(proposals, remote_path)``. When no remote is configured or
     the remote dir is missing/unreadable, returns ``([], None)``. Filters
-    closed/tombstone unless ``show_all`` is True.
+    closed/tombstone unless ``show_all`` is True. Pass ``config`` and
+    ``ns_filters`` when the command already loaded them.
     """
     from pathlib import Path
 
-    from dogcat.config import get_namespace, load_config
+    from dogcat.config import load_config
     from dogcat.inbox import InboxStorage
     from dogcat.models import ProposalStatus
 
-    try:
-        config = load_config(dogcats_dir)
-    except (ValueError, RuntimeError):
-        return [], None
+    if config is None:
+        try:
+            config = load_config(dogcats_dir)
+        except (ValueError, RuntimeError):
+            return [], None
     remote_path = config.inbox_remote
     if not remote_path:
         return [], None
@@ -806,8 +883,12 @@ def load_remote_inbox_proposals(
     if not remote_dogcats.is_dir():
         return [], remote_path
 
+    if ns_filters is None:
+        ns_filters = NamespaceFilters(
+            dogcats_dir, namespace, all_namespaces=all_namespaces
+        )
     ns_filter_value = (
-        None if all_namespaces else (namespace or get_namespace(dogcats_dir))
+        None if all_namespaces else (namespace or ns_filters.primary_namespace())
     )
     try:
         remote_inbox = InboxStorage(dogcats_dir=str(remote_dogcats))

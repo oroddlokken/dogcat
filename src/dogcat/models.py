@@ -540,6 +540,11 @@ def sanitize_for_terminal(text: str | None) -> str:
     """
     if not text:
         return text or ""
+    # Runs per field per visible issue, and almost every field is already clean.
+    # The pattern must match exactly the code points the loop below escapes —
+    # a class it misses is an escape-injection hole, not a rendering bug.
+    if _control_char_pattern.search(text) is None:
+        return text
     out: list[str] = []
     for ch in text:
         if ch in {"\t", "\n"}:

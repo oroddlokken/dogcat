@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import orjson
 
@@ -58,6 +59,14 @@ class EventRecord:
 # _serialize. A prefix match on the top-level first key cannot be spoofed
 # by nested content, unlike a substring check.
 EVENT_LINE_PREFIX = b'{"record_type":"event"'
+
+# Fallback for an event line whose keys are not in _serialize's order, so
+# EVENT_LINE_PREFIX misses it: the compact form orjson writes and the spaced
+# form json.dumps writes. EventLog.read skips a line carrying neither without
+# parsing it, which is how issue/dependency/link lines — most of a mature
+# issues.jsonl — stay off the orjson path. Arbitrary whitespace around the
+# colon is not covered; nothing that writes this file produces it.
+_EVENT_RECORD_MARKERS = (b'"record_type":"event"', b'"record_type": "event"')
 
 
 def _serialize(event: EventRecord) -> dict[str, Any]:
@@ -216,6 +225,16 @@ class _BaseEventLog:
     ) -> list[EventRecord]:
         """Read events in reverse chronological order (newest first).
 
+        Two passes over the file. The first rejects non-event lines on a
+        byte match and keeps only the raw lines a ``limit``-sized window at
+        the tail can reach; the second parses those, newest first, and stops
+        at ``limit``. So the number of orjson calls and EventRecord objects
+        tracks ``limit`` rather than the file's lifetime event count.
+
+        Two consequences of parsing the tail only: a malformed line outside
+        the window is no longer logged, and a malformed line inside it
+        yields one event fewer rather than reaching further back.
+
         Args:
             issue_id: Filter to events for this ID (issue or proposal).
             limit: Maximum number of events to return. Must be >= 0;
@@ -225,50 +244,64 @@ class _BaseEventLog:
         if limit is not None and limit < 0:
             msg = f"limit must be >= 0, got {limit}"
             raise ValueError(msg)
-        if not self.path.exists():
+        if limit == 0 or not self.path.exists():
             return []
 
-        events: list[EventRecord] = []
+        # Exact needle for the issue_id field as _serialize writes it. Both
+        # sides go through orjson, so the escaping matches byte for byte and
+        # a canonical line without the needle cannot carry this ID. A hit is
+        # not proof — the same bytes can sit inside an escaped title or
+        # change value — so the parse pass re-checks issue_id.
+        needle = None if issue_id is None else b'"issue_id":' + orjson.dumps(issue_id)
+
+        candidates: deque[tuple[int, bytes]] = deque(maxlen=limit)
         with self.path.open("rb") as f:
             for line_idx, raw_line in enumerate(f):
                 line = raw_line.strip()
                 if not line:
                     continue
-                # Mirror :meth:`JSONLStorage._load`'s tolerance: a single
-                # corrupt line must not crash ``dcat history`` /
-                # ``dcat workflow`` / etc.
-                try:
-                    raw_data = orjson.loads(line)
-                    if not isinstance(raw_data, dict):
+                if line.startswith(EVENT_LINE_PREFIX):
+                    # Canonical event line: filter on raw bytes. One missing
+                    # its issue_id cannot match a filter either way, so
+                    # dropping it here gives the answer the parse would.
+                    if needle is not None and needle not in line:
                         continue
-                    from typing import cast
-
-                    data = cast("dict[str, Any]", raw_data)
-                    if data.get("record_type") != "event":
-                        continue
-                    record = _deserialize(data)
-                except (
-                    orjson.JSONDecodeError,
-                    ValueError,
-                    KeyError,
-                    AttributeError,
-                    TypeError,
-                ) as e:
-                    logging.getLogger(__name__).warning(
-                        "Skipping malformed line %d in %s: %s",
-                        line_idx + 1,
-                        self.path,
-                        e,
-                    )
+                elif not any(m in line for m in _EVENT_RECORD_MARKERS):
                     continue
-                if issue_id is not None and record.issue_id != issue_id:
+                candidates.append((line_idx, line))
+
+        events: list[EventRecord] = []
+        for line_idx, line in reversed(candidates):
+            # Mirror :meth:`JSONLStorage._load`'s tolerance: a single
+            # corrupt line must not crash ``dcat history`` /
+            # ``dcat workflow`` / etc.
+            try:
+                raw_data = orjson.loads(line)
+                if not isinstance(raw_data, dict):
                     continue
-                events.append(record)
-
-        events.reverse()
-
-        if limit is not None:
-            events = events[:limit]
+                data = cast("dict[str, Any]", raw_data)
+                if data.get("record_type") != "event":
+                    continue
+                record = _deserialize(data)
+            except (
+                orjson.JSONDecodeError,
+                ValueError,
+                KeyError,
+                AttributeError,
+                TypeError,
+            ) as e:
+                logging.getLogger(__name__).warning(
+                    "Skipping malformed line %d in %s: %s",
+                    line_idx + 1,
+                    self.path,
+                    e,
+                )
+                continue
+            if issue_id is not None and record.issue_id != issue_id:
+                continue
+            events.append(record)
+            if limit is not None and len(events) >= limit:
+                break
 
         return events
 

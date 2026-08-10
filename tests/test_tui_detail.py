@@ -16,6 +16,7 @@ from textual.widgets import (
     Static,
     TextArea,
 )
+from tui_test_helpers import wait_for_workers
 
 from dogcat.models import Issue
 from dogcat.tui.editor import IssueEditorScreen
@@ -632,6 +633,8 @@ class TestFormSafetyGuards:
             panel = screen.query_one("#editor-panel", IssueDetailPanel)
             panel.query_one("#title-input", Input).value = "x" * (MAX_TITLE_LEN + 1)
             panel.do_save()
+            # The save runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
             await pilot.pause()
 
             storage.update.assert_not_called()
@@ -663,6 +666,8 @@ class TestFormSafetyGuards:
                 MAX_DESC_LEN + 1
             )
             panel.do_save()
+            # The save runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
             await pilot.pause()
 
             storage.update.assert_not_called()
@@ -731,6 +736,8 @@ class TestDependencyEditingRoundTrip:
             panel = screen.query_one("#editor-panel", IssueDetailPanel)
             panel.query_one("#depends-on-input", Input).value = "dc-tgt"
             panel.do_save()
+            # The save runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
             await pilot.pause()
 
             deps = storage.get_dependencies("dc-src")
@@ -765,6 +772,8 @@ class TestDependencyEditingRoundTrip:
             panel.query_one("#title-input", Input).value = "Renamed"
             panel.query_one("#depends-on-input", Input).value = "dc-ghost"
             panel.do_save()
+            # The save runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
             await pilot.pause()
 
             # Title must NOT have been written; deps must be empty.
@@ -805,6 +814,8 @@ class TestDependencyEditingRoundTrip:
             panel = screen.query_one("#editor-panel", IssueDetailPanel)
             panel.query_one("#depends-on-input", Input).value = "dc-b"
             panel.do_save()
+            # The save runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
             await pilot.pause()
 
             # No new edge should have been added in either direction

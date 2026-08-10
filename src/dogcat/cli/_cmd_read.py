@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 import orjson
 import typer
 
-from dogcat.config import get_namespace_filter, load_config
+from dogcat.config import load_config
 from dogcat.constants import MAX_PREVIEW_SUBTASKS, parse_labels
 
 from ._completions import (
@@ -34,6 +34,7 @@ from ._formatting import (
     get_legend,
 )
 from ._helpers import (
+    NamespaceFilters,
     _make_alias,
     get_storage,
     load_open_inbox_proposals,
@@ -60,6 +61,7 @@ from ._list_options import (
 )
 
 if TYPE_CHECKING:
+    from dogcat.config import DogcatConfig
     from dogcat.event_log import EventRecord
     from dogcat.models import Issue
     from dogcat.storage import JSONLStorage
@@ -269,23 +271,32 @@ def _reinclude_tree_parents(
     issues: list[Issue],
     storage: JSONLStorage,
 ) -> list[Issue]:
-    """Re-include closed (non-tombstone) parents so the tree stays connected."""
+    """Re-include closed (non-tombstone) parents so the tree stays connected.
+
+    Each pass scans only the parents the previous pass appended: every
+    earlier issue's parent is already either visible or in ``checked``, so
+    rescanning the whole list per depth level finds nothing new.
+    """
     visible_ids = {i.full_id for i in issues}
     checked: set[str] = set()
+    frontier: list[Issue] = issues
     while True:
         missing_parent_ids = {
             i.parent
-            for i in issues
+            for i in frontier
             if i.parent and i.parent not in visible_ids and i.parent not in checked
         }
         if not missing_parent_ids:
             break
+        appended: list[Issue] = []
         for parent_id in missing_parent_ids:
             checked.add(parent_id)
             parent_issue = storage.get(parent_id)
             if parent_issue and not parent_issue.is_tombstone():
                 issues.append(parent_issue)
                 visible_ids.add(parent_issue.full_id)
+                appended.append(parent_issue)
+        frontier = appended
     return issues
 
 
@@ -313,10 +324,13 @@ def _filter_issues_for_list(
     has_comments: bool,
     without_comments: bool,
     include_snoozed: bool,
+    ns_filters: NamespaceFilters | None = None,
 ) -> list[Issue]:
     """Apply the same filter pipeline `dcat list` uses, sorted by priority then id.
 
     Shared by `list` and `random` so both commands draw from the same candidate set.
+    Pass ``ns_filters`` when the command also filters something else (the
+    inbox) by namespace, so the resolution is paid for once.
     """
     from ._helpers import apply_common_filters
 
@@ -350,11 +364,13 @@ def _filter_issues_for_list(
     if no_parent:
         issues = [i for i in issues if i.parent is None]
 
-    actual_dogcats_dir = str(storage.dogcats_dir)
-    if not all_namespaces:
-        ns_filter = get_namespace_filter(actual_dogcats_dir, namespace)
-        if ns_filter is not None:
-            issues = [i for i in issues if ns_filter(i.namespace)]
+    if ns_filters is None:
+        ns_filters = NamespaceFilters(
+            str(storage.dogcats_dir), namespace, all_namespaces=all_namespaces
+        )
+    ns_filter = ns_filters.for_issues()
+    if ns_filter is not None:
+        issues = [i for i in issues if ns_filter(i.namespace)]
 
     issues = _apply_default_visibility(
         issues,
@@ -397,10 +413,40 @@ def _issue_separator(issue_id: str) -> str:
     return ("─" * left) + label + ("─" * right)
 
 
-def _render_issue_show(issue: Issue, storage: JSONLStorage) -> str:
+class _BlockedMapCache:
+    """The blocked-issue map for one command invocation, built on first use.
+
+    :func:`dogcat.deps.get_blocked_issues` materializes every issue in the
+    store plus a full dependency map, so calling it per rendered issue makes
+    `show-all` O(store x issues). Lazy rather than eager because only issues
+    with children need the map, and most rendered issues have none.
+    """
+
+    def __init__(self, storage: JSONLStorage) -> None:
+        self._storage = storage
+        self._map: dict[str, list[str]] | None = None
+
+    def get(self) -> dict[str, list[str]]:
+        """Return {issue full_id: blocking issue ids}."""
+        if self._map is None:
+            from dogcat.deps import get_blocked_issues
+
+            self._map = {
+                bi.issue_id: bi.blocking_ids for bi in get_blocked_issues(self._storage)
+            }
+        return self._map
+
+
+def _render_issue_show(
+    issue: Issue,
+    storage: JSONLStorage,
+    blocked_map: _BlockedMapCache | None = None,
+) -> str:
     """Render an issue exactly like `dcat show` does (text mode).
 
-    Shared so `random` displays its pick the same way.
+    Shared so `random` displays its pick the same way. Pass ``blocked_map``
+    when rendering several issues so the blocked-issue map is built once for
+    the whole command.
     """
     parent_title = None
     if issue.parent:
@@ -442,10 +488,9 @@ def _render_issue_show(issue: Issue, storage: JSONLStorage) -> str:
 
     children = storage.get_children(issue.full_id)
     if children:
-        from dogcat.deps import get_blocked_issues
-
-        blocked_issues = get_blocked_issues(storage)
-        blocked_by_map = {bi.issue_id: bi.blocking_ids for bi in blocked_issues}
+        if blocked_map is None:
+            blocked_map = _BlockedMapCache(storage)
+        blocked_by_map = blocked_map.get()
 
         output_lines.append("\nChildren:")
         for child in children:
@@ -461,22 +506,28 @@ def _render_issue_show(issue: Issue, storage: JSONLStorage) -> str:
     return "\n".join(output_lines)
 
 
-def _read_issue_events(issue_full_id: str, storage: JSONLStorage) -> list[EventRecord]:
-    """Read every event for one issue, oldest-first.
+def _read_events_by_issue(storage: JSONLStorage) -> dict[str, list[EventRecord]]:
+    """Read the whole event log once, grouped by issue id, oldest-first.
+
+    One pass for the command rather than one per rendered issue: every
+    `EventLog.read` parses all of issues.jsonl, and event lines are half or
+    more of a mature store.
 
     Unlimited on purpose: a single issue's audit trail is short enough that
     truncating it would hide more than it saves.
     """
     from dogcat.event_log import EventLog
 
-    events = EventLog(storage.dogcats_dir).read(issue_id=issue_full_id)
+    events = EventLog(storage.dogcats_dir).read()
     events.reverse()  # read() returns newest-first
-    return events
+    grouped: dict[str, list[EventRecord]] = {}
+    for event in events:
+        grouped.setdefault(event.issue_id, []).append(event)
+    return grouped
 
 
-def _render_issue_history(issue: Issue, storage: JSONLStorage) -> str:
+def _render_issue_history(issue: Issue, events: list[EventRecord]) -> str:
     """Render the History section appended by `dcat show --include-history`."""
-    events = _read_issue_events(issue.full_id, storage)
     if not events:
         return "\nHistory:\n  No events recorded"
     lines = ["\nHistory:"]
@@ -505,7 +556,7 @@ def _render_list_text(
     tree: bool,
     table: bool,
     final_limit: int | None,
-    dogcats_dir: str,
+    config: DogcatConfig,
 ) -> None:
     """Emit the human-readable list output (brief/tree/table + legend).
 
@@ -536,7 +587,6 @@ def _render_list_text(
     total_hidden = sum(hidden_counts.values()) - sum(
         len(p) for p in preview_subtasks.values()
     )
-    config = load_config(dogcats_dir)
     legend_color = not config.disable_legend_colors
 
     if not issues:
@@ -545,7 +595,7 @@ def _render_list_text(
         # (closed, snoozed, namespace) are on by default, so the user
         # never typed them. Asking the store distinguishes the two.
         # (dogcat-2kex)
-        if storage.list():
+        if not storage.is_empty():
             typer.echo(
                 "No issues match these filters. Closed and snoozed issues "
                 "are hidden by default — try --all --include-snoozed, or -A "
@@ -714,6 +764,9 @@ def register(app: typer.Typer) -> None:
 
             storage = get_storage(dogcats_dir)
             actual_dogcats_dir = str(storage.dogcats_dir)
+            ns_filters = NamespaceFilters(
+                actual_dogcats_dir, namespace, all_namespaces=all_namespaces
+            )
 
             issues = _filter_issues_for_list(
                 storage,
@@ -738,10 +791,14 @@ def register(app: typer.Typer) -> None:
                 has_comments=has_comments,
                 without_comments=without_comments,
                 include_snoozed=include_snoozed,
+                ns_filters=ns_filters,
             )
 
             # In tree mode, re-include closed parents of visible children
-            # so the hierarchy is preserved (closed parents show with ✓ icon)
+            # so the hierarchy is preserved (closed parents show with ✓ icon).
+            # Re-sorting belongs here and nowhere else: _filter_issues_for_list
+            # already returns priority-then-id order, and re-inclusion is the
+            # only step that appends to it.
             if tree and _is_closed_excluded_by_default(
                 status=status,
                 closed=closed,
@@ -750,15 +807,14 @@ def register(app: typer.Typer) -> None:
                 closed_before=closed_before,
             ):
                 issues = _reinclude_tree_parents(issues, storage)
-
-            # Sort by priority (lower number = higher priority)
-            issues = sorted(issues, key=lambda i: (i.priority, i.id))
+                issues.sort(key=lambda i: (i.priority, i.id))
 
             final_limit = resolve_limit(None, limit)
 
             if is_json():
                 _render_list_json(issues, final_limit)
             else:
+                config = load_config(actual_dogcats_dir)
                 _render_list_text(
                     issues,
                     storage,
@@ -766,11 +822,17 @@ def register(app: typer.Typer) -> None:
                     tree=tree,
                     table=table,
                     final_limit=final_limit,
-                    dogcats_dir=actual_dogcats_dir,
+                    config=config,
                 )
                 # Append inbox proposals if requested
                 if include_inbox:
-                    _show_inbox_proposals(actual_dogcats_dir, namespace, all_namespaces)
+                    _show_inbox_proposals(
+                        actual_dogcats_dir,
+                        namespace,
+                        all_namespaces,
+                        config=config,
+                        ns_filters=ns_filters,
+                    )
 
         except typer.Exit:
             raise
@@ -782,12 +844,20 @@ def register(app: typer.Typer) -> None:
         dogcats_dir: str,
         namespace: str | None,
         all_namespaces: bool,
+        *,
+        config: DogcatConfig,
+        ns_filters: NamespaceFilters,
     ) -> None:
-        """Show open inbox proposals as a section in list output."""
+        """Show open inbox proposals as a section in list output.
+
+        Takes the config and namespace resolution the list command already
+        paid for; both loaders would otherwise redo them.
+        """
         proposals = load_open_inbox_proposals(
             dogcats_dir,
             namespace,
             all_namespaces=all_namespaces,
+            ns_filters=ns_filters,
         )
         if proposals:
             typer.echo(f"\nInbox ({len(proposals)}):")
@@ -796,10 +866,12 @@ def register(app: typer.Typer) -> None:
 
         # Remote inbox proposals
         remote_proposals, remote_path = load_remote_inbox_proposals(
-            dogcats_dir, namespace, all_namespaces=all_namespaces
+            dogcats_dir,
+            namespace,
+            all_namespaces=all_namespaces,
+            config=config,
+            ns_filters=ns_filters,
         )
-        if not all_namespaces and namespace:
-            remote_proposals = [p for p in remote_proposals if p.namespace == namespace]
         if remote_proposals and remote_path:
             typer.echo(f"\nRemote Inbox ({len(remote_proposals)}) [{remote_path}]:")
             for proposal in remote_proposals:
@@ -834,6 +906,8 @@ def register(app: typer.Typer) -> None:
         """
         set_json(json_output)
         storage = get_storage(dogcats_dir)
+        blocked_map = _BlockedMapCache(storage)
+        events_by_issue = _read_events_by_issue(storage) if include_history else {}
 
         has_errors = False
         shown = 0
@@ -857,8 +931,7 @@ def register(app: typer.Typer) -> None:
                 payload = issue_to_dict(issue)
                 if include_history:
                     payload["history"] = [
-                        _serialize(e)
-                        for e in _read_issue_events(issue.full_id, storage)
+                        _serialize(e) for e in events_by_issue.get(issue.full_id, [])
                     ]
                 typer.echo(orjson.dumps(payload).decode())
             else:
@@ -866,9 +939,13 @@ def register(app: typer.Typer) -> None:
                     typer.echo()
                     typer.echo(_issue_separator(issue.full_id))
                     typer.echo()
-                typer.echo(_render_issue_show(issue, storage))
+                typer.echo(_render_issue_show(issue, storage, blocked_map))
                 if include_history:
-                    typer.echo(_render_issue_history(issue, storage))
+                    typer.echo(
+                        _render_issue_history(
+                            issue, events_by_issue.get(issue.full_id, [])
+                        )
+                    )
             shown += 1
 
         if include_history and shown and not is_json():
@@ -999,12 +1076,13 @@ def register(app: typer.Typer) -> None:
                 typer.echo("No issues found")
                 return
 
+            blocked_map = _BlockedMapCache(storage)
             for index, issue in enumerate(issues):
                 if index > 0:
                     typer.echo()
                     typer.echo(_issue_separator(issue.full_id))
                     typer.echo()
-                typer.echo(_render_issue_show(issue, storage))
+                typer.echo(_render_issue_show(issue, storage, blocked_map))
 
         except typer.Exit:
             raise

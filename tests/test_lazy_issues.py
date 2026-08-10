@@ -64,6 +64,26 @@ class TestLazyIssueMap:
         assert pairs == {"t-a1": None, "t-b2": "t-a1"}
         assert not isinstance(m._entries["t-b2"], Issue)
 
+    def test_iter_completion_fields_does_not_materialize(self) -> None:
+        """Completion reads its seven fields off raw dicts."""
+        m = _make_map(
+            Issue(id="a1", namespace="t", title="A", labels=["x"], owner="me"),
+            Issue(id="b2", namespace="t", title="B"),
+        )
+        # Materialize one entry so both branches are exercised
+        _ = m["t-a1"]
+
+        fields = {f.full_id: f for f in m.iter_completion_fields()}
+        assert set(fields) == {"t-a1", "t-b2"}
+        assert fields["t-a1"].id == "a1"
+        assert fields["t-a1"].namespace == "t"
+        assert fields["t-a1"].status == "open"
+        assert fields["t-a1"].title == "A"
+        assert fields["t-a1"].labels == ["x"]
+        assert fields["t-a1"].owner == "me"
+        assert fields["t-b2"].owner is None
+        assert not isinstance(m._entries["t-b2"], Issue)
+
     def test_values_iteration_materializes_all(self) -> None:
         """values() yields Issues; in-place replacement is iteration-safe."""
         m = _make_map(

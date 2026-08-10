@@ -24,13 +24,29 @@ arbitrary later access.
 from __future__ import annotations
 
 from collections.abc import MutableMapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
-from dogcat.models import Issue
-from dogcat.models_serde import dict_to_issue
+from dogcat.models import Issue, Status, _safe_enum
+from dogcat.models_serde import (
+    _migrate_issue_type,
+    _migrate_namespace,
+    dict_to_issue,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+
+class CompletionFields(NamedTuple):
+    """The issue fields shell completion reads, and nothing else."""
+
+    full_id: str
+    id: str
+    namespace: str
+    status: str
+    title: str
+    labels: list[str]
+    owner: str | None
 
 
 class LazyIssueMap(MutableMapping[str, Issue]):
@@ -57,6 +73,44 @@ class LazyIssueMap(MutableMapping[str, Issue]):
                 yield full_id, value.parent
             else:
                 yield full_id, value.get("parent")
+
+    def iter_completion_fields(self) -> Iterator[CompletionFields]:
+        """Yield the completion-relevant fields without materializing.
+
+        Every Tab press runs in a fresh process, so completion pays the whole
+        load. It reads seven fields, none of which need the datetime parses
+        and comment lists ``dict_to_issue`` builds.
+
+        The raw branch reapplies the normalizations ``dict_to_issue`` would
+        have applied to these fields — the namespace/id split for legacy ids,
+        the ``issue_type=draft`` rewrite that moves a record to ``draft``
+        status, and the enum coercion that maps an unrecognized status to the
+        ``UNKNOWN`` sentinel. Reading ``data["status"]`` raw instead would
+        change which issues a status predicate keeps.
+        """
+        for value in self._entries.values():
+            if isinstance(value, Issue):
+                yield CompletionFields(
+                    value.full_id,
+                    value.id,
+                    value.namespace,
+                    value.status.value,
+                    value.title,
+                    value.labels,
+                    value.owner,
+                )
+                continue
+            namespace, issue_id = _migrate_namespace(value)
+            _, raw_status = _migrate_issue_type(value)
+            yield CompletionFields(
+                f"{namespace}-{issue_id}",
+                issue_id,
+                namespace,
+                _safe_enum(Status, raw_status, "status").value,
+                value["title"],
+                value.get("labels", []),
+                value.get("owner"),
+            )
 
     def __getitem__(self, key: str) -> Issue:
         value = self._entries[key]

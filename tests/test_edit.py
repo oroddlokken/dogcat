@@ -16,6 +16,7 @@ from textual.widgets import (
     Static,
     TextArea,
 )
+from tui_test_helpers import wait_for_workers
 
 from dogcat.models import Issue, Status
 from dogcat.tui.detail_panel import IssueDetailPanel
@@ -146,6 +147,8 @@ class TestCollapsibleFields:
 
             # Trigger save
             await pilot.press("ctrl+s")
+            # The save runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
 
         storage.update.assert_called_once()
         updates = storage.update.call_args[0][1].to_dict()
@@ -169,6 +172,8 @@ class TestCollapsibleFields:
             title_input.value = "Changed title"
 
             await pilot.press("ctrl+s")
+            # The save runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
 
         storage.update.assert_called_once()
         updates = storage.update.call_args[0][1].to_dict()
@@ -224,6 +229,8 @@ class TestExternalRefField:
             ref_input = app.query_one("#external-ref-input", Input)
             ref_input.value = "https://example.com"
             await pilot.press("ctrl+s")
+            # The save runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
 
         storage.update.assert_called_once()
         updates = storage.update.call_args[0][1].to_dict()
@@ -241,6 +248,8 @@ class TestExternalRefField:
             title_input = app.query_one("#title-input", Input)
             title_input.value = "New title"
             await pilot.press("ctrl+s")
+            # The save runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
 
         storage.update.assert_called_once()
         updates = storage.update.call_args[0][1].to_dict()
@@ -271,6 +280,8 @@ class TestCreateMode:
         async with app.run_test() as pilot:
             app.query_one("#title-input", Input).value = "My new issue"
             await pilot.press("ctrl+s")
+            # The save runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
 
         storage.create.assert_called_once()
         created = storage.create.call_args[0][0]
@@ -287,6 +298,8 @@ class TestCreateMode:
         async with app.run_test() as pilot:
             # Leave title empty, try to save
             await pilot.press("ctrl+s")
+            # The save runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
 
         storage.create.assert_not_called()
 
@@ -320,6 +333,8 @@ class TestCreateMode:
             app.query_one("#acceptance-input", TextArea).load_text("Criteria here")
             app.query_one("#design-input", TextArea).load_text("Design doc")
             await pilot.press("ctrl+s")
+            # The save runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
 
         created = storage.create.call_args[0][0]
         assert created.title == "Full issue"
@@ -341,6 +356,8 @@ class TestCreateMode:
         async with app.run_test() as pilot:
             app.query_one("#title-input", Input).value = "Default test"
             await pilot.press("ctrl+s")
+            # The save runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
 
         created = storage.create.call_args[0][0]
         assert created.status.value == "open"
@@ -358,6 +375,8 @@ class TestCreateMode:
         async with app.run_test() as pilot:
             app.query_one("#title-input", Input).value = "Namespace test"
             await pilot.press("ctrl+s")
+            # The save runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
 
         created = storage.create.call_args[0][0]
         assert created.namespace == "myns"
@@ -373,6 +392,8 @@ class TestCreateMode:
         async with app.run_test() as pilot:
             app.query_one("#title-input", Input).value = "No update"
             await pilot.press("ctrl+s")
+            # The save runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
 
         storage.update.assert_not_called()
         storage.create.assert_called_once()
@@ -433,6 +454,8 @@ class TestCreateModeShorthands:
 
         async with app.run_test() as pilot:
             await pilot.press("ctrl+s")
+            # The save runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
 
         storage.create.assert_called_once()
         created = storage.create.call_args[0][0]
@@ -545,6 +568,8 @@ class TestParentPicker:
             panel = app.query_one("#editor-panel", IssueDetailPanel)
             panel._on_parent_picked("dc-par1")
             await pilot.press("ctrl+s")
+            # The save runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
 
         storage.update.assert_called_once()
         updates = storage.update.call_args[0][1].to_dict()
@@ -565,6 +590,8 @@ class TestParentPicker:
             panel = app.query_one("#editor-panel", IssueDetailPanel)
             panel._on_parent_picked("")
             await pilot.press("ctrl+s")
+            # The save runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
 
         storage.update.assert_called_once()
         updates = storage.update.call_args[0][1].to_dict()
@@ -626,6 +653,8 @@ class TestParentPicker:
         async with app.run_test() as pilot:
             app.query_one("#title-input", Input).value = "New title"
             await pilot.press("ctrl+s")
+            # The save runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
 
         storage.update.assert_called_once()
         updates = storage.update.call_args[0][1].to_dict()
@@ -792,6 +821,8 @@ class TestManualCheckboxToggle:
             checkbox = app.query_one("#manual-input", Checkbox)
             checkbox.value = True
             await pilot.press("ctrl+s")
+            # The save runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
 
         storage.update.assert_called_once()
         updates = storage.update.call_args[0][1].to_dict()
@@ -812,6 +843,8 @@ class TestManualCheckboxToggle:
             checkbox = app.query_one("#manual-input", Checkbox)
             checkbox.value = False
             await pilot.press("ctrl+s")
+            # The save runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
 
         storage.update.assert_called_once()
         updates = storage.update.call_args[0][1].to_dict()
@@ -834,6 +867,8 @@ class TestNoChangesToSave:
         async with app.run_test() as pilot:
             # Don't change anything, just save
             await pilot.press("ctrl+s")
+            # The save runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
 
         storage.update.assert_not_called()
         assert app.saved is False
@@ -854,6 +889,8 @@ class TestCreateModeStorageException:
         async with app.run_test() as pilot:
             app.query_one("#title-input", Input).value = "Will fail"
             await pilot.press("ctrl+s")
+            # The save runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
 
         # create was called but raised
         storage.create.assert_called_once()
@@ -877,6 +914,8 @@ class TestUpdateModeStorageException:
         async with app.run_test() as pilot:
             app.query_one("#title-input", Input).value = "Changed title"
             await pilot.press("ctrl+s")
+            # The save runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
 
         storage.update.assert_called_once()
         assert app.saved is False

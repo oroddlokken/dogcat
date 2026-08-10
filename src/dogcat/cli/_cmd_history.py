@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import orjson
@@ -11,7 +12,7 @@ from dogcat.config import extract_namespace, get_namespace_filter
 
 from ._completions import complete_issue_ids
 from ._formatting import format_event, get_event_legend
-from ._helpers import get_storage
+from ._helpers import find_dogcats_dir, get_storage
 from ._json_state import echo_error, is_json, set_json
 from ._list_options import (
     DogcatsDirOpt,
@@ -20,6 +21,7 @@ from ._list_options import (
 
 if TYPE_CHECKING:
     from dogcat.event_log import EventRecord
+    from dogcat.storage import JSONLStorage
 
 
 def _merge_events(
@@ -102,20 +104,37 @@ def register(app: typer.Typer) -> None:
             from dogcat.event_log import EventLog, InboxEventLog, _serialize
 
             final_limit = limit_arg or limit or 20
-            storage = get_storage(dogcats_dir)
-            event_log = EventLog(storage.dogcats_dir)
+            # The store is loaded only where one is needed — resolving a
+            # partial --issue, or filling in a title the event omitted.
+            # Reading the timeline itself goes straight to the event log, so
+            # a store whose events all carry titles is never parsed at all.
+            store: JSONLStorage | None = None
+
+            def get_store() -> JSONLStorage:
+                nonlocal store
+                if store is None:
+                    store = get_storage(dogcats_dir)
+                return store
+
+            resolved_dir = (
+                find_dogcats_dir() if dogcats_dir == ".dogcats" else dogcats_dir
+            )
+            dcats_path = Path(resolved_dir)
+            if not dcats_path.is_dir():
+                get_store()  # raises the canonical "run 'dcat init' first" error
+            event_log = EventLog(dcats_path)
 
             # Resolve partial issue ID if provided — try issues first, then inbox
             resolved_issue = None
             if issue:
-                resolved_issue = storage.resolve_id(issue)
+                resolved_issue = get_store().resolve_id(issue)
                 if resolved_issue is None:
                     # Try resolving as inbox proposal
                     try:
                         from dogcat.inbox import InboxStorage
 
                         inbox = InboxStorage(
-                            dogcats_dir=str(storage.dogcats_dir),
+                            dogcats_dir=str(dcats_path),
                         )
                         resolved_issue = inbox.resolve_id(issue)
                     except (ValueError, RuntimeError):
@@ -129,7 +148,7 @@ def register(app: typer.Typer) -> None:
             # Merge inbox events
             if include_inbox:
                 try:
-                    inbox_log = InboxEventLog(storage.dogcats_dir)
+                    inbox_log = InboxEventLog(dcats_path)
                     inbox_events = inbox_log.read(
                         issue_id=resolved_issue,
                         limit=final_limit,
@@ -140,8 +159,7 @@ def register(app: typer.Typer) -> None:
 
             # Apply namespace filter (skip if --all-namespaces)
             if not all_namespaces:
-                actual_dogcats_dir = str(storage.dogcats_dir)
-                ns_filter = get_namespace_filter(actual_dogcats_dir)
+                ns_filter = get_namespace_filter(str(dcats_path))
                 if ns_filter is not None:
                     events = [
                         e
@@ -155,13 +173,13 @@ def register(app: typer.Typer) -> None:
             inbox_cache: dict[str, str] | None = None
             for event in events:
                 if not event.title:
-                    issue_obj = storage.get(event.issue_id)
+                    issue_obj = get_store().get(event.issue_id)
                     if issue_obj:
                         event.title = issue_obj.title
                     elif "inbox" in event.issue_id:
                         if inbox_cache is None:
                             inbox_cache = _load_inbox_titles(
-                                str(storage.dogcats_dir),
+                                str(dcats_path),
                             )
                         event.title = inbox_cache.get(event.issue_id)
 

@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from dogcat.cli import app
@@ -672,7 +673,7 @@ class TestCLIShow:
 
     def test_render_issue_history_empty(self, tmp_path: Path) -> None:
         """An issue with no recorded events reports that, not a bare header."""
-        from dogcat.cli._cmd_read import _render_issue_history
+        from dogcat.cli._cmd_read import _read_events_by_issue, _render_issue_history
         from dogcat.cli._helpers import get_storage
 
         dogcats_dir = tmp_path / ".dogcats"
@@ -688,7 +689,8 @@ class TestCLIShow:
         assert issue is not None
         issue.id = "nosuch"  # point at an ID the event log has never seen
 
-        assert "No events recorded" in _render_issue_history(issue, storage)
+        events = _read_events_by_issue(storage).get(issue.full_id, [])
+        assert "No events recorded" in _render_issue_history(issue, events)
 
     def test_show_displays_parent(self, tmp_path: Path) -> None:
         """Test that show displays parent for child issues."""
@@ -730,3 +732,182 @@ class TestCLIShow:
         )
         assert result.exit_code == 0
         assert f"Parent: {parent_full_id}" in result.stdout
+
+
+class TestShowSharedWork:
+    """show/show-all do their whole-store work once per invocation."""
+
+    @staticmethod
+    def _seed_parents(dogcats_dir: Path, count: int) -> list[str]:
+        """Create ``count`` parents, each with one child, and return their IDs."""
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        parent_ids: list[str] = []
+        for n in range(count):
+            result = runner.invoke(
+                app,
+                ["create", f"Parent {n}", "--json", "--dogcats-dir", str(dogcats_dir)],
+            )
+            data = json.loads(result.stdout)
+            parent_id = f"{data['namespace']}-{data['id']}"
+            parent_ids.append(parent_id)
+            runner.invoke(
+                app,
+                [
+                    "create",
+                    f"Child {n}",
+                    "--parent",
+                    parent_id,
+                    "--dogcats-dir",
+                    str(dogcats_dir),
+                ],
+            )
+        return parent_ids
+
+    @staticmethod
+    def _count_blocked_map_builds(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
+        import dogcat.deps
+
+        calls = {"n": 0}
+        real = dogcat.deps.get_blocked_issues
+
+        def counting(storage: object) -> object:
+            calls["n"] += 1
+            return real(storage)  # pyright: ignore[reportArgumentType]
+
+        monkeypatch.setattr(dogcat.deps, "get_blocked_issues", counting)
+        return calls
+
+    def test_show_builds_blocked_map_once(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Three issues with children share one blocked-map build."""
+        dogcats_dir = tmp_path / ".dogcats"
+        parent_ids = self._seed_parents(dogcats_dir, 3)
+        calls = self._count_blocked_map_builds(monkeypatch)
+
+        result = runner.invoke(
+            app,
+            ["show", *parent_ids, "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert result.stdout.count("Children:") == 3
+        assert calls["n"] == 1
+
+    def test_show_all_builds_blocked_map_once(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """show-all renders every parent from a single blocked-map build."""
+        dogcats_dir = tmp_path / ".dogcats"
+        self._seed_parents(dogcats_dir, 3)
+        calls = self._count_blocked_map_builds(monkeypatch)
+
+        result = runner.invoke(
+            app,
+            ["show-all", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert result.stdout.count("Children:") == 3
+        assert calls["n"] == 1
+
+    def test_show_childless_issue_skips_blocked_map(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Nothing needs the map when no rendered issue has children."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        created = runner.invoke(
+            app,
+            ["create", "Lonely", "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        data = json.loads(created.stdout)
+        calls = self._count_blocked_map_builds(monkeypatch)
+
+        result = runner.invoke(
+            app,
+            ["show", data["id"], "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert result.exit_code == 0
+        assert calls["n"] == 0
+
+    def test_include_history_reads_event_log_once(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """One event-log pass covers every ID on the command line."""
+        import dogcat.event_log
+
+        dogcats_dir = tmp_path / ".dogcats"
+        parent_ids = self._seed_parents(dogcats_dir, 3)
+
+        calls = {"n": 0}
+        real = dogcat.event_log.EventLog.read
+
+        def counting(
+            self: dogcat.event_log.EventLog,
+            **kwargs: object,
+        ) -> list[dogcat.event_log.EventRecord]:
+            calls["n"] += 1
+            return real(self, **kwargs)  # pyright: ignore[reportArgumentType]
+
+        monkeypatch.setattr(dogcat.event_log.EventLog, "read", counting)
+
+        result = runner.invoke(
+            app,
+            [
+                "show",
+                *parent_ids,
+                "--include-history",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert result.stdout.count("History:") == 3
+        assert calls["n"] == 1
+
+    def test_include_history_keeps_events_with_their_issue(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Grouping by issue must not leak one issue's events into another."""
+        dogcats_dir = tmp_path / ".dogcats"
+        parent_ids = self._seed_parents(dogcats_dir, 2)
+        runner.invoke(
+            app,
+            [
+                "update",
+                parent_ids[0],
+                "--status",
+                "in_progress",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "show",
+                *parent_ids,
+                "--include-history",
+                "--json",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        payloads = [json.loads(line) for line in result.stdout.strip().split("\n")]
+        assert len(payloads) == 2
+        for payload, full_id in zip(payloads, parent_ids, strict=True):
+            assert {e["issue_id"] for e in payload["history"]} == {full_id}
+        # The updated issue has one more event, in chronological order.
+        assert len(payloads[0]["history"]) == len(payloads[1]["history"]) + 1
+        timestamps = [e["timestamp"] for e in payloads[0]["history"]]
+        assert timestamps == sorted(timestamps)

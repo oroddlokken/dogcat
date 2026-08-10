@@ -183,10 +183,13 @@ def _refresh_inbox_if_stale(inbox: object, inbox_path_state: dict[str, float]) -
     if not isinstance(inbox, InboxStorage):
         return
     try:
-        mtime = inbox.path.stat().st_mtime
-        size = inbox.path.stat().st_size
+        # One stat() for both fields: two calls can straddle a concurrent
+        # write and pair an old mtime with a new size.
+        stat_result = inbox.path.stat()
     except OSError:
         return
+    mtime = stat_result.st_mtime
+    size = stat_result.st_size
     cached = inbox_path_state.get("mtime")
     cached_size = inbox_path_state.get("size")
     if cached == mtime and cached_size == size:
@@ -306,8 +309,13 @@ async def propose_form(request: Request) -> HTMLResponse:
 
         inbox: InboxStorage | None = getattr(request.app.state, "inbox", None)
         if inbox is None:
+            # The constructor reads and parses the whole inbox file, so run
+            # it off the loop — the propose server runs a single worker and
+            # every in-flight request waits behind it.
             try:
-                inbox = InboxStorage(dogcats_dir=request.app.state.dogcats_dir)
+                inbox = await asyncio.to_thread(
+                    InboxStorage, dogcats_dir=request.app.state.dogcats_dir
+                )
             except (ValueError, RuntimeError):
                 inbox = None
         if inbox is not None:

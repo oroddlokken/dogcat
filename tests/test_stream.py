@@ -5,6 +5,9 @@ from datetime import timezone
 from pathlib import Path
 from typing import Any
 
+import orjson
+import pytest
+
 from dogcat.inbox import InboxStorage
 from dogcat.models import Issue, Proposal, Status, issue_to_dict
 from dogcat.storage import JSONLStorage
@@ -226,13 +229,50 @@ class TestStreamWatcher:
 
         assert watcher.storage_path == Path(storage_path)
 
-    def test_watcher_events_list(self, temp_dogcats_dir: Path) -> None:
-        """Test watcher events list."""
+    def test_watcher_events_starts_empty(self, temp_dogcats_dir: Path) -> None:
+        """Test watcher starts with no retained events."""
         storage_path = temp_dogcats_dir / "issues.jsonl"
         watcher = StreamWatcher(storage_path=str(storage_path))
 
-        assert isinstance(watcher.events, list)
         assert len(watcher.events) == 0
+
+    def test_watcher_events_are_bounded(
+        self,
+        temp_dogcats_dir: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Retention is capped so a days-long stream cannot grow forever.
+
+        dogcat-44ry: the list had no reader and no trim, so every event
+        payload stayed on the heap for the process lifetime.
+        """
+        from datetime import datetime
+
+        from dogcat.stream import _RECENT_EVENTS_MAXLEN
+
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        watcher = StreamWatcher(storage_path=str(storage_path))
+
+        overflow = _RECENT_EVENTS_MAXLEN + 50
+        for n in range(overflow):
+            watcher._handle_event(  # noqa: SLF001
+                StreamEvent(
+                    event_type="updated",
+                    issue_id=f"issue-{n}",
+                    timestamp=datetime.now(timezone.utc),
+                ),
+            )
+
+        assert len(watcher.events) == _RECENT_EVENTS_MAXLEN
+        assert watcher.events[-1].issue_id == f"issue-{overflow - 1}"
+        assert watcher.events[0].issue_id == (
+            f"issue-{overflow - _RECENT_EVENTS_MAXLEN}"
+        )
+
+        # Every event still reaches stdout; only retention is capped.
+        printed = capsys.readouterr().out.strip().splitlines()
+        assert len(printed) == overflow
+        assert json.loads(printed[0])["issue_id"] == "issue-0"
 
 
 class TestStreamIntegration:
@@ -552,6 +592,393 @@ class TestInboxStreamEmitter:
         assert emitter._file_position > initial_pos
         assert len(captured) == 1
         assert captured[0].event_type == "proposal_created"
+
+
+class TestIncrementalDiffScope:
+    """dogcat-3h90: the incremental path diffs only the touched records.
+
+    The appended bytes already name which issues changed, so comparing
+    every field of every issue in the store made per-event cost grow with
+    store size. These tests pin the narrowing and the payloads it emits.
+    """
+
+    def _record_diff_sizes(
+        self,
+        emitter: StreamEmitter,
+        sizes: list[tuple[int, int]],
+    ) -> None:
+        """Wrap _compute_diff so each call records its (old, new) sizes."""
+        original = emitter._compute_diff  # noqa: SLF001
+
+        def spy(
+            old_state: dict[str, Any],
+            new_state: dict[str, Any],
+        ) -> list[StreamEvent]:
+            sizes.append((len(old_state), len(new_state)))
+            return original(old_state, new_state)
+
+        emitter._compute_diff = spy  # type: ignore[method-assign]  # noqa: SLF001
+
+    def test_diff_scope_is_changed_records_not_store_size(
+        self,
+        temp_dogcats_dir: Path,
+    ) -> None:
+        """One updated issue means a one-record diff, whatever the store holds."""
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path))
+        for n in range(6):
+            storage.create(Issue(id=f"issue-{n}", title=f"Issue {n}"))
+
+        captured: list[StreamEvent] = []
+        emitter = StreamEmitter(str(storage_path), on_event=captured.append)
+        assert len(emitter.current_state) == 6
+
+        sizes: list[tuple[int, int]] = []
+        self._record_diff_sizes(emitter, sizes)
+
+        storage.update("issue-3", {"title": "Changed"})
+        emitter._handle_file_change()  # noqa: SLF001
+
+        assert sizes == [(1, 1)]
+        assert len(captured) == 1
+        assert captured[0].issue_id == "dc-issue-3"
+        assert captured[0].changes["title"].new == "Changed"
+
+        # Untouched issues stay in state and keep their values.
+        assert len(emitter.current_state) == 6
+        assert emitter.current_state["dc-issue-0"]["title"] == "Issue 0"
+
+    def test_narrowed_diff_matches_full_diff_payload(
+        self,
+        temp_dogcats_dir: Path,
+    ) -> None:
+        """The narrowed path emits the same payload a full-state diff would."""
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path))
+        storage.create(Issue(id="issue-1", title="One"))
+        storage.create(Issue(id="issue-2", title="Two"))
+
+        captured: list[StreamEvent] = []
+        emitter = StreamEmitter(str(storage_path), on_event=captured.append)
+        before = {k: dict(v) for k, v in emitter.current_state.items()}
+
+        storage.update("issue-2", {"title": "Two prime", "priority": 0})
+        emitter._handle_file_change()  # noqa: SLF001
+
+        after: dict[str, Any] = {}
+        for issue in JSONLStorage(str(storage_path)).list():
+            after[issue.full_id] = issue_to_dict(issue)
+
+        reference = StreamEmitter(str(storage_path))._compute_diff(before, after)  # noqa: SLF001
+
+        assert len(captured) == len(reference) == 1
+        # Timestamps are wall-clock per diff call, so compare everything else.
+        narrow_payload = captured[0].to_dict()
+        full_payload = reference[0].to_dict()
+        narrow_payload.pop("timestamp")
+        full_payload.pop("timestamp")
+        assert narrow_payload == full_payload
+
+    def test_batch_of_two_records_emits_both_events(
+        self,
+        temp_dogcats_dir: Path,
+    ) -> None:
+        """A create and an update in one batch both surface."""
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path))
+        storage.create(Issue(id="issue-1", title="One"))
+        storage.create(Issue(id="issue-2", title="Two"))
+
+        captured: list[StreamEvent] = []
+        emitter = StreamEmitter(str(storage_path), on_event=captured.append)
+
+        storage.update("issue-1", {"title": "One prime"})
+        storage.create(Issue(id="issue-3", title="Three"))
+        emitter._handle_file_change()  # noqa: SLF001
+
+        assert [(e.issue_id, e.event_type) for e in captured] == [
+            ("dc-issue-1", "updated"),
+            ("dc-issue-3", "created"),
+        ]
+
+    def test_inbox_diff_scope_is_changed_proposals(
+        self,
+        temp_dogcats_dir: Path,
+    ) -> None:
+        """The inbox emitter narrows the same way as the issue emitter."""
+        inbox = InboxStorage(dogcats_dir=str(temp_dogcats_dir))
+        for n in range(4):
+            inbox.create(Proposal(id=f"test{n}", title=f"Proposal {n}"))
+
+        inbox_path = temp_dogcats_dir / "inbox.jsonl"
+        captured: list[StreamEvent] = []
+        emitter = InboxStreamEmitter(str(inbox_path), on_event=captured.append)
+        assert len(emitter.current_state) == 4
+
+        sizes: list[tuple[int, int]] = []
+        original = emitter._compute_diff  # noqa: SLF001
+
+        def spy(
+            old_state: dict[str, Any],
+            new_state: dict[str, Any],
+        ) -> list[StreamEvent]:
+            sizes.append((len(old_state), len(new_state)))
+            return original(old_state, new_state)
+
+        emitter._compute_diff = spy  # type: ignore[method-assign]  # noqa: SLF001
+
+        inbox.close("dc-inbox-test2", reason="Done")
+        emitter._handle_file_change()  # noqa: SLF001
+
+        assert sizes == [(1, 1)]
+        assert len(captured) == 1
+        assert captured[0].event_type == "proposal_closed"
+        assert captured[0].issue_id == "dc-inbox-test2"
+        assert len(emitter.current_state) == 4
+
+
+class TestEmissionOrder:
+    """dogcat-3h90: emission order survives the narrowed diff.
+
+    The pre-change diff ran over the whole merged state, so events came out
+    in the state's first-insertion order with this batch's new records last.
+    Anything consuming `dcat stream` as a feed sees that order, so narrowing
+    the diff must not reorder it. Each test below builds a batch whose file
+    order differs from the state order, which is the only case that can tell
+    the two apart.
+    """
+
+    def test_new_record_appended_first_still_emits_last(
+        self,
+        temp_dogcats_dir: Path,
+    ) -> None:
+        """A create written before an update still lands after it."""
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path))
+        storage.create(Issue(id="issue-1", title="One"))
+        storage.create(Issue(id="issue-2", title="Two"))
+
+        captured: list[StreamEvent] = []
+        emitter = StreamEmitter(str(storage_path), on_event=captured.append)
+
+        # File order: the new issue first, then the update.
+        storage.create(Issue(id="issue-9", title="Nine"))
+        storage.update("issue-2", {"title": "Two prime"})
+        emitter._handle_file_change()  # noqa: SLF001
+
+        assert [(e.issue_id, e.event_type) for e in captured] == [
+            ("dc-issue-2", "updated"),
+            ("dc-issue-9", "created"),
+        ]
+
+    def test_two_updates_follow_state_order_not_file_order(
+        self,
+        temp_dogcats_dir: Path,
+    ) -> None:
+        """Known issues emit in first-insertion order, not append order."""
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path))
+        storage.create(Issue(id="issue-1", title="One"))
+        storage.create(Issue(id="issue-2", title="Two"))
+        storage.create(Issue(id="issue-3", title="Three"))
+
+        captured: list[StreamEvent] = []
+        emitter = StreamEmitter(str(storage_path), on_event=captured.append)
+
+        # File order is the reverse of the state order.
+        storage.update("issue-3", {"title": "Three prime"})
+        storage.update("issue-1", {"title": "One prime"})
+        emitter._handle_file_change()  # noqa: SLF001
+
+        assert [e.issue_id for e in captured] == ["dc-issue-1", "dc-issue-3"]
+
+    def test_two_creates_keep_file_order(self, temp_dogcats_dir: Path) -> None:
+        """Records new in the batch emit in the order they were appended."""
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path))
+        storage.create(Issue(id="issue-1", title="One"))
+
+        captured: list[StreamEvent] = []
+        emitter = StreamEmitter(str(storage_path), on_event=captured.append)
+
+        storage.create(Issue(id="issue-b", title="B"))
+        storage.create(Issue(id="issue-a", title="A"))
+        emitter._handle_file_change()  # noqa: SLF001
+
+        assert [e.issue_id for e in captured] == ["dc-issue-b", "dc-issue-a"]
+
+    def test_order_of_a_created_record_persists_into_the_next_batch(
+        self,
+        temp_dogcats_dir: Path,
+    ) -> None:
+        """An issue created in one batch ranks after the older ones later."""
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path))
+        storage.create(Issue(id="issue-1", title="One"))
+        storage.create(Issue(id="issue-2", title="Two"))
+
+        captured: list[StreamEvent] = []
+        emitter = StreamEmitter(str(storage_path), on_event=captured.append)
+
+        storage.create(Issue(id="issue-9", title="Nine"))
+        emitter._handle_file_change()  # noqa: SLF001
+        captured.clear()
+
+        # Second batch updates all three, youngest first in the file.
+        storage.update("issue-9", {"title": "Nine prime"})
+        storage.update("issue-2", {"title": "Two prime"})
+        storage.update("issue-1", {"title": "One prime"})
+        emitter._handle_file_change()  # noqa: SLF001
+
+        assert [e.issue_id for e in captured] == [
+            "dc-issue-1",
+            "dc-issue-2",
+            "dc-issue-9",
+        ]
+
+    def test_order_is_reanchored_after_compaction(
+        self,
+        temp_dogcats_dir: Path,
+    ) -> None:
+        """A full reload resets the ranking to the rewritten file's order."""
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path))
+        storage.create(Issue(id="issue-1", title="One"))
+        storage.create(Issue(id="issue-2", title="Two"))
+
+        captured: list[StreamEvent] = []
+        emitter = StreamEmitter(str(storage_path), on_event=captured.append)
+
+        # Compact to issue-2 then issue-1 — the reverse of the load order.
+        kept: list[bytes] = []
+        for raw in storage_path.read_bytes().splitlines():
+            if not raw.strip():
+                continue
+            data = orjson.loads(raw)
+            if data.get("record_type") == "issue":
+                kept.append(orjson.dumps(data))
+        storage_path.write_bytes(b"\n".join(reversed(kept)) + b"\n")
+
+        emitter._handle_file_change()  # noqa: SLF001
+        assert list(emitter.current_state) == ["dc-issue-2", "dc-issue-1"]
+        captured.clear()
+
+        storage = JSONLStorage(str(storage_path))
+        storage.update("issue-1", {"title": "One prime"})
+        storage.update("issue-2", {"title": "Two prime"})
+        emitter._handle_file_change()  # noqa: SLF001
+
+        assert [e.issue_id for e in captured] == ["dc-issue-2", "dc-issue-1"]
+
+    def test_inbox_emission_order_matches_state_order(
+        self,
+        temp_dogcats_dir: Path,
+    ) -> None:
+        """The inbox emitter orders proposals the same way."""
+        inbox = InboxStorage(dogcats_dir=str(temp_dogcats_dir))
+        inbox.create(Proposal(id="test1", title="One"))
+        inbox.create(Proposal(id="test2", title="Two"))
+
+        inbox_path = temp_dogcats_dir / "inbox.jsonl"
+        captured: list[StreamEvent] = []
+        emitter = InboxStreamEmitter(str(inbox_path), on_event=captured.append)
+
+        inbox.create(Proposal(id="test9", title="Nine"))
+        inbox.close("dc-inbox-test1", reason="Done")
+        emitter._handle_file_change()  # noqa: SLF001
+
+        assert [(e.issue_id, e.event_type) for e in captured] == [
+            ("dc-inbox-test1", "proposal_closed"),
+            ("dc-inbox-test9", "proposal_created"),
+        ]
+
+
+class TestFullReloadAfterCompaction:
+    """dogcat-3h90 guard: compaction still gets a whole-store diff.
+
+    Narrowing the incremental path to the touched IDs is only safe because
+    a rewritten file goes through _full_reload instead. If that path ever
+    narrowed too, a compaction that drops or rewrites records the appended
+    bytes never mention would emit nothing.
+    """
+
+    def _compact(self, storage_path: Path, keep: dict[str, str]) -> None:
+        """Rewrite the file with only `keep` issues, applying new titles.
+
+        Mirrors what JSONLStorage compaction produces: current issue state
+        only, no event records, so the file also shrinks.
+        """
+        lines: list[bytes] = []
+        for raw in storage_path.read_bytes().splitlines():
+            if not raw.strip():
+                continue
+            data = orjson.loads(raw)
+            if data.get("record_type") != "issue":
+                continue
+            if data["id"] not in keep:
+                continue
+            data["title"] = keep[data["id"]]
+            lines.append(orjson.dumps(data))
+        storage_path.write_bytes(b"\n".join(lines) + b"\n")
+
+    def test_compaction_emits_events_for_untouched_records(
+        self,
+        temp_dogcats_dir: Path,
+    ) -> None:
+        """A compaction rewrite reports both the changed and the dropped issue."""
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path))
+        storage.create(Issue(id="issue-1", title="One"))
+        storage.create(Issue(id="issue-2", title="Two"))
+        storage.create(Issue(id="issue-3", title="Three"))
+
+        captured: list[StreamEvent] = []
+        emitter = StreamEmitter(str(storage_path), on_event=captured.append)
+        position_before = emitter._file_position  # noqa: SLF001
+        assert len(emitter.current_state) == 3
+
+        self._compact(
+            storage_path,
+            {"issue-1": "One", "issue-2": "Two rewritten"},
+        )
+        assert storage_path.stat().st_size < position_before
+
+        emitter._handle_file_change()  # noqa: SLF001
+
+        by_id = {e.issue_id: e for e in captured}
+        assert set(by_id) == {"dc-issue-2", "dc-issue-3"}
+        assert by_id["dc-issue-2"].event_type == "updated"
+        assert by_id["dc-issue-2"].changes["title"].old == "Two"
+        assert by_id["dc-issue-2"].changes["title"].new == "Two rewritten"
+        assert by_id["dc-issue-3"].event_type == "deleted"
+        assert by_id["dc-issue-3"].changes["status"].new == "deleted"
+
+        assert set(emitter.current_state) == {"dc-issue-1", "dc-issue-2"}
+
+    def test_incremental_resumes_after_compaction(
+        self,
+        temp_dogcats_dir: Path,
+    ) -> None:
+        """The file position is re-anchored, so the next append still parses."""
+        storage_path = temp_dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path))
+        storage.create(Issue(id="issue-1", title="One"))
+        storage.create(Issue(id="issue-2", title="Two"))
+
+        captured: list[StreamEvent] = []
+        emitter = StreamEmitter(str(storage_path), on_event=captured.append)
+
+        self._compact(storage_path, {"issue-1": "One"})
+        emitter._handle_file_change()  # noqa: SLF001
+        captured.clear()
+
+        # Append past the compacted file with a fresh storage view.
+        JSONLStorage(str(storage_path)).create(Issue(id="issue-9", title="Nine"))
+        emitter._handle_file_change()  # noqa: SLF001
+
+        assert [(e.issue_id, e.event_type) for e in captured] == [
+            ("dc-issue-9", "created"),
+        ]
 
 
 class TestStreamEmitterPathFiltering:
