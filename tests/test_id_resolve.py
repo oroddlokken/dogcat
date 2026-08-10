@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from dogcat._id_resolve import resolve_partial_id
+from dogcat._id_resolve import TRAILING_PUNCTUATION, resolve_partial_id
 
 
 class TestExactMatch:
@@ -69,31 +69,39 @@ class TestAmbiguity:
             resolve_partial_id("abc", ids, kind="issues")
 
 
-class TestTrailingColon:
-    """Ids copied from a terminal pane may carry a trailing ``':'``."""
+class TestTrailingPunctuation:
+    """Ids copied out of a pane or a sentence carry trailing punctuation."""
 
-    def test_full_id_with_trailing_colon(self) -> None:
-        """Exact match still wins once the colon is stripped."""
+    @pytest.mark.parametrize("char", TRAILING_PUNCTUATION)
+    def test_full_id_with_trailing_punctuation(self, char: str) -> None:
+        """Exact match still wins once the punctuation is stripped."""
         ids = {"dogcat-1iw8", "dogcat-other"}
-        assert resolve_partial_id("dogcat-1iw8:", ids) == "dogcat-1iw8"
+        assert resolve_partial_id(f"dogcat-1iw8{char}", ids) == "dogcat-1iw8"
 
-    def test_partial_suffix_with_trailing_colon(self) -> None:
-        """Short hash with a trailing colon resolves by suffix."""
+    @pytest.mark.parametrize("char", TRAILING_PUNCTUATION)
+    def test_partial_suffix_with_trailing_punctuation(self, char: str) -> None:
+        """Short hash with trailing punctuation resolves by suffix."""
         ids = {"dogcat-1iw8", "dogcat-other"}
-        assert resolve_partial_id("1iw8:", ids) == "dogcat-1iw8"
+        assert resolve_partial_id(f"1iw8{char}", ids) == "dogcat-1iw8"
 
-    def test_colon_only_returns_none(self) -> None:
-        """A bare colon is empty after stripping."""
-        assert resolve_partial_id(":", {"dc-abc"}) is None
+    @pytest.mark.parametrize("char", TRAILING_PUNCTUATION)
+    def test_punctuation_only_returns_none(self, char: str) -> None:
+        """A bare punctuation character is empty after stripping."""
+        assert resolve_partial_id(char, {"dc-abc"}) is None
 
-    def test_multiple_trailing_colons(self) -> None:
-        """Repeated trailing colons are all stripped."""
+    def test_mixed_trailing_run_is_stripped(self) -> None:
+        """A run of different trailing characters is stripped in full."""
         ids = {"dogcat-inbox-4kzj"}
-        assert resolve_partial_id("4kzj:::", ids) == "dogcat-inbox-4kzj"
+        assert resolve_partial_id("4kzj:).", ids) == "dogcat-inbox-4kzj"
 
-    def test_only_trailing_colons_stripped(self) -> None:
-        """A leading colon is not stripped, so it must not match."""
-        assert resolve_partial_id(":abc", {"dc-abc"}) is None
+    @pytest.mark.parametrize("char", TRAILING_PUNCTUATION)
+    def test_only_trailing_punctuation_stripped(self, char: str) -> None:
+        """A leading punctuation character is not stripped, so it must not match."""
+        assert resolve_partial_id(f"{char}abc", {"dc-abc"}) is None
+
+    def test_hyphen_is_not_stripped(self) -> None:
+        """Hyphen separates namespace from hash, so it stays put."""
+        assert resolve_partial_id("dc-", {"dc-abc"}) is None
 
 
 class TestHyphenatedNamespace:

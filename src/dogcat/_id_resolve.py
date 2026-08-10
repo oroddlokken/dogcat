@@ -21,6 +21,16 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+TRAILING_PUNCTUATION = ":.,;!?)]}'\""
+"""Characters stripped from the end of a partial id before matching.
+
+An id copied out of a terminal pane or a sentence picks up whatever followed
+it. Generated ids are base36 joined to a namespace by hyphens (see
+:func:`dogcat.idgen.generate_hash_id`), so none of these can end a real id and
+stripping them cannot shadow a match. Hyphen is deliberately absent — it
+separates namespace from hash.
+"""
+
 
 def resolve_partial_id(
     partial_id: str,
@@ -31,9 +41,8 @@ def resolve_partial_id(
     """Resolve ``partial_id`` against ``ids``.
 
     Args:
-        partial_id: Full or partial id (suffix or short hash). Trailing ``':'``
-            characters are stripped — copying an id out of a terminal pane
-            often picks up the colon that followed it.
+        partial_id: Full or partial id (suffix or short hash). Trailing
+            punctuation is stripped — see :data:`TRAILING_PUNCTUATION`.
         ids: All candidate full ids.
         kind: Plural noun used in the ambiguity error (e.g. ``"issues"``,
             ``"proposals"``).
@@ -44,7 +53,7 @@ def resolve_partial_id(
     Raises:
         ValueError: If ``partial_id`` matches more than one id.
     """
-    partial_id = partial_id.rstrip(":")
+    partial_id = partial_id.rstrip(TRAILING_PUNCTUATION)
 
     if not partial_id or not partial_id.strip():
         return None
