@@ -20,6 +20,10 @@ the user asks what would ship.
 The branch name is load-bearing. `publish.yml` fires only for merged pull requests whose head branch
 starts with `release/v`; landing the same commits any other way skips publishing entirely.
 
+`publish.yml` and `ci.yml` both run `just lint-all`, and each sets up its own toolchain — uv, Python,
+pnpm and the node deps. A step added to one has to be added to the other, or the failure surfaces
+only at release time, when the merge has already landed on `main` (dogcat-11yx).
+
 ## Homebrew formula
 
 `publish.yml` and `release.yml` rewrite the `url` and `sha256` fields in `Formula/dogcat.rb` and
