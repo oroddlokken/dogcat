@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.14.1 (2026-08-11)
+
 ### Development
 
 - **PyPI uploads accept the wheel again.** hatchling stamps `Metadata-Version: 2.5` into the wheel it builds, and `pypa/gh-action-pypi-publish` was pinned at v1.14.0, which bundles a Twine older than the v7 that first understood 2.5 — so `publish-pypi` failed its pre-upload check with `'2.5' is not a valid metadata version`. PyPI itself accepts 2.5; only twine objected, and it objected before transferring anything. The pin moves to v1.14.2. **0.14.0 is missing from PyPI as a result** and cannot be recovered through the pipeline: a job rerun replays the old workflow file, and a fresh release PR dies at the tag step because `v0.14.0` already exists. That release stands as tag, GitHub release and Homebrew formula only, and the tap points at the GitHub wheel, so `brew` users were never affected (closes dogcat-3ke8).
