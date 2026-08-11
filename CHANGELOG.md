@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.14.0 (2026-08-11)
+
 ### Added
 
 - **`dcat show <id> --include-history` appends the issue's audit trail to its details**, so reading what changed no longer costs a second `dcat history --issue <id>` invocation. Events render exactly as `dcat history` renders them, oldest-first, with the symbol legend printed once at the end. There is no limit: a single issue's trail is short enough that truncating it would hide more than it saves. With `--json` the events land under a `history` key on the issue object instead of a separate stream, and with several IDs each issue gets its own section (closes dogcat-5j6h).
