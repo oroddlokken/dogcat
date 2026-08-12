@@ -914,7 +914,7 @@ def register(app: typer.Typer) -> None:
         for issue_id in issue_ids:
             try:
                 issue = storage.get(issue_id)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 echo_error(str(e))
                 has_errors = True
                 continue

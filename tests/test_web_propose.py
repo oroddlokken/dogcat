@@ -1312,7 +1312,6 @@ class TestWebProposeInit:
 
         monkeypatch.setattr(uvicorn, "run", _no_serve)
 
-        # noqa S104: binding to all interfaces is the condition under test,
         # and uvicorn.run is patched out so nothing actually listens.
         result = runner.invoke(
             cli_app,

@@ -567,7 +567,7 @@ class DogcatTUI(App[None]):
             self._storage.delete(full_id)
         except (ValueError, RuntimeError, OSError) as e:
             error = f"Delete failed: {e}"
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             error = f"Delete failed: {type(e).__name__}: {e}"
         self.post_message(self._DeleteComplete(full_id, error))
 

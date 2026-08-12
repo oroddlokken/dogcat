@@ -117,7 +117,7 @@ def _register_command_module(name: str) -> None:
     try:
         mod = importlib.import_module(f".{name}", package=__name__)
         mod.register(app)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         _logger.warning(
             # No global -v exists (the root callback defines only --json and
             # -C/--repo), and %s above already carries the exception.

@@ -99,8 +99,8 @@ class TestCompactSnapshotContent:
         )
 
         records = _lines(buf)
-        assert count == 4  # noqa: PLR2004
-        assert len(records) == 4  # noqa: PLR2004
+        assert count == 4
+        assert len(records) == 4
         kinds = [classify_record(r) for r in records]
         # Emission order: issues, then dependencies, then links.
         assert kinds == ["issue", "issue", "dependency", "link"]
@@ -144,7 +144,7 @@ class TestEventPreservation:
         records = _lines(buf)
         # 1 current issue + 2 preserved events; the source's stale issue line
         # is NOT copied (only events are preserved from source).
-        assert count == 3  # noqa: PLR2004
+        assert count == 3
         assert [classify_record(r) for r in records] == ["issue", "event", "event"]
         assert {r["issue_id"] for r in records if r.get("record_type") == "event"} == {
             "dc-a",
@@ -186,7 +186,7 @@ class TestEventPreservation:
         )
 
         records = _lines(buf)
-        assert count == 2  # noqa: PLR2004
+        assert count == 2
         assert [r["issue_id"] for r in records] == ["ns-a", "dc-c"]
 
 
@@ -210,7 +210,7 @@ class TestMalformedTolerance:
         )
 
         records = _lines(buf)
-        assert count == 2  # noqa: PLR2004
+        assert count == 2
         assert [r["issue_id"] for r in records] == ["dc-a", "dc-b"]
 
     def test_non_object_json_line_is_skipped(self, tmp_path: Path) -> None:

@@ -89,7 +89,7 @@ class TestStreamEmitter:
             new_state[issue.id] = issue_to_dict(issue)
 
         # Compute diff
-        events = emitter._compute_diff(old_state, new_state)  # noqa: SLF001
+        events = emitter._compute_diff(old_state, new_state)
 
         assert len(events) == 1
         assert events[0].event_type == "created"
@@ -122,7 +122,7 @@ class TestStreamEmitter:
 
         # Compute diff
         emitter = StreamEmitter(str(storage_path))
-        events = emitter._compute_diff(old_state, new_state)  # noqa: SLF001
+        events = emitter._compute_diff(old_state, new_state)
 
         assert len(events) == 1
         assert events[0].event_type == "updated"
@@ -156,7 +156,7 @@ class TestStreamEmitter:
 
         # Compute diff
         emitter = StreamEmitter(str(storage_path))
-        events = emitter._compute_diff(old_state, new_state)  # noqa: SLF001
+        events = emitter._compute_diff(old_state, new_state)
 
         assert len(events) == 1
         assert events[0].event_type == "closed"
@@ -191,7 +191,7 @@ class TestStreamEmitter:
 
         # Compute diff
         emitter = StreamEmitter(str(storage_path))
-        events = emitter._compute_diff(old_state, new_state)  # noqa: SLF001
+        events = emitter._compute_diff(old_state, new_state)
 
         assert len(events) == 2
         event_types = {e.event_type for e in events}
@@ -214,7 +214,7 @@ class TestStreamEmitter:
 
         # Compute diff with same state
         emitter = StreamEmitter(str(storage_path))
-        events = emitter._compute_diff(state, state)  # noqa: SLF001
+        events = emitter._compute_diff(state, state)
 
         assert len(events) == 0
 
@@ -255,7 +255,7 @@ class TestStreamWatcher:
 
         overflow = _RECENT_EVENTS_MAXLEN + 50
         for n in range(overflow):
-            watcher._handle_event(  # noqa: SLF001
+            watcher._handle_event(
                 StreamEvent(
                     event_type="updated",
                     issue_id=f"issue-{n}",
@@ -295,7 +295,7 @@ class TestStreamIntegration:
         # Create event and serialize
         emitter = StreamEmitter(str(storage_path))
         empty_state: dict[str, Any] = {}
-        events = emitter._compute_diff(empty_state, state)  # noqa: SLF001
+        events = emitter._compute_diff(empty_state, state)
 
         assert len(events) > 0
         for event in events:
@@ -319,7 +319,7 @@ class TestStreamIntegration:
 
         emitter = StreamEmitter(str(storage_path), by="user@example.com")
         empty_state: dict[str, Any] = {}
-        events = emitter._compute_diff(empty_state, state)  # noqa: SLF001
+        events = emitter._compute_diff(empty_state, state)
 
         assert len(events) > 0
         assert events[0].by == "user@example.com"
@@ -346,7 +346,7 @@ class TestStreamEmitterIncrementalParsing:
         storage.create(Issue(id="issue-2", title="Second"))
 
         # Trigger file change handling
-        emitter._handle_file_change()  # noqa: SLF001
+        emitter._handle_file_change()
 
         # Position should have advanced (incremental parse)
         assert emitter._file_position > initial_position
@@ -389,7 +389,7 @@ class TestStreamEmitterIncrementalParsing:
         storage_path.write_text("\n".join(kept_lines) + "\n")
 
         # Now file is smaller than file_position — should trigger full reload
-        emitter._handle_file_change()  # noqa: SLF001
+        emitter._handle_file_change()
 
         # After full reload, state should have only dc-issue-1
         assert len(emitter.current_state) == 1
@@ -412,7 +412,7 @@ class TestStreamEmitterIncrementalParsing:
         )
 
         # Call handle_file_change without any actual file changes
-        emitter._handle_file_change()  # noqa: SLF001
+        emitter._handle_file_change()
 
         assert len(captured_events) == 0
 
@@ -431,7 +431,7 @@ class TestStreamEmitterIncrementalParsing:
         # Update the issue (appends new line)
         storage.update("issue-1", {"title": "Updated"})
 
-        emitter._handle_file_change()  # noqa: SLF001
+        emitter._handle_file_change()
 
         assert len(captured_events) == 1
         assert captured_events[0].event_type == "updated"
@@ -454,7 +454,7 @@ class TestStreamEmitterIncrementalParsing:
         storage_path.unlink()
 
         # Should not raise
-        emitter._handle_file_change()  # noqa: SLF001
+        emitter._handle_file_change()
 
     def test_callback_called_for_each_event(self, temp_dogcats_dir: Path) -> None:
         """Test that on_event callback is called for each detected event."""
@@ -471,7 +471,7 @@ class TestStreamEmitterIncrementalParsing:
         storage.create(Issue(id="issue-1", title="First"))
         storage.create(Issue(id="issue-2", title="Second"))
 
-        emitter._handle_file_change()  # noqa: SLF001
+        emitter._handle_file_change()
 
         assert len(captured_events) == 2
         event_types = {e.event_type for e in captured_events}
@@ -502,7 +502,7 @@ class TestInboxStreamEmitter:
         proposal = Proposal(id="test1", title="Test proposal")
         inbox.create(proposal)
 
-        emitter._handle_file_change()  # noqa: SLF001
+        emitter._handle_file_change()
 
         assert len(captured) == 1
         assert captured[0].event_type == "proposal_created"
@@ -525,7 +525,7 @@ class TestInboxStreamEmitter:
         # Close the proposal
         inbox.close("dc-inbox-test1", reason="Done")
 
-        emitter._handle_file_change()  # noqa: SLF001
+        emitter._handle_file_change()
 
         assert len(captured) == 1
         assert captured[0].event_type == "proposal_closed"
@@ -547,7 +547,7 @@ class TestInboxStreamEmitter:
 
         inbox.delete("dc-inbox-test1")
 
-        emitter._handle_file_change()  # noqa: SLF001
+        emitter._handle_file_change()
 
         assert len(captured) == 1
         assert captured[0].event_type == "proposal_deleted"
@@ -565,7 +565,7 @@ class TestInboxStreamEmitter:
             on_event=captured.append,
         )
 
-        emitter._handle_file_change()  # noqa: SLF001
+        emitter._handle_file_change()
 
         assert len(captured) == 0
 
@@ -587,7 +587,7 @@ class TestInboxStreamEmitter:
         proposal2 = Proposal(id="test2", title="Second")
         inbox.create(proposal2)
 
-        emitter._handle_file_change()  # noqa: SLF001
+        emitter._handle_file_change()
 
         assert emitter._file_position > initial_pos
         assert len(captured) == 1
@@ -608,7 +608,7 @@ class TestIncrementalDiffScope:
         sizes: list[tuple[int, int]],
     ) -> None:
         """Wrap _compute_diff so each call records its (old, new) sizes."""
-        original = emitter._compute_diff  # noqa: SLF001
+        original = emitter._compute_diff
 
         def spy(
             old_state: dict[str, Any],
@@ -617,7 +617,7 @@ class TestIncrementalDiffScope:
             sizes.append((len(old_state), len(new_state)))
             return original(old_state, new_state)
 
-        emitter._compute_diff = spy  # type: ignore[method-assign]  # noqa: SLF001
+        emitter._compute_diff = spy  # type: ignore[method-assign]
 
     def test_diff_scope_is_changed_records_not_store_size(
         self,
@@ -637,7 +637,7 @@ class TestIncrementalDiffScope:
         self._record_diff_sizes(emitter, sizes)
 
         storage.update("issue-3", {"title": "Changed"})
-        emitter._handle_file_change()  # noqa: SLF001
+        emitter._handle_file_change()
 
         assert sizes == [(1, 1)]
         assert len(captured) == 1
@@ -663,13 +663,13 @@ class TestIncrementalDiffScope:
         before = {k: dict(v) for k, v in emitter.current_state.items()}
 
         storage.update("issue-2", {"title": "Two prime", "priority": 0})
-        emitter._handle_file_change()  # noqa: SLF001
+        emitter._handle_file_change()
 
         after: dict[str, Any] = {}
         for issue in JSONLStorage(str(storage_path)).list():
             after[issue.full_id] = issue_to_dict(issue)
 
-        reference = StreamEmitter(str(storage_path))._compute_diff(before, after)  # noqa: SLF001
+        reference = StreamEmitter(str(storage_path))._compute_diff(before, after)
 
         assert len(captured) == len(reference) == 1
         # Timestamps are wall-clock per diff call, so compare everything else.
@@ -694,7 +694,7 @@ class TestIncrementalDiffScope:
 
         storage.update("issue-1", {"title": "One prime"})
         storage.create(Issue(id="issue-3", title="Three"))
-        emitter._handle_file_change()  # noqa: SLF001
+        emitter._handle_file_change()
 
         assert [(e.issue_id, e.event_type) for e in captured] == [
             ("dc-issue-1", "updated"),
@@ -716,7 +716,7 @@ class TestIncrementalDiffScope:
         assert len(emitter.current_state) == 4
 
         sizes: list[tuple[int, int]] = []
-        original = emitter._compute_diff  # noqa: SLF001
+        original = emitter._compute_diff
 
         def spy(
             old_state: dict[str, Any],
@@ -725,10 +725,10 @@ class TestIncrementalDiffScope:
             sizes.append((len(old_state), len(new_state)))
             return original(old_state, new_state)
 
-        emitter._compute_diff = spy  # type: ignore[method-assign]  # noqa: SLF001
+        emitter._compute_diff = spy  # type: ignore[method-assign]
 
         inbox.close("dc-inbox-test2", reason="Done")
-        emitter._handle_file_change()  # noqa: SLF001
+        emitter._handle_file_change()
 
         assert sizes == [(1, 1)]
         assert len(captured) == 1
@@ -764,7 +764,7 @@ class TestEmissionOrder:
         # File order: the new issue first, then the update.
         storage.create(Issue(id="issue-9", title="Nine"))
         storage.update("issue-2", {"title": "Two prime"})
-        emitter._handle_file_change()  # noqa: SLF001
+        emitter._handle_file_change()
 
         assert [(e.issue_id, e.event_type) for e in captured] == [
             ("dc-issue-2", "updated"),
@@ -788,7 +788,7 @@ class TestEmissionOrder:
         # File order is the reverse of the state order.
         storage.update("issue-3", {"title": "Three prime"})
         storage.update("issue-1", {"title": "One prime"})
-        emitter._handle_file_change()  # noqa: SLF001
+        emitter._handle_file_change()
 
         assert [e.issue_id for e in captured] == ["dc-issue-1", "dc-issue-3"]
 
@@ -803,7 +803,7 @@ class TestEmissionOrder:
 
         storage.create(Issue(id="issue-b", title="B"))
         storage.create(Issue(id="issue-a", title="A"))
-        emitter._handle_file_change()  # noqa: SLF001
+        emitter._handle_file_change()
 
         assert [e.issue_id for e in captured] == ["dc-issue-b", "dc-issue-a"]
 
@@ -821,14 +821,14 @@ class TestEmissionOrder:
         emitter = StreamEmitter(str(storage_path), on_event=captured.append)
 
         storage.create(Issue(id="issue-9", title="Nine"))
-        emitter._handle_file_change()  # noqa: SLF001
+        emitter._handle_file_change()
         captured.clear()
 
         # Second batch updates all three, youngest first in the file.
         storage.update("issue-9", {"title": "Nine prime"})
         storage.update("issue-2", {"title": "Two prime"})
         storage.update("issue-1", {"title": "One prime"})
-        emitter._handle_file_change()  # noqa: SLF001
+        emitter._handle_file_change()
 
         assert [e.issue_id for e in captured] == [
             "dc-issue-1",
@@ -859,14 +859,14 @@ class TestEmissionOrder:
                 kept.append(orjson.dumps(data))
         storage_path.write_bytes(b"\n".join(reversed(kept)) + b"\n")
 
-        emitter._handle_file_change()  # noqa: SLF001
+        emitter._handle_file_change()
         assert list(emitter.current_state) == ["dc-issue-2", "dc-issue-1"]
         captured.clear()
 
         storage = JSONLStorage(str(storage_path))
         storage.update("issue-1", {"title": "One prime"})
         storage.update("issue-2", {"title": "Two prime"})
-        emitter._handle_file_change()  # noqa: SLF001
+        emitter._handle_file_change()
 
         assert [e.issue_id for e in captured] == ["dc-issue-2", "dc-issue-1"]
 
@@ -885,7 +885,7 @@ class TestEmissionOrder:
 
         inbox.create(Proposal(id="test9", title="Nine"))
         inbox.close("dc-inbox-test1", reason="Done")
-        emitter._handle_file_change()  # noqa: SLF001
+        emitter._handle_file_change()
 
         assert [(e.issue_id, e.event_type) for e in captured] == [
             ("dc-inbox-test1", "proposal_closed"),
@@ -934,7 +934,7 @@ class TestFullReloadAfterCompaction:
 
         captured: list[StreamEvent] = []
         emitter = StreamEmitter(str(storage_path), on_event=captured.append)
-        position_before = emitter._file_position  # noqa: SLF001
+        position_before = emitter._file_position
         assert len(emitter.current_state) == 3
 
         self._compact(
@@ -943,7 +943,7 @@ class TestFullReloadAfterCompaction:
         )
         assert storage_path.stat().st_size < position_before
 
-        emitter._handle_file_change()  # noqa: SLF001
+        emitter._handle_file_change()
 
         by_id = {e.issue_id: e for e in captured}
         assert set(by_id) == {"dc-issue-2", "dc-issue-3"}
@@ -969,12 +969,12 @@ class TestFullReloadAfterCompaction:
         emitter = StreamEmitter(str(storage_path), on_event=captured.append)
 
         self._compact(storage_path, {"issue-1": "One"})
-        emitter._handle_file_change()  # noqa: SLF001
+        emitter._handle_file_change()
         captured.clear()
 
         # Append past the compacted file with a fresh storage view.
         JSONLStorage(str(storage_path)).create(Issue(id="issue-9", title="Nine"))
-        emitter._handle_file_change()  # noqa: SLF001
+        emitter._handle_file_change()
 
         assert [(e.issue_id, e.event_type) for e in captured] == [
             ("dc-issue-9", "created"),

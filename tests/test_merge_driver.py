@@ -1525,7 +1525,7 @@ class TestDependencyLinkConvergence:
         """Byte-identical output under three different hash seeds."""
         outputs: list[bytes] = []
         for seed in ("1", "2", "3"):
-            proc = subprocess.run(  # noqa: S603
+            proc = subprocess.run(
                 [sys.executable, "-c", _ORDER_PROBE],
                 capture_output=True,
                 check=True,

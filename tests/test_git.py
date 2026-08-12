@@ -29,7 +29,7 @@ def _completed(
 def test_repo_root_returns_path(monkeypatch: pytest.MonkeyPatch) -> None:
     """repo_root parses git output into a Path."""
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         return _completed(0, "/tmp/some-repo\n")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -39,7 +39,7 @@ def test_repo_root_returns_path(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_repo_root_returns_none_outside_repo(monkeypatch: pytest.MonkeyPatch) -> None:
     """repo_root returns None when git reports failure."""
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         return _completed(128, "", "fatal: not a git repository\n")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -51,7 +51,7 @@ def test_repo_root_returns_none_when_git_missing(
 ) -> None:
     """repo_root returns None when the git binary is unavailable."""
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         msg = "git not on PATH"
         raise FileNotFoundError(msg)
 
@@ -62,7 +62,7 @@ def test_repo_root_returns_none_when_git_missing(
 def test_current_branch_strips_whitespace(monkeypatch: pytest.MonkeyPatch) -> None:
     """current_branch strips trailing whitespace from git's output."""
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         return _completed(0, "feature/my-thing\n")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -72,7 +72,7 @@ def test_current_branch_strips_whitespace(monkeypatch: pytest.MonkeyPatch) -> No
 def test_show_file_returns_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
     """show_file returns the raw bytes of git show."""
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         return _completed(0, b"file contents\n")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -82,7 +82,7 @@ def test_show_file_returns_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_show_file_returns_none_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     """show_file returns None when the ref doesn't resolve."""
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         return _completed(128, b"")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -92,7 +92,7 @@ def test_show_file_returns_none_on_failure(monkeypatch: pytest.MonkeyPatch) -> N
 def test_is_path_ignored_true(monkeypatch: pytest.MonkeyPatch) -> None:
     """is_path_ignored returns True when git check-ignore exits 0."""
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         return _completed(0, "")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -102,7 +102,7 @@ def test_is_path_ignored_true(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_is_path_ignored_false(monkeypatch: pytest.MonkeyPatch) -> None:
     """is_path_ignored returns False when git check-ignore exits non-zero."""
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         return _completed(1, "")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -114,7 +114,7 @@ def test_is_path_ignored_safe_when_git_missing(
 ) -> None:
     """is_path_ignored returns False (not an error) when git is missing."""
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         msg = "no git"
         raise FileNotFoundError(msg)
 
@@ -125,7 +125,7 @@ def test_is_path_ignored_safe_when_git_missing(
 def test_user_email_returns_value(monkeypatch: pytest.MonkeyPatch) -> None:
     """user_email parses git config output."""
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         return _completed(0, "alice@example.com\n")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -135,7 +135,7 @@ def test_user_email_returns_value(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_user_email_returns_none_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     """user_email returns None when git config exits non-zero (key not set)."""
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         return _completed(1, "")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -147,7 +147,7 @@ def test_set_config_returns_true_on_success(
 ) -> None:
     """set_config returns True when git config exits 0."""
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         return _completed(0, "")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -159,7 +159,7 @@ def test_set_config_returns_false_on_failure(
 ) -> None:
     """set_config returns False when git config exits non-zero."""
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         return _completed(128, "", "fatal: bad config name\n")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -171,7 +171,7 @@ def test_set_config_returns_false_when_git_missing(
 ) -> None:
     """set_config returns False when git is unavailable."""
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         msg = "no git"
         raise FileNotFoundError(msg)
 
@@ -182,7 +182,7 @@ def test_set_config_returns_false_when_git_missing(
 def test_common_dir_returns_path(monkeypatch: pytest.MonkeyPatch) -> None:
     """common_dir parses ``git rev-parse --git-common-dir`` output."""
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         return _completed(0, "/tmp/some-repo/.git\n")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -194,7 +194,7 @@ def test_common_dir_returns_none_outside_repo(
 ) -> None:
     """common_dir returns None when git reports failure."""
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         return _completed(128, "", "fatal: not a git repository\n")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -206,7 +206,7 @@ def test_common_dir_returns_none_when_git_missing(
 ) -> None:
     """common_dir returns None when the git binary is unavailable."""
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         msg = "no git"
         raise FileNotFoundError(msg)
 
@@ -219,7 +219,7 @@ def test_common_dir_returns_none_for_empty_output(
 ) -> None:
     """common_dir returns None when stdout is whitespace-only."""
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         return _completed(0, "  \n")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -229,7 +229,7 @@ def test_common_dir_returns_none_for_empty_output(
 def test_get_config_returns_value(monkeypatch: pytest.MonkeyPatch) -> None:
     """get_config returns the trimmed config value."""
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         return _completed(0, "abcd\n")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -241,7 +241,7 @@ def test_get_config_returns_none_for_missing_key(
 ) -> None:
     """get_config returns None when git exits non-zero (key not set)."""
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         return _completed(1, "")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -257,7 +257,7 @@ def test_get_config_returns_none_for_empty_value(
     a missing key — callers that care can distinguish via direct git.
     """
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         return _completed(0, "  \n")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -270,7 +270,7 @@ def test_add_paths_non_empty_invokes_git(
     """add_paths runs ``git add <paths>`` for a non-empty list."""
     captured: list[list[str]] = []
 
-    def fake_run(args: list[str], *_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(args: list[str], *_args: Any, **_kwargs: Any) -> object:
         captured.append(args)
         return _completed(0, "")
 
@@ -284,7 +284,7 @@ def test_add_paths_returns_false_on_git_failure(
 ) -> None:
     """add_paths returns False when git exits non-zero."""
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         return _completed(128, "", "fatal: not a repository\n")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -294,7 +294,7 @@ def test_add_paths_returns_false_on_git_failure(
 def test_latest_merge_commit_returns_sha(monkeypatch: pytest.MonkeyPatch) -> None:
     """latest_merge_commit returns the trimmed SHA on success."""
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         return _completed(0, "abc123def456\n")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -306,7 +306,7 @@ def test_latest_merge_commit_returns_none_when_no_merges(
 ) -> None:
     """latest_merge_commit returns None when git log returns nothing."""
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         return _completed(0, "")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -316,7 +316,7 @@ def test_latest_merge_commit_returns_none_when_no_merges(
 def test_merge_parents_returns_pair(monkeypatch: pytest.MonkeyPatch) -> None:
     """merge_parents returns a (parent1, parent2) tuple."""
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         return _completed(0, "aaa\nbbb\n")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -328,7 +328,7 @@ def test_merge_parents_returns_none_on_unexpected_count(
 ) -> None:
     """merge_parents returns None when output doesn't have exactly 2 parents."""
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         return _completed(0, "only-one\n")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -338,7 +338,7 @@ def test_merge_parents_returns_none_on_unexpected_count(
 def test_merge_base_returns_sha(monkeypatch: pytest.MonkeyPatch) -> None:
     """merge_base returns the SHA of the common ancestor."""
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         return _completed(0, "common-sha\n")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -349,7 +349,7 @@ def test_add_paths_empty_list_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:
     """add_paths returns True without invoking git for an empty list."""
     called: list[bool] = []
 
-    def fake_run(*_args: Any, **_kwargs: Any) -> object:  # noqa: ARG001
+    def fake_run(*_args: Any, **_kwargs: Any) -> object:
         called.append(True)
         return _completed(0, "")
 
@@ -421,7 +421,7 @@ class TestCLocaleEnvOverlay:
         """``repo_root`` (and every helper through ``_run``) sets LC_ALL=C, LANG=C."""
         captured: dict[str, dict[str, str] | None] = {}
 
-        def fake_run(*_args: Any, **kwargs: Any) -> object:  # noqa: ARG001
+        def fake_run(*_args: Any, **kwargs: Any) -> object:
             captured["env"] = kwargs.get("env")
             return _completed(0, "/tmp/some-repo\n")
 
@@ -445,7 +445,7 @@ class TestCLocaleEnvOverlay:
         """
         captured: dict[str, dict[str, str] | None] = {}
 
-        def fake_run(*_args: Any, **kwargs: Any) -> object:  # noqa: ARG001
+        def fake_run(*_args: Any, **kwargs: Any) -> object:
             captured["env"] = kwargs.get("env")
             return _completed(0, "main\n")
 
@@ -470,7 +470,7 @@ class TestCLocaleEnvOverlay:
         monkeypatch.setenv("DCAT_TEST_SENTINEL", "preserved")
         captured: dict[str, dict[str, str] | None] = {}
 
-        def fake_run(*_args: Any, **kwargs: Any) -> object:  # noqa: ARG001
+        def fake_run(*_args: Any, **kwargs: Any) -> object:
             captured["env"] = kwargs.get("env")
             return _completed(0, "")
 

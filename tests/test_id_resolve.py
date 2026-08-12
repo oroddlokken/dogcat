@@ -212,7 +212,7 @@ class TestLazyIssueMapInput:
         """The fast path answers without constructing a single Issue."""
         m = _lazy_map("dc-abc", "dc-def")
         assert resolve_partial_id("dc-abc", m, kind="issues") == "dc-abc"
-        assert not any(isinstance(v, Issue) for v in m._entries.values())  # noqa: SLF001
+        assert not any(isinstance(v, Issue) for v in m._entries.values())
 
     def test_unique_suffix(self) -> None:
         """Short hash resolves by the fallback scan."""

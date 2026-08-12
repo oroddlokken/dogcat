@@ -25,7 +25,7 @@ def _mp_create_issues(
         local_storage = JSONLStorage(storage_path)
         for i in range(start, start + count):
             local_storage.create(Issue(id=f"issue-{i}", title=f"Issue {i}"))
-    except Exception as e:  # noqa: BLE001 - propagate any failure to the parent
+    except Exception as e:
         errors.append(repr(e))
 
 

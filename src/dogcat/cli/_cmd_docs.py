@@ -599,7 +599,7 @@ def register(app: typer.Typer) -> None:
                     # it must not reach `errors`: there is nothing to act on
                     # and exit 1 mid-rebase is not free (dogcat-3qw3).
                     continue
-                except OSError as exc:  # noqa: PERF203
+                except OSError as exc:
                     # Present but unreadable — permissions, I/O — is a real
                     # problem and stays an error.
                     errors.append(f"{jsonl_path.name}: {exc}")
@@ -638,7 +638,7 @@ def register(app: typer.Typer) -> None:
                         msg = f"git add failed for {jsonl_path}"
                         raise RuntimeError(msg)
                     resolved.append(jsonl_path.name)
-                except Exception as exc:  # noqa: PERF203
+                except Exception as exc:
                     errors.append(f"{jsonl_path.name}: {exc}")
 
         if not resolved and not errors and not unresolved:

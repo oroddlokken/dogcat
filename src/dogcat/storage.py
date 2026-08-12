@@ -337,7 +337,7 @@ class JSONLStorage(EventEmitterMixin):
                 raw_data = orjson.loads(line)
                 if not isinstance(raw_data, dict):
                     msg = f"expected JSON object, got {type(raw_data).__name__}"
-                    raise TypeError(msg)  # noqa: TRY301
+                    raise TypeError(msg)
                 data = cast("dict[str, Any]", raw_data)
                 parsed_records.append(data)
                 rtype = classify_record(data)
@@ -1963,7 +1963,7 @@ def get_namespaces(
     # Namespace counts need two fields per record, so they read the raw
     # dicts rather than paying dict_to_issue for the whole store — this runs
     # per Tab press on the namespace completer (dogcat-4qif).
-    for fields in storage._issues.iter_completion_fields():  # noqa: SLF001
+    for fields in storage._issues.iter_completion_fields():
         if fields.status == Status.TOMBSTONE.value:
             continue
         counts = ns_counts.setdefault(fields.namespace, NamespaceCounts())

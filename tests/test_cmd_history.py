@@ -158,7 +158,7 @@ class TestHistoryStorageLoad:
         calls: list[str] = []
         real = _cmd_history.get_storage
 
-        def spy(dogcats_dir: str = ".dogcats", create_dir: bool = False):  # noqa: ANN202
+        def spy(dogcats_dir: str = ".dogcats", create_dir: bool = False):
             calls.append(dogcats_dir)
             return real(dogcats_dir, create_dir)
 
@@ -181,7 +181,7 @@ class TestHistoryStorageLoad:
         calls: list[str] = []
         real = _cmd_history.get_storage
 
-        def spy(dogcats_dir: str = ".dogcats", create_dir: bool = False):  # noqa: ANN202
+        def spy(dogcats_dir: str = ".dogcats", create_dir: bool = False):
             calls.append(dogcats_dir)
             return real(dogcats_dir, create_dir)
 

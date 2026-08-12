@@ -197,7 +197,7 @@ def apply_to_each(
     for id_ in ids:
         try:
             op(id_)
-        except Exception as e:  # noqa: BLE001, PERF203
+        except Exception as e:  # noqa: PERF203
             echo_error(f"{verb} {id_}: {e}")
             has_errors = True
     return has_errors
@@ -589,7 +589,7 @@ def parse_duration(value: str) -> datetime:
                 # tzname() values like "CEST" are unparseable by
                 # ZoneInfo. Fall back to the system tz on error.
                 local_tz = ZoneInfo(local_tz_name) if local_tz_name else None
-            except (ImportError, Exception):  # noqa: BLE001
+            except (ImportError, Exception):
                 local_tz = None
             if local_tz is None:
                 local_tz = datetime.now().astimezone().tzinfo

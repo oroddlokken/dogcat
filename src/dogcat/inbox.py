@@ -125,7 +125,7 @@ class InboxStorage(EventEmitterMixin):
                 raw_data = orjson.loads(line)
                 if not isinstance(raw_data, dict):
                     msg = f"expected JSON object, got {type(raw_data).__name__}"
-                    raise TypeError(msg)  # noqa: TRY301
+                    raise TypeError(msg)
                 data = cast("dict[str, Any]", raw_data)
                 parsed_records.append(data)
                 rtype = classify_record(data)

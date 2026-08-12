@@ -1059,7 +1059,7 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
         """
         try:
             result = commit()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             result = _SaveResult(error=f"Save failed: {type(e).__name__}: {e}")
         result.token = token
         self.post_message(self._SaveComplete(result))
