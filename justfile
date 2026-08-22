@@ -24,6 +24,10 @@ fmt:
     pnpm run --silent stylelint-fix & s=$!; \
     rc=0; for p in $d $o $l $s; do wait $p || rc=1; done; exit $rc
 
+# run all formatters
+fmt-all:
+    just fmt
+
 # lint the code
 lint:
     uv run ruff format --check --diff src tests dcat.py benchmark.py tabcomp.py
@@ -37,6 +41,13 @@ lint:
 # lint using pyright
 lint-pyright:
     PYRIGHT_PYTHON_FORCE_VERSION=latest uv run pyright src tests dcat.py benchmark.py tabcomp.py
+
+# --locked fails when pyproject.toml has drifted from uv.lock, so a stale lock
+# surfaces here instead of at the next `uv sync`.
+# audit dependencies for known vulnerabilities (needs network)
+audit:
+    uv audit --preview-features audit-command --locked
+    pnpm audit --audit-level high
 
 # run all linters
 lint-all:

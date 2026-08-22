@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Development
+
+- **`just fmt-all` and `just audit` exist.** Both sit in `py_project_template`'s justfile spine, and every project generated from it carries them, so colophon's `justfile-spine` drift check reported dogcat missing both. dogcat's own AGENTS.md names neither, so nothing here errored on them; an agent carrying the fleet's habits from another checkout would have. `fmt-all` is `just fmt` alone, since dogcat has no SQL and so no `fmt-sql`. `audit` runs `uv audit --preview-features audit-command --locked` and then `pnpm audit --audit-level high`; `--locked` fails when `pyproject.toml` has drifted from `uv.lock`, so a stale lock surfaces here instead of at the next `uv sync`. `uv audit` exits non-zero on any finding, so the pnpm line does not run in the same invocation while the Python side has one — today that is 27 known vulnerabilities across 64 packages, and pnpm run alone reports 11 more (2 moderate, 9 high) (closes dogcat-1vul).
+
 ## 0.14.1 (2026-08-11)
 
 ### Development
