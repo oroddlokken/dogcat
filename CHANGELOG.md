@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`dcat edit` saves again on an issue that has dependencies.** Every save aborted with `Dependency error: Unknown issue: blocked / Unknown issue: by: / Unknown issue: blocking:` and wrote no field. `_compose_deps_row` rendered the two deps Inputs with display text — "blocked by: a, b" — and only `enter_edit` rewrote them to bare ids; `dcat edit` composes straight into edit mode, so nothing stripped the prefix and `_parse_dep_ids` split "blocked by: a" into three ids. The same row also hardcoded `disabled=True`, so the fields were unreachable and the text could not be cleared by hand. Compose now honours `view_mode` for both value and disabled state, the way the rest of the row already did, so both routes into edit mode produce the same widget state. `dcat tui` was never affected — it enters edit through the `e` keypress (closes dogcat-1iie).
+
 ### Development
 
 - **`just fmt-all` and `just audit` exist.** Both sit in `py_project_template`'s justfile spine, and every project generated from it carries them, so colophon's `justfile-spine` drift check reported dogcat missing both. dogcat's own AGENTS.md names neither, so nothing here errored on them; an agent carrying the fleet's habits from another checkout would have. `fmt-all` is `just fmt` alone, since dogcat has no SQL and so no `fmt-sql`. `audit` runs `uv audit --preview-features audit-command --locked` and then `pnpm audit --audit-level high`; `--locked` fails when `pyproject.toml` has drifted from `uv.lock`, so a stale lock surfaces here instead of at the next `uv sync`. `uv audit` exits non-zero on any finding, so the pnpm line does not run in the same invocation while the Python side has one — today that is 27 known vulnerabilities across 64 packages, and pnpm run alone reports 11 more (2 moderate, 9 high) (closes dogcat-1vul).

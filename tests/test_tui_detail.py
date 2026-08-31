@@ -539,6 +539,97 @@ class TestDependencyInputs:
             assert depends_on.value == "dc-blocker"
             assert blocks.value == "dc-blocked"
 
+    @pytest.mark.asyncio
+    async def test_deps_inputs_hold_bare_ids_in_edit_mode(self) -> None:
+        """Composing straight into edit mode renders bare ids, not the summaries.
+
+        `dcat edit` builds the panel with view_mode=False, so it never reaches
+        ``enter_edit``; prefixed text left in the fields parsed as ids and aborted
+        every save (dogcat-1iie).
+        """
+        from dogcat.models import Dependency, DependencyType
+
+        issue = _make_issue()
+        storage = _make_storage()
+        storage.get_dependencies.return_value = [
+            Dependency(
+                issue_id="dc-test",
+                depends_on_id="dc-blocker",
+                dep_type=DependencyType.BLOCKS,
+            ),
+        ]
+        storage.get_dependents.return_value = [
+            Dependency(
+                issue_id="dc-blocked",
+                depends_on_id="dc-test",
+                dep_type=DependencyType.BLOCKS,
+            ),
+        ]
+        from textual.app import App, ComposeResult
+
+        screen = IssueEditorScreen(issue, storage)
+
+        class TestApp(App[None]):
+            def compose(self) -> ComposeResult:
+                yield Header()
+
+        app = TestApp()
+        async with app.run_test() as pilot:
+            app.push_screen(screen)
+            await pilot.pause()
+
+            depends_on = screen.query_one("#depends-on-input", Input)
+            blocks = screen.query_one("#blocks-input", Input)
+            assert depends_on.value == "dc-blocker"
+            assert blocks.value == "dc-blocked"
+            assert depends_on.disabled is False
+            assert blocks.disabled is False
+
+    @pytest.mark.asyncio
+    async def test_edit_mode_save_keeps_existing_deps(self, tmp_path: Any) -> None:
+        """A save from `dcat edit` commits the title and leaves both deps in place."""
+        from textual.app import App, ComposeResult
+
+        from dogcat.models import DependencyType
+        from dogcat.storage import JSONLStorage
+        from dogcat.tui.detail_panel import IssueDetailPanel
+
+        storage_path = tmp_path / ".dogcats" / "issues.jsonl"
+        storage = JSONLStorage(str(storage_path), create_dir=True)
+        storage.create(_make_issue(id="src", title="Original title"))
+        storage.create(_make_issue(id="blocker", title="Blocker"))
+        storage.create(_make_issue(id="blocked", title="Blocked"))
+        storage.add_dependency("dc-src", "dc-blocker", DependencyType.BLOCKS)
+        storage.add_dependency("dc-blocked", "dc-src", DependencyType.BLOCKS)
+
+        src = storage.get("dc-src")
+        assert src is not None
+        screen = IssueEditorScreen(src, storage)
+
+        class TestApp(App[None]):
+            def compose(self) -> ComposeResult:
+                yield Header()
+
+        app = TestApp()
+        async with app.run_test() as pilot:
+            app.push_screen(screen)
+            await pilot.pause()
+
+            panel = screen.query_one("#editor-panel", IssueDetailPanel)
+            panel.query_one("#title-input", Input).value = "Renamed"
+            panel.do_save()
+            # The save runs on a worker thread (dogcat-46i8).
+            await wait_for_workers(app)
+            await pilot.pause()
+
+        after = storage.get("dc-src")
+        assert after is not None
+        assert after.title == "Renamed"
+        assert [d.depends_on_id for d in storage.get_dependencies("dc-src")] == [
+            "dc-blocker"
+        ]
+        assert [d.issue_id for d in storage.get_dependents("dc-src")] == ["dc-blocked"]
+
 
 class TestDependencyViewSections:
     """Test enhanced dependency display in view mode."""

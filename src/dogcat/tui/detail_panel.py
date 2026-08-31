@@ -373,7 +373,7 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
         with VerticalScroll(id="editor-form"):
             yield from self._compose_meta_row(ro=ro)
             yield from self._compose_owner_row(ro=ro)
-            yield from self._compose_deps_row()
+            yield from self._compose_deps_row(ro=ro)
             yield from self._compose_body_sections(ro=ro)
 
     def _compose_title_bar(self, *, ro: bool) -> ComposeResult:
@@ -443,8 +443,14 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
                 disabled=ro,
             )
 
-    def _compose_deps_row(self) -> ComposeResult:
-        """Parent picker plus the read-only blocked-by / blocks summaries."""
+    def _compose_deps_row(self, *, ro: bool) -> ComposeResult:
+        """Parent picker plus the blocked-by / blocks fields.
+
+        View mode shows prefixed summaries ("blocked by: a, b"); edit mode shows
+        the bare ids ``_parse_dep_ids`` reads back on save, so `dcat edit` — which
+        composes straight into edit mode without passing through ``enter_edit`` —
+        gets the same widget state as the `e` keypress (dogcat-1iie).
+        """
         with Horizontal(classes="deps-row"):
             yield Button(
                 self._issue.parent or _PARENT_PLACEHOLDER,
@@ -455,22 +461,28 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
             )
             depends_on_ids = self._get_depends_on_ids()
             yield Input(
-                value=(
-                    "blocked by: " + ", ".join(depends_on_ids) if depends_on_ids else ""
-                ),
+                value=self._format_dep_value(depends_on_ids, "blocked by: ", ro=ro),
                 # A placeholder only renders when the field is empty, so
                 # "(no blockers)" restated the emptiness it was shown for.
-                placeholder="Blocked by",
+                placeholder="Blocked by" if ro else "Blocked by (comma-separated IDs)",
                 id="depends-on-input",
-                disabled=True,
+                disabled=ro,
             )
             blocks_ids = self._get_blocks_ids()
             yield Input(
-                value=("blocking: " + ", ".join(blocks_ids) if blocks_ids else ""),
-                placeholder="Blocks",
+                value=self._format_dep_value(blocks_ids, "blocking: ", ro=ro),
+                placeholder="Blocks" if ro else "Blocks (comma-separated IDs)",
                 id="blocks-input",
-                disabled=True,
+                disabled=ro,
             )
+
+    @staticmethod
+    def _format_dep_value(ids: list[str], prefix: str, *, ro: bool) -> str:
+        """Render dep ids as a view-mode summary or an editable id list."""
+        if not ids:
+            return ""
+        joined = ", ".join(ids)
+        return prefix + joined if ro else joined
 
     def _compose_body_sections(self, *, ro: bool) -> ComposeResult:
         """Yield description plus the collapsible notes/acceptance/design sections."""
