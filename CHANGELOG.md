@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.14.2 (2026-08-31)
+
 ### Fixed
 
 - **`dcat edit` saves again on an issue that has dependencies.** Every save aborted with `Dependency error: Unknown issue: blocked / Unknown issue: by: / Unknown issue: blocking:` and wrote no field. `_compose_deps_row` rendered the two deps Inputs with display text — "blocked by: a, b" — and only `enter_edit` rewrote them to bare ids; `dcat edit` composes straight into edit mode, so nothing stripped the prefix and `_parse_dep_ids` split "blocked by: a" into three ids. The same row also hardcoded `disabled=True`, so the fields were unreachable and the text could not be cleared by hand. Compose now honours `view_mode` for both value and disabled state, the way the rest of the row already did, so both routes into edit mode produce the same widget state. `dcat tui` was never affected — it enters edit through the `e` keypress (closes dogcat-1iie).
