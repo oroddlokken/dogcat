@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -240,6 +241,61 @@ class TestSplitPaneSaveCancel:
 
             # Title should be restored
             assert app.title == "dogcat"
+
+
+class TestConcurrentPanelSwap:
+    """Test that overlapping detail-panel swaps do not tear down a mount."""
+
+    @pytest.mark.asyncio
+    async def test_overlapping_shows_do_not_crash(self) -> None:
+        """Concurrent _show_issue_in_panel calls leave one working panel.
+
+        Each swap removes the panel and mounts a replacement. Before the
+        swap lock, a second swap starting mid-mount removed widgets whose
+        Mount message was still queued, and Textual's Select answers Mount
+        by querying its own children — so it raised NoMatches into the app
+        (dogcat-xur2, seen as a Python 3.10 CI failure).
+        """
+        issue = _make_issue(id="abc1", title="Test")
+        storage = _make_storage([issue])
+        app = DogcatTUI(storage)
+
+        async with app.run_test(size=(200, 40)) as pilot:
+            await pilot.pause()
+
+            await asyncio.gather(
+                *(app._show_issue_in_panel("dc-abc1") for _ in range(4)),
+            )
+            await pilot.pause()
+
+            from dogcat.tui.detail_panel import IssueDetailPanel
+
+            panels = app.query(IssueDetailPanel)
+            assert len(panels) == 1
+            # The surviving panel finished mounting: type, status and
+            # priority are the three Selects that compose the meta row.
+            assert len(panels.first().query("Select")) == 3
+
+    @pytest.mark.asyncio
+    async def test_overlapping_show_and_clear_do_not_crash(self) -> None:
+        """A clear racing a show still ends with a consistent right pane."""
+        issue = _make_issue(id="abc1", title="Test")
+        storage = _make_storage([issue])
+        app = DogcatTUI(storage)
+
+        async with app.run_test(size=(200, 40)) as pilot:
+            await pilot.pause()
+
+            await asyncio.gather(
+                app._show_issue_in_panel("dc-abc1"),
+                app._clear_detail_panel(),
+                app._show_issue_in_panel("dc-abc1"),
+            )
+            await pilot.pause()
+
+            from dogcat.tui.detail_panel import IssueDetailPanel
+
+            assert len(app.query(IssueDetailPanel)) == 1
 
 
 class TestEscapeInEditMode:

@@ -6,7 +6,13 @@ Releasing is the user's call. Read this before running anything in it.
 
 `just release-prep <version>` runs the lint and test suites, stamps `CHANGELOG.md`, resets an
 existing `release/v<version>` branch to `main`, force-pushes it with lease, pushes a
-`vX.Y.Z-rc.N` tag that fires `.github/workflows/release.yml`, and opens a pull request.
+`vX.Y.Z-rc.N` tag that fires `.github/workflows/release.yml`, and opens a pull request. An existing
+branch counts whether or not the clone has it — a remote-only branch is fetched, because branching
+off `main` instead forks a sibling commit no push can fast-forward.
+
+The tag goes out only after the branch push lands, and a rejected push deletes the local tag and
+stops. Both are there because one `push --tags` published `v0.14.2-rc.2` on a commit no branch
+reached (dogcat-43d6).
 
 Merging that pull request fires `.github/workflows/publish.yml`: it tags `vX.Y.Z`, uploads the wheel
 and sdist to PyPI, creates the GitHub release, and pushes a formula commit to the

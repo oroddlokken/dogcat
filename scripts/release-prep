@@ -97,8 +97,23 @@ fi
 
 # Create or reuse release branch in a temporary worktree
 NEEDS_FORCE_PUSH=false
+REUSING_BRANCH=true
 if git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
     git worktree add "$WORKTREE_DIR" "${BRANCH}"
+elif git ls-remote --exit-code --heads origin "${BRANCH}" >/dev/null 2>&1; then
+    # The branch exists on origin but not in this clone — a previous RC cut
+    # elsewhere, or a local branch since deleted. Fetch it. Branching off main
+    # instead would fork a sibling of the real tip that no push can
+    # fast-forward, which is how v0.14.2 stalled.
+    info "Fetching existing ${BRANCH} from origin"
+    git fetch --quiet origin "${BRANCH}:${BRANCH}"
+    git worktree add "$WORKTREE_DIR" "${BRANCH}"
+else
+    git worktree add -b "${BRANCH}" "$WORKTREE_DIR"
+    REUSING_BRANCH=false
+fi
+
+if [[ "$REUSING_BRANCH" == true ]]; then
     # If main has new commits the release branch doesn't include, hard-reset
     # the branch to main so any fixes that landed since the previous RC are
     # picked up. The changelog stamp gets re-created below.
@@ -108,8 +123,6 @@ if git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
         git -C "$WORKTREE_DIR" reset --hard main
         NEEDS_FORCE_PUSH=true
     fi
-else
-    git worktree add -b "${BRANCH}" "$WORKTREE_DIR"
 fi
 
 cleanup() { git worktree remove --force "$WORKTREE_DIR" 2>/dev/null || true; }
@@ -130,14 +143,18 @@ if [[ -n "$EXISTING_TAG" ]]; then
     warn "HEAD already tagged as ${EXISTING_TAG} — nothing changed, skipping tag."
     RC_TAG="$EXISTING_TAG"
 else
-    # Tag and push
+    # Tag, then push the branch and the tag as separate commands. Sending
+    # both with `push --tags` publishes the tag even when the branch ref is
+    # rejected, which strands an RC tag on a commit no branch reaches and
+    # fires the RC release workflow against it.
     git -C "$WORKTREE_DIR" tag -a "${RC_TAG}" -m "Release candidate ${RC_TAG}"
-    if [[ "$NEEDS_FORCE_PUSH" == true ]]; then
-        git push --force-with-lease -u origin "${BRANCH}"
-        git push origin "${RC_TAG}"
-    else
-        git push -u origin "${BRANCH}" --tags
+    PUSH_ARGS=(-u origin "${BRANCH}")
+    [[ "$NEEDS_FORCE_PUSH" == true ]] && PUSH_ARGS=(--force-with-lease "${PUSH_ARGS[@]}")
+    if ! git push "${PUSH_ARGS[@]}"; then
+        git -C "$WORKTREE_DIR" tag -d "${RC_TAG}" >/dev/null
+        die "Push of ${BRANCH} was rejected. Dropped the local ${RC_TAG} so a rerun cuts it again; nothing was published."
     fi
+    git push origin "${RC_TAG}"
     ok "RC tag ${RC_TAG} pushed"
 fi
 

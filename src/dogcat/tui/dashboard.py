@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -179,6 +180,12 @@ class DogcatTUI(App[None]):
         # One storage worker at a time: delete and reload both rewrite or
         # replace in-memory state that the other reads.
         self._storage_busy = False
+        # One detail-panel swap at a time. Swapping means remove-then-mount,
+        # and a second swap that starts mid-mount removes widgets whose Mount
+        # message is still queued. Textual's Select handles Mount by querying
+        # its own children, so it raises NoMatches into the app when that
+        # happens (dogcat-xur2).
+        self._panel_swap_lock = asyncio.Lock()
 
     def compose(self) -> ComposeResult:
         """Build the dashboard layout."""
@@ -222,6 +229,11 @@ class DogcatTUI(App[None]):
 
     async def _show_issue_in_panel(self, full_id: str) -> None:
         """Load an issue into the right-pane detail panel."""
+        async with self._panel_swap_lock:
+            await self._show_issue_in_panel_locked(full_id)
+
+    async def _show_issue_in_panel_locked(self, full_id: str) -> None:
+        """Body of _show_issue_in_panel; call with _panel_swap_lock held."""
         from dogcat.tui.detail_panel import IssueDetailPanel
 
         issue = self._storage.get(full_id)
@@ -234,7 +246,7 @@ class DogcatTUI(App[None]):
                 f"Issue {full_id} no longer exists",
                 severity="warning",
             )
-            await self._clear_detail_panel()
+            await self._clear_detail_panel_locked()
             return
 
         right_pane = self.query_one("#right-pane", Vertical)
@@ -255,6 +267,11 @@ class DogcatTUI(App[None]):
 
     async def _clear_detail_panel(self) -> None:
         """Remove the detail panel from the right pane."""
+        async with self._panel_swap_lock:
+            await self._clear_detail_panel_locked()
+
+    async def _clear_detail_panel_locked(self) -> None:
+        """Body of _clear_detail_panel; call with _panel_swap_lock held."""
         from dogcat.tui.detail_panel import IssueDetailPanel
 
         right_pane = self.query_one("#right-pane", Vertical)
