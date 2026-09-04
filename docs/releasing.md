@@ -30,6 +30,25 @@ starts with `release/v`; landing the same commits any other way skips publishing
 pnpm and the node deps. A step added to one has to be added to the other, or the failure surfaces
 only at release time, when the merge has already landed on `main` (dogcat-11yx).
 
+## `just check-sdist` guards what reaches PyPI
+
+`scripts/check-sdist` fails when the source distribution exceeds 1 MiB or holds a top-level entry
+outside its allowlist. `pyproject.toml`'s `[tool.hatch.build.targets.sdist]` include-list is what
+keeps the tarball to `src/`, `docs/` and four files; the script is the alarm for that section being
+loosened, which nothing else catches until the release is already published (dogcat-sin0).
+
+The entry check earns its place beside the size one. hatchling reads the root `.gitignore` alone, so
+a directory a tool gitignores from inside itself stays invisible to `git status` and still ships —
+`.hypothesis/` rode along in 21 releases that way, and `.pytest_cache/` caches identically. When the
+script rejects a directory that belongs in the sdist, add it to the include-list and to `ALLOWED` in the
+script; when it rejects a cache, gitignore it at the repo root, which is the copy hatchling reads.
+
+It runs three times, and the placements are deliberate. `ci.yml` runs it on every pull request, which
+is where a loosened include-list should be caught. `publish.yml` runs it **before** the tag push,
+because that push is the first irreversible step and a guard firing after it would strand `vX.Y.Z` on
+origin with no release behind it. `publish-pypi` runs it once more against its own build, which is
+the only check standing over the exact bytes PyPI receives.
+
 ## Homebrew formula
 
 `publish.yml` and `release.yml` rewrite the `url` and `sha256` fields in `Formula/dogcat.rb` and

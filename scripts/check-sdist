@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Fails when the source distribution carries anything but the package and its
+# docs. pyproject.toml's [tool.hatch.build.targets.sdist] include-list is what
+# keeps the tarball small; this is the alarm for that section being loosened,
+# which nothing else would catch until the release was already on PyPI.
+#
+# The entry check matters as much as the size one. hatchling reads the root
+# .gitignore alone, so a directory a tool gitignores from inside itself is
+# invisible to git and still lands in the tarball — .hypothesis/ rode along in
+# 21 releases that way, and .pytest_cache/ caches identically (dogcat-sin0).
+
+MAX_BYTES=$((1024 * 1024))
+
+# Every top-level name the tarball may contain. hatchling adds PKG-INFO,
+# pyproject.toml and .gitignore itself; the rest come from the include-list.
+ALLOWED=(
+    .gitignore
+    CHANGELOG.md
+    LICENSE
+    PKG-INFO
+    README.md
+    docs
+    pyproject.toml
+    src
+)
+
+# A tarball missing this passes every other check while being useless.
+REQUIRED_MEMBER="src/dogcat/__init__.py"
+
+if [[ -t 1 ]]; then
+    GREEN='\033[0;32m' RED='\033[0;31m' BOLD='\033[1m' DIM='\033[2m' RESET='\033[0m'
+else
+    GREEN='' RED='' BOLD='' DIM='' RESET=''
+fi
+
+info() { printf "${BOLD}▸${RESET} %s\n" "$*"; }
+ok()   { printf "${GREEN}✓${RESET} %s\n" "$*"; }
+die()  { printf "${RED}✗${RESET} %s\n" "$*" >&2; exit 1; }
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [--max-bytes N] [<tarball>]
+
+Check a built sdist for unexpected contents and excessive size.
+
+Arguments:
+  <tarball>       Path to the .tar.gz. Defaults to the single dist/*.tar.gz.
+
+Options:
+  --max-bytes N   Size ceiling in bytes (default: ${MAX_BYTES})
+  -h, --help      Show this help
+EOF
+}
+
+TARBALL=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --max-bytes) MAX_BYTES="${2:?--max-bytes needs a value}"; shift 2 ;;
+        -h|--help)   usage; exit 0 ;;
+        -*)          die "Unknown option: $1" ;;
+        *)           TARBALL="$1"; shift ;;
+    esac
+done
+
+if [[ -z "$TARBALL" ]]; then
+    shopt -s nullglob
+    candidates=(dist/*.tar.gz)
+    shopt -u nullglob
+    case ${#candidates[@]} in
+        0) die "No dist/*.tar.gz found. Run 'uv build --sdist' first." ;;
+        1) TARBALL="${candidates[0]}" ;;
+        *) die "${#candidates[@]} tarballs in dist/. Name one, or clear the directory." ;;
+    esac
+fi
+
+[[ -f "$TARBALL" ]] || die "Not a file: $TARBALL"
+
+info "Checking $(basename "$TARBALL")"
+
+size=$(wc -c <"$TARBALL" | tr -d ' ')
+if (( size > MAX_BYTES )); then
+    die "$(printf 'sdist is %s bytes, over the %s ceiling.' "$size" "$MAX_BYTES")
+  Check [tool.hatch.build.targets.sdist] in pyproject.toml, then list the
+  tarball to see what got in: tar tzf $TARBALL"
+fi
+ok "$(printf 'Size %s bytes, under the %s ceiling' "$size" "$MAX_BYTES")"
+
+# Strip the leading dogcat-<version>/ component; the root entry itself
+# collapses to an empty line, which the NF guard drops.
+members=$(tar tzf "$TARBALL" | sed 's|^[^/]*/||')
+entries=$(printf '%s\n' "$members" | awk -F/ 'NF && $1 != "" { print $1 }' | sort -u)
+
+unexpected=$(comm -23 \
+    <(printf '%s\n' "$entries") \
+    <(printf '%s\n' "${ALLOWED[@]}" | sort))
+
+if [[ -n "$unexpected" ]]; then
+    printf "${RED}✗${RESET} Unexpected top-level entries in the sdist:\n" >&2
+    printf "${DIM}    %s${RESET}\n" $unexpected >&2
+    die "Add them to [tool.hatch.build.targets.sdist] in pyproject.toml if they
+  belong, or to ALLOWED in this script. A tool's own cache directory does not
+  belong — gitignore it at the repo root, which is the copy hatchling reads."
+fi
+ok "$(printf 'Top-level entries all expected (%s)' "$(printf '%s\n' "$entries" | wc -l | tr -d ' ')")"
+
+if ! printf '%s\n' "$members" | grep -qxF "$REQUIRED_MEMBER"; then
+    die "$REQUIRED_MEMBER is missing — the tarball holds no package."
+fi
+ok "Package present"

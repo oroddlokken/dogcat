@@ -43,3 +43,8 @@ jobs:
 
       - name: Test
         run: uv run pytest --timeout 30 -n 8 tests
+
+      # Catches a loosened sdist include-list on the pull request that causes
+      # it. publish.yml runs the same check, but only once the merge has landed.
+      - name: Check sdist
+        run: uvx --from rust-just just check-sdist

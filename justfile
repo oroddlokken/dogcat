@@ -82,6 +82,17 @@ test-perf:
 generate-fixture tag="":
     python tests/generate_fixture.py {{tag}}
 
+# build an sdist and check it for unexpected contents and size
+check-sdist:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Built into a temp dir rather than dist/, which holds artifacts from
+    # earlier builds that would make the tarball ambiguous.
+    out=$(mktemp -d)
+    trap 'rm -rf "$out"' EXIT
+    uv build --sdist --out-dir "$out" -q
+    ./scripts/check-sdist "$out"/*.tar.gz
+
 # show next possible versions (patch or minor bump)
 next:
     #!/usr/bin/env bash

@@ -49,6 +49,13 @@ jobs:
       - name: Test
         run: uv run pytest --timeout 30 -n 8 tests
 
+      # Ahead of the tag, not after the build below, because the tag push is
+      # the first irreversible step: a guard that fired later would leave
+      # vX.Y.Z on origin with no release behind it. The version this build
+      # stamps is a dev string, which the contents and size do not depend on.
+      - name: Check sdist
+        run: uvx --from rust-just just check-sdist
+
       - name: Extract version from branch name
         id: version
         run: |
@@ -113,6 +120,12 @@ jobs:
 
       - name: Build sdist and wheel
         run: uv build
+
+      # This job builds its own tarball, so this is the only check standing
+      # over the exact bytes PyPI receives. A version there can never be
+      # reused, which is what makes the last gate worth its duplication.
+      - name: Check sdist
+        run: ./scripts/check-sdist
 
       - name: Publish to PyPI
         # v1.14.2 is the first release bundling Twine 7, which accepts the
