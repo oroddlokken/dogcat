@@ -32,6 +32,19 @@ version-file = "src/dogcat/_version.py"
 [tool.hatch.build.targets.wheel]
 packages = ["src/dogcat"]
 
+[tool.hatch.build.targets.sdist]
+# An include-list, not an exclude-list, because hatchling reads the root
+# .gitignore alone: a nested one, like the .hypothesis/ cache writes for itself,
+# left 458 files in every published sdist. tests/ stays out because nothing
+# builds from the tarball — both Homebrew formulas pin the wheel (dogcat-q8g6).
+include = [
+  "/src",
+  "/docs",
+  "/README.md",
+  "/CHANGELOG.md",
+  "/LICENSE",
+]
+
 [project.optional-dependencies]
 web = [
     "fastapi>=0.115.0",

@@ -6,6 +6,7 @@ node_modules
 htmlcov
 .coverage*
 .testmondata*
+.hypothesis/
 .DS_Store
 scratch
 src/dogcat/_version.py
