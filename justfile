@@ -104,3 +104,6 @@ next:
 release-prep *args:
     ./scripts/release-prep {{args}}
     git pull origin main
+
+uv-sync-reinstall:
+    uv sync --reinstall-package dogcat
