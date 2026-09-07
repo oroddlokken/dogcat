@@ -114,6 +114,7 @@ next:
 # prepare a release: create RC tag, push branch, open PR
 release-prep *args:
     ./scripts/release-prep {{args}}
+    git fetch --all --tags --prune
     git pull origin main
 
 uv-sync-reinstall:
