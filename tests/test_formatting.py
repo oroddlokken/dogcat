@@ -601,7 +601,7 @@ class TestLegendHiddenCount:
 
 
 class TestBlockedStatusPrecedence:
-    """Test that advanced statuses take precedence over blocked display symbol."""
+    """Test that a status saying more than "blocked" takes display precedence."""
 
     def test_in_review_not_overridden_by_blocked_brief(self) -> None:
         """In-review issues keep their own symbol even with open dependencies."""
@@ -656,8 +656,12 @@ class TestBlockedStatusPrecedence:
         output = format_issue_brief(issue, blocked_ids=blocked_ids)
         assert "■" in output
 
-    def test_in_progress_still_overridden_by_blocked_brief(self) -> None:
-        """In-progress issues with dependencies should still show as blocked."""
+    def test_in_progress_not_overridden_by_blocked_brief(self) -> None:
+        """In-progress issues keep their own symbol even with open dependencies.
+
+        Work that is underway is not blocked, and ``dcat pr`` never claimed it
+        was — the glyph now matches there (dogcat-132j).
+        """
         issue = Issue(
             id="ip1",
             namespace="dc",
@@ -666,7 +670,8 @@ class TestBlockedStatusPrecedence:
         )
         blocked_ids = {"dc-ip1"}
         output = format_issue_brief(issue, blocked_ids=blocked_ids)
-        assert "■" in output
+        assert "◐" in output
+        assert "■" not in output
 
 
 class TestCommentCountSuffix:

@@ -1,11 +1,11 @@
 """Shared status-glyph resolution for issue renderers (CLI, TUI, web).
 
 Which glyph and color an issue shows is a subtle rule: a dependency-blocked
-issue displays the blocked "■" glyph, UNLESS its status is one of the
-advanced states (in_review / deferred / closed), which take display
-precedence. ``dcat list``, the Rich table and the TUI all render through here,
-which is what keeps the three from disagreeing — re-implementing the rule at a
-new surface is how they start to.
+issue displays the blocked "■" glyph, UNLESS its status already says more
+than the override would (in_progress / in_review / deferred / closed), which
+takes display precedence. ``dcat list``, the Rich table and the TUI all render
+through here, which is what keeps the three from disagreeing — re-implementing
+the rule at a new surface is how they start to.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ def is_blocked_display(issue: Issue, blocked_ids: set[str] | None) -> bool:
     """Return True when the issue should render with the blocked glyph.
 
     An issue renders as blocked when it is in ``blocked_ids`` and its status
-    is not one of the display-exempt advanced states.
+    is not one of the display-exempt statuses.
     """
     return bool(
         blocked_ids

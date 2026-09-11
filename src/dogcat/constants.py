@@ -265,11 +265,11 @@ EVENT_SYMBOLS: dict[str, str] = {
 TERMINAL_STATUSES: frozenset[str] = frozenset({"closed", "tombstone"})
 
 # Statuses where a dependency-blocked issue keeps its natural status glyph
-# instead of the blocked "■" — these advanced states take display
-# precedence over the blocked override. Shared by every issue renderer
+# instead of the blocked "■" — each already says what the override would hide:
+# work underway, under review, parked, or done. Shared by every issue renderer
 # (dcat list, the Rich table, the TUI) so they never disagree.
 BLOCKED_DISPLAY_EXEMPT_STATUSES: frozenset[str] = frozenset(
-    {"in_review", "deferred", "closed"},
+    {"in_progress", "in_review", "deferred", "closed"},
 )
 
 
