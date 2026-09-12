@@ -105,6 +105,16 @@ WithoutCommentsOpt = Annotated[
     bool,
     typer.Option("--without-comments", help="Only show issues that have no comments"),
 ]
+# A calendar date, not a datetime: the filter starts at local midnight so
+# the day named is included. Lifts the default limit of 10 so a date range
+# is not silently cut short.
+SinceOpt = Annotated[
+    str | None,
+    typer.Option(
+        "--since",
+        help="Only show entries on or after this date (YYYY-MM-DD, inclusive)",
+    ),
+]
 
 # -- Display ---------------------------------------------------------------
 # Both flags name the other: passing them together exits 1

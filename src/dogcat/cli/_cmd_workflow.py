@@ -26,8 +26,10 @@ from ._helpers import (
     check_comments_exclusive,
     get_default_operator,
     get_storage,
+    is_since,
     load_open_inbox_proposals,
     parse_duration,
+    parse_since,
     resolve_limit,
     with_ns_shim,
 )
@@ -48,6 +50,7 @@ from ._list_options import (
     OwnerFilterOpt,
     ParentFilterOpt,
     PriorityFilterOpt,
+    SinceOpt,
     TableOpt,
     TreeOpt,
     WithoutCommentsOpt,
@@ -871,12 +874,14 @@ def register(app: typer.Typer) -> None:
         manual: ManualFilterOpt = False,
         has_comments: HasCommentsOpt = False,
         without_comments: WithoutCommentsOpt = False,
+        since: SinceOpt = None,
         json_output: JsonOpt = False,
         dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
         """Show recently closed issues (oldest first).
 
         Displays the last N closed issues in chronological order.
+        With --since, every issue closed on or after that date.
         """
         set_json(json_output)
         try:
@@ -890,9 +895,14 @@ def register(app: typer.Typer) -> None:
             )
 
             storage = get_storage(dogcats_dir)
-            final_limit = resolve_limit(limit_arg, limit, default=10)
+            since_dt = parse_since(since) if since is not None else None
+            final_limit = resolve_limit(
+                limit_arg, limit, default=None if since_dt else 10
+            )
             event_log = EventLog(storage.dogcats_dir)
             events = [e for e in event_log.read() if e.event_type == "closed"]
+            if since_dt is not None:
+                events = [e for e in events if is_since(e.timestamp, since_dt)]
 
             # Apply namespace filter (skip if --all-namespaces)
             if not all_namespaces:
@@ -967,6 +977,7 @@ def register(app: typer.Typer) -> None:
         manual: ManualFilterOpt = False,
         has_comments: HasCommentsOpt = False,
         without_comments: WithoutCommentsOpt = False,
+        since: SinceOpt = None,
         json_output: JsonOpt = False,
         dogcats_dir: DogcatsDirOpt = ".dogcats",
     ) -> None:
@@ -974,13 +985,17 @@ def register(app: typer.Typer) -> None:
 
         Displays the last N issues sorted by created_at date,
         with the oldest of the recent issues at the top.
+        With --since, every issue created on or after that date.
         """
         set_json(json_output)
         try:
             storage = get_storage(dogcats_dir)
+            since_dt = parse_since(since) if since is not None else None
             issues = [
                 i for i in storage.list() if i.status.value not in TERMINAL_STATUSES
             ]
+            if since_dt is not None:
+                issues = [i for i in issues if is_since(i.created_at, since_dt)]
 
             issues = apply_common_filters(
                 issues,
@@ -993,7 +1008,9 @@ def register(app: typer.Typer) -> None:
                 storage=storage,
             )
 
-            final_limit = resolve_limit(limit_arg, limit, default=10)
+            final_limit = resolve_limit(
+                limit_arg, limit, default=None if since_dt else 10
+            )
             # Sort descending to select the N most recent, then reverse for display
             issues.sort(key=lambda i: i.created_at, reverse=True)
 

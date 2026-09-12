@@ -818,6 +818,7 @@ def register(app: typer.Typer) -> None:
   See recently closed issues:
 
     dcat recently-closed
+    dcat recently-closed --since 2026-09-01   # everything closed on or after that day
 
   View change history (who changed what, when):
 

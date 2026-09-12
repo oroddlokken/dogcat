@@ -603,6 +603,35 @@ def parse_duration(value: str) -> datetime:
     raise ValueError(msg)
 
 
+def parse_since(value: str) -> datetime:
+    """Parse a ``--since`` date into local midnight, timezone-aware.
+
+    Raises:
+        typer.BadParameter: If ``value`` is not a ``YYYY-MM-DD`` date.
+    """
+    from datetime import date
+
+    try:
+        day = date.fromisoformat(value.strip())
+    except ValueError:
+        msg = f"--since expects YYYY-MM-DD (got '{value}')"
+        raise typer.BadParameter(msg) from None
+    return datetime(day.year, day.month, day.day).astimezone()
+
+
+def is_since(timestamp: datetime | str, since: datetime) -> bool:
+    """Return whether ``timestamp`` is at or after ``since``.
+
+    Accepts the ISO string an :class:`EventRecord` carries or the
+    ``datetime`` on an :class:`Issue`. A naive value — records from
+    before timestamps carried an offset — is read as local time.
+    """
+    ts = datetime.fromisoformat(timestamp) if isinstance(timestamp, str) else timestamp
+    if ts.tzinfo is None:
+        ts = ts.astimezone()
+    return ts >= since
+
+
 def _parse_priority_value(value: str) -> int:
     """Parse a priority value that can be an int (0-4), pINT (p0-p4), or a name.
 

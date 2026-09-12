@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`dcat recently-closed` and `dcat recently-added` take `--since YYYY-MM-DD`.** Both commands could only answer "the last N", so a question like "what closed this week" meant guessing a count and checking the dates by eye. `--since` filters on the close event's timestamp for `recently-closed` and on `created_at` for `recently-added`, from local midnight on the named day, so the day itself counts. With `--since` and no explicit limit every match shows; a positional count or `--limit` still caps it (closes dogcat-4eie).
+
 ### Changed
 
 - **The published sdist is 0.35 MiB instead of 4.81 MiB.** `pyproject.toml` declared only `[tool.hatch.build.targets.wheel]`, so hatchling fell back to sweeping the whole working tree into the source distribution: README screenshots under `static/` (2.91 MiB compressed), the project's own `.dogcats/` issue store (0.68 MiB), `tests/` (0.47 MiB), and whichever `.hypothesis/` example cache the release machine happened to hold. That last one hid: Hypothesis writes a `.hypothesis/.gitignore` containing `*`, so git never surfaced the directory in `git status`, but hatchling consults the root `.gitignore` alone and packed 458 cache files into every release regardless. Twenty-one releases went out that way, 83.8 MiB against the project's PyPI quota. The new `[tool.hatch.build.targets.sdist]` section is an include-list rather than a list of exclusions, so the next unignored directory at the repo root stays out by default instead of shipping until someone notices; `.hypothesis/` also joins the root `.gitignore`, which is the copy hatchling actually reads. What ships is `src/`, `docs/`, `README.md`, `CHANGELOG.md` and `LICENSE`, plus the `pyproject.toml`, `PKG-INFO` and `.gitignore` hatchling adds itself. A wheel built from the sdist is byte-identical to one built from the repo — same 92 entries, matching hashes — so the tarball is still a complete build input. `tests/` is gone from it, which costs a downstream packager the suite; nothing consumes the sdist today, since both Homebrew formulas pin the wheel's URL and sha256 (closes dogcat-q8g6).
