@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from textual.app import App
+    from textual.geometry import Size
+    from textual.pilot import Pilot
 
 
 async def wait_for_workers(app: App[Any]) -> None:
@@ -19,3 +21,20 @@ async def wait_for_workers(app: App[Any]) -> None:
     an unbounded wait there hangs the suite instead of failing it.
     """
     await app.workers.wait_for_complete()  # pyright: ignore[reportUnknownMemberType]
+
+
+async def wait_for_app_size(pilot: Pilot[Any], size: Size, *, tries: int = 50) -> None:
+    """Pause until the app has handled a posted ``Resize``.
+
+    ``Pilot.pause`` returns once the event loop goes idle, which does not mean
+    a posted message has been processed, and ``App.size`` only changes when
+    ``App._on_resize`` handles one. Reading the size after a single pause
+    passes on a fast machine and loses the race on a loaded CI runner
+    (dogcat-1mvy).
+    """
+    for _ in range(tries):
+        await pilot.pause()
+        if pilot.app.size == size:
+            return
+    msg = f"resize not processed: app.size is {pilot.app.size}, expected {size}"
+    raise AssertionError(msg)

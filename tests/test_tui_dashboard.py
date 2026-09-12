@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from textual.widgets import Button, OptionList, Static
-from tui_test_helpers import wait_for_workers
+from tui_test_helpers import wait_for_app_size, wait_for_workers
 
 from dogcat.models import Issue
 from dogcat.tui.dashboard import ConfirmDeleteScreen, DogcatTUI
@@ -740,7 +740,7 @@ class TestInlineEditDataLossGuards:
             # Send a resize event below the split threshold (200 cols / 40 rows)
             shrunk = Size(80, 24)
             app.post_message(Resize(shrunk, shrunk))
-            await pilot.pause()
+            await wait_for_app_size(pilot, shrunk)
 
             # Panel must still be present and still hold the typed text
             still_editing = app._is_panel_editing()
@@ -778,7 +778,7 @@ class TestInlineEditDataLossGuards:
             # Shrink — the guard preserves split mode mid-edit
             shrunk = Size(80, 24)
             app.post_message(Resize(shrunk, shrunk))
-            await pilot.pause()
+            await wait_for_app_size(pilot, shrunk)
             assert app._split_mode
 
             # Save — the post-save reapply must now collapse split mode
