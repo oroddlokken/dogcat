@@ -34,7 +34,7 @@ from dogcat.constants import (
     parse_labels,
 )
 from dogcat.models import DependencyType, UpdateRequest, is_manual_issue
-from dogcat.tui.shared import SHARED_CSS, make_issue_label
+from dogcat.tui.shared import SHARED_CSS, MountSafeSelect, make_issue_label
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -393,21 +393,21 @@ class IssueDetailPanel(Widget, can_focus=True, can_focus_children=True):
     def _compose_meta_row(self, *, ro: bool) -> ComposeResult:
         """Type / status / priority selects plus the manual checkbox."""
         with Horizontal(classes="field-row"):
-            yield Select(
+            yield MountSafeSelect(
                 options=[(label, val) for label, val in TYPE_OPTIONS],
                 value=self._issue.issue_type.value,
                 id="type-input",
                 allow_blank=False,
                 disabled=ro,
             )
-            yield Select(
+            yield MountSafeSelect(
                 options=[(label, val) for label, val in STATUS_OPTIONS],
                 value=self._issue.status.value,
                 id="status-input",
                 allow_blank=False,
                 disabled=ro,
             )
-            yield Select(
+            yield MountSafeSelect(
                 options=[(label, val) for label, val in PRIORITY_OPTIONS],
                 value=self._issue.priority,
                 id="priority-input",

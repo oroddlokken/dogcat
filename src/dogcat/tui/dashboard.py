@@ -198,13 +198,16 @@ class DogcatTUI(App[None]):
                 yield Static("Select an issue to view details", id="detail-placeholder")
         yield Footer()
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         """Populate the list on startup."""
         self._load_issues()
         option_list = self.query_one("#issue-list", OptionList)
         if option_list.option_count > 0:
             option_list.highlighted = 0
         option_list.focus()
+        # Replay split mode against the pane that now exists, in case a
+        # resize set it while compose() had not run.
+        await self.watch__split_mode(self._split_mode)
 
     def on_resize(self, event: Resize) -> None:
         """Toggle split-pane mode based on terminal size."""
@@ -217,7 +220,13 @@ class DogcatTUI(App[None]):
 
     async def watch__split_mode(self, split_active: bool) -> None:
         """React to split-mode changes."""
-        main_pane = self.query_one("#main-pane", Horizontal)
+        try:
+            main_pane = self.query_one("#main-pane", Horizontal)
+        except NoMatches:
+            # on_resize can assign _split_mode before compose() mounts the
+            # pane. on_mount replays the current value, so returning defers
+            # the work rather than dropping it (dogcat-1mvy).
+            return
         if split_active:
             main_pane.add_class("split-active")
             full_id = self._get_selected_issue_id()

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -340,3 +340,103 @@ class TestEscapeInEditMode:
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
             assert app.check_action("quit", ()) is True
+
+
+class TestSplitModeBeforeMount:
+    """Test that a resize arriving ahead of compose() is not lost."""
+
+    @pytest.mark.asyncio
+    async def test_split_mode_applied_without_pane_does_not_raise(self) -> None:
+        """The watcher returns quietly when #main-pane is not in the DOM.
+
+        on_resize assigns _split_mode, and Textual can deliver a resize
+        before compose() has built the pane. The watcher used to query
+        #main-pane unguarded and raise NoMatches into the app (dogcat-1mvy).
+        """
+        issue = _make_issue(id="abc1", title="Test")
+        storage = _make_storage([issue])
+        app = DogcatTUI(storage)
+
+        async with app.run_test(size=(200, 40)) as pilot:
+            await pilot.pause()
+            await app.query_one("#main-pane").remove()
+
+            await app.watch__split_mode(True)
+
+            assert not app.query("#main-pane")
+
+    @pytest.mark.asyncio
+    async def test_mount_replays_split_mode_set_before_compose(self) -> None:
+        """State set while the pane was missing lands once it exists.
+
+        set_reactive writes _split_mode without running the watcher, which
+        is the state a dropped pre-mount toggle leaves behind.
+        """
+        issue = _make_issue(id="abc1", title="Test")
+        storage = _make_storage([issue])
+        app = DogcatTUI(storage)
+        app.set_reactive(DogcatTUI._split_mode, True)
+
+        async with app.run_test(size=(200, 40)) as pilot:
+            await pilot.pause()
+
+            assert app.query_one("#main-pane").has_class("split-active")
+
+
+class TestMountSafeSelect:
+    """Test the Select guard against children vanishing mid-mount."""
+
+    @pytest.mark.asyncio
+    async def test_value_set_with_label_removed_does_not_raise(self) -> None:
+        """A value applied to a torn-down select is absorbed.
+
+        Textual's Select answers Mount by pushing the value through
+        SelectCurrent.update, which queries #label. A panel swap that
+        removes the subtree mid-mount made that raise into the app
+        (dogcat-5obm).
+        """
+        from textual.widgets import Select
+        from textual.widgets._select import SelectCurrent
+
+        issue = _make_issue(id="abc1", title="Test")
+        storage = _make_storage([issue])
+        app = DogcatTUI(storage)
+
+        async with app.run_test(size=(200, 40)) as pilot:
+            await pilot.pause()
+            await app._show_issue_in_panel("dc-abc1")
+            await pilot.pause()
+
+            select = cast("Select[str]", app.query_one("#status-input", Select))
+            await select.query_one(SelectCurrent).query("#label").remove()
+
+            select.value = "closed"
+            await pilot.pause()
+
+            assert select.value == "closed"
+
+    @pytest.mark.asyncio
+    async def test_value_reaches_label_that_comes_back(self) -> None:
+        """A swallowed update is re-applied once the child exists again."""
+        from textual.widgets import Select, Static
+        from textual.widgets._select import SelectCurrent
+
+        issue = _make_issue(id="abc1", title="Test")
+        storage = _make_storage([issue])
+        app = DogcatTUI(storage)
+
+        async with app.run_test(size=(200, 40)) as pilot:
+            await pilot.pause()
+            await app._show_issue_in_panel("dc-abc1")
+            await pilot.pause()
+
+            select = cast("Select[str]", app.query_one("#status-input", Select))
+            current = select.query_one(SelectCurrent)
+            await current.query("#label").remove()
+
+            select.value = "closed"
+            await current.mount(Static(id="label"))
+            await pilot.pause()
+
+            label = current.query_one("#label", Static)
+            assert "Closed" in str(label.render())

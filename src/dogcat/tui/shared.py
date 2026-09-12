@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import contextlib
+from typing import TYPE_CHECKING, Any
 
 from rich.text import Text
+from textual.css.query import NoMatches
+from textual.widgets import Select
 
 from dogcat.constants import PRIORITY_COLORS, STATUS_COLORS, TYPE_COLORS
 from dogcat.models import is_manual_issue
@@ -106,3 +109,29 @@ def make_issue_label(
     if is_manual_issue(issue.metadata):
         label.append(" [manual]", style="yellow")
     return label
+
+
+class MountSafeSelect(Select[Any]):
+    """Select that tolerates losing its children while Mount is in flight.
+
+    `Select._on_mount` pushes the constructor's `value` through
+    `SelectCurrent.update`, which queries `#label`. Textual guards the
+    `SelectCurrent` lookup one level up but not that query or the
+    `SelectOverlay` lookup beside it, so a panel swap that removes the
+    subtree mid-mount raises NoMatches into the app (dogcat-5obm).
+    """
+
+    def _watch_value(self, value: Any) -> None:
+        try:
+            super()._watch_value(value)
+        except NoMatches:
+            self._value = value
+            if self.is_mounted:
+                # The children may be mid-compose rather than gone; retry so a
+                # surviving select still shows its label.
+                self.call_after_refresh(self._reapply_value, value)
+
+    def _reapply_value(self, value: Any) -> None:
+        """Re-run the value watcher once the DOM has settled."""
+        with contextlib.suppress(NoMatches):
+            super()._watch_value(value)
