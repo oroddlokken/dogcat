@@ -11,8 +11,6 @@ from typer.testing import CliRunner
 
 from dogcat.cli import app
 from dogcat.event_log import EventLog, EventRecord
-from dogcat.idgen import IDGenerator
-from dogcat.models import Issue
 from dogcat.storage import JSONLStorage
 
 if TYPE_CHECKING:
@@ -31,15 +29,8 @@ def dogcats_dir(tmp_path: Path) -> Path:
 
 def _create_at(dogcats_dir: Path, title: str, when: datetime) -> str:
     storage = JSONLStorage(str(dogcats_dir / "issues.jsonl"))
-    idgen = IDGenerator(existing_ids=storage.get_issue_ids(), namespace="dc")
-    issue = Issue(
-        id=idgen.generate_issue_id(title, timestamp=when, namespace="dc"),
-        title=title,
-        namespace="dc",
-        created_at=when,
-        updated_at=when,
-    )
-    return storage.create(issue).full_id
+    issue = storage.create_issue(title=title, namespace="dc", timestamp=when)
+    return issue.full_id
 
 
 def _close_at(dogcats_dir: Path, issue_id: str, title: str, when: datetime) -> None:

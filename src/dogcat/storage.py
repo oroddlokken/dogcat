@@ -748,6 +748,8 @@ class JSONLStorage(EventEmitterMixin):
             duplicate_of=duplicate_of,
             created_by=created_by,
             metadata=dict(metadata) if metadata else {},
+            created_at=ts,
+            updated_at=ts,
         )
         return self.create(issue)
 

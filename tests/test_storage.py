@@ -2988,6 +2988,26 @@ class TestCreateIssueFactory:
         assert issue.created_by == "bob"
         assert issue.metadata == {"manual": True}
 
+    def test_create_issue_timestamp_seeds_created_and_updated(
+        self, storage: JSONLStorage
+    ) -> None:
+        """``timestamp`` lands on created_at and updated_at, and survives reload.
+
+        Regression for dogcat-2wng: only the ID generator saw it, so a
+        backdated import or test fixture still stamped "now".
+        """
+        from datetime import datetime, timezone
+
+        when = datetime(2020, 5, 17, 9, 30, tzinfo=timezone.utc)
+        issue = storage.create_issue(title="Backdated", namespace="t", timestamp=when)
+        assert issue.created_at == when
+        assert issue.updated_at == when
+
+        reloaded = JSONLStorage(str(storage.path)).get(issue.full_id)
+        assert reloaded is not None
+        assert reloaded.created_at == when
+        assert reloaded.updated_at == when
+
     def test_create_issue_unique_ids(self, storage: JSONLStorage) -> None:
         """Two calls with the same title under the same namespace get distinct ids."""
         a = storage.create_issue(title="Same title", namespace="t")
