@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from html.parser import HTMLParser as _HTMLParser
 from typing import TYPE_CHECKING
 
@@ -176,6 +177,22 @@ class TestGetForm:
         assert "static/js/propose.js" in resp.text
         # No inline IIFE remains.
         assert "function()" not in resp.text
+
+    def test_static_urls_carry_the_file_mtime(self, client: TestClient) -> None:
+        """An upgrade changes the stylesheet and script URLs, so no stale copy."""
+        resp = client.get("/")
+
+        assert re.search(r"static/css/propose\.css\?mtime=[1-9]\d*", resp.text)
+        assert re.search(r"static/js/propose\.js\?mtime=[1-9]\d*", resp.text)
+
+    def test_a_stamped_static_url_still_serves_the_file(
+        self,
+        client: TestClient,
+    ) -> None:
+        """The stamp is a query string the static mount ignores."""
+        resp = client.get("/static/css/propose.css?mtime=1")
+
+        assert resp.status_code == 200
 
 
 class TestNamespacePopulation:

@@ -32,7 +32,10 @@ and no CDN URLs — the browser drops them silently, and a test asserts the poli
 The propose server is FastAPI plus Jinja2: one template
 (`src/dogcat/web/propose/templates/propose.html`), one stylesheet, one script. Assets live under
 `src/dogcat/web/static/` and mount at `/static`, so reference them as
-`{{ url_for('static', path='css/propose.css') }}`.
+`{{ url_for('static', path='css/propose.css') }}?mtime={{ static_mtime('css/propose.css') }}`.
+`static_mtime` reaches the template through a context processor in `create_app`
+(`src/dogcat/web/propose/__init__.py`) and stamps the URL with the file's mtime, so a browser
+fetches the new file after an upgrade.
 
 `dcat web propose` binds `127.0.0.1` unless `DCAT_WEB_HOST` overrides it, and has no
 authentication; CSRF nonces cap abuse but do not identify the submitter. An exported
