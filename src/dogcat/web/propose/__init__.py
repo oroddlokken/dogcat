@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -122,7 +123,26 @@ def create_app(
         openapi_url=None,
     )
 
-    templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    @cache
+    def static_mtime(path: str) -> int:
+        """Return a static file's mtime, the stamp its URL carries.
+
+        Without it a browser keeps the old stylesheet and script after an
+        upgrade. Cached for the life of the app: an upgrade starts a new
+        process.
+        """
+        try:
+            return int((STATIC_DIR / path).stat().st_mtime)
+        except OSError:
+            return 0
+
+    def static_helpers(_request: Request) -> dict[str, Any]:
+        return {"static_mtime": static_mtime}
+
+    templates = Jinja2Templates(
+        directory=str(TEMPLATES_DIR),
+        context_processors=[static_helpers],
+    )
 
     # Hold one InboxStorage on app state instead of constructing per request.
     # The constructor calls _load() which reads + parses the entire inbox

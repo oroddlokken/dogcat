@@ -5,7 +5,7 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>dogcat &mdash; propose</title>
         <link rel="stylesheet"
-              href="{{ url_for('static', path='css/propose.css') }}">
+              href="{{ url_for('static', path='css/propose.css') }}?mtime={{ static_mtime('css/propose.css') }}">
     </head>
     <body>
         <div class="wrap">
@@ -90,6 +90,6 @@
 
         </div>
 
-        <script src="{{ url_for('static', path='js/propose.js') }}"></script>
+        <script src="{{ url_for('static', path='js/propose.js') }}?mtime={{ static_mtime('js/propose.js') }}"></script>
     </body>
 </html>
