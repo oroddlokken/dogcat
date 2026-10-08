@@ -326,6 +326,19 @@ def hash_object(path: str | Path, *, cwd: str | Path | None = None) -> str | Non
     return _stdout_line(_run(["hash-object", "-w", "--", str(path)], cwd=cwd))
 
 
+def stage_blob(blob: str, repo_path: str, *, cwd: str | Path | None = None) -> bool:
+    """Point the index entry for ``repo_path`` at ``blob``, leaving the worktree.
+
+    ``repo_path`` is repo-root-relative with forward slashes. The entry is
+    written as a regular non-executable file (mode 100644).
+    """
+    result = _run(
+        ["update-index", "--add", "--cacheinfo", f"100644,{blob},{repo_path}"],
+        cwd=cwd,
+    )
+    return result is not None and result.returncode == 0
+
+
 def commit_file_to_branch(
     branch: str,
     *,

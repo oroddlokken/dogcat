@@ -128,6 +128,7 @@ You can run `diff <(dcat prime) <(dcat prime --opinionated)` to see the differen
 | `dcat repair-jsonl` | Move malformed lines out of the JSONL stores |
 | `dcat history` | Show change history timeline |
 | `dcat diff` | Show uncommitted issue changes |
+| `dcat stage $id` | Stage one issue's records for `git commit`, leaving other issues' uncommitted writes in the working tree |
 | `dcat doctor` | Run health checks on issue data |
 | `dcat archive` | Archive closed issues to reduce startup load |
 | `dcat prune` | Permanently remove deleted issues |

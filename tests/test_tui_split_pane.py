@@ -436,7 +436,14 @@ class TestMountSafeSelect:
 
             select.value = "closed"
             await current.mount(Static(id="label"))
-            await pilot.pause()
+
+            # The re-apply is an InvokeLater on the select's own queue, and
+            # pilot.pause() only waits on a heuristic idle check, so it can
+            # return first (dogcat-4ykg). A marker queued behind it on the
+            # same queue runs only after the re-apply has.
+            reapplied = asyncio.Event()
+            select.call_after_refresh(reapplied.set)
+            await asyncio.wait_for(reapplied.wait(), timeout=5)
 
             label = current.query_one("#label", Static)
             assert "Closed" in str(label.render())

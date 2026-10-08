@@ -127,7 +127,10 @@ are safe and concurrent hand-edits are not.
 
 Work commits directly to `main`. Commit only when the user asks, and push only when the user asks —
 a push to `main` runs CI, and a push of a `release/v*` branch starts the publish pipeline.
-Stage `.dogcats/` alongside the code change it belongs to.
+Stage an issue's tracker records alongside the code change it belongs to with
+`uv run dcat stage <id>`, then run `git commit` with no pathspec. `git add .dogcats/` would also
+commit every other issue's uncommitted writes, and `git commit -- <path>` bypasses the index that
+`dcat stage` wrote.
 `--branch <name>` on any mutating `dcat` command is a commit onto that branch, so pass it only when
 the user names the target branch.
 

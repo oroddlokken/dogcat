@@ -139,6 +139,12 @@ _GIT_GUIDE_TEXT = """\
        $ git add src/fix.py .dogcats/
        $ git commit -m "Fix login timeout bug"
 
+     When .dogcats/issues.jsonl also holds unrelated uncommitted issues,
+     stage only the one this commit closes, and commit with no pathspec:
+       $ git add src/fix.py
+       $ dcat stage <id>
+       $ git commit -m "Fix login timeout bug"
+
   2. Review .dogcats/ diffs in PRs.
 
 ── Quick Reference ─────────────────────────────────────────────────────────
@@ -146,6 +152,7 @@ _GIT_GUIDE_TEXT = """\
   Install merge driver:   dcat git setup
   Check configuration:    dcat git check
   Commit issues:          git add .dogcats/ && git commit
+  Commit one issue:       dcat stage <id> && git commit
   Ignore issues:          echo ".dogcats/" >> .gitignore
   Validate issue data:    dcat doctor
   Log issue history:      git log --oneline -- .dogcats/
@@ -1061,6 +1068,7 @@ def register(app: typer.Typer) -> None:
   dcat status      Show project overview and counts
   dcat history     Show change history timeline
   dcat diff        Show uncommitted issue changes
+  dcat stage <id>  Stage one issue's records without the rest
   dcat doctor      Run health checks on your issue data
   dcat link        Manage general issue relationships
   dcat export      Export all issues (for backup or migration)
@@ -1196,6 +1204,28 @@ def register(app: typer.Typer) -> None:
                 " and cite actual output.\n"
             )
 
+        # Opinionated only: plain prime has no budget left for it.
+        opinionated_commit = (
+            ""
+            if not opinionated
+            else """## Committing Issue Changes
+
+`.dogcats/issues.jsonl` holds every issue's writes, including other agents'
+work in progress. To commit your issue alone, stage it and commit with no
+pathspec:
+
+  $ git add src/fix.py
+  $ dcat stage <id>
+  $ git commit -m "Fix login timeout"
+
+`git add .dogcats` re-stages the whole file, and `git commit -- <path>`
+bypasses the index, so either one undoes `dcat stage`. An edge to an issue
+that is neither committed nor staged is held back and named; stage that
+issue too, or leave the edge for its own commit.
+
+"""
+        )
+
         guide = f"""
 DOGCAT WORKFLOW GUIDE
 {global_mode_section}
@@ -1247,6 +1277,7 @@ Allowed issue types, priorities, and statuses:
   dcat history                               - Show change history timeline
   dcat history -i <id>                       - History for a specific issue
   dcat diff                                  - Show uncommitted issue changes
+  dcat stage <id>                            - Stage one issue to commit
   dcat label <id> add -l <label>             - Add a label
   dcat label <id> remove -l <label>          - Remove a label
   dcat link <id> add --related <other_id>    - Link two issues
@@ -1256,7 +1287,7 @@ Allowed issue types, priorities, and statuses:
   dcat comment <id> list                     - List comments
   dcat comment <id> delete -c <comment_id>   - Delete a comment
 
-## Parent-Child vs Dependencies
+{opinionated_commit}## Parent-Child vs Dependencies
 
 Parent-child is **organizational** (grouping), not **blocking**.
 Children appear in `dcat ready` even when parent is open.

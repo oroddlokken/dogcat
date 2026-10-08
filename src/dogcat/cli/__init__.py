@@ -104,6 +104,7 @@ _COMMAND_MODULES: tuple[str, ...] = (
     "_cmd_rename_namespace",
     "_cmd_reopen",
     "_cmd_search",
+    "_cmd_stage",
     "_cmd_stale",
     "_cmd_tui",
     "_cmd_update",

@@ -31,6 +31,10 @@ time, not the whole backlog at once. Set `in_review` when that issue's work is \
 done before moving on. `dcat list` is how the user sees what is live, so a \
 stale status misreports the session.
 
+To commit an issue's tracker changes without other issues' uncommitted \
+writes, run `dcat stage <id>` and then `git commit` with no pathspec. \
+`git add .dogcats` and `git commit -- <path>` both undo it.
+
 It is okay to work on multiple related issues at the same time. If there is a \
 priority conflict, ask the user which to focus on first.
 
