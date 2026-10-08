@@ -19,6 +19,7 @@ from dogcat.constants import (
 )
 from dogcat.models import IssueType, Status
 
+from ._branch import with_branch
 from ._completions import (
     complete_issue_ids,
     complete_labels,
@@ -172,6 +173,7 @@ Examples:
 def register(app: typer.Typer) -> None:
     """Register create and new commands."""
 
+    @with_branch
     def _create_impl(
         arg1: str | None = typer.Argument(
             None,

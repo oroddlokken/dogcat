@@ -9,6 +9,7 @@ import typer
 
 from dogcat.models import Status
 
+from ._branch import with_branch
 from ._completions import complete_issue_ids
 from ._helpers import apply_to_each, get_default_operator, get_storage, with_ns_shim
 from ._json_state import is_json, set_json
@@ -45,6 +46,7 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     @with_ns_shim
+    @with_branch
     def close(
         issue_ids: list[str] = typer.Argument(  # noqa: B008
             ...,
@@ -89,6 +91,7 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     @with_ns_shim
+    @with_branch
     def delete(
         issue_ids: list[str] = typer.Argument(  # noqa: B008
             ...,
@@ -135,6 +138,7 @@ def register(app: typer.Typer) -> None:
 
     @app.command(name="remove", hidden=True)
     @with_ns_shim
+    @with_branch
     def remove(
         issue_id: str = typer.Argument(
             ...,

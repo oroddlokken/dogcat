@@ -406,6 +406,14 @@ def get_storage(
     Returns:
         JSONLStorage instance
     """
+    from dogcat.branch_store import active_branch_storage
+
+    # Under ``--branch`` every command reads and writes the target branch's
+    # scratch store instead (see cli/_branch.py).
+    branch_storage = active_branch_storage()
+    if branch_storage is not None:
+        return branch_storage
+
     # Always resolve via find_dogcats_dir() to respect .dogcatrc priority
     # over a local .dogcats/ directory (which may only contain config.local.toml)
     if not create_dir and dogcats_dir == ".dogcats":

@@ -128,6 +128,8 @@ are safe and concurrent hand-edits are not.
 Work commits directly to `main`. Commit only when the user asks, and push only when the user asks —
 a push to `main` runs CI, and a push of a `release/v*` branch starts the publish pipeline.
 Stage `.dogcats/` alongside the code change it belongs to.
+`--branch <name>` on any mutating `dcat` command is a commit onto that branch, so pass it only when
+the user names the target branch.
 
 The JSONL merge driver is live in this checkout: `.gitattributes` maps `.dogcats/**/*.jsonl` to
 `merge=dcat-jsonl`, and local git config binds that to `dcat git merge-driver`. It resolves `dcat`

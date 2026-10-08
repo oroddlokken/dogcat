@@ -5,6 +5,7 @@ from __future__ import annotations
 import orjson
 import typer
 
+from ._branch import with_branch
 from ._completions import (
     complete_dep_types,
     complete_issue_ids,
@@ -25,6 +26,7 @@ def register(app: typer.Typer) -> None:
 
     @app.command("dep")
     @with_ns_shim
+    @with_branch
     def dependency(
         issue_id: str = typer.Argument(
             ...,
@@ -118,6 +120,7 @@ def register(app: typer.Typer) -> None:
 
     @app.command("link")
     @with_ns_shim
+    @with_branch
     def link(
         issue_id: str = typer.Argument(
             ...,

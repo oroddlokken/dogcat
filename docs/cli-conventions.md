@@ -37,6 +37,14 @@ A command that takes an issue ID and uses `complete_issue_ids` needs the `@with_
 (`cli/_helpers.py`); it injects the hidden `-A` / `--namespace` options the completer reads out of
 the Click context. Without it, completion ignores namespace visibility.
 
+A command that mutates issues takes `@with_branch` (`cli/_branch.py`), placed below `@with_ns_shim`.
+It adds `--branch <name>`: the body runs against a scratch copy of that branch's `issues.jsonl`,
+which `get_storage` returns while the option is active, and the result is committed onto the branch
+through git plumbing (`dogcat/branch_store.py`). That only works when the body gets its storage from
+`get_storage(dogcats_dir)`; a command that builds a `JSONLStorage` itself would silently write the
+current checkout instead. Store-rewriting commands (`prune`, `archive`, `repair-jsonl`,
+`backfill-history`, `rename-namespace`) and the inbox commands deliberately lack the option.
+
 Any command accepting `--json` calls `set_json(json_output)` from `_json_state`. `--json` also exists
 as a global option before the subcommand (`dcat --json list`), and both paths write the same
 module-level flag that `is_json()` and the formatters read.
@@ -49,6 +57,8 @@ Typer. Shared completers live in `src/dogcat/cli/_completions.py` and return `li
 (value, description) pairs. A completer used by exactly one command may stay in that command's module
 (`_complete_by_values` in `_cmd_chart.py` is the current example); move it to `_completions.py`
 the moment a second command needs it.
+
+`--branch` completes local branch names through `complete_branches`.
 
 Two options deliberately have no callback: `dcat init --namespace` names a namespace that does not
 exist yet, and the hidden `--namespace` added by `with_ns_shim` is plumbing rather than user input.

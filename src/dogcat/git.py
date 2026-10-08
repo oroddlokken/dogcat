@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
+from typing import Any
 
 
 def _c_locale_env() -> dict[str, str]:
@@ -50,6 +51,7 @@ def _run(
     *,
     cwd: str | Path | None = None,
     capture_text: bool = True,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes] | None:
     """Run ``git <args>`` and return the CompletedProcess (or None if missing).
 
@@ -59,13 +61,14 @@ def _run(
     distinguish "no repo" from real failures. The call is bounded by
     :func:`_git_timeout` (default 10 s, overridable via
     ``DCAT_GIT_TIMEOUT_SECS``); on TimeoutExpired we return None like a
-    missing binary so callers degrade gracefully.
+    missing binary so callers degrade gracefully. ``env`` is overlaid on
+    the C-locale environment (e.g. ``GIT_INDEX_FILE`` for a scratch index).
 
     S603/S607 are silenced throughout: argv is a fixed list (never a shell
     string), and resolving "git" off PATH is the point — dcat must use whichever
     git the user's environment provides, not one pinned at install time.
     """
-    env = _c_locale_env()
+    env = {**_c_locale_env(), **(env or {})}
     timeout = _git_timeout()
     try:
         if capture_text:
@@ -279,3 +282,88 @@ def merge_base(
     if not isinstance(out, str):
         return None
     return out.strip() or None
+
+
+def _stdout_line(result: subprocess.CompletedProcess[Any] | None) -> str | None:
+    """Return stripped text stdout of a successful run, or None."""
+    if result is None or result.returncode != 0:
+        return None
+    out = result.stdout
+    if not isinstance(out, str):
+        return None
+    return out.strip() or None
+
+
+def resolve_branch(branch: str, *, cwd: str | Path | None = None) -> str | None:
+    """Return the commit SHA of local branch ``branch``, or None if it doesn't exist."""
+    return _stdout_line(
+        _run(
+            ["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}^{{commit}}"],
+            cwd=cwd,
+        )
+    )
+
+
+def local_branches(cwd: str | Path | None = None) -> list[str]:
+    """Return the names of all local branches (empty outside a repo)."""
+    out = _stdout_line(
+        _run(["for-each-ref", "--format=%(refname:short)", "refs/heads/"], cwd=cwd)
+    )
+    return out.splitlines() if out else []
+
+
+def checked_out_branches(cwd: str | Path | None = None) -> set[str]:
+    """Return the branches checked out in any worktree of this repository."""
+    out = _stdout_line(_run(["worktree", "list", "--porcelain"], cwd=cwd))
+    if out is None:
+        return set()
+    prefix = "branch refs/heads/"
+    return {line[len(prefix) :] for line in out.splitlines() if line.startswith(prefix)}
+
+
+def hash_object(path: str | Path, *, cwd: str | Path | None = None) -> str | None:
+    """Write ``path``'s contents to the object store and return the blob SHA."""
+    return _stdout_line(_run(["hash-object", "-w", "--", str(path)], cwd=cwd))
+
+
+def commit_file_to_branch(
+    branch: str,
+    *,
+    parent: str,
+    repo_path: str,
+    blob: str,
+    message: str,
+    scratch_index: str | Path,
+    cwd: str | Path | None = None,
+) -> str | None:
+    """Commit ``blob`` at ``repo_path`` on top of ``parent`` and move ``branch`` to it.
+
+    Builds the tree in ``scratch_index`` (a path that must not exist yet),
+    so the user's index and working tree are never touched. The ref moves
+    with ``update-ref <new> <parent>``, a compare-and-swap: when ``branch``
+    no longer points at ``parent`` nothing moves and None is returned.
+
+    Returns:
+        The new commit SHA, or None when any step failed.
+    """
+    env = {"GIT_INDEX_FILE": str(scratch_index)}
+    steps: list[list[str]] = [
+        ["read-tree", parent],
+        ["update-index", "--add", "--cacheinfo", f"100644,{blob},{repo_path}"],
+    ]
+    for args in steps:
+        result = _run(args, cwd=cwd, env=env)
+        if result is None or result.returncode != 0:
+            return None
+    tree = _stdout_line(_run(["write-tree"], cwd=cwd, env=env))
+    if tree is None:
+        return None
+    commit = _stdout_line(
+        _run(["commit-tree", tree, "-p", parent, "-m", message], cwd=cwd)
+    )
+    if commit is None:
+        return None
+    moved = _run(["update-ref", f"refs/heads/{branch}", commit, parent], cwd=cwd)
+    if moved is None or moved.returncode != 0:
+        return None
+    return commit

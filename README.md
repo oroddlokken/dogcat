@@ -111,6 +111,7 @@ You can run `diff <(dcat prime) <(dcat prime --opinionated)` to see the differen
 | `dcat close $id --reason "Fixed the bug"` | Close an issue with reason |
 | `dcat reopen $id` | Reopen a closed issue |
 | `dcat delete $id` | Delete an issue (soft delete) |
+| `dcat create "Title" --branch main` | Commit the issue onto another local branch without checking it out (works on every mutating command; nothing is pushed) |
 | **TUI** | |
 | `dcat tui` | Launch the interactive TUI dashboard |
 | `dcat new` | Interactive TUI for creating a new issue |

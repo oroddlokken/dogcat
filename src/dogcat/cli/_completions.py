@@ -398,3 +398,15 @@ def complete_link_types(incomplete: str) -> list[tuple[str, str]]:
         ("duplicates", "Duplicate issue"),
     ]
     return [(v, h) for v, h in options if v.startswith(incomplete)]
+
+
+def complete_branches(incomplete: str) -> list[tuple[str, str]]:
+    """Complete local git branch names for ``--branch``."""
+    import dogcat.git as git_helpers
+
+    current = git_helpers.current_branch()
+    return [
+        (name, "local branch")
+        for name in git_helpers.local_branches()
+        if name.startswith(incomplete) and name != current
+    ]

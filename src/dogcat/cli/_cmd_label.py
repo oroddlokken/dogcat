@@ -8,6 +8,7 @@ import typer
 from dogcat.config import get_namespace, load_config
 from dogcat.models import UpdateRequest
 
+from ._branch import with_branch
 from ._completions import complete_issue_ids, complete_labels, complete_subcommands
 from ._helpers import get_storage, with_ns_shim
 from ._json_state import echo_error, is_json, set_json
@@ -23,6 +24,7 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     @with_ns_shim
+    @with_branch
     def label(
         issue_id: str = typer.Argument(
             ...,

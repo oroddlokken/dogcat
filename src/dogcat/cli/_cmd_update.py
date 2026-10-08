@@ -17,6 +17,7 @@ from dogcat.constants import (
 )
 from dogcat.models import UpdateRequest, set_manual_flag
 
+from ._branch import with_branch
 from ._completions import (
     complete_issue_ids,
     complete_labels,
@@ -182,6 +183,7 @@ def register(app: typer.Typer) -> None:
     """Register update command."""
 
     @app.command()
+    @with_branch
     def update(
         issue_ids: list[str] = typer.Argument(  # noqa: B008
             ...,

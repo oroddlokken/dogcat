@@ -1231,6 +1231,7 @@ Allowed issue types, priorities, and statuses:
   dcat create <title>                        - Create a new issue
   dcat create <title> --depends-on <id>      - Create with dependency
   dcat create <title> --blocks <id>          - Create issue that blocks another
+  dcat create <title> --branch main          - Commit the issue onto another branch
   dcat update <id> --depends-on <other_id>   - Add dependency
   dcat update <id> --blocks <other_id>       - Mark as blocking another
   dcat update <id> --remove-depends-on <id>  - Remove a dependency

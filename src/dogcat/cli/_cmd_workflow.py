@@ -9,6 +9,7 @@ from dogcat.config import extract_namespace, get_namespace_filter
 from dogcat.constants import TERMINAL_STATUSES
 from dogcat.models import Status, is_manual_issue
 
+from ._branch import with_branch
 from ._completions import (
     complete_issue_ids,
     complete_snooze_durations,
@@ -719,6 +720,7 @@ def register(app: typer.Typer) -> None:
 
     @app.command(name="defer", hidden=True)
     @with_ns_shim
+    @with_branch
     def defer_shortcut(
         issue_id: str = typer.Argument(
             ...,
@@ -816,6 +818,7 @@ def register(app: typer.Typer) -> None:
 
     @app.command(name="mark-manual", hidden=True)
     @with_ns_shim
+    @with_branch
     def mark_manual_shortcut(
         issue_id: str = typer.Argument(
             ...,
@@ -1139,6 +1142,7 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     @with_ns_shim
+    @with_branch
     def snooze(
         issue_id: str = typer.Argument(
             ...,
@@ -1188,6 +1192,7 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     @with_ns_shim
+    @with_branch
     def unsnooze(
         issue_id: str = typer.Argument(
             ...,

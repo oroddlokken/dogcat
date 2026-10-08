@@ -5,6 +5,7 @@ from __future__ import annotations
 import orjson
 import typer
 
+from ._branch import with_branch
 from ._completions import complete_comment_actions, complete_issue_ids
 from ._helpers import get_default_operator, get_storage, with_ns_shim
 from ._json_state import echo_error, is_json, set_json
@@ -19,6 +20,7 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     @with_ns_shim
+    @with_branch
     def comment(
         issue_id: str = typer.Argument(
             ...,
