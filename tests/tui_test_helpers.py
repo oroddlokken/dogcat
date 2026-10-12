@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from textual.app import App
     from textual.geometry import Size
     from textual.pilot import Pilot
@@ -37,4 +39,27 @@ async def wait_for_app_size(pilot: Pilot[Any], size: Size, *, tries: int = 50) -
         if pilot.app.size == size:
             return
     msg = f"resize not processed: app.size is {pilot.app.size}, expected {size}"
+    raise AssertionError(msg)
+
+
+async def wait_until(
+    pilot: Pilot[Any],
+    condition: Callable[[], bool],
+    what: str,
+    *,
+    tries: int = 50,
+) -> None:
+    """Pause until ``condition()`` holds, failing after ``tries`` pauses.
+
+    A worker finishing does not mean the messages it posts have been handled:
+    a save hops through ``_SaveComplete`` and ``Saved`` before the app's
+    handler runs, and that handler awaits a re-render before touching split
+    mode. One pause after ``wait_for_workers`` loses that race on a slow
+    runner (dogcat-1nav).
+    """
+    for _ in range(tries):
+        await pilot.pause()
+        if condition():
+            return
+    msg = f"timed out waiting for {what}"
     raise AssertionError(msg)

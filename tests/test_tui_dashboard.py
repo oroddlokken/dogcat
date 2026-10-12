@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from textual.widgets import Button, OptionList, Static
-from tui_test_helpers import wait_for_app_size, wait_for_workers
+from tui_test_helpers import wait_for_app_size, wait_for_workers, wait_until
 
 from dogcat.models import Issue
 from dogcat.tui.dashboard import ConfirmDeleteScreen, DogcatTUI
@@ -785,5 +785,6 @@ class TestInlineEditDataLossGuards:
             panel.do_save()
             # The save runs on a worker thread (dogcat-46i8).
             await wait_for_workers(app)
-            await pilot.pause()
-            assert not app._split_mode
+            await wait_until(
+                pilot, lambda: not app._split_mode, "split mode to collapse"
+            )

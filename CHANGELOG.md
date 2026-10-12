@@ -28,6 +28,8 @@
 
 - **AGENTS.md has agents commit tracker records with `dcat stage <id>`.** The old rule, stage `.dogcats/` with the code, committed every other issue's uncommitted writes along with it.
 
+- **`test_save_recollapses_split_when_below_threshold` no longer flakes on slow runners.** It paused once after the save worker finished, but split mode collapses only after `_SaveComplete`, `Saved` and a panel re-render have been handled, so the Python 3.10 leg of the v0.14.3 release PR lost the race. The test now polls through a new `wait_until` helper in `tests/tui_test_helpers.py`; the other 27 post-save waits assert on storage or on shutdown state and were left as they are (closes dogcat-1nav).
+
 - **`test_value_reaches_label_that_comes_back` stops failing intermittently.** About half its isolated runs failed with an empty label. `MountSafeSelect` was never at fault: the `NoMatches` it swallows schedules `_reapply_value` through `call_after_refresh`, which posts an `InvokeLater` to the select's own queue, and the reapply always wrote "Closed" to the remounted label. The test asserted after a single `pilot.pause()`, which waits only on Textual's heuristic idle check and could return before that message ran, so in failing runs the reapply landed during app teardown. The test now queues a marker behind it on the same queue and awaits it under `asyncio.wait_for`, so FIFO order guarantees the reapply has run. 50 isolated runs in a row pass, as does the suite under `-n 8` (closes dogcat-4ykg).
 
 - **AGENTS.md says `--branch` is a commit.** Under the repo's commit-only-when-asked rule an agent may pass `--branch` only when the user names the target branch.
