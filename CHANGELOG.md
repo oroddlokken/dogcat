@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.14.3 (2026-10-12)
+
 ### Added
 
 - **`dcat stage <id>` commits one issue's tracker records and leaves the rest uncommitted.** Two agents sharing `.dogcats/issues.jsonl` had two bad options: `git add .dogcats/` swept the other agent's unfinished `in_progress` flips into the commit, and `git commit -- src/foo.py` left the agent's own `dcat` writes behind. `dcat stage` writes the file into the git index as it stands there plus the named issues' new records — the issue record, its events, and its dependencies and links — and never touches the working tree, so a plain `git commit` carries that issue alone. It builds on the index rather than HEAD, so staging X and then Y keeps both, the way `git add` does. A dependency or link to an issue that is neither committed nor staged is held back and named, since committing it would leave an edge that `dcat doctor --fix` deletes; a staged issue whose parent is in the same position is staged with a warning, because the parent reference lives inside the issue record. When the working file was rewritten since it was staged (compaction, `rename-namespace`, `prune`), line identity no longer says what changed, so both sides are replayed to state and the staged issues' changes are appended as records — including `remove` records for edges they dropped — leaving the index's existing lines byte-identical. An id with nothing new exits 0; a store outside a git worktree is refused. `dcat prime --opinionated`, the `example-md` template and the `dcat git` guide say to follow it with `git commit` and no pathspec (closes dogcat-42xb).
