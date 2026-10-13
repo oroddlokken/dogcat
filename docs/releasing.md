@@ -30,6 +30,15 @@ starts with `release/v`; landing the same commits any other way skips publishing
 pnpm and the node deps. A step added to one has to be added to the other, or the failure surfaces
 only at release time, when the merge has already landed on `main` (dogcat-11yx).
 
+## Refresh the editable install after the release tag lands
+
+The `dcat` on the maintainer's PATH is often this checkout's editable install, and hatch-vcs stamps
+its version at install time. Left stale, it keeps reporting the previous dev version after
+`publish.yml` tags `vX.Y.Z`, and every repo holding records written by the released dcat warns that
+the running tool is older. `just release-prep` waits for the publish run, pulls the tag, and ends
+with `just uv-sync-reinstall`, which restamps the version. Run that recipe by hand when the release
+finished outside `release-prep`, or when the run stopped after publishing.
+
 ## `just check-sdist` guards what reaches PyPI
 
 `scripts/check-sdist` fails when the source distribution exceeds 1 MiB or holds a top-level entry

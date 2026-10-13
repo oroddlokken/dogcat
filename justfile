@@ -116,6 +116,8 @@ release-prep *args:
     ./scripts/release-prep {{args}}
     git fetch --all --tags --prune
     git pull origin main
+    just uv-sync-reinstall
 
+# reinstall dogcat so the editable install reports the latest tag's version
 uv-sync-reinstall:
     uv sync --reinstall-package dogcat

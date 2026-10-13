@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Development
+
+- **`just release-prep` ends by reinstalling the editable dcat.** hatch-vcs stamps the version at install time, so a maintainer's `.venv` install kept reporting the previous dev version (`0.14.2.post1.dev24+gb685cf790`) after `v0.14.3` was tagged, and every repo holding records written by 0.14.3 warned that the running tool was older. The recipe now runs `just uv-sync-reinstall` after pulling the published tag; the recipe has a `just --list` description, and `docs/releasing.md` says when to run it by hand (closes dogcat-2an7).
+
 ## 0.14.3 (2026-10-12)
 
 ### Added
