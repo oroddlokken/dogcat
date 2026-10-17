@@ -5,12 +5,18 @@ one issue's records and leaves every other issue's uncommitted writes in the
 working tree (dogcat-42xb).
 
 The base is the file as it stands in the index, not HEAD, so successive
-``dcat stage`` calls accumulate the way ``git add`` does. The blob is always
-the base's bytes, untouched, plus appended records:
+``dcat stage`` calls accumulate the way ``git add`` does. The blob is the
+base's bytes plus appended records, with one exception noted below:
 
 - When every base line is still in the working file, the store has only
   been appended to, and the appended lines naming a staged id are copied
-  across verbatim, in file order.
+  across verbatim, in file order. If the base already carries appended
+  lines of its own (an earlier ``dcat stage``) and the working file has
+  other issues' writes interleaved among them, the base's lines after the
+  longest common prefix are re-emitted together with the new lines in
+  working-file order. That is the exception: those base lines move, so the
+  index equals the working file once every interleaved issue is staged
+  instead of holding the same records grouped by stage call (dogcat-3sf5).
 - When a base line is gone, the file was rewritten since (compaction,
   ``rename_namespace``, ``prune``, ...), so line identity no longer says
   what changed. Both sides are replayed to state instead, and each staged
@@ -233,6 +239,36 @@ def _collect_from_state(
             col.add(line, (data["issue_id"],))
 
 
+def _common_prefix_len(base: list[bytes], working: list[bytes]) -> int:
+    n = 0
+    for b, w in zip(base, working, strict=False):
+        if b != w:
+            break
+        n += 1
+    return n
+
+
+def _in_working_order(
+    base: list[bytes], working: list[bytes], prefix: int, new_lines: list[bytes]
+) -> bytes:
+    """Re-emit the base's tail and the new lines in working-file order.
+
+    Every base line is in the working file (the caller checked), and every
+    new line was copied from it, so the lines after ``prefix`` in the
+    working file hold all of them; the ones to keep are selected by
+    multiset so a duplicate line is emitted as many times as it is owed.
+    """
+    want = Counter(base[prefix:]) + Counter(new_lines)
+    out = base[:prefix]
+    for line in working[prefix:]:
+        if want[line] > 0:
+            want[line] -= 1
+            out.append(line)
+    # Nothing should be left; if it is, append rather than drop a record.
+    out.extend(want.elements())
+    return b"".join(line + b"\n" for line in out)
+
+
 def plan_stage(base: bytes, working: bytes, ids: Iterable[str]) -> StagePlan:
     """Return the blob that adds ``ids``' uncommitted records to ``base``.
 
@@ -271,9 +307,13 @@ def plan_stage(base: bytes, working: bytes, ids: Iterable[str]) -> StagePlan:
 
     blob = base
     if col.lines:
-        if blob and not blob.endswith(b"\n"):
-            blob += b"\n"
-        blob += b"".join(line + b"\n" for line in col.lines)
+        prefix = _common_prefix_len(base_list, working_list)
+        if not rewritten and prefix < len(base_list):
+            blob = _in_working_order(base_list, working_list, prefix, col.lines)
+        else:
+            if blob and not blob.endswith(b"\n"):
+                blob += b"\n"
+            blob += b"".join(line + b"\n" for line in col.lines)
     return StagePlan(
         blob=blob,
         staged=col.counts,

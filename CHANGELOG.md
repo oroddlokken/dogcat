@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`dcat stage` keeps the index in the working file's line order when two issues' writes interleave.** Staging X and then Y appended each issue's new lines as a block, so an `issues.jsonl` where X's and Y's records had been written turn and turn about ended up committed grouped by issue. The store held the same records in a different order, which left git reporting the file modified for good while `dcat diff` said `No changes`, since it compares replayed state rather than bytes. The second stage now re-emits every index line after the longest prefix it shares with the working file, together with the lines it adds, in working-file order, so the index equals the working file once every interleaved issue is staged. A base that is a plain prefix of the working file is still copied byte for byte, and the rewritten-store path (compaction, `rename-namespace`, `prune`) is unchanged (closes dogcat-3sf5).
+
 ### Development
 
 - **`just release-prep` ends by reinstalling the editable dcat.** hatch-vcs stamps the version at install time, so a maintainer's `.venv` install kept reporting the previous dev version (`0.14.2.post1.dev24+gb685cf790`) after `v0.14.3` was tagged, and every repo holding records written by 0.14.3 warned that the running tool was older. The recipe now runs `just uv-sync-reinstall` after pulling the published tag; the recipe has a `just --list` description, and `docs/releasing.md` says when to run it by hand (closes dogcat-2an7).

@@ -156,6 +156,33 @@ class TestStageIsolation:
         assert _diff_ids(repo, "--staged") == {x, y}
         assert _diff_ids(repo, "--unstaged") == {z}
 
+    def test_interleaved_issues_stage_in_working_order(self, repo: Path) -> None:
+        """Staging X then Y leaves the index byte-equal to the working file.
+
+        X's and Y's writes interleave in the store. The first stage appends
+        X's lines; the second must not append Y's after them but restore the
+        working file's order, or git keeps showing a diff that dcat diff
+        cannot see (dogcat-3sf5).
+        """
+        x = _create(repo, "Issue X")
+        y = _create(repo, "Issue Y")
+        _dcat(repo, "update", x, "--title", "Issue X, renamed")
+        _dcat(repo, "update", y, "--title", "Issue Y, renamed")
+        _dcat(repo, "close", x, "--reason", "done")
+
+        assert _stage(repo, x).exit_code == 0
+        assert _stage(repo, y).exit_code == 0
+
+        index = subprocess.run(
+            ["git", "-C", str(repo), "show", f":{STORE}"],
+            check=True,
+            capture_output=True,
+            env=_GIT_TEST_ENV,
+        ).stdout
+        assert index == (repo / STORE).read_bytes()
+        assert _diff_ids(repo, "--staged") == {x, y}
+        assert _diff_ids(repo, "--unstaged") == set()
+
     def test_commit_carries_staged_issue_only(self, repo: Path) -> None:
         """A plain git commit after stage leaves Y uncommitted."""
         x = _create(repo, "Issue X")
@@ -391,6 +418,33 @@ class TestPlanStage:
         plan = plan_stage(base, base + b"\n" + update + b"\n", ["dc-aaaa"])
 
         assert plan.blob == base + b"\n" + update + b"\n"
+
+    def test_interleaved_tail_follows_working_order(self) -> None:
+        """A second stage re-emits the first stage's tail in working order."""
+        x1 = self._issue("dc-aaaa", "X")
+        y1 = self._issue("dc-bbbb", "Y")
+        x2 = self._issue("dc-aaaa", "X2")
+        y2 = self._issue("dc-bbbb", "Y2")
+        head = self._issue("dc-cccc", "Committed") + b"\n"
+        working = head + b"".join(line + b"\n" for line in (x1, y1, x2, y2))
+
+        first = plan_stage(head, working, ["dc-aaaa"])
+        second = plan_stage(first.blob, working, ["dc-bbbb"])
+
+        assert first.blob == head + x1 + b"\n" + x2 + b"\n"
+        assert second.blob == working
+        assert second.staged == {"dc-bbbb": 2}
+        assert not second.rewritten
+
+    def test_tail_in_working_order_already_appends(self) -> None:
+        """A base that is a prefix of the working file keeps its bytes."""
+        x1 = self._issue("dc-aaaa", "X")
+        y1 = self._issue("dc-bbbb", "Y")
+        base = x1 + b"\n"
+
+        plan = plan_stage(base, base + y1 + b"\n", ["dc-bbbb"])
+
+        assert plan.blob == base + y1 + b"\n"
 
     def test_unknown_record_types_not_staged(self) -> None:
         """A record kind this dcat does not model is left in the working tree."""
