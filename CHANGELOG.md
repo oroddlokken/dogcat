@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.14.4 (2026-10-17)
+
 ### Fixed
 
 - **`dcat stage` keeps the index in the working file's line order when two issues' writes interleave.** Staging X and then Y appended each issue's new lines as a block, so an `issues.jsonl` where X's and Y's records had been written turn and turn about ended up committed grouped by issue. The store held the same records in a different order, which left git reporting the file modified for good while `dcat diff` said `No changes`, since it compares replayed state rather than bytes. The second stage now re-emits every index line after the longest prefix it shares with the working file, together with the lines it adds, in working-file order, so the index equals the working file once every interleaved issue is staged. A base that is a plain prefix of the working file is still copied byte for byte, and the rewritten-store path (compaction, `rename-namespace`, `prune`) is unchanged (closes dogcat-3sf5).
