@@ -3,9 +3,9 @@
     "node": ">=24"
   },
   "devDependencies": {
-    "oxfmt": "^0.62.0",
-    "oxlint": "^1.77.0",
-    "stylelint": "^17.14.1",
+    "oxfmt": "^0.73.0",
+    "oxlint": "^1.88.0",
+    "stylelint": "^17.16.0",
     "stylelint-config-standard": "^40.0.0"
   },
   "scripts": {
