@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Development
+
+- **Dependencies move to latest: orjson 3.13.0, typer 0.27.3, tomli 2.5.0, ruff 0.17.1, pyright 1.1.414, djlint 1.46, hypothesis 6.168, oxlint 1.88, oxfmt 0.73 and stylelint 17.16.**
+
 ## 0.14.4 (2026-10-17)
 
 ### Fixed
