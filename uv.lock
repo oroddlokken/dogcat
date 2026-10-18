@@ -461,7 +461,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", marker = "extra == 'web'", specifier = ">=0.115.0" },
     { name = "jinja2", marker = "extra == 'web'", specifier = ">=3.1.0" },
-    { name = "orjson", specifier = ">=3.11.9" },
+    { name = "orjson", specifier = ">=3.13.0" },
     { name = "python-multipart", marker = "extra == 'web'", specifier = ">=0.0.9" },
     { name = "rich", specifier = ">=15.0.0" },
     { name = "textual", specifier = ">=8.2.8" },
@@ -469,7 +469,7 @@ requires-dist = [
     { name = "tomli-w", specifier = ">=1.0.0" },
     { name = "typer", specifier = ">=0.27.1" },
     { name = "uvicorn", marker = "extra == 'web'", specifier = ">=0.30.0" },
-    { name = "watchdog", specifier = ">=4.0.0" },
+    { name = "watchdog", specifier = ">=6.0.0" },
 ]
 provides-extras = ["web"]
 
