@@ -475,18 +475,18 @@ provides-extras = ["web"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "djlint", specifier = ">=1.44.1" },
+    { name = "djlint", specifier = ">=1.46.4" },
     { name = "dogcat", extras = ["web"] },
-    { name = "httpx", specifier = ">=0.28.0" },
-    { name = "hypothesis", specifier = ">=6.165.2" },
-    { name = "pyright", specifier = ">=1.1.411" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "hypothesis", specifier = ">=6.168.5" },
+    { name = "pyright", specifier = ">=1.1.414" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
     { name = "pytest-testmon", specifier = ">=2.2.0" },
     { name = "pytest-timeout", specifier = ">=2.4.0" },
     { name = "pytest-xdist", extras = ["psutil"] },
-    { name = "ruff", specifier = ">=0.16.2" },
+    { name = "ruff", specifier = ">=0.17.1" },
     { name = "vulture", specifier = ">=2.16" },
 ]
 
