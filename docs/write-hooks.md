@@ -1,23 +1,59 @@
 # Write hooks
 
-A user-global `pre_write_hook` can validate a pending write on POSIX systems. It is optional: an unset or blank value disables it. No scanner is required, and a disabled hook starts no subprocess. Configure a command you trust in your user-global config, for example:
+On POSIX systems, dogcat can validate pending records with an optional
+`pre_write_hook`. It is off by default and accepts any trusted validator.
+
+## Gitleaks example
+
+On macOS, install Gitleaks and enable secret scanning:
 
 ```sh
-dcat config set --global pre_write_hook 'python3 /absolute/path/to/require_acceptance.py'
+brew install gitleaks
+dcat config set --global pre_write_hook 'gitleaks stdin --no-banner --redact --ignore-gitleaks-allow'
+dcat config get --global pre_write_hook
 ```
 
-Disable it with `dcat config unset --global pre_write_hook`. Use an absolute path and shell-quote paths containing spaces. The command is a shell command, so only set it in your own global config; repository config cannot select it. A global wrapper can dispatch by namespace if different stores need different policies. `DCAT_WRITE_TARGET` contains the absolute planned target path.
-
-The hook receives JSONL on stdin: a batch of data records and event records, not the whole database. An issue data record is the new state; events can contain old values. A scanner can therefore reject removal of a pre-existing secret when an event retains it. Exit 0 allows the write; any other exit, a start failure, a 30-second timeout, or invalid configuration rejects it. Output on stdout and stderr is discarded to avoid leaking secrets; an error reports the exit code when available.
-
-The batch is validated at flush, not as a transaction across multiple commands or stores. Newly generated namespace mutations are also validated. Historical copies, compaction, merge, archive, repair, and external writes are not retroactively scanned or sanitized.
-
-Hooks should be fast local validators without side effects. They cannot transform the write and are not intended for notifications, deployments, or test runs. The standalone [acceptance example](../examples/hooks/require_acceptance.py) requires nonempty acceptance text on every `in_progress` issue record, including edits to issues already in progress, while ignoring events and other record types. It exits 10 when acceptance is missing and 1 for invalid JSON or a non-object record. This illustrates a workflow policy beyond secret scanning.
-
-For example, configure a locally installed and trusted `gitleaks` scanner to inspect stdin:
+Try a clean write and a synthetic secret in a temporary store:
 
 ```sh
-dcat config set --global pre_write_hook 'gitleaks stdin --no-banner --redact'
+(
+  tmp=$(mktemp -d)
+  cd "$tmp" || exit 1
+  dcat init --dogcats-dir "$tmp/store" --namespace trial --no-git
+  dcat create 'Clean trial issue' --dogcats-dir "$tmp/store"
+  prefix=ghp_
+  body=Zx81Kq0LmT4vR7nB2cYw9sHd5jFg3aPe6uQi
+  dcat create 'Synthetic secret' --description "${prefix}${body}" --dogcats-dir "$tmp/store"
+  echo "Exit: $?"
+  rm -rf "$tmp"
+)
 ```
 
-Test the scanner and its configuration locally; dogcat does not install or depend on it. Remember that event history can include old values.
+The clean issue is created. The synthetic secret is rejected with
+`Error: pre_write_hook rejected the write (exit 1)` and `Exit: 1`.
+Disable the hook with `dcat config unset --global pre_write_hook`.
+
+The command is user-global and applies across stores. It lives in
+`$XDG_CONFIG_HOME/dogcat/config.toml`, defaulting to
+`~/.config/dogcat/config.toml`; repository and local config cannot select it.
+It runs as a shell command, so configure only commands you trust. For another
+validator, see the [acceptance-criteria example](../examples/hooks/require_acceptance.py).
+
+## Contract and scope
+
+Dogcat sends each pending batch as unmodified JSONL on stdin. A batch can
+contain multiple data and event records; events can include old values, so a
+scanner may reject removal of a secret. The hook cannot transform the write.
+Exit 0 approves; any other exit, failure to start, invalid global config, or
+30-second timeout rejects it. Dogcat hides stdout and stderr. The hook inherits
+the working directory and environment; `DCAT_WRITE_TARGET` is the absolute
+path of the target file.
+
+Approval covers a batch, not an entire command or multiple files: earlier
+batches may already be written. Hooks do not scan history or cover Git, manual
+edits, compaction, merge, archive, or repair. Keep hooks fast and side-effect
+free; approval does not guarantee the subsequent write succeeds.
+
+For exit 127, check paths, permissions and shell quoting. For a timeout or
+other rejection, run the validator directly with synthetic JSONL and check its
+exit code. For invalid config, check the TOML and ensure the value is a string.
