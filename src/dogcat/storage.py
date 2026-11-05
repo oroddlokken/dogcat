@@ -57,6 +57,7 @@ from dogcat.models import (
     validate_priority,
 )
 from dogcat.models_serde import precheck_issue_record
+from dogcat.write_hook import WriteHookRejectedError, run_pre_write_hook
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
@@ -496,6 +497,7 @@ class JSONLStorage(EventEmitterMixin):
         _reload: bool = True,
         _prune_event_ids: set[str] | None = None,
         _rename_event_ids: dict[str, str] | None = None,
+        _extra_records: list[dict[str, Any]] | None = None,
     ) -> None:
         """Body of :meth:`_save` that assumes the file lock is already held.
 
@@ -507,7 +509,7 @@ class JSONLStorage(EventEmitterMixin):
             self._load()
 
         def _write(tmp_file: IO[bytes]) -> int:
-            return compact_snapshot(
+            count = compact_snapshot(
                 tmp_file,
                 issues=self._issues.values(),
                 dependencies=self._dependencies,
@@ -517,10 +519,35 @@ class JSONLStorage(EventEmitterMixin):
                 prune_event_ids=_prune_event_ids,
                 rename_event_ids=_rename_event_ids,
             )
+            for record in _extra_records or []:
+                tmp_file.write(orjson.dumps(record) + b"\n")
+                count += 1
+            return count
 
         line_count = atomic_rewrite_jsonl(self.path, self.dogcats_dir, _write)
         self._base_lines = line_count
         self._appended_lines = 0
+
+    def _vet_payload(self, payload: bytes) -> None:
+        """Run the user's ``pre_write_hook`` before ``payload`` is appended.
+
+        Runs ahead of the corrupt-tail compaction in :meth:`_append`, which
+        would otherwise write the refused records to disk from memory. On
+        rejection the in-memory state is reloaded from disk: the mutation has
+        already been applied there, and a long-lived process (TUI, web) would
+        otherwise show the refused change and flush it with its next write.
+        """
+        try:
+            run_pre_write_hook(payload, self.path)
+        except WriteHookRejectedError:
+            if self.path.exists():
+                self.reload()
+            else:
+                self._issues.clear()
+                self._dependencies.clear()
+                self._links.clear()
+                self._rebuild_indexes()
+            raise
 
     def _append(self, records: list[dict[str, Any]]) -> None:
         """Append records to the JSONL file without rewriting it.
@@ -542,6 +569,11 @@ class JSONLStorage(EventEmitterMixin):
             self._batch_records.extend(records)
             return
 
+        # Pre-serialize so the hook sees exactly the bytes that get written,
+        # and the file write is a single operation.
+        payload = b"".join(orjson.dumps(r) + b"\n" for r in records)
+        self._vet_payload(payload)
+
         # If the file had a corrupt last line, rewrite it cleanly first
         # so the garbage doesn't persist between valid records.
         # Use _reload=False because callers (e.g. create()) may have already
@@ -549,9 +581,6 @@ class JSONLStorage(EventEmitterMixin):
         if self._needs_compaction:
             self._save(_reload=False)
             self._needs_compaction = False
-
-        # Pre-serialize so the file write is a single operation
-        payload = b"".join(orjson.dumps(r) + b"\n" for r in records)
 
         # Warm the default-branch memo before taking the lock: the check forks
         # `git rev-parse` (plus a second fork for init.defaultBranch), and every
@@ -1118,6 +1147,7 @@ class JSONLStorage(EventEmitterMixin):
 
             issue = self._issues[resolved_id]
             old_full_id = issue.full_id
+            old_namespace = issue.namespace
             new_full_id = f"{new_namespace}-{issue.id}"
 
             if old_full_id == new_full_id:
@@ -1136,27 +1166,26 @@ class JSONLStorage(EventEmitterMixin):
             self._issues[new_full_id] = issue
 
             # Cascade the rename through everything referencing old_full_id.
-            self._cascade_id_rename(old_full_id, new_full_id)
+            changed = self._cascade_id_rename(old_full_id, new_full_id)
 
             # Rebuild indexes since IDs changed
             self._rebuild_indexes()
 
-            # Namespace changes cannot be expressed as simple appends (the
-            # old full_id must vanish), so rewrite the entire file from
-            # current state. Pass _reload=False because we already reloaded
-            # under this very lock.
-            self._save_locked(
-                _reload=False, _rename_event_ids={old_full_id: new_full_id}
+            event = self._build_event_record(
+                "updated",
+                issue,
+                {"namespace": {"old": old_namespace, "new": new_namespace}},
+                by=updated_by,
             )
-
-        # Emit event after releasing the lock so the event-append path
-        # (which also takes the lock) doesn't deadlock.
-        self._emit_event(
-            "updated",
-            issue,
-            {"namespace": {"old": old_full_id.split("-")[0], "new": new_namespace}},
-            by=updated_by,
-        )
+            records = [issue_to_dict(issue), *changed]
+            if event is not None:
+                records.append(event)
+            self._vet_payload(b"".join(orjson.dumps(r) + b"\n" for r in records))
+            self._save_locked(
+                _reload=False,
+                _rename_event_ids={old_full_id: new_full_id},
+                _extra_records=[event] if event is not None else [],
+            )
 
         return issue
 
@@ -1220,37 +1249,71 @@ class JSONLStorage(EventEmitterMixin):
                 del self._issues[old_fid]
                 self._issues[issue.full_id] = issue
 
+            changed_issues: list[Issue] = []
+            changed_deps: list[Dependency] = []
+            changed_links: list[Link] = []
             for other in self._issues.values():
+                changed = False
                 if other.parent and other.parent in id_map:
                     other.parent = id_map[other.parent]
+                    changed = True
                     other.updated_at = now
                 if other.duplicate_of and other.duplicate_of in id_map:
                     other.duplicate_of = id_map[other.duplicate_of]
+                    changed = True
                     other.updated_at = now
 
+                if changed:
+                    changed_issues.append(other)
+
             for dep in self._dependencies:
+                changed = False
                 if dep.issue_id in id_map:
                     dep.issue_id = id_map[dep.issue_id]
+                    changed = True
                 if dep.depends_on_id in id_map:
                     dep.depends_on_id = id_map[dep.depends_on_id]
+                    changed = True
+
+                if changed:
+                    changed_deps.append(dep)
 
             for link in self._links:
+                changed = False
                 if link.from_id in id_map:
                     link.from_id = id_map[link.from_id]
+                    changed = True
                 if link.to_id in id_map:
                     link.to_id = id_map[link.to_id]
+                    changed = True
+
+                if changed:
+                    changed_links.append(link)
 
             self._rebuild_indexes()
-            self._save_locked(_reload=False, _rename_event_ids=id_map)
-
-        # Emit events outside the lock — _emit_event acquires the lock to
-        # append, so doing it inside the with-block would deadlock.
-        for issue in targets:
-            self._emit_event(
-                "updated",
-                issue,
-                {"namespace": {"old": old_namespace, "new": new_namespace}},
-                by=updated_by,
+            events = [
+                self._build_event_record(
+                    "updated",
+                    issue,
+                    {"namespace": {"old": old_namespace, "new": new_namespace}},
+                    by=updated_by,
+                )
+                for issue in targets
+            ]
+            # Scan changed records only, not unrelated historical snapshot data.
+            records = [issue_to_dict(i) for i in targets]
+            target_ids = set(id_map.values())
+            records += [
+                issue_to_dict(i) for i in changed_issues if i.full_id not in target_ids
+            ]
+            records += [dependency_to_record(d) for d in changed_deps]
+            records += [link_to_record(link) for link in changed_links]
+            records += [event for event in events if event is not None]
+            self._vet_payload(b"".join(orjson.dumps(r) + b"\n" for r in records))
+            self._save_locked(
+                _reload=False,
+                _rename_event_ids=id_map,
+                _extra_records=[event for event in events if event is not None],
             )
 
         return targets

@@ -31,6 +31,7 @@ from dogcat.models import (
     dict_to_proposal,
     proposal_to_dict,
 )
+from dogcat.write_hook import WriteHookRejectedError, run_pre_write_hook
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -262,11 +263,21 @@ class InboxStorage(EventEmitterMixin):
             self._batch_records.extend(records)
             return
 
+        payload = b"".join(orjson.dumps(r) + b"\n" for r in records)
+        try:
+            run_pre_write_hook(payload, self.path)
+        except WriteHookRejectedError:
+            # Same reason as JSONLStorage._vet_payload: the refused proposal
+            # is already in memory and must not outlive the rejection.
+            if self.path.exists():
+                self.reload()
+            else:
+                self._proposals.clear()
+            raise
+
         if self._needs_compaction:
             self._save()
             self._needs_compaction = False
-
-        payload = b"".join(orjson.dumps(r) + b"\n" for r in records)
 
         with self._file_lock():
             append_jsonl_payload(self.path, payload)
@@ -591,6 +602,14 @@ class InboxStorage(EventEmitterMixin):
                 self._proposals[proposal.full_id] = proposal
                 id_map[old_fid] = proposal.full_id
 
+            payload = b"".join(
+                orjson.dumps(self._proposal_record(p)) + b"\n" for p in targets
+            )
+            try:
+                run_pre_write_hook(payload, self.path)
+            except WriteHookRejectedError:
+                self.reload()
+                raise
             self._save_locked(_rename_event_ids=id_map)
         return len(targets)
 

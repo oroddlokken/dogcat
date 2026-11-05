@@ -60,6 +60,8 @@ Three setups, in order of scope:
 
 See [docs/sharing-a-database.md](docs/sharing-a-database.md) for the namespace rules, the resolution order, and the config precedence chain.
 
+For optional local validation before writes, see [write hooks](docs/write-hooks.md).
+
 ### Telling your agent to use dogcat
 
 Run `dcat example-md` to print a starting block for your `AGENTS.md`/`CLAUDE.md`. It covers the session-start command, when to mark an issue `in_progress`, when to ask before creating an issue, and the approval gate before closing one:

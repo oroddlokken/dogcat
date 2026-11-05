@@ -151,6 +151,9 @@ class _BaseEventLog:
         line.
         """
         payload = orjson.dumps(_serialize(event)) + b"\n"
+        from dogcat.write_hook import run_pre_write_hook
+
+        run_pre_write_hook(payload, self.path)
         with self._file_lock():
             append_jsonl_payload(self.path, payload)
 
