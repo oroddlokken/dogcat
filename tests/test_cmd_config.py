@@ -627,7 +627,7 @@ class TestConfigKeys:
         monkeypatch.chdir(tmp_path)
         _init_with_namespace(tmp_path / ".dogcats", "proj")
 
-        no_value_keys = {"inbox_remote", "default_storage"}
+        no_value_keys = {"inbox_remote", "default_storage", "pre_write_hook"}
         for key, info in _KNOWN_KEYS.items():
             if key in no_value_keys:
                 assert "unset_value" not in info

@@ -120,6 +120,15 @@ _KNOWN_KEYS: dict[str, dict[str, Any]] = {
         "default": "(unset)",
         "global_only": True,
     },
+    "pre_write_hook": {
+        "type": "str",
+        "description": (
+            "Shell command run with each write's JSONL on stdin; "
+            "non-zero exit aborts the write (global only)"
+        ),
+        "default": "(unset)",
+        "global_only": True,
+    },
 }
 
 # Resolvers for keys marked ``unset_computed``. Keyed by config key; each takes

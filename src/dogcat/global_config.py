@@ -31,7 +31,7 @@ _logger = logging.getLogger(__name__)
 
 # Keys the runtime actually reads from the global config file.
 GLOBAL_CONFIG_KEYS: frozenset[str] = frozenset(
-    {"default_storage", "visible_namespaces"}
+    {"default_storage", "visible_namespaces", "pre_write_hook"}
 )
 
 
@@ -41,6 +41,9 @@ class GlobalConfig:
 
     default_storage: Path | None = None
     visible_namespaces: list[str] = field(default_factory=list[str])
+    # Shell command that vets records before they are written; see
+    # dogcat.write_hook. Empty means no hook.
+    pre_write_hook: str | None = None
 
 
 def get_global_config_path() -> Path:
@@ -72,9 +75,32 @@ def load_global_config_raw() -> dict[str, Any]:
     try:
         with path.open("rb") as f:
             return tomllib.load(f)
-    except (tomllib.TOMLDecodeError, OSError) as e:
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError, OSError) as e:
         _logger.warning("Failed to read global config at %s: %s", path, e)
         return {}
+
+
+def load_pre_write_hook_strict() -> str | None:
+    """Read the hook without silently disabling it on configuration errors."""
+    path = get_global_config_path()
+    try:
+        with path.open("rb") as f:
+            data = tomllib.load(f)
+    except FileNotFoundError:
+        if os.path.lexists(path):
+            msg = "cannot read global config"
+            raise ValueError(msg) from None
+        return None
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError, OSError):
+        msg = "cannot read global config"
+        raise ValueError(msg) from None
+    if "pre_write_hook" not in data:
+        return None
+    hook = data["pre_write_hook"]
+    if not isinstance(hook, str):
+        msg = "pre_write_hook must be a string"
+        raise ValueError(msg)  # noqa: TRY004  # malformed configuration
+    return hook.strip() or None
 
 
 def load_global_config() -> GlobalConfig:
@@ -93,9 +119,13 @@ def load_global_config() -> GlobalConfig:
         else []
     )
 
+    hook_raw = data.get("pre_write_hook")
+    hook = hook_raw.strip() if isinstance(hook_raw, str) else None
+
     return GlobalConfig(
         default_storage=storage,
         visible_namespaces=visible,
+        pre_write_hook=hook or None,
     )
 
 
