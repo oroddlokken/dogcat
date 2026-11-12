@@ -9,6 +9,13 @@ default:
 var:
     @just --evaluate
 
+# oxlint --fix and oxfmt rewrite the same JS files, so they run chained rather
+# than side by side: a fix oxlint lands after oxfmt has run leaves JS that
+# `just lint` rejects. djlint and stylelint have trees of their own. The trap
+# kills the process group: a background child of a non-interactive shell
+# ignores SIGINT, so without it all three keep rewriting the tree after Ctrl-C
+# hands the prompt back. `trap -` first, because dash re-enters the handler on
+# the TERM its own `kill 0` sends and dies of a segfault.
 # run formatters
 fmt:
     uv run ruff format src tests dcat.py benchmark.py tabcomp.py
@@ -18,11 +25,11 @@ fmt:
     # by `lint`, which runs djlint in check mode. The `rc` loop below is what
     # makes a failing branch fail the recipe — a bare `wait` returns the last
     # job's status and silently swallowed the others.
+    trap 'trap - INT TERM; kill 0' INT TERM; \
     uv run djlint src/dogcat/web --reformat --quiet || true & d=$!; \
-    pnpm run --silent oxfmt-fix & o=$!; \
-    pnpm run --silent oxlint-fix & l=$!; \
+    pnpm run --silent oxlint-fix && pnpm run --silent oxfmt-fix & o=$!; \
     pnpm run --silent stylelint-fix & s=$!; \
-    rc=0; for p in $d $o $l $s; do wait $p || rc=1; done; exit $rc
+    rc=0; for p in $d $o $s; do wait $p || rc=1; done; exit $rc
 
 # run all formatters
 fmt-all:
