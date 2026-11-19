@@ -2181,3 +2181,76 @@ class TestListSharedWork:
         assert "Listed proposal" in result.stdout
         assert ns_calls["n"] == 1
         assert inbox_loads["n"] == 1
+
+
+class TestListWithParentLoop:
+    """dcat list finishes when the store holds a parent loop.
+
+    ``update`` refuses loops, so the loop is written through the storage
+    API, standing in for a merge or a hand edit of ``issues.jsonl``.
+    """
+
+    def _store_with_loop(self, tmp_path: Path) -> Path:
+        from dogcat.models import Issue, Status
+        from dogcat.storage import JSONLStorage
+
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        storage = JSONLStorage(str(dogcats_dir / "issues.jsonl"))
+        storage.create(
+            Issue(
+                id="dfa",
+                namespace="dc",
+                title="Deferred on loop",
+                parent="dc-opb",
+                status=Status.DEFERRED,
+            ),
+        )
+        storage.create(
+            Issue(id="opb", namespace="dc", title="Open on loop", parent="dc-dfa"),
+        )
+        storage.create(Issue(id="plain", namespace="dc", title="Plain issue"))
+        return dogcats_dir
+
+    @pytest.mark.timeout(10)
+    @pytest.mark.parametrize("extra", [[], ["--tree"], ["--expand", "--tree"]])
+    def test_list_finishes_and_shows_loop(
+        self, tmp_path: Path, extra: list[str]
+    ) -> None:
+        """The deferred issue on the loop and the plain issue are listed."""
+        dogcats_dir = self._store_with_loop(tmp_path)
+
+        result = runner.invoke(
+            app,
+            ["list", *extra, "-A", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "Deferred on loop" in result.output
+        assert "Plain issue" in result.output
+
+    @pytest.mark.timeout(10)
+    def test_two_deferred_issues_on_one_loop_both_listed(self, tmp_path: Path) -> None:
+        """Deferred issues on the same loop do not hide each other."""
+        from dogcat.models import Issue, Status
+        from dogcat.storage import JSONLStorage
+
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        storage = JSONLStorage(str(dogcats_dir / "issues.jsonl"))
+        for own, other in (("dfa", "dc-dfb"), ("dfb", "dc-dfa")):
+            storage.create(
+                Issue(
+                    id=own,
+                    namespace="dc",
+                    title=f"Deferred {own}",
+                    parent=other,
+                    status=Status.DEFERRED,
+                ),
+            )
+
+        result = runner.invoke(app, ["list", "-A", "--dogcats-dir", str(dogcats_dir)])
+
+        assert result.exit_code == 0, result.output
+        assert "Deferred dfa" in result.output
+        assert "Deferred dfb" in result.output

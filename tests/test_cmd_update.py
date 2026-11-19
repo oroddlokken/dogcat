@@ -1278,3 +1278,46 @@ class TestUpdateStatusValidation:
         # The fields --status tombstone left empty are what delete fills in.
         assert stored.deleted_at is not None
         assert stored.deleted_reason == "obsolete"
+
+
+class TestCLIUpdateParentLoop:
+    """dcat update refuses a parent that would close a parent loop."""
+
+    def _create(self, dogcats_dir: Path, title: str, *extra: str) -> str:
+        result = runner.invoke(
+            app,
+            ["create", title, "--json", *extra, "--dogcats-dir", str(dogcats_dir)],
+        )
+        data = json.loads(result.stdout)
+        return f"{data['namespace']}-{data['id']}"
+
+    def _parent(self, dogcats_dir: Path, issue_id: str) -> str | None:
+        result = runner.invoke(
+            app,
+            ["show", issue_id, "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+        return json.loads(result.stdout).get("parent")
+
+    @pytest.mark.parametrize("target", ["self", "child"])
+    def test_loop_refused(self, tmp_path: Path, target: str) -> None:
+        """Self and descendant parents fail with an error and change nothing."""
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        top = self._create(dogcats_dir, "Top epic")
+        child = self._create(dogcats_dir, "Child epic", "--parent", top)
+
+        result = runner.invoke(
+            app,
+            [
+                "update",
+                top,
+                "--parent",
+                top if target == "self" else child,
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "Cannot set parent" in result.output
+        assert self._parent(dogcats_dir, top) is None

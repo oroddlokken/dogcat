@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`dcat update` refuses a parent that would put an issue on a parent loop, and every command that walks parents survives a loop already in the store.** `dcat update A --parent A`, or `--parent` naming one of A's descendants, used to be accepted. One loop then made `dcat ready` spin forever, left the loop's issues out of `dcat list --tree`, the TUI tree and `dcat graph` while the list header still counted them, hid deferred issues on a loop from `dcat list` as their own or each other's hidden subtasks, and passed `dcat doctor`. `update` now raises the same kind of error `dep add` gives for a dependency cycle, which the CLI prints with exit 1; the TUI picker already left descendants out. A loop can still arrive by a merge of two branches whose parent changes are each valid, or by a hand edit, so `ready` stops its ancestor walk when it comes back to an id, the descendant walk expands each id once and never counts an ancestor as a descendant, both tree views show an issue on a loop at the top level, `dcat graph` starts a walk from every issue no root reached, and `dcat doctor` names each loop under data integrity with the `dcat update <id> --parent ""` that breaks it (closes dogcat-3foy).
+
 ### Development
 
 - **Dependencies move to latest: orjson 3.13.0, typer 0.27.3, tomli 2.5.0, ruff 0.17.1, pyright 1.1.414, djlint 1.46, hypothesis 6.168, oxlint 1.88, oxfmt 0.73 and stylelint 17.16.**
