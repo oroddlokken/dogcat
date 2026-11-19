@@ -47,7 +47,9 @@ scanner may reject removal of a secret. The hook cannot transform the write.
 Exit 0 approves; any other exit, failure to start, invalid global config, or
 30-second timeout rejects it. The hook's stdout is discarded on every run. On rejection the error includes the first
 4 KiB of stderr and marks any truncation. The CLI, TUI and JSON error output
-carry that diagnostic. Print only what you are willing to
+carry that diagnostic, with ANSI escapes and control characters removed except
+for newlines and tabs. A hook must not leave background processes holding its
+stderr open, since dcat waits for it to close and rejects the write on timeout. Print only what you are willing to
 see in a terminal or an agent's log: name the rule and the issue id, not the
 record, and pass `--redact` to Gitleaks. The hook inherits the working
 directory and environment; `DCAT_WRITE_TARGET` is the absolute path of the

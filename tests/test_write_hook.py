@@ -459,6 +459,24 @@ class TestRuntime:
             write_hook.run_pre_write_hook(b"data", target)
         assert "private detail" not in str(exc.value)
 
+    def test_stderr_strips_terminal_sequences_and_keeps_layout(
+        self, tmp_path: Path
+    ) -> None:
+        """Colour, terminal titles and controls disappear from the rejection."""
+        diagnostic = (
+            "\x1b[31mred\x1b[0m\x07\x00\r\x7f\x85\n\t"
+            "\x1b]0;title\x07\x1b]8;;https://example.org\x1b\\link\x1b]8;;\x1b\\"
+            "\x9b32m done\x1b["
+        )
+        command = f"import sys; sys.stderr.write({diagnostic!r}); sys.exit(1)"
+        _set_hook(shlex.join([sys.executable, "-c", command]))
+        with pytest.raises(WriteHookRejectedError) as exc:
+            write_hook.run_pre_write_hook(b"record", tmp_path / "issues.jsonl")
+        assert (
+            str(exc.value)
+            == "pre_write_hook rejected the write (exit 1): red\n\tlink done"
+        )
+
     def test_noisy_hook_is_drained_and_truncated(self, tmp_path: Path) -> None:
         """A full stderr pipe cannot stall delivery of a large stdin payload."""
         command = (

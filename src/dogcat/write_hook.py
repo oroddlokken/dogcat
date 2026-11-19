@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import re
 import selectors
 import signal
 import subprocess
@@ -29,6 +30,7 @@ import time
 from typing import TYPE_CHECKING
 
 from dogcat.global_config import load_pre_write_hook_strict
+from dogcat.models import strip_control_bytes
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -36,6 +38,16 @@ if TYPE_CHECKING:
 # Bound a hung hook so it cannot wedge every write.
 HOOK_TIMEOUT_SECS = 30.0
 HOOK_STDERR_LIMIT = 4096
+
+# Consume the whole terminal sequence, including any parameters or string
+# payload. A bounded capture can end before the sequence's terminator.
+_ANSI_ESCAPE = re.compile(
+    r"(?:\x1b\]|\x9d).*?(?:\x07|\x1b\\|\x9c|\Z)"  # OSC
+    r"|(?:\x1b[PX^_]|[\x90\x98\x9e\x9f]).*?(?:\x1b\\|\x9c|\Z)"  # DCS/SOS/PM/APC
+    r"|(?:\x1b\[|\x9b)[0-?]*[ -/]*(?:[@-~]|\Z)"  # CSI
+    r"|\x1b[ -/]*[0-~]",  # Other escape sequences
+    re.DOTALL,
+)
 
 # Set in the hook's environment so one command can tell the stores apart.
 HOOK_TARGET_ENV_VAR = "DCAT_WRITE_TARGET"
@@ -135,7 +147,8 @@ def run_pre_write_hook(payload: bytes, target: Path) -> None:
             if process.returncode == 0:
                 return
             msg = f"pre_write_hook rejected the write (exit {process.returncode})"
-    detail = stderr[:HOOK_STDERR_LIMIT].decode("utf-8", errors="replace").rstrip()
+    detail = stderr[:HOOK_STDERR_LIMIT].decode("utf-8", errors="replace")
+    detail = (strip_control_bytes(_ANSI_ESCAPE.sub("", detail)) or "").rstrip()
     if len(stderr) > HOOK_STDERR_LIMIT:
         detail += " [stderr truncated]"
     if detail:
