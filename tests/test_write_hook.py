@@ -224,11 +224,13 @@ class TestInboxStore:
 class TestCli:
     """What a refused write looks like from the command line."""
 
+    @pytest.mark.parametrize("json_mode", [False, True])
     def test_create_shows_hook_stderr_and_exits_1(
         self,
         temp_dogcats_dir: Path,
         hook_log: Path,
         capfd: pytest.CaptureFixture[str],
+        json_mode: bool,
     ) -> None:
         """The hook's stderr says why, and no issue is created."""
         runner.invoke(app, ["init", "--dogcats-dir", str(temp_dogcats_dir)])
@@ -238,6 +240,7 @@ class TestCli:
             [
                 "create",
                 "leaky",
+                *(["--json"] if json_mode else []),
                 "-d",
                 "FORBIDDEN",
                 "--dogcats-dir",
@@ -246,7 +249,9 @@ class TestCli:
         )
         assert result.exit_code == 1
         assert "pre_write_hook rejected the write" in result.output
-        assert "found FORBIDDEN in the record" in capfd.readouterr().err
+        reason = json.loads(result.stderr)["error"] if json_mode else result.stderr
+        assert "found FORBIDDEN in the record" in reason
+        assert capfd.readouterr().err == ""
         assert b"leaky" not in (temp_dogcats_dir / "issues.jsonl").read_bytes()
         assert hook_log.exists()
 
@@ -454,12 +459,25 @@ class TestRuntime:
             write_hook.run_pre_write_hook(b"data", target)
         assert "private detail" not in str(exc.value)
 
+    def test_noisy_hook_is_drained_and_truncated(self, tmp_path: Path) -> None:
+        """A full stderr pipe cannot stall delivery of a large stdin payload."""
+        command = (
+            "import sys; sys.stderr.buffer.write(b'x' * 200000); "
+            "assert len(sys.stdin.buffer.read()) == 200000; sys.exit(4)"
+        )
+        _set_hook(shlex.join([sys.executable, "-c", command]))
+        with pytest.raises(WriteHookRejectedError, match="exit 4") as exc:
+            write_hook.run_pre_write_hook(b"a" * 200000, tmp_path / "issues.jsonl")
+        assert str(exc.value).endswith(
+            ": " + "x" * write_hook.HOOK_STDERR_LIMIT + " [stderr truncated]"
+        )
+
     def test_exact_bytes_and_target(
         self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """The hook gets the payload byte for byte and the target path.
 
-        Its stdout is discarded and its stderr reaches the user.
+        Neither output stream reaches the terminal on success.
         """
         script = tmp_path / "record.py"
         payload_file = tmp_path / "payload"
@@ -483,7 +501,7 @@ class TestRuntime:
         assert target_file.read_text() == str(target)
         captured = capfd.readouterr()
         assert captured.out == ""
-        assert captured.err == "private stderr\n"
+        assert captured.err == ""
 
     @pytest.mark.skipif(os.name != "posix", reason="POSIX process groups")
     def test_timeout_kills_descendant(

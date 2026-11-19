@@ -29,9 +29,8 @@ Try a clean write and a synthetic secret in a temporary store:
 )
 ```
 
-The clean issue is created. The synthetic secret is rejected: Gitleaks prints
-its redacted finding on stderr, followed by
-`Error: pre_write_hook rejected the write (exit 1)` and `Exit: 1`.
+The clean issue is created. The synthetic secret is rejected: the error includes
+`pre_write_hook rejected the write (exit 1)` and the redacted Gitleaks finding.
 Disable the hook with `dcat config unset --global pre_write_hook`.
 
 The command is user-global and applies across stores. It lives in
@@ -46,8 +45,9 @@ Dogcat sends each pending batch as unmodified JSONL on stdin. A batch can
 contain multiple data and event records; events can include old values, so a
 scanner may reject removal of a secret. The hook cannot transform the write.
 Exit 0 approves; any other exit, failure to start, invalid global config, or
-30-second timeout rejects it. The hook's stdout is discarded and its stderr
-is shown, so it can say which rule failed. Print only what you are willing to
+30-second timeout rejects it. The hook's stdout is discarded on every run. On rejection the error includes the first
+4 KiB of stderr and marks any truncation. The CLI, TUI and JSON error output
+carry that diagnostic. Print only what you are willing to
 see in a terminal or an agent's log: name the rule and the issue id, not the
 record, and pass `--redact` to Gitleaks. The hook inherits the working
 directory and environment; `DCAT_WRITE_TARGET` is the absolute path of the
