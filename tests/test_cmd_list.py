@@ -2230,6 +2230,48 @@ class TestListWithParentLoop:
         assert "Plain issue" in result.output
 
     @pytest.mark.timeout(10)
+    def test_ready_and_list_both_show_open_issue_on_loop_with_deferred(
+        self, tmp_path: Path
+    ) -> None:
+        """Issues on one loop are not under each other, in either command."""
+        dogcats_dir = self._store_with_loop(tmp_path)
+
+        listed = runner.invoke(app, ["list", "-A", "--dogcats-dir", str(dogcats_dir)])
+        ready = runner.invoke(app, ["ready", "-A", "--dogcats-dir", str(dogcats_dir)])
+
+        assert listed.exit_code == 0, listed.output
+        assert ready.exit_code == 0, ready.output
+        assert "Open on loop" in listed.output
+        assert "Open on loop" in ready.output
+
+    @pytest.mark.timeout(10)
+    def test_ready_and_list_both_hide_issue_below_loop_with_deferred(
+        self, tmp_path: Path
+    ) -> None:
+        """An issue hanging off the loop is under the deferred one in both."""
+        from dogcat.cli._cmd_read import _collapse_deferred_subtrees
+        from dogcat.deps import get_ready_work
+        from dogcat.models import Issue
+        from dogcat.storage import JSONLStorage
+
+        dogcats_dir = self._store_with_loop(tmp_path)
+        storage = JSONLStorage(str(dogcats_dir / "issues.jsonl"))
+        storage.create(
+            Issue(id="tail", namespace="dc", title="Below loop", parent="dc-opb"),
+        )
+
+        ready_ids = {i.full_id for i in get_ready_work(storage)}
+        listed_ids = {
+            i.full_id
+            for i in _collapse_deferred_subtrees(storage.list(), storage).filtered
+        }
+
+        assert "dc-tail" not in ready_ids
+        assert "dc-tail" not in listed_ids
+        assert "dc-opb" in ready_ids
+        assert "dc-opb" in listed_ids
+
+    @pytest.mark.timeout(10)
     def test_two_deferred_issues_on_one_loop_both_listed(self, tmp_path: Path) -> None:
         """Deferred issues on the same loop do not hide each other."""
         from dogcat.models import Issue, Status

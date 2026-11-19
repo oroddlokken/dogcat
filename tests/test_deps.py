@@ -209,11 +209,11 @@ class TestReadyWorkWithParentLoops:
         assert {"t-la", "t-lb"} <= ready_ids
 
     @pytest.mark.timeout(10)
-    def test_deferred_issue_on_loop_still_hides_descendants(
+    def test_open_issue_on_loop_with_deferred_issue_is_ready(
         self,
         storage_with_issues: JSONLStorage,
     ) -> None:
-        """A deferred issue on a loop still keeps the other loop member out."""
+        """Issues on one loop are not under each other, deferred or not."""
         storage_with_issues.create(
             Issue(id="da", namespace="t", title="Deferred", parent="t-db"),
         )
@@ -222,7 +222,30 @@ class TestReadyWorkWithParentLoops:
         )
         storage_with_issues.update("t-da", {"status": "deferred"})
         ready_ids = {i.full_id for i in get_ready_work(storage_with_issues)}
-        assert "t-db" not in ready_ids
+        assert "t-db" in ready_ids
+        assert "t-da" not in ready_ids
+
+    @pytest.mark.timeout(10)
+    @pytest.mark.parametrize("hangs_off", ["t-da", "t-db"])
+    def test_issue_below_loop_with_deferred_issue_is_held_back(
+        self,
+        storage_with_issues: JSONLStorage,
+        hangs_off: str,
+    ) -> None:
+        """An issue hanging off the loop is below the deferred one, whichever end."""
+        storage_with_issues.create(
+            Issue(id="da", namespace="t", title="Deferred", parent="t-db"),
+        )
+        storage_with_issues.create(
+            Issue(id="db", namespace="t", title="Open", parent="t-da"),
+        )
+        storage_with_issues.create(
+            Issue(id="tail", namespace="t", title="Tail", parent=hangs_off),
+        )
+        storage_with_issues.update("t-da", {"status": "deferred"})
+        ready_ids = {i.full_id for i in get_ready_work(storage_with_issues)}
+        assert "t-tail" not in ready_ids
+        assert "t-db" in ready_ids
 
 
 class TestGetBlockedIssues:
