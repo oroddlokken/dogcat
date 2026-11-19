@@ -33,9 +33,12 @@ the file in an editor, hand-resolving a merge conflict inside it, restoring it w
 `issues.jsonl`. For conflict markers run `uv run dcat git rebase`; for a damaged file run
 `uv run dcat repair-jsonl --dry-run` first, because the next append silently drops unparseable lines.
 `dcat git rebase` exits non-zero and names any file it could not resolve — that file still holds
-`<<<<<<<`, so do not run `git rebase --continue` until it does. A yellow line naming a file means it
-merged without a common ancestor and may have restored a dependency or link the other branch
-deleted; check with `uv run dcat doctor --post-merge`.
+`<<<<<<<`, so do not run `git rebase --continue` until it does. A yellow line naming a file is one of
+two warnings. "no common ancestor" means the file merged as a union and may have restored a
+dependency or link the other branch deleted; check with `uv run dcat doctor --post-merge`.
+"parent loop" means two branches each moved an issue under the other; the line names the
+`dcat update <id> --parent ""` that breaks it, and which of the two links to clear is the user's
+call, so ask before running it.
 Test fixtures under `tests/` may serialize records straight to a temp store — that precedent does
 not extend to this repo's own `.dogcats/`.
 

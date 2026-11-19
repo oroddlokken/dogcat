@@ -557,6 +557,11 @@ def register(app: typer.Typer) -> None:
         to a union of the two sides, which restores a dependency or link one
         branch deleted. That case is named per file rather than resolved
         silently (dogcat-5cvm).
+
+        Two branches that each move an issue under the other merge into a
+        parent loop. The resolve keeps both changes and names the loop per
+        file with the update that breaks it. A loop one side already held
+        is not named again; dcat doctor reports those (dogcat-3v2f).
         """
         from contextlib import ExitStack
 
@@ -564,7 +569,12 @@ def register(app: typer.Typer) -> None:
         from dogcat._jsonl_io import atomic_rewrite_jsonl
         from dogcat.constants import LOCK_FILENAME
         from dogcat.locking import advisory_file_lock
-        from dogcat.merge_driver import merge_jsonl, parse_conflicted_jsonl
+        from dogcat.merge_driver import (
+            describe_parent_loop,
+            find_new_parent_loops,
+            merge_jsonl,
+            parse_conflicted_jsonl,
+        )
 
         dogcats_dir = Path(find_dogcats_dir())
         if not dogcats_dir.is_dir():
@@ -576,6 +586,7 @@ def register(app: typer.Typer) -> None:
         errors: list[str] = []
         unresolved: list[str] = []
         without_base: list[str] = []
+        parent_loops: list[tuple[str, list[str]]] = []
 
         # One lock around the whole scan, not one per file. Every resolve
         # below replaces its file wholesale, so a concurrent dcat append
@@ -645,6 +656,10 @@ def register(app: typer.Typer) -> None:
                         msg = f"git add failed for {jsonl_path}"
                         raise RuntimeError(msg)
                     resolved.append(jsonl_path.name)
+                    parent_loops.extend(
+                        (jsonl_path.name, cycle)
+                        for cycle in find_new_parent_loops(merged, ours, theirs)
+                    )
                 except Exception as exc:
                     errors.append(f"{jsonl_path.name}: {exc}")
 
@@ -661,6 +676,15 @@ def register(app: typer.Typer) -> None:
                     f"! {name}: no common ancestor available, so both sides were "
                     "merged as a union — a dependency or link deleted on one "
                     "branch may be back. Check with 'dcat doctor --post-merge'.",
+                    fg="yellow",
+                ),
+            )
+
+        for name, cycle in parent_loops:
+            typer.echo(
+                typer.style(
+                    f"! {name}: the two sides merged into a "
+                    f"{describe_parent_loop(cycle)}",
                     fg="yellow",
                 ),
             )
@@ -696,11 +720,19 @@ def register(app: typer.Typer) -> None:
         leaves the ours file exactly as it found it and marks the path
         conflicted. No fallback merge runs, so the file holds ours-side
         records only and staging it discards every record from theirs.
+
+        A parent loop the merge produced is a warning, not a failure: the
+        merge is written as it resolved and still exits 0 (dogcat-3v2f).
         """
         import logging
 
         from dogcat._jsonl_io import atomic_rewrite_jsonl
-        from dogcat.merge_driver import _parse_jsonl, merge_jsonl
+        from dogcat.merge_driver import (
+            _parse_jsonl,
+            describe_parent_loop,
+            find_new_parent_loops,
+            merge_jsonl,
+        )
 
         try:
             base_path = Path(base)
@@ -725,6 +757,13 @@ def register(app: typer.Typer) -> None:
                 "record from the other branch.",
             )
             raise typer.Exit(1)
+
+        # After the write and outside the try: the merge has landed, and a
+        # warning must not turn it into a conflict.
+        for cycle in find_new_parent_loops(merged, ours_records, theirs_records):
+            logging.getLogger("dogcat.merge_driver").warning(
+                "The two sides merged into a %s", describe_parent_loop(cycle)
+            )
 
         raise typer.Exit(0)
 

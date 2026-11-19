@@ -20,6 +20,9 @@ from dogcat.merge_driver import (
     _parse_jsonl,
     _tie_break_key,
     _TieBreakCache,
+    describe_parent_loop,
+    find_new_parent_loops,
+    find_parent_loops,
     merge_jsonl,
 )
 from dogcat.models import DependencyType, Issue
@@ -1676,3 +1679,212 @@ class TestTieBreakMemo:
         assert cache(first) == _tie_break_key(first)
         assert cache(first) == cache(second)
         assert cache(second) == _tie_break_key(second)
+
+
+def _two_branches_into_a_loop() -> tuple[
+    list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]
+]:
+    """Build base, ours and theirs where each side makes one valid parent change.
+
+    Ours moves A under B, theirs moves B under A. Neither branch holds a
+    loop on its own, and ``dcat update`` accepts both.
+    """
+    early = "2026-01-01T00:00:00+00:00"
+    base = [
+        _issue_record(id="a", title="A", updated_at=early),
+        _issue_record(id="b", title="B", updated_at=early),
+    ]
+    ours = [
+        _issue_record(
+            id="a", title="A", parent="test-b", updated_at="2026-01-02T00:00:00+00:00"
+        ),
+        base[1],
+    ]
+    theirs = [
+        base[0],
+        _issue_record(
+            id="b", title="B", parent="test-a", updated_at="2026-01-03T00:00:00+00:00"
+        ),
+    ]
+    return base, ours, theirs
+
+
+def _loop_already_on_ours() -> tuple[
+    list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]
+]:
+    """Build a merge where ours carried the loop in, and theirs adds an issue."""
+    _, ours, theirs = _two_branches_into_a_loop()
+    looped = [ours[0], theirs[1]]
+    newcomer = _issue_record(id="c", title="C")
+    return looped, looped, [*looped, newcomer]
+
+
+class TestParentLoopFromMerge:
+    """Two valid parent changes merge into a loop, and the callers say so.
+
+    The merger keeps both changes; picking one would drop an edit nobody
+    asked to lose. (dogcat-3v2f)
+    """
+
+    def test_two_valid_branches_merge_into_a_loop(self) -> None:
+        """Neither side holds a loop, the merged result does, both edits kept."""
+        base, ours, theirs = _two_branches_into_a_loop()
+
+        merged = merge_jsonl(base, ours, theirs)
+
+        assert find_parent_loops(ours) == []
+        assert find_parent_loops(theirs) == []
+        (loop,) = find_new_parent_loops(merged, ours, theirs)
+        assert sorted(loop) == ["test-a", "test-b"]
+        parents = {r["id"]: r.get("parent") for r in merged}
+        assert parents == {"a": "test-b", "b": "test-a"}
+
+    def test_loop_one_side_already_held_is_not_new(self) -> None:
+        """A loop ours carried in is in the result, but this merge did not make it."""
+        base, ours, theirs = _loop_already_on_ours()
+
+        merged = merge_jsonl(base, ours, theirs)
+
+        assert len(find_parent_loops(merged)) == 1
+        assert find_new_parent_loops(merged, ours, theirs) == []
+        assert find_new_parent_loops(merged, theirs, ours) == []
+
+    def test_last_record_for_an_id_decides_a_sides_parent(self) -> None:
+        """A side is a log: a later record that clears the parent ends the loop."""
+        _, ours, theirs = _two_branches_into_a_loop()
+        looped = [ours[0], theirs[1]]
+        cleared = _issue_record(id="a", title="A", parent=None)
+
+        assert len(find_parent_loops(looped)) == 1
+        assert find_parent_loops([*looped, cleared]) == []
+
+    def test_same_issues_looped_the_other_way_round_is_new(self) -> None:
+        """A loop is its links, not its members: reversed, it is another loop."""
+
+        def side(*links: tuple[str, str]) -> list[dict[str, Any]]:
+            return [_issue_record(id=c, parent=f"test-{par}") for c, par in links]
+
+        ours = side(("a", "b"), ("b", "c"), ("c", "a"))
+        merged = side(("a", "c"), ("c", "b"), ("b", "a"))
+
+        assert len(find_new_parent_loops(merged, ours, [])) == 1
+        assert find_new_parent_loops(ours, ours, []) == []
+
+    def test_no_loop_in_an_ordinary_merge(self) -> None:
+        """A parent chain and a parent outside the records are not loops."""
+        records = [
+            _issue_record(id="top"),
+            _issue_record(id="mid", parent="test-top"),
+            _issue_record(id="orphan", parent="test-gone"),
+        ]
+
+        assert find_parent_loops(records) == []
+
+    def test_only_issue_records_are_read(self) -> None:
+        """Other kinds are skipped, and a non-string parent is no parent."""
+        records: list[dict[str, Any]] = [
+            _issue_record(id="a", parent=["test-a"]),
+            {"record_type": "event", "issue_id": "test-a", "parent": "test-a"},
+            {"record_type": "from_a_newer_dcat", "id": "a", "parent": "test-a"},
+        ]
+
+        assert find_parent_loops(records) == []
+
+    def test_unknown_kind_is_not_warned_about_twice(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The loop check adds no second unknown-kind warning to a merge."""
+        records = [{"record_type": "from_a_newer_dcat", "id": "a"}]
+
+        with caplog.at_level(logging.WARNING):
+            find_parent_loops(records)
+
+        assert caplog.messages == []
+
+    def test_description_names_the_loop_and_the_fix(self) -> None:
+        """The rendered line closes the loop and gives a runnable command."""
+        text = describe_parent_loop(["test-a", "test-b"])
+
+        assert "test-a -> test-b -> test-a" in text
+        assert 'dcat update test-a --parent ""' in text
+
+    def _write_sides(self, tmp_path: Path, *, loop: str) -> tuple[Path, Path, Path]:
+        base_records, ours_records, theirs_records = _two_branches_into_a_loop()
+        if loop == "none":
+            theirs_records = base_records
+        elif loop == "already on ours":
+            base_records, ours_records, theirs_records = _loop_already_on_ours()
+        paths = (
+            tmp_path / "base.jsonl",
+            tmp_path / "ours.jsonl",
+            tmp_path / "theirs.jsonl",
+        )
+        for path, records in zip(
+            paths, (base_records, ours_records, theirs_records), strict=True
+        ):
+            path.write_bytes(b"".join(orjson.dumps(r) + b"\n" for r in records))
+        return paths
+
+    def test_merge_driver_warns_and_still_exits_zero(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The driver writes the merge as it resolved and names the loop."""
+        from typer.testing import CliRunner
+
+        from dogcat.cli import app
+
+        base, ours, theirs = self._write_sides(tmp_path, loop="new")
+
+        with caplog.at_level(logging.WARNING, logger="dogcat.merge_driver"):
+            result = CliRunner().invoke(
+                app, ["git", "merge-driver", str(base), str(ours), str(theirs)]
+            )
+
+        assert result.exit_code == 0
+        written = [orjson.loads(ln) for ln in ours.read_bytes().splitlines() if ln]
+        assert {r["id"]: r.get("parent") for r in written} == {
+            "a": "test-b",
+            "b": "test-a",
+        }
+        (warning,) = [m for m in caplog.messages if "parent loop" in m]
+        assert "test-a" in warning
+        assert "test-b" in warning
+        assert "--parent" in warning
+
+    def test_merge_driver_is_silent_without_a_loop(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """An ordinary parent change merges with no warning."""
+        from typer.testing import CliRunner
+
+        from dogcat.cli import app
+
+        base, ours, theirs = self._write_sides(tmp_path, loop="none")
+
+        with caplog.at_level(logging.WARNING, logger="dogcat.merge_driver"):
+            result = CliRunner().invoke(
+                app, ["git", "merge-driver", str(base), str(ours), str(theirs)]
+            )
+
+        assert result.exit_code == 0
+        assert caplog.messages == []
+
+    def test_merge_driver_is_silent_about_a_loop_it_did_not_make(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A loop ours already held merges through without a warning."""
+        from typer.testing import CliRunner
+
+        from dogcat.cli import app
+
+        base, ours, theirs = self._write_sides(tmp_path, loop="already on ours")
+
+        with caplog.at_level(logging.WARNING, logger="dogcat.merge_driver"):
+            result = CliRunner().invoke(
+                app, ["git", "merge-driver", str(base), str(ours), str(theirs)]
+            )
+
+        assert result.exit_code == 0
+        written = [orjson.loads(ln) for ln in ours.read_bytes().splitlines() if ln]
+        assert len(find_parent_loops(written)) == 1
+        assert caplog.messages == []
