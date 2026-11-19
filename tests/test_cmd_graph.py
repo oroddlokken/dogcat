@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from dogcat.cli import app
@@ -227,3 +228,36 @@ class TestGraph:
         data = json.loads(result.stdout)
         assert data["nodes"] == []
         assert data["edges"] == []
+
+
+@pytest.mark.timeout(10)
+class TestGraphWithParentLoop:
+    """dcat graph shows issues on a parent loop next to ordinary roots.
+
+    ``update`` refuses loops, so the loop is written through the storage
+    API, standing in for a merge or a hand edit of ``issues.jsonl``.
+    """
+
+    def test_loop_members_and_their_children_shown(self, tmp_path: Path) -> None:
+        """Loop issues, an issue hanging off the loop, and a plain tree all print."""
+        from dogcat.models import Issue
+        from dogcat.storage import JSONLStorage
+
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        storage = JSONLStorage(str(dogcats_dir / "issues.jsonl"))
+        storage.create(Issue(id="root", namespace="dc", title="Plain root"))
+        storage.create(
+            Issue(id="kid", namespace="dc", title="Plain kid", parent="dc-root"),
+        )
+        storage.create(Issue(id="la", namespace="dc", title="Loop A", parent="dc-lb"))
+        storage.create(Issue(id="lb", namespace="dc", title="Loop B", parent="dc-la"))
+        storage.create(
+            Issue(id="off", namespace="dc", title="Hangs off A", parent="dc-la"),
+        )
+
+        result = runner.invoke(app, ["graph", "--dogcats-dir", str(dogcats_dir)])
+
+        assert result.exit_code == 0, result.output
+        for title in ("Plain root", "Plain kid", "Loop A", "Loop B", "Hangs off A"):
+            assert title in result.output

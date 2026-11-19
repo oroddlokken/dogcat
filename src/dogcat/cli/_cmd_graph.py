@@ -105,10 +105,6 @@ def _render_graph(
         key=lambda i: (i.priority, i.full_id),
     )
 
-    # If no clear roots (cycle-only graph), fall back to all issues as roots.
-    if not roots:
-        roots = sorted(issues, key=lambda i: (i.priority, i.full_id))
-
     issue_by_id = {i.full_id: i for i in issues}
     visited: set[str] = set()
     lines: list[str] = []
@@ -153,6 +149,12 @@ def _render_graph(
         if root.full_id in visited:
             continue
         _walk(root.full_id, "", "")
+
+    # Issues on a cycle (parent loop or blocking cycle) are never roots, and
+    # no walk from a root reaches them, so start a walk from each one left.
+    for issue in sorted(issues, key=lambda i: (i.priority, i.full_id)):
+        if issue.full_id not in visited:
+            _walk(issue.full_id, "", "")
 
     return "\n".join(lines)
 

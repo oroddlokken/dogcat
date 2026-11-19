@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
+import pytest
+
 from dogcat.issue_queries import (
     default_visible_issues,
     find_parent_cycles,
@@ -104,6 +106,7 @@ class TestReparentOrphans:
         assert parent in hierarchy[None]
 
 
+@pytest.mark.timeout(10)
 class TestFindParentCycles:
     """Parent loops are found once each, and only the loop itself."""
 
@@ -143,6 +146,7 @@ class TestFindParentCycles:
         assert parent_cycle_ids([a]) == set()
 
 
+@pytest.mark.timeout(10)
 class TestReparentOrphansWithLoops:
     """Issues on a parent loop are rooted instead of dropped."""
 

@@ -1032,9 +1032,10 @@ class JSONLStorage(EventEmitterMixin):
                 )
                 raise ValueError(msg)
 
-        new_parent = updates.get("parent")
-        if new_parent:
-            self._refuse_parent_loop(resolved_id, new_parent)
+        if "parent" in updates:
+            new_parent = self._coerce_update_value("parent", updates["parent"])
+            if new_parent:
+                self._refuse_parent_loop(resolved_id, new_parent)
 
         # Track old parent for index maintenance
         old_parent = issue.parent

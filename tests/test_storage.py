@@ -1338,6 +1338,7 @@ class TestParentChildRelationships:
         assert children[0].full_id == "dc-child"
 
 
+@pytest.mark.timeout(10)
 class TestParentLoopRefused:
     """update() refuses a parent that is the issue itself or a descendant."""
 
@@ -1395,6 +1396,12 @@ class TestParentLoopRefused:
         self._chain(storage)
         storage.update("test-mid", {"parent": None})
         assert self._parent(storage, "test-mid") is None
+
+    def test_wrong_type_parent_gets_type_error(self, storage: JSONLStorage) -> None:
+        """A non-string parent is rejected by the type check, not the loop check."""
+        self._chain(storage)
+        with pytest.raises(TypeError, match="parent must be"):
+            storage.update("test-top", {"parent": ["test-leaf"]})
 
     def test_existing_loop_above_does_not_hang(self, storage: JSONLStorage) -> None:
         """A loop already further up (merge, hand edit) ends the check."""

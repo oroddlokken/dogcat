@@ -2228,3 +2228,29 @@ class TestListWithParentLoop:
         assert result.exit_code == 0, result.output
         assert "Deferred on loop" in result.output
         assert "Plain issue" in result.output
+
+    @pytest.mark.timeout(10)
+    def test_two_deferred_issues_on_one_loop_both_listed(self, tmp_path: Path) -> None:
+        """Deferred issues on the same loop do not hide each other."""
+        from dogcat.models import Issue, Status
+        from dogcat.storage import JSONLStorage
+
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        storage = JSONLStorage(str(dogcats_dir / "issues.jsonl"))
+        for own, other in (("dfa", "dc-dfb"), ("dfb", "dc-dfa")):
+            storage.create(
+                Issue(
+                    id=own,
+                    namespace="dc",
+                    title=f"Deferred {own}",
+                    parent=other,
+                    status=Status.DEFERRED,
+                ),
+            )
+
+        result = runner.invoke(app, ["list", "-A", "--dogcats-dir", str(dogcats_dir)])
+
+        assert result.exit_code == 0, result.output
+        assert "Deferred dfa" in result.output
+        assert "Deferred dfb" in result.output

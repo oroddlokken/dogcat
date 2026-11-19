@@ -71,7 +71,10 @@ def _collect_descendants(storage: JSONLStorage, parent_id: str) -> set[str]:
     """Collect all descendant issue IDs of a parent.
 
     Iterative, and each id is expanded once, so a parent loop in the store
-    ends the walk instead of recursing until the interpreter gives up.
+    ends the walk instead of recursing until the interpreter gives up. On a
+    loop every issue is both ancestor and descendant of the others; an
+    ancestor never counts as a descendant here, so two deferred issues on
+    the same loop do not hide each other.
 
     Args:
         storage: The storage instance
@@ -91,9 +94,13 @@ def _collect_descendants(storage: JSONLStorage, parent_id: str) -> set[str]:
             if child.full_id not in descendants:
                 descendants.add(child.full_id)
                 stack.append(child.full_id)
-    # On a loop the walk comes back to the start; an issue is not its own
-    # descendant.
-    descendants.discard(parent_id)
+    if descendants:
+        node = storage.get(parent_id)
+        seen: set[str] = set()
+        while node is not None and node.full_id not in seen:
+            seen.add(node.full_id)
+            node = storage.get(node.parent) if node.parent else None
+        descendants -= seen
     return descendants
 
 

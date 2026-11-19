@@ -1,5 +1,7 @@
 """Tests for display and formatting functions."""
 
+import pytest
+
 from dogcat.cli._formatting import (
     DeferredView,
     format_event,
@@ -808,6 +810,7 @@ class TestFormatEventLongFormFields:
         assert "in_progress" in output
 
 
+@pytest.mark.timeout(10)
 class TestFormatIssueTreeParentLoops:
     """format_issue_tree shows issues on a parent loop instead of dropping them."""
 
