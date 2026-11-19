@@ -1636,6 +1636,29 @@ class TestCloseDeleteOperator:
         closed = storage.close("issue-1", reason="Done")
         assert closed.closed_by is None
 
+    def test_close_moves_updated_by_to_the_closer(self, storage: JSONLStorage) -> None:
+        """The closer replaces the previous editor in updated_by, on disk too."""
+        storage.create(Issue(id="issue-1", title="Test"))
+        storage.update("issue-1", {"title": "Edited", "updated_by": "bob"})
+
+        closed = storage.close("issue-1", reason="Done", closed_by="alice")
+
+        assert closed.updated_by == "alice"
+        reloaded = JSONLStorage(str(storage.path)).get("issue-1")
+        assert reloaded is not None
+        assert reloaded.updated_by == "alice"
+
+    def test_close_without_closed_by_keeps_updated_by(
+        self, storage: JSONLStorage
+    ) -> None:
+        """An anonymous close does not erase the last known editor."""
+        storage.create(Issue(id="issue-1", title="Test"))
+        storage.update("issue-1", {"title": "Edited", "updated_by": "bob"})
+
+        closed = storage.close("issue-1", reason="Done")
+
+        assert closed.updated_by == "bob"
+
     def test_delete_sets_deleted_by(self, storage: JSONLStorage) -> None:
         """Test that delete() sets deleted_by when provided."""
         issue = Issue(id="issue-1", title="Test")
@@ -1643,6 +1666,31 @@ class TestCloseDeleteOperator:
 
         deleted = storage.delete("issue-1", reason="Dup", deleted_by="bob")
         assert deleted.deleted_by == "bob"
+
+    def test_delete_moves_updated_by_to_the_deleter(
+        self, storage: JSONLStorage
+    ) -> None:
+        """The deleter replaces the previous editor in updated_by, on disk too."""
+        storage.create(Issue(id="issue-1", title="Test"))
+        storage.update("issue-1", {"title": "Edited", "updated_by": "bob"})
+
+        deleted = storage.delete("issue-1", reason="Dup", deleted_by="alice")
+
+        assert deleted.updated_by == "alice"
+        reloaded = JSONLStorage(str(storage.path)).get("issue-1")
+        assert reloaded is not None
+        assert reloaded.updated_by == "alice"
+
+    def test_delete_without_deleted_by_keeps_updated_by(
+        self, storage: JSONLStorage
+    ) -> None:
+        """An anonymous delete does not erase the last known editor."""
+        storage.create(Issue(id="issue-1", title="Test"))
+        storage.update("issue-1", {"title": "Edited", "updated_by": "bob"})
+
+        deleted = storage.delete("issue-1", reason="Dup")
+
+        assert deleted.updated_by == "bob"
 
     def test_delete_without_deleted_by(self, storage: JSONLStorage) -> None:
         """Test that delete() leaves deleted_by as None when not provided."""

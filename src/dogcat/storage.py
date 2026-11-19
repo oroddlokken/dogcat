@@ -1339,6 +1339,11 @@ class JSONLStorage(EventEmitterMixin):
             issue.closed_reason = reason
         if closed_by:
             issue.closed_by = closed_by
+            # A close moves updated_at, so updated_by moves with it, as in
+            # reopen(). `dcat diff` rebuilds its events from the record and
+            # reads updated_by; left alone, it names whoever edited the
+            # issue before the close (dogcat-1rtw).
+            issue.updated_by = closed_by
 
         event_record = self._build_event_record(
             "closed",
@@ -1437,6 +1442,9 @@ class JSONLStorage(EventEmitterMixin):
         issue.original_type = issue.issue_type
         if deleted_by:
             issue.deleted_by = deleted_by
+            # As in close(): updated_by follows updated_at, so `dcat diff`
+            # names the deleter rather than the previous editor (dogcat-1rtw).
+            issue.updated_by = deleted_by
 
         # Collect deps/links to remove (for append-only removal records)
         removed_deps = [

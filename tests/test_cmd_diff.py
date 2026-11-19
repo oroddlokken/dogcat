@@ -254,6 +254,125 @@ class TestDiff:
         assert result.exit_code == 0
         assert "Closed" in result.stdout
 
+    def _commit_dogcats(self, workspace: Path, message: str) -> None:
+        subprocess.run(
+            ["git", "-C", str(workspace), "add", ".dogcats/"],
+            check=True,
+            capture_output=True,
+            env=_GIT_TEST_ENV,
+        )
+        subprocess.run(
+            ["git", "-C", str(workspace), "commit", "-m", message],
+            check=True,
+            capture_output=True,
+            env=_GIT_TEST_ENV,
+        )
+
+    def test_diff_names_the_closer_not_the_last_editor(
+        self, git_workspace: Path
+    ) -> None:
+        """A close by alice after an edit by bob is alice's, as in history."""
+        dogcats_dir = git_workspace / ".dogcats"
+        issue_id = _create_issue(dogcats_dir, "Edited then closed")
+        edited = runner.invoke(
+            app,
+            [
+                "update",
+                issue_id,
+                "--title",
+                "Edited by bob",
+                "--by",
+                "bob",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert edited.exit_code == 0, edited.output
+        self._commit_dogcats(git_workspace, "add and edit issue")
+
+        closed = runner.invoke(
+            app,
+            ["close", issue_id, "--by", "alice", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert closed.exit_code == 0, closed.output
+
+        diff = runner.invoke(app, ["diff", "--json", "--dogcats-dir", str(dogcats_dir)])
+        history = runner.invoke(
+            app,
+            ["history", "-i", issue_id, "--json", "--dogcats-dir", str(dogcats_dir)],
+        )
+
+        assert diff.exit_code == 0, diff.output
+        (event,) = json.loads(diff.stdout)
+        assert event["event_type"] == "closed"
+        assert event["by"] == "alice"
+        assert history.exit_code == 0, history.output
+        closes = [e for e in json.loads(history.stdout) if e["event_type"] == "closed"]
+        assert [e["by"] for e in closes] == ["alice"]
+
+    def test_diff_names_the_deleter_not_the_last_editor(
+        self, git_workspace: Path
+    ) -> None:
+        """A delete by alice after an edit by bob is alice's."""
+        dogcats_dir = git_workspace / ".dogcats"
+        issue_id = _create_issue(dogcats_dir, "Edited then deleted")
+        edited = runner.invoke(
+            app,
+            [
+                "update",
+                issue_id,
+                "--title",
+                "Edited by bob",
+                "--by",
+                "bob",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert edited.exit_code == 0, edited.output
+        self._commit_dogcats(git_workspace, "add and edit issue")
+
+        deleted = runner.invoke(
+            app,
+            ["delete", issue_id, "--by", "alice", "--dogcats-dir", str(dogcats_dir)],
+        )
+        assert deleted.exit_code == 0, deleted.output
+
+        diff = runner.invoke(app, ["diff", "--json", "--dogcats-dir", str(dogcats_dir)])
+
+        assert diff.exit_code == 0, diff.output
+        (event,) = json.loads(diff.stdout)
+        assert event["event_type"] == "deleted"
+        assert event["by"] == "alice"
+
+    def test_diff_plain_update_keeps_its_editor(self, git_workspace: Path) -> None:
+        """An uncommitted edit is still attributed to whoever made it."""
+        dogcats_dir = git_workspace / ".dogcats"
+        issue_id = _create_issue(dogcats_dir, "Edited only")
+        self._commit_dogcats(git_workspace, "add issue")
+
+        edited = runner.invoke(
+            app,
+            [
+                "update",
+                issue_id,
+                "--title",
+                "Edited by bob",
+                "--by",
+                "bob",
+                "--dogcats-dir",
+                str(dogcats_dir),
+            ],
+        )
+        assert edited.exit_code == 0, edited.output
+
+        diff = runner.invoke(app, ["diff", "--json", "--dogcats-dir", str(dogcats_dir)])
+
+        assert diff.exit_code == 0, diff.output
+        (event,) = json.loads(diff.stdout)
+        assert event["event_type"] == "updated"
+        assert event["by"] == "bob"
+
     def test_diff_new_and_closed_shows_closed(self, git_workspace: Path) -> None:
         """Test diff shows closed symbol for issue created and closed since HEAD."""
         dogcats_dir = git_workspace / ".dogcats"
