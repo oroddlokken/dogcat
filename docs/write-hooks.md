@@ -29,7 +29,8 @@ Try a clean write and a synthetic secret in a temporary store:
 )
 ```
 
-The clean issue is created. The synthetic secret is rejected with
+The clean issue is created. The synthetic secret is rejected: Gitleaks prints
+its redacted finding on stderr, followed by
 `Error: pre_write_hook rejected the write (exit 1)` and `Exit: 1`.
 Disable the hook with `dcat config unset --global pre_write_hook`.
 
@@ -45,14 +46,36 @@ Dogcat sends each pending batch as unmodified JSONL on stdin. A batch can
 contain multiple data and event records; events can include old values, so a
 scanner may reject removal of a secret. The hook cannot transform the write.
 Exit 0 approves; any other exit, failure to start, invalid global config, or
-30-second timeout rejects it. Dogcat hides stdout and stderr. The hook inherits
-the working directory and environment; `DCAT_WRITE_TARGET` is the absolute
-path of the target file.
+30-second timeout rejects it. The hook's stdout is discarded and its stderr
+is shown, so it can say which rule failed. Print only what you are willing to
+see in a terminal or an agent's log: name the rule and the issue id, not the
+record, and pass `--redact` to Gitleaks. The hook inherits the working
+directory and environment; `DCAT_WRITE_TARGET` is the absolute path of the
+target file.
 
-Approval covers a batch, not an entire command or multiple files: earlier
-batches may already be written. Hooks do not scan history or cover Git, manual
-edits, compaction, merge, archive, or repair. Keep hooks fast and side-effect
-free; approval does not guarantee the subsequent write succeeds.
+With `--branch <name>`, the command runs against a scratch copy of the other
+branch's store, so `DCAT_WRITE_TARGET` points into a `dcat-branch-…` temporary
+directory rather than the store in your repository. A hook that decides by
+path must not assume the target sits in the current repository.
+
+A command that mutates several ids, such as `dcat close A B C`, sends them as
+one batch. A rejection refuses all of them and prints no success lines.
+Otherwise, approval covers a batch, not an entire command or multiple files:
+earlier batches may already be written. Hooks do not scan history or cover
+Git, manual edits, compaction, merge, archive, `backfill-history`, or repair.
+Keep hooks fast and side-effect free; approval does not guarantee the
+subsequent write succeeds.
+
+Namespace changes (`dcat update --namespace`, and `dcat rename-namespace` for
+both issues and inbox) run the hook while holding the store's file lock,
+because the whole file is rewritten under it. Other `dcat` processes wait at
+most 30 seconds for that lock (`DCAT_LOCK_TIMEOUT_SECS`), the same as the hook
+timeout, so a slow hook there makes them give up. Every other write runs the hook before taking the
+lock.
+
+The global config is read strictly whenever dcat writes, hook or not. If
+`~/.config/dogcat/config.toml` cannot be parsed, every write fails with an
+error naming the file until it is fixed.
 
 For exit 127, check paths, permissions and shell quoting. For a timeout or
 other rejection, run the validator directly with synthetic JSONL and check its

@@ -18,7 +18,7 @@ from ._completions import (
 )
 from ._helpers import (
     SortedGroup,
-    apply_to_each,
+    apply_to_each_in_batch,
     get_default_operator,
     load_remote_inbox_proposals,
     resolve_dogcats_dir,
@@ -31,6 +31,8 @@ from ._list_options import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from dogcat.inbox import InboxStorage
     from dogcat.models import Proposal
 
@@ -342,20 +344,23 @@ def register(app: typer.Typer) -> None:
 
         from dogcat.models import proposal_to_dict
 
-        def _close(proposal_id: str) -> None:
+        def _close(proposal_id: str) -> Callable[[], None]:
             proposal = inbox.close(
                 proposal_id,
                 reason=reason,
                 closed_by=closed_by,
                 resolved_issue=issue,
             )
-            if is_json():
-                typer.echo(orjson.dumps(proposal_to_dict(proposal)).decode())
-            else:
-                typer.echo(f"✓ Closed {proposal.full_id}: {proposal.title}")
 
-        with inbox.batch():
-            has_errors = apply_to_each(proposal_ids, _close, verb="closing")
+            def _report() -> None:
+                if is_json():
+                    typer.echo(orjson.dumps(proposal_to_dict(proposal)).decode())
+                else:
+                    typer.echo(f"✓ Closed {proposal.full_id}: {proposal.title}")
+
+            return _report
+
+        has_errors = apply_to_each_in_batch(inbox, proposal_ids, _close, verb="closing")
         if has_errors:
             raise typer.Exit(1)
 
@@ -382,15 +387,20 @@ def register(app: typer.Typer) -> None:
 
         from dogcat.models import proposal_to_dict
 
-        def _delete(proposal_id: str) -> None:
+        def _delete(proposal_id: str) -> Callable[[], None]:
             proposal = inbox.delete(proposal_id, deleted_by=deleted_by)
-            if is_json():
-                typer.echo(orjson.dumps(proposal_to_dict(proposal)).decode())
-            else:
-                typer.echo(f"✓ Deleted {proposal.full_id}: {proposal.title}")
 
-        with inbox.batch():
-            has_errors = apply_to_each(proposal_ids, _delete, verb="deleting")
+            def _report() -> None:
+                if is_json():
+                    typer.echo(orjson.dumps(proposal_to_dict(proposal)).decode())
+                else:
+                    typer.echo(f"✓ Deleted {proposal.full_id}: {proposal.title}")
+
+            return _report
+
+        has_errors = apply_to_each_in_batch(
+            inbox, proposal_ids, _delete, verb="deleting"
+        )
         if has_errors:
             raise typer.Exit(1)
 
@@ -558,18 +568,23 @@ def register(app: typer.Typer) -> None:
 
         from dogcat.models import proposal_to_dict
 
-        def _reject(proposal_id: str) -> None:
+        def _reject(proposal_id: str) -> Callable[[], None]:
             proposal = remote_inbox.close(
                 proposal_id,
                 reason=reason or "Rejected",
                 closed_by=operator,
             )
-            if is_json():
-                typer.echo(orjson.dumps(proposal_to_dict(proposal)).decode())
-            else:
-                typer.echo(f"✓ Rejected {proposal.full_id}: {proposal.title}")
 
-        with remote_inbox.batch():
-            has_errors = apply_to_each(proposal_ids, _reject, verb="rejecting")
+            def _report() -> None:
+                if is_json():
+                    typer.echo(orjson.dumps(proposal_to_dict(proposal)).decode())
+                else:
+                    typer.echo(f"✓ Rejected {proposal.full_id}: {proposal.title}")
+
+            return _report
+
+        has_errors = apply_to_each_in_batch(
+            remote_inbox, proposal_ids, _reject, verb="rejecting"
+        )
         if has_errors:
             raise typer.Exit(1)

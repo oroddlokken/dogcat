@@ -648,7 +648,7 @@ class JSONLStorage(EventEmitterMixin):
             self._default_branch_cache = is_default_branch(self.dogcats_dir)
         return self._default_branch_cache
 
-    # _emit_event / _build_event_record / _append_with_event are provided by
+    # _build_event_record / _append_with_event are provided by
     # EventEmitterMixin (dogcat._events), shared with InboxStorage.
 
     def _tracked_changes(

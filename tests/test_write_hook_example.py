@@ -20,6 +20,7 @@ def run_hook(*records: object) -> subprocess.CompletedProcess[str]:
 
 
 def test_mixed_records_and_draft_are_allowed() -> None:
+    """Only in_progress issue records are checked; everything else passes."""
     result = run_hook(
         {"record_type": "event", "status": "in_progress"},
         {"record_type": "dependency"},
@@ -30,16 +31,27 @@ def test_mixed_records_and_draft_are_allowed() -> None:
 
 
 def test_missing_acceptance_in_any_issue_rejects_batch() -> None:
+    """One bad issue refuses the batch, named by id without echoing the record."""
     result = run_hook(
         {"record_type": "issue", "status": "in_progress", "acceptance": "Works"},
-        {"record_type": "issue", "status": "in_progress", "acceptance": "  "},
+        {
+            "record_type": "issue",
+            "namespace": "demo",
+            "id": "a1b2",
+            "status": "in_progress",
+            "acceptance": "  ",
+            "description": "private text",
+        },
     )
     assert result.returncode == 10
     assert not result.stdout
-    assert not result.stderr
+    assert "demo-a1b2" in result.stderr
+    assert "acceptance criteria" in result.stderr
+    assert "private text" not in result.stderr
 
 
 def test_malformed_input_fails_without_printing_record() -> None:
+    """Unparseable input is refused without echoing what was read."""
     result = subprocess.run(
         [sys.executable, str(SCRIPT)],
         input='{"secret":',
@@ -49,4 +61,5 @@ def test_malformed_input_fails_without_printing_record() -> None:
     )
     assert result.returncode != 0
     assert not result.stdout
-    assert not result.stderr
+    assert "not JSONL" in result.stderr
+    assert "secret" not in result.stderr

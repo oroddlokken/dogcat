@@ -151,45 +151,8 @@ class _BaseEventLog:
         line.
         """
         payload = orjson.dumps(_serialize(event)) + b"\n"
-        from dogcat.write_hook import run_pre_write_hook
-
-        run_pre_write_hook(payload, self.path)
         with self._file_lock():
             append_jsonl_payload(self.path, payload)
-
-    def try_emit(
-        self,
-        event_type: str,
-        full_id: str,
-        timestamp: str,
-        title: str | None,
-        changes: dict[str, dict[str, Any]],
-        by: str | None = None,
-    ) -> None:
-        """Best-effort append of an event derived from the given fields.
-
-        No-op if ``changes`` is empty. Failures are logged at DEBUG and
-        swallowed so the caller's primary write path is never broken by
-        an event-log issue. The ``try_`` prefix is the swallow signal —
-        callers that need an exception on append failure should call
-        :meth:`append` directly.
-        """
-        if not changes:
-            return
-        event = EventRecord(
-            event_type=event_type,
-            issue_id=full_id,
-            timestamp=timestamp,
-            by=by,
-            title=title,
-            changes=changes,
-        )
-        try:
-            self.append(event)
-        except (OSError, RuntimeError):
-            logging.getLogger(__name__).debug(
-                "Failed to write event for %s", full_id, exc_info=True
-            )
 
     @staticmethod
     def build_record(
@@ -205,7 +168,7 @@ class _BaseEventLog:
         Used by callers that want to bundle the event record with another
         record into a single locked append, halving lock acquisitions and
         fsyncs for each mutation. Returns ``None`` when there are no
-        changes to record (parity with :meth:`try_emit` no-op).
+        changes to record.
         """
         if not changes:
             return None

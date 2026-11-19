@@ -224,11 +224,15 @@ class TestInboxStore:
 class TestCli:
     """What a refused write looks like from the command line."""
 
-    def test_create_hides_hook_output_and_exits_1(
-        self, temp_dogcats_dir: Path, hook_log: Path
+    def test_create_shows_hook_stderr_and_exits_1(
+        self,
+        temp_dogcats_dir: Path,
+        hook_log: Path,
+        capfd: pytest.CaptureFixture[str],
     ) -> None:
-        """The hook's message stays private, and no issue is created."""
+        """The hook's stderr says why, and no issue is created."""
         runner.invoke(app, ["init", "--dogcats-dir", str(temp_dogcats_dir)])
+        capfd.readouterr()
         result = runner.invoke(
             app,
             [
@@ -242,9 +246,130 @@ class TestCli:
         )
         assert result.exit_code == 1
         assert "pre_write_hook rejected the write" in result.output
-        assert "found FORBIDDEN" not in result.output
+        assert "found FORBIDDEN in the record" in capfd.readouterr().err
         assert b"leaky" not in (temp_dogcats_dir / "issues.jsonl").read_bytes()
         assert hook_log.exists()
+
+    @pytest.mark.parametrize(
+        ("command", "verb"),
+        [
+            (["close", "--reason", "FORBIDDEN"], "Closed"),
+            (["delete", "--reason", "FORBIDDEN"], "Deleted"),
+            (["update", "--status", "in_progress", "--by", "FORBIDDEN"], "Updated"),
+        ],
+    )
+    @pytest.mark.parametrize("json_flag", [[], ["--json"]])
+    def test_rejected_batch_prints_no_success(
+        self,
+        temp_dogcats_dir: Path,
+        command: list[str],
+        verb: str,
+        json_flag: list[str],
+    ) -> None:
+        """A refused multi-id command prints only the error, no success lines.
+
+        Every id is mutated in memory before the batch flushes and the hook
+        runs, so a success line printed per id would claim writes that the
+        rejection then discards.
+        """
+        store = JSONLStorage(str(temp_dogcats_dir / "issues.jsonl"), create_dir=True)
+        ids = [
+            store.create_issue(namespace="test", title=title).full_id
+            for title in ("One", "Two")
+        ]
+        before = store.path.read_bytes()
+        self._install_rejecting_hook(temp_dogcats_dir)
+
+        result = runner.invoke(
+            app,
+            [*command, *ids, *json_flag, "--dogcats-dir", str(temp_dogcats_dir)],
+        )
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "pre_write_hook rejected the write" in result.stderr
+        assert verb not in result.stderr
+        assert store.path.read_bytes() == before
+
+    def test_rejected_reopen_prints_no_success(self, temp_dogcats_dir: Path) -> None:
+        """`dcat reopen` holds its success lines until the flush too."""
+        store = JSONLStorage(str(temp_dogcats_dir / "issues.jsonl"), create_dir=True)
+        ids = [
+            store.close(store.create_issue(namespace="test", title=t).full_id).full_id
+            for t in ("One", "Two")
+        ]
+        before = store.path.read_bytes()
+        self._install_rejecting_hook(temp_dogcats_dir)
+
+        result = runner.invoke(
+            app,
+            [
+                "reopen",
+                *ids,
+                "--reason",
+                "FORBIDDEN",
+                "--dogcats-dir",
+                str(temp_dogcats_dir),
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "Reopened" not in result.stderr
+        assert store.path.read_bytes() == before
+
+    @pytest.mark.parametrize(
+        ("command", "verb"),
+        [
+            (["inbox", "close", "--reason", "FORBIDDEN"], "Closed"),
+            (["inbox", "delete", "--by", "FORBIDDEN"], "Deleted"),
+        ],
+    )
+    def test_rejected_inbox_batch_prints_no_success(
+        self, temp_dogcats_dir: Path, command: list[str], verb: str
+    ) -> None:
+        """The inbox commands that batch hold their success lines as well."""
+        inbox = InboxStorage(dogcats_dir=str(temp_dogcats_dir), create_dir=True)
+        ids = [
+            inbox.create_proposal(title=t, namespace="test").full_id
+            for t in ("One", "Two")
+        ]
+        before = inbox.path.read_bytes()
+        self._install_rejecting_hook(temp_dogcats_dir)
+
+        result = runner.invoke(
+            app, [*command, *ids, "--dogcats-dir", str(temp_dogcats_dir)]
+        )
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "pre_write_hook rejected the write" in result.stderr
+        assert verb not in result.stderr
+        assert inbox.path.read_bytes() == before
+
+    def test_accepted_batch_prints_every_success(self, temp_dogcats_dir: Path) -> None:
+        """The held success lines are printed once the flush succeeds."""
+        store = JSONLStorage(str(temp_dogcats_dir / "issues.jsonl"), create_dir=True)
+        ids = [
+            store.create_issue(namespace="test", title=t).full_id
+            for t in ("One", "Two")
+        ]
+        self._install_rejecting_hook(temp_dogcats_dir)
+
+        result = runner.invoke(
+            app, ["close", *ids, "--dogcats-dir", str(temp_dogcats_dir)]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert result.stdout.count("✓ Closed") == 2
+
+    @staticmethod
+    def _install_rejecting_hook(tmp: Path) -> None:
+        script = tmp.parent / "reject.py"
+        script.write_text(
+            "import sys\nsys.exit(1 if 'FORBIDDEN' in sys.stdin.read() else 0)\n"
+        )
+        _set_hook(shlex.join([sys.executable, str(script)]))
 
 
 @pytest.mark.skipif(shutil.which("gitleaks") is None, reason="gitleaks not installed")
@@ -274,27 +399,33 @@ class TestRuntime:
     def test_invalid_config_rejects_but_read_config_is_forgiving(
         self, contents: bytes, tmp_path: Path
     ) -> None:
-        """Check the runtime contract for this case."""
+        """Broken TOML, a non-string hook or bad bytes refuse the write.
+
+        ``load_global_config`` stays forgiving for the other keys, but the
+        hook path fails closed and names the file to fix.
+        """
         path = get_global_config_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(contents)
         assert load_global_config().pre_write_hook is None
-        with pytest.raises(WriteHookRejectedError, match="Invalid global config"):
+        with pytest.raises(WriteHookRejectedError, match="Invalid global config") as e:
             write_hook.run_pre_write_hook(b"data", tmp_path / "issues.jsonl")
+        assert str(path) in str(e.value)
 
     def test_unreadable_config_rejects(self, tmp_path: Path) -> None:
-        """Check the runtime contract for this case."""
+        """A config path that exists but can't be read refuses and is named."""
         path = get_global_config_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.mkdir()
-        with pytest.raises(WriteHookRejectedError, match="Invalid global config"):
+        with pytest.raises(WriteHookRejectedError, match="Invalid global config") as e:
             write_hook.run_pre_write_hook(b"data", tmp_path / "issues.jsonl")
+        assert str(path) in str(e.value)
 
     @pytest.mark.parametrize("command", [None, "", "   "])
     def test_no_hook_starts_no_process(
         self, command: str | None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Check the runtime contract for this case."""
+        """An unset or blank hook costs nothing: no subprocess is started."""
         if command is not None:
             _set_hook(command)
 
@@ -307,7 +438,7 @@ class TestRuntime:
     def test_start_failure_and_invalid_command_reject(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Check the runtime contract for this case."""
+        """A command that can't be spawned refuses without leaking the OS error."""
         target = tmp_path / "issues.jsonl"
         _set_hook("bad\x00command")
         with pytest.raises(WriteHookRejectedError, match="could not start"):
@@ -326,7 +457,10 @@ class TestRuntime:
     def test_exact_bytes_and_target(
         self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
     ) -> None:
-        """Check the runtime contract for this case."""
+        """The hook gets the payload byte for byte and the target path.
+
+        Its stdout is discarded and its stderr reaches the user.
+        """
         script = tmp_path / "record.py"
         payload_file = tmp_path / "payload"
         target_file = tmp_path / "target"
@@ -349,13 +483,13 @@ class TestRuntime:
         assert target_file.read_text() == str(target)
         captured = capfd.readouterr()
         assert captured.out == ""
-        assert captured.err == ""
+        assert captured.err == "private stderr\n"
 
     @pytest.mark.skipif(os.name != "posix", reason="POSIX process groups")
     def test_timeout_kills_descendant(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Check the runtime contract for this case."""
+        """A timeout kills the hook's whole process group, not just the shell."""
         marker = tmp_path / "descendant-survived"
         started = tmp_path / "started"
         script = tmp_path / "child.py"
@@ -379,6 +513,7 @@ class TestRuntime:
 def test_rejected_first_writes_then_clean(
     temp_dogcats_dir: Path, hook_log: Path
 ) -> None:
+    """A refused first write creates no file, and a later clean write works."""
     store = JSONLStorage(str(temp_dogcats_dir / "issues.jsonl"), create_dir=True)
     inbox = InboxStorage(dogcats_dir=str(temp_dogcats_dir))
     with pytest.raises(WriteHookRejectedError):
@@ -397,6 +532,7 @@ def test_rejected_first_writes_then_clean(
 def test_namespace_preflight_rolls_back_and_checks_once(
     storage: JSONLStorage, hook_log: Path
 ) -> None:
+    """`change_namespace` vets once, rolls back on refusal, and keeps its event."""
     issue = storage.create_issue(namespace="test", title="clean")
     before = storage.path.read_bytes()
     with pytest.raises(WriteHookRejectedError):
@@ -419,6 +555,7 @@ def test_namespace_preflight_rolls_back_and_checks_once(
 def test_inbox_namespace_rejection_restores_memory(
     temp_dogcats_dir: Path, hook_log: Path
 ) -> None:
+    """A refused inbox namespace rename leaves file and memory unchanged."""
     inbox = InboxStorage(dogcats_dir=str(temp_dogcats_dir))
     proposal = inbox.create_proposal(title="clean", namespace="test")
     before = inbox.path.read_bytes()
@@ -429,23 +566,8 @@ def test_inbox_namespace_rejection_restores_memory(
     assert hook_log.exists()
 
 
-@pytest.mark.parametrize("log_class", ["EventLog", "InboxEventLog"])
-def test_direct_events_rejected(
-    temp_dogcats_dir: Path, hook_log: Path, log_class: str
-) -> None:
-    from dogcat import event_log
-
-    log = getattr(event_log, log_class)(temp_dogcats_dir)
-    event = event_log.EventRecord("updated", "test-1", "2026-01-01", title="FORBIDDEN")
-    with pytest.raises(WriteHookRejectedError):
-        log.append(event)
-    with pytest.raises(WriteHookRejectedError):
-        log.try_emit("updated", "test-1", "2026-01-01", "FORBIDDEN", {"x": {"new": 1}})
-    assert not log.path.exists()
-    assert hook_log.exists()
-
-
 def test_bulk_namespace_preflight(storage: JSONLStorage, hook_log: Path) -> None:
+    """`rename_namespace` vets every changed record and event in one run."""
     first = storage.create_issue(namespace="test", title="first")
     storage.create_issue(namespace="test", title="second")
     before = storage.path.read_bytes()
@@ -473,6 +595,7 @@ def test_bulk_namespace_preflight(storage: JSONLStorage, hook_log: Path) -> None
 
 
 def test_inbox_batch_rejection(temp_dogcats_dir: Path, hook_log: Path) -> None:
+    """A refused inbox batch writes nothing and empties memory."""
     inbox = InboxStorage(dogcats_dir=str(temp_dogcats_dir))
     with pytest.raises(WriteHookRejectedError), inbox.batch():  # noqa: PT012
         inbox.create_proposal(title="clean")
@@ -485,6 +608,7 @@ def test_inbox_batch_rejection(temp_dogcats_dir: Path, hook_log: Path) -> None:
 
 
 def test_web_proposal_rejection(temp_dogcats_dir: Path, hook_log: Path) -> None:
+    """The web form shows an error, not a success, for a refused proposal."""
     from fastapi.testclient import TestClient
 
     from dogcat.config import DogcatConfig, save_config
@@ -511,6 +635,7 @@ def test_web_proposal_rejection(temp_dogcats_dir: Path, hook_log: Path) -> None:
 
 
 def test_acceptance_policy_example(storage: JSONLStorage) -> None:
+    """The shipped example refuses in_progress without acceptance, end to end."""
     from pathlib import Path
 
     script = (
@@ -531,6 +656,7 @@ def test_acceptance_policy_example(storage: JSONLStorage) -> None:
 def test_relative_target_is_absolute(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """`DCAT_WRITE_TARGET` is absolute even when the store path is relative."""
     monkeypatch.chdir(tmp_path)
     target_file = tmp_path / "target"
     script = tmp_path / "target.py"

@@ -4,8 +4,9 @@
 names a shell command. Before any record is appended to ``issues.jsonl`` or
 ``inbox.jsonl`` the command runs with the JSONL lines about to be written on
 stdin. Exit 0 lets the write through; anything else aborts it and nothing
-reaches disk. This can enforce user-defined validation or policy, for example
-secret scanning::
+reaches disk. The hook's stderr reaches the user so it can say why it
+refused; its stdout is discarded. This can enforce user-defined validation
+or policy, for example secret scanning::
 
     pre_write_hook = "gitleaks stdin --no-banner --redact"
 
@@ -72,8 +73,10 @@ def run_pre_write_hook(payload: bytes, target: Path) -> None:
             command,
             shell=True,
             stdin=subprocess.PIPE,
+            # stdout is discarded; stderr is inherited so the hook can say
+            # why it refused. The hook is the user's own and decides what it
+            # prints there (gitleaks has --redact).
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
             start_new_session=True,
             env=env,
         )

@@ -11,7 +11,12 @@ from dogcat.models import Status
 
 from ._branch import with_branch
 from ._completions import complete_issue_ids
-from ._helpers import apply_to_each, get_default_operator, get_storage, with_ns_shim
+from ._helpers import (
+    apply_to_each_in_batch,
+    get_default_operator,
+    get_storage,
+    with_ns_shim,
+)
 from ._json_state import is_json, set_json
 from ._list_options import (
     ByOpt,
@@ -20,6 +25,8 @@ from ._list_options import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from dogcat.storage import JSONLStorage
 
 
@@ -69,19 +76,22 @@ def register(app: typer.Typer) -> None:
         final_closed_by = closed_by if closed_by is not None else get_default_operator()
         parent_ids: set[str] = set()
 
-        def _close(issue_id: str) -> None:
+        def _close(issue_id: str) -> Callable[[], None]:
             issue = storage.close(issue_id, reason=reason, closed_by=final_closed_by)
             if issue.parent:
                 parent_ids.add(issue.parent)
-            if is_json():
-                from dogcat.models import issue_to_dict
 
-                typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
-            else:
-                typer.echo(f"✓ Closed {issue.full_id}: {issue.title}")
+            def _report() -> None:
+                if is_json():
+                    from dogcat.models import issue_to_dict
 
-        with storage.batch():
-            has_errors = apply_to_each(issue_ids, _close, verb="closing")
+                    typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
+                else:
+                    typer.echo(f"✓ Closed {issue.full_id}: {issue.title}")
+
+            return _report
+
+        has_errors = apply_to_each_in_batch(storage, issue_ids, _close, verb="closing")
 
         if parent_ids and not is_json():
             _check_epic_completion(storage, parent_ids)
@@ -120,19 +130,24 @@ def register(app: typer.Typer) -> None:
             deleted_by if deleted_by is not None else get_default_operator()
         )
 
-        def _delete(issue_id: str) -> None:
+        def _delete(issue_id: str) -> Callable[[], None]:
             deleted = storage.delete(
                 issue_id, reason=reason, deleted_by=final_deleted_by
             )
-            if is_json():
-                from dogcat.models import issue_to_dict
 
-                typer.echo(orjson.dumps(issue_to_dict(deleted)).decode())
-            else:
-                typer.echo(f"✓ Deleted {deleted.full_id}: {deleted.title}")
+            def _report() -> None:
+                if is_json():
+                    from dogcat.models import issue_to_dict
 
-        with storage.batch():
-            has_errors = apply_to_each(issue_ids, _delete, verb="deleting")
+                    typer.echo(orjson.dumps(issue_to_dict(deleted)).decode())
+                else:
+                    typer.echo(f"✓ Deleted {deleted.full_id}: {deleted.title}")
+
+            return _report
+
+        has_errors = apply_to_each_in_batch(
+            storage, issue_ids, _delete, verb="deleting"
+        )
         if has_errors:
             raise typer.Exit(1)
 

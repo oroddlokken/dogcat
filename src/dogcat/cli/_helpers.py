@@ -7,7 +7,7 @@ import getpass
 import inspect
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple, get_type_hints
+from typing import TYPE_CHECKING, Any, NamedTuple, Protocol, get_type_hints
 
 import typer
 from typer.core import TyperGroup
@@ -26,6 +26,7 @@ from dogcat.storage import JSONLStorage
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
+    from contextlib import AbstractContextManager
 
     from dogcat.config import DogcatConfig
 
@@ -200,6 +201,48 @@ def apply_to_each(
         except Exception as e:  # noqa: PERF203
             echo_error(f"{verb} {id_}: {e}")
             has_errors = True
+    return has_errors
+
+
+class BatchingStore(Protocol):
+    """A store whose writes can be deferred into one flush."""
+
+    def batch(self) -> AbstractContextManager[None]: ...
+
+
+def apply_to_each_in_batch(
+    store: BatchingStore,
+    ids: list[str],
+    op: Callable[[str], Callable[[], None]],
+    *,
+    verb: str,
+) -> bool:
+    """Apply ``op`` to each id in one batch and report success after the flush.
+
+    ``op`` mutates and returns a callable that prints its success output.
+    Nothing reaches disk until the batch flushes, and the ``pre_write_hook``
+    only runs then, so printing inside ``op`` would claim writes that a
+    rejection then discards. A rejection prints only the error and none of
+    the held success output. Per-id errors are reported as they happen, as in
+    :func:`apply_to_each`. Returns True if any id or the flush failed.
+    """
+    from dogcat.write_hook import WriteHookRejectedError
+
+    from ._json_state import echo_error
+
+    reports: list[Callable[[], None]] = []
+
+    def _collect(id_: str) -> None:
+        reports.append(op(id_))
+
+    try:
+        with store.batch():
+            has_errors = apply_to_each(ids, _collect, verb=verb)
+    except WriteHookRejectedError as e:
+        echo_error(str(e))
+        return True
+    for report in reports:
+        report()
     return has_errors
 
 

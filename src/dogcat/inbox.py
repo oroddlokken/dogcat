@@ -287,7 +287,7 @@ class InboxStorage(EventEmitterMixin):
         """Serialize a proposal to a dict for appending."""
         return proposal_to_dict(proposal)
 
-    # _emit_event / _build_event_record / _append_with_event are provided by
+    # _build_event_record / _append_with_event are provided by
     # EventEmitterMixin (dogcat._events), shared with JSONLStorage.
 
     @staticmethod

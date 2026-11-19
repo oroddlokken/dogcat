@@ -2,7 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- **An optional `pre_write_hook` vets records before dcat writes them.** Set it with `dcat config set --global pre_write_hook '<command>'` and every issue, proposal and event write first runs that command with the pending JSONL on stdin; a non-zero exit, a failure to start or a 30-second timeout refuses the write and rolls the in-memory store back. The hook's stderr is shown so it can say why, its stdout is discarded, and `DCAT_WRITE_TARGET` names the file about to be written. A multi-id command such as `dcat close A B C` is vetted as one batch and prints its success lines only after the write lands, so a refusal shows the error alone. The key is global-only: a store's own `config.toml` cannot set a command. `docs/write-hooks.md` covers the contract, a Gitleaks setup and what the hook does not cover, and `examples/hooks/require_acceptance.py` is a standalone policy that refuses `in_progress` issues without acceptance criteria.
+
+### Changed
+
+- **A global config that cannot be parsed now stops every write.** Before, dcat logged a warning and carried on with defaults. Since the file may hold a `pre_write_hook`, a broken one could silently switch validation off, so writes now fail with `Invalid global config: cannot read <path>` until the file is fixed, also for users who never set a hook. Read-only commands still fall back to defaults.
+
 ### Development
+
+- **`EventLog.try_emit` and the stores' `_emit_event` are gone.** Both namespace-change paths now write their events in the same rewrite as the data, and nothing else called the best-effort emitter.
 
 - **Dependencies move to latest: orjson 3.13.0, typer 0.27.3, tomli 2.5.0, ruff 0.17.1, pyright 1.1.414, djlint 1.46, hypothesis 6.168, oxlint 1.88, oxfmt 0.73 and stylelint 17.16.**
 

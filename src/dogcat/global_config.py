@@ -88,17 +88,17 @@ def load_pre_write_hook_strict() -> str | None:
             data = tomllib.load(f)
     except FileNotFoundError:
         if os.path.lexists(path):
-            msg = "cannot read global config"
+            msg = f"cannot read {path}"
             raise ValueError(msg) from None
         return None
     except (tomllib.TOMLDecodeError, UnicodeDecodeError, OSError):
-        msg = "cannot read global config"
+        msg = f"cannot read {path}"
         raise ValueError(msg) from None
     if "pre_write_hook" not in data:
         return None
     hook = data["pre_write_hook"]
     if not isinstance(hook, str):
-        msg = "pre_write_hook must be a string"
+        msg = f"pre_write_hook in {path} must be a string"
         raise ValueError(msg)  # noqa: TRY004  # malformed configuration
     return hook.strip() or None
 
