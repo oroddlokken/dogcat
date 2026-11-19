@@ -68,7 +68,10 @@ if TYPE_CHECKING:
 
 
 def _collect_descendants(storage: JSONLStorage, parent_id: str) -> set[str]:
-    """Recursively collect all descendant issue IDs of a parent.
+    """Collect all descendant issue IDs of a parent.
+
+    Iterative, and each id is expanded once, so a parent loop in the store
+    ends the walk instead of recursing until the interpreter gives up.
 
     Args:
         storage: The storage instance
@@ -78,13 +81,19 @@ def _collect_descendants(storage: JSONLStorage, parent_id: str) -> set[str]:
         Set of all descendant issue full_ids
     """
     descendants: set[str] = set()
-    try:
-        children = storage.get_children(parent_id)
-    except ValueError:
-        return descendants
-    for child in children:
-        descendants.add(child.full_id)
-        descendants |= _collect_descendants(storage, child.full_id)
+    stack = [parent_id]
+    while stack:
+        try:
+            children = storage.get_children(stack.pop())
+        except ValueError:
+            continue
+        for child in children:
+            if child.full_id not in descendants:
+                descendants.add(child.full_id)
+                stack.append(child.full_id)
+    # On a loop the walk comes back to the start; an issue is not its own
+    # descendant.
+    descendants.discard(parent_id)
     return descendants
 
 

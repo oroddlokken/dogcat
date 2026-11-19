@@ -173,6 +173,58 @@ class TestGetReadyWork:
         assert "t-gc1" not in ready_ids
 
 
+class TestReadyWorkWithParentLoops:
+    """get_ready_work returns when the store already holds a parent loop.
+
+    ``update`` refuses loops, so these are injected through ``create``,
+    standing in for a merge or a hand edit of ``issues.jsonl``.
+    """
+
+    @pytest.mark.timeout(10)
+    def test_self_parent_does_not_hang(
+        self,
+        storage_with_issues: JSONLStorage,
+    ) -> None:
+        """An issue that is its own parent is still ready work."""
+        storage_with_issues.create(
+            Issue(id="selfp", namespace="t", title="Self", parent="t-selfp"),
+        )
+        ready_ids = {i.full_id for i in get_ready_work(storage_with_issues)}
+        assert "t-selfp" in ready_ids
+        assert "t-i0" in ready_ids
+
+    @pytest.mark.timeout(10)
+    def test_two_issue_loop_does_not_hang(
+        self,
+        storage_with_issues: JSONLStorage,
+    ) -> None:
+        """Two issues that are each other's parent are both ready work."""
+        storage_with_issues.create(
+            Issue(id="la", namespace="t", title="Loop A", parent="t-lb"),
+        )
+        storage_with_issues.create(
+            Issue(id="lb", namespace="t", title="Loop B", parent="t-la"),
+        )
+        ready_ids = {i.full_id for i in get_ready_work(storage_with_issues)}
+        assert {"t-la", "t-lb"} <= ready_ids
+
+    @pytest.mark.timeout(10)
+    def test_deferred_issue_on_loop_still_hides_descendants(
+        self,
+        storage_with_issues: JSONLStorage,
+    ) -> None:
+        """A deferred issue on a loop still keeps the other loop member out."""
+        storage_with_issues.create(
+            Issue(id="da", namespace="t", title="Deferred", parent="t-db"),
+        )
+        storage_with_issues.create(
+            Issue(id="db", namespace="t", title="Open", parent="t-da"),
+        )
+        storage_with_issues.update("t-da", {"status": "deferred"})
+        ready_ids = {i.full_id for i in get_ready_work(storage_with_issues)}
+        assert "t-db" not in ready_ids
+
+
 class TestGetBlockedIssues:
     """Test blocked issues detection."""
 

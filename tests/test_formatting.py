@@ -806,3 +806,23 @@ class TestFormatEventLongFormFields:
         output = format_event(event)
         assert "open" in output
         assert "in_progress" in output
+
+
+class TestFormatIssueTreeParentLoops:
+    """format_issue_tree shows issues on a parent loop instead of dropping them."""
+
+    def test_loop_members_shown_at_top_level(self) -> None:
+        """A self-parent and a two-issue loop all print, unindented."""
+        a = Issue(id="a", namespace="dc", title="Loop A", parent="dc-b")
+        b = Issue(id="b", namespace="dc", title="Loop B", parent="dc-a")
+        selfp = Issue(id="s", namespace="dc", title="Self parent", parent="dc-s")
+        child = Issue(id="c", namespace="dc", title="Hangs off A", parent="dc-a")
+
+        lines = format_issue_tree([a, b, selfp, child]).splitlines()
+
+        for title in ("Loop A", "Loop B", "Self parent"):
+            (line,) = [ln for ln in lines if title in ln]
+            assert not line.startswith(" ")
+        (child_line,) = [ln for ln in lines if "Hangs off A" in ln]
+        assert child_line.startswith("  ")
+        assert len(lines) == 4

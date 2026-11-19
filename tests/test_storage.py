@@ -1338,6 +1338,73 @@ class TestParentChildRelationships:
         assert children[0].full_id == "dc-child"
 
 
+class TestParentLoopRefused:
+    """update() refuses a parent that is the issue itself or a descendant."""
+
+    def _parent(self, storage: JSONLStorage, issue_id: str) -> str | None:
+        issue = storage.get(issue_id)
+        assert issue is not None
+        return issue.parent
+
+    def _chain(self, storage: JSONLStorage) -> None:
+        storage.create(Issue(id="top", namespace="test", title="Top"))
+        storage.create(
+            Issue(id="mid", namespace="test", title="Mid", parent="test-top"),
+        )
+        storage.create(
+            Issue(id="leaf", namespace="test", title="Leaf", parent="test-mid"),
+        )
+
+    def test_self_parent_refused(self, storage: JSONLStorage) -> None:
+        """An issue cannot be its own parent."""
+        self._chain(storage)
+        with pytest.raises(ValueError, match="to itself"):
+            storage.update("test-top", {"parent": "test-top"})
+        assert self._parent(storage, "test-top") is None
+
+    def test_child_as_parent_refused(self, storage: JSONLStorage) -> None:
+        """A direct child cannot become the parent."""
+        self._chain(storage)
+        with pytest.raises(ValueError, match="parent loop"):
+            storage.update("test-top", {"parent": "test-mid"})
+        assert self._parent(storage, "test-top") is None
+
+    def test_grandchild_as_parent_refused(self, storage: JSONLStorage) -> None:
+        """A descendant further down cannot become the parent either."""
+        self._chain(storage)
+        with pytest.raises(ValueError, match="parent loop"):
+            storage.update("test-top", {"parent": "test-leaf"})
+        assert storage.get_children("test-leaf") == []
+
+    def test_refusal_survives_reload(self, storage: JSONLStorage) -> None:
+        """Nothing of the refused update reaches disk."""
+        self._chain(storage)
+        with pytest.raises(ValueError, match="parent loop"):
+            storage.update("test-top", {"parent": "test-leaf"})
+        reloaded = JSONLStorage(str(storage.path))
+        assert self._parent(reloaded, "test-top") is None
+
+    def test_legal_reparent_still_allowed(self, storage: JSONLStorage) -> None:
+        """Moving an issue under a non-descendant works as before."""
+        self._chain(storage)
+        storage.update("test-leaf", {"parent": "test-top"})
+        assert self._parent(storage, "test-leaf") == "test-top"
+
+    def test_clearing_parent_allowed(self, storage: JSONLStorage) -> None:
+        """Clearing a parent never counts as a loop."""
+        self._chain(storage)
+        storage.update("test-mid", {"parent": None})
+        assert self._parent(storage, "test-mid") is None
+
+    def test_existing_loop_above_does_not_hang(self, storage: JSONLStorage) -> None:
+        """A loop already further up (merge, hand edit) ends the check."""
+        storage.create(Issue(id="a", namespace="test", title="A", parent="test-b"))
+        storage.create(Issue(id="b", namespace="test", title="B", parent="test-a"))
+        storage.create(Issue(id="c", namespace="test", title="C"))
+        storage.update("test-c", {"parent": "test-a"})
+        assert self._parent(storage, "test-c") == "test-a"
+
+
 class TestChildrenByParentIndex:
     """Test the _children_by_parent index is maintained correctly."""
 

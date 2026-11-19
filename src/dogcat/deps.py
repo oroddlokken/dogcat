@@ -68,7 +68,9 @@ def get_ready_work(
     def _has_deferred_ancestor(issue: Issue) -> bool:
         chain: list[str] = []
         current_parent = issue.parent
-        while current_parent:
+        # A parent loop (hand edit, merge, older store) would otherwise spin
+        # forever; stop when the walk comes back to an id it has passed.
+        while current_parent and current_parent not in chain:
             if current_parent in deferred_memo:
                 result = deferred_memo[current_parent]
                 for cid in chain:
