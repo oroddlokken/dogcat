@@ -5,10 +5,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
+import pytest
+
 from dogcat.issue_queries import (
     default_visible_issues,
+    find_parent_cycles,
     hide_snoozed,
     hide_terminal,
+    parent_cycle_ids,
     reparent_orphans,
 )
 from dogcat.models import Issue, Status
@@ -100,3 +104,71 @@ class TestReparentOrphans:
         assert child in hierarchy["dc-par1"]
         assert orphan in hierarchy[None]
         assert parent in hierarchy[None]
+
+
+@pytest.mark.timeout(10)
+class TestFindParentCycles:
+    """Parent loops are found once each, and only the loop itself."""
+
+    def test_no_loop(self) -> None:
+        """A plain chain has no loop."""
+        assert find_parent_cycles({"a": None, "b": "a", "c": "b"}) == []
+
+    def test_self_parent(self) -> None:
+        """An issue that is its own parent is a loop of one."""
+        assert find_parent_cycles({"a": "a"}) == [["a"]]
+
+    def test_two_issue_loop_reported_once(self) -> None:
+        """Two issues that are each other's parent form one loop."""
+        cycles = find_parent_cycles({"a": "b", "b": "a"})
+        assert len(cycles) == 1
+        assert sorted(cycles[0]) == ["a", "b"]
+
+    def test_tail_into_loop_is_not_part_of_it(self) -> None:
+        """An issue whose chain runs into a loop is not on the loop."""
+        cycles = find_parent_cycles({"tail": "a", "a": "b", "b": "a"})
+        assert len(cycles) == 1
+        assert sorted(cycles[0]) == ["a", "b"]
+
+    def test_missing_parent_ends_walk(self) -> None:
+        """A parent outside the map is not a loop."""
+        assert find_parent_cycles({"a": "gone"}) == []
+
+    def test_long_chain_into_loop(self) -> None:
+        """Iterative: a 10000-deep chain does not hit the recursion limit."""
+        parent_of: dict[str, str | None] = {f"n{i}": f"n{i + 1}" for i in range(10000)}
+        parent_of["n10000"] = "n9999"
+        assert find_parent_cycles(parent_of) == [["n9999", "n10000"]]
+
+    def test_parent_cycle_ids_ignores_links_out_of_set(self) -> None:
+        """A loop through an issue outside the set is not a loop in the set."""
+        a = Issue(id="a", namespace="dc", title="A", parent="dc-b")
+        assert parent_cycle_ids([a]) == set()
+
+
+@pytest.mark.timeout(10)
+class TestReparentOrphansWithLoops:
+    """Issues on a parent loop are rooted instead of dropped."""
+
+    def test_loop_members_are_rooted(self) -> None:
+        """Both issues of a two-issue loop appear under None."""
+        a = Issue(id="a", namespace="dc", title="A", parent="dc-b")
+        b = Issue(id="b", namespace="dc", title="B", parent="dc-a")
+        selfp = Issue(id="s", namespace="dc", title="S", parent="dc-s")
+
+        hierarchy = reparent_orphans([a, b, selfp])
+
+        assert {i.full_id for i in hierarchy[None]} == {"dc-a", "dc-b", "dc-s"}
+        assert "dc-a" not in hierarchy
+        assert "dc-b" not in hierarchy
+        assert "dc-s" not in hierarchy
+
+    def test_child_of_loop_member_stays_nested(self) -> None:
+        """An issue hanging off a loop keeps its place under its parent."""
+        a = Issue(id="a", namespace="dc", title="A", parent="dc-b")
+        b = Issue(id="b", namespace="dc", title="B", parent="dc-a")
+        child = Issue(id="c", namespace="dc", title="C", parent="dc-a")
+
+        hierarchy = reparent_orphans([a, b, child])
+
+        assert hierarchy["dc-a"] == [child]

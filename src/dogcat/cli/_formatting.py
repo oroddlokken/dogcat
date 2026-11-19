@@ -14,6 +14,7 @@ from dogcat.constants import (
     STATUS_SYMBOLS,
     TYPE_COLORS,
 )
+from dogcat.issue_queries import parent_cycle_ids
 from dogcat.models import is_manual_issue, sanitize_for_terminal
 from dogcat.status_display import resolve_status_glyph
 
@@ -364,14 +365,22 @@ def format_issue_tree(
     hidden_counts = deferred.hidden_counts if deferred else None
     deferred_blocker_map = deferred.deferred_blocker_map if deferred else None
     preview_subtasks = deferred.preview_subtasks if deferred else None
-    hierarchy = build_hierarchy(issues)
+    # An issue on a parent loop is shown as a root and never as a child:
+    # no walk from the roots reaches it otherwise, and following its parent
+    # link would recurse forever.
+    looped = parent_cycle_ids(issues)
+    hierarchy = build_hierarchy([i for i in issues if i.full_id not in looped])
 
     issue_ids = {issue.full_id for issue in issues}
 
     # Determine root issues: those with no parent, OR whose parent is not
-    # in the filtered set (orphaned children).
+    # in the filtered set (orphaned children), OR that sit on a parent loop.
     roots = sorted(
-        [i for i in issues if i.parent is None or i.parent not in issue_ids],
+        [
+            i
+            for i in issues
+            if i.parent is None or i.parent not in issue_ids or i.full_id in looped
+        ],
         key=lambda i: (i.priority, i.full_id),
     )
 

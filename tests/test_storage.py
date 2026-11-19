@@ -1338,6 +1338,80 @@ class TestParentChildRelationships:
         assert children[0].full_id == "dc-child"
 
 
+@pytest.mark.timeout(10)
+class TestParentLoopRefused:
+    """update() refuses a parent that is the issue itself or a descendant."""
+
+    def _parent(self, storage: JSONLStorage, issue_id: str) -> str | None:
+        issue = storage.get(issue_id)
+        assert issue is not None
+        return issue.parent
+
+    def _chain(self, storage: JSONLStorage) -> None:
+        storage.create(Issue(id="top", namespace="test", title="Top"))
+        storage.create(
+            Issue(id="mid", namespace="test", title="Mid", parent="test-top"),
+        )
+        storage.create(
+            Issue(id="leaf", namespace="test", title="Leaf", parent="test-mid"),
+        )
+
+    def test_self_parent_refused(self, storage: JSONLStorage) -> None:
+        """An issue cannot be its own parent."""
+        self._chain(storage)
+        with pytest.raises(ValueError, match="to itself"):
+            storage.update("test-top", {"parent": "test-top"})
+        assert self._parent(storage, "test-top") is None
+
+    def test_child_as_parent_refused(self, storage: JSONLStorage) -> None:
+        """A direct child cannot become the parent."""
+        self._chain(storage)
+        with pytest.raises(ValueError, match="parent loop"):
+            storage.update("test-top", {"parent": "test-mid"})
+        assert self._parent(storage, "test-top") is None
+
+    def test_grandchild_as_parent_refused(self, storage: JSONLStorage) -> None:
+        """A descendant further down cannot become the parent either."""
+        self._chain(storage)
+        with pytest.raises(ValueError, match="parent loop"):
+            storage.update("test-top", {"parent": "test-leaf"})
+        assert storage.get_children("test-leaf") == []
+
+    def test_refusal_survives_reload(self, storage: JSONLStorage) -> None:
+        """Nothing of the refused update reaches disk."""
+        self._chain(storage)
+        with pytest.raises(ValueError, match="parent loop"):
+            storage.update("test-top", {"parent": "test-leaf"})
+        reloaded = JSONLStorage(str(storage.path))
+        assert self._parent(reloaded, "test-top") is None
+
+    def test_legal_reparent_still_allowed(self, storage: JSONLStorage) -> None:
+        """Moving an issue under a non-descendant works as before."""
+        self._chain(storage)
+        storage.update("test-leaf", {"parent": "test-top"})
+        assert self._parent(storage, "test-leaf") == "test-top"
+
+    def test_clearing_parent_allowed(self, storage: JSONLStorage) -> None:
+        """Clearing a parent never counts as a loop."""
+        self._chain(storage)
+        storage.update("test-mid", {"parent": None})
+        assert self._parent(storage, "test-mid") is None
+
+    def test_wrong_type_parent_gets_type_error(self, storage: JSONLStorage) -> None:
+        """A non-string parent is rejected by the type check, not the loop check."""
+        self._chain(storage)
+        with pytest.raises(TypeError, match="parent must be"):
+            storage.update("test-top", {"parent": ["test-leaf"]})
+
+    def test_existing_loop_above_does_not_hang(self, storage: JSONLStorage) -> None:
+        """A loop already further up (merge, hand edit) ends the check."""
+        storage.create(Issue(id="a", namespace="test", title="A", parent="test-b"))
+        storage.create(Issue(id="b", namespace="test", title="B", parent="test-a"))
+        storage.create(Issue(id="c", namespace="test", title="C"))
+        storage.update("test-c", {"parent": "test-a"})
+        assert self._parent(storage, "test-c") == "test-a"
+
+
 class TestChildrenByParentIndex:
     """Test the _children_by_parent index is maintained correctly."""
 
@@ -1562,6 +1636,29 @@ class TestCloseDeleteOperator:
         closed = storage.close("issue-1", reason="Done")
         assert closed.closed_by is None
 
+    def test_close_moves_updated_by_to_the_closer(self, storage: JSONLStorage) -> None:
+        """The closer replaces the previous editor in updated_by, on disk too."""
+        storage.create(Issue(id="issue-1", title="Test"))
+        storage.update("issue-1", {"title": "Edited", "updated_by": "bob"})
+
+        closed = storage.close("issue-1", reason="Done", closed_by="alice")
+
+        assert closed.updated_by == "alice"
+        reloaded = JSONLStorage(str(storage.path)).get("issue-1")
+        assert reloaded is not None
+        assert reloaded.updated_by == "alice"
+
+    def test_close_without_closed_by_keeps_updated_by(
+        self, storage: JSONLStorage
+    ) -> None:
+        """An anonymous close does not erase the last known editor."""
+        storage.create(Issue(id="issue-1", title="Test"))
+        storage.update("issue-1", {"title": "Edited", "updated_by": "bob"})
+
+        closed = storage.close("issue-1", reason="Done")
+
+        assert closed.updated_by == "bob"
+
     def test_delete_sets_deleted_by(self, storage: JSONLStorage) -> None:
         """Test that delete() sets deleted_by when provided."""
         issue = Issue(id="issue-1", title="Test")
@@ -1569,6 +1666,31 @@ class TestCloseDeleteOperator:
 
         deleted = storage.delete("issue-1", reason="Dup", deleted_by="bob")
         assert deleted.deleted_by == "bob"
+
+    def test_delete_moves_updated_by_to_the_deleter(
+        self, storage: JSONLStorage
+    ) -> None:
+        """The deleter replaces the previous editor in updated_by, on disk too."""
+        storage.create(Issue(id="issue-1", title="Test"))
+        storage.update("issue-1", {"title": "Edited", "updated_by": "bob"})
+
+        deleted = storage.delete("issue-1", reason="Dup", deleted_by="alice")
+
+        assert deleted.updated_by == "alice"
+        reloaded = JSONLStorage(str(storage.path)).get("issue-1")
+        assert reloaded is not None
+        assert reloaded.updated_by == "alice"
+
+    def test_delete_without_deleted_by_keeps_updated_by(
+        self, storage: JSONLStorage
+    ) -> None:
+        """An anonymous delete does not erase the last known editor."""
+        storage.create(Issue(id="issue-1", title="Test"))
+        storage.update("issue-1", {"title": "Edited", "updated_by": "bob"})
+
+        deleted = storage.delete("issue-1", reason="Dup")
+
+        assert deleted.updated_by == "bob"
 
     def test_delete_without_deleted_by(self, storage: JSONLStorage) -> None:
         """Test that delete() leaves deleted_by as None when not provided."""

@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from dogcat.cli import app
@@ -227,3 +228,78 @@ class TestGraph:
         data = json.loads(result.stdout)
         assert data["nodes"] == []
         assert data["edges"] == []
+
+
+@pytest.mark.timeout(10)
+class TestGraphWithParentLoop:
+    """dcat graph shows issues on a parent loop next to ordinary roots.
+
+    ``update`` refuses loops, so the loop is written through the storage
+    API, standing in for a merge or a hand edit of ``issues.jsonl``.
+    """
+
+    def test_loop_members_and_their_children_shown(self, tmp_path: Path) -> None:
+        """Loop issues, an issue hanging off the loop, and a plain tree all print."""
+        from dogcat.models import Issue
+        from dogcat.storage import JSONLStorage
+
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        storage = JSONLStorage(str(dogcats_dir / "issues.jsonl"))
+        storage.create(Issue(id="root", namespace="dc", title="Plain root"))
+        storage.create(
+            Issue(id="kid", namespace="dc", title="Plain kid", parent="dc-root"),
+        )
+        storage.create(Issue(id="la", namespace="dc", title="Loop A", parent="dc-lb"))
+        storage.create(Issue(id="lb", namespace="dc", title="Loop B", parent="dc-la"))
+        storage.create(
+            Issue(id="off", namespace="dc", title="Hangs off A", parent="dc-la"),
+        )
+
+        result = runner.invoke(app, ["graph", "--dogcats-dir", str(dogcats_dir)])
+
+        assert result.exit_code == 0, result.output
+        for title in ("Plain root", "Plain kid", "Loop A", "Loop B", "Hangs off A"):
+            assert title in result.output
+
+
+@pytest.mark.timeout(10)
+class TestGraphWithBlockingCycle:
+    """dcat graph shows issues on a blocking cycle next to ordinary roots.
+
+    ``add_dependency`` refuses a cycle, so the two dependency records are
+    appended to ``issues.jsonl`` directly, standing in for a merge or a hand
+    edit. Every issue on the cycle has an incoming blocks edge, so none is a
+    root and no walk from a root reaches them.
+    """
+
+    def test_cycle_members_shown_next_to_plain_tree(self, tmp_path: Path) -> None:
+        """Both issues on the cycle print, and so does the plain tree."""
+        from dogcat.models import Issue
+        from dogcat.storage import JSONLStorage
+
+        dogcats_dir = tmp_path / ".dogcats"
+        runner.invoke(app, ["init", "--dogcats-dir", str(dogcats_dir)])
+        issues_file = dogcats_dir / "issues.jsonl"
+        storage = JSONLStorage(str(issues_file))
+        storage.create(Issue(id="root", namespace="dc", title="Plain root"))
+        storage.create(
+            Issue(id="kid", namespace="dc", title="Plain kid", parent="dc-root"),
+        )
+        storage.create(Issue(id="ca", namespace="dc", title="Cycle A"))
+        storage.create(Issue(id="cb", namespace="dc", title="Cycle B"))
+        with issues_file.open("a") as f:
+            for issue_id, depends_on_id in (("dc-ca", "dc-cb"), ("dc-cb", "dc-ca")):
+                f.write(
+                    '{"record_type": "dependency", '
+                    f'"issue_id": "{issue_id}", '
+                    f'"depends_on_id": "{depends_on_id}", '
+                    '"type": "blocks", '
+                    '"created_at": "2026-04-25T12:00:00+00:00"}\n'
+                )
+
+        result = runner.invoke(app, ["graph", "--dogcats-dir", str(dogcats_dir)])
+
+        assert result.exit_code == 0, result.output
+        for title in ("Plain root", "Plain kid", "Cycle A", "Cycle B"):
+            assert title in result.output

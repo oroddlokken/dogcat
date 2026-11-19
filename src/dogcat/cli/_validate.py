@@ -15,6 +15,7 @@ from typing import Any, Literal, cast
 import orjson
 
 from dogcat.constants import DEFAULT_NAMESPACE, TRACKED_FIELDS
+from dogcat.issue_queries import find_parent_cycles
 from dogcat.models import IssueType, ProposalStatus, Status, classify_record
 
 
@@ -286,6 +287,24 @@ def validate_references(
                     ),
                 ),
             )
+
+    # Parent loops: nothing in the store format prevents one (a merge, a
+    # hand edit, a store from before ``update`` refused them), and every
+    # walk up the parent chain must then stop on it, so report each loop.
+    parent_of = {
+        full_id: record.get("parent") for full_id, record in resolved_issues.items()
+    }
+    errors.extend(
+        ValidationError(
+            level="error",
+            message=(
+                "Parent loop: "
+                + " -> ".join([*cycle, cycle[0]])
+                + f" (fix with 'dcat update {cycle[0]} --parent \"\"')"
+            ),
+        )
+        for cycle in find_parent_cycles(parent_of)
+    )
 
     # Replay dependency ops; keyed like storage's parse_dependency_record
     # so a ``remove`` cancels the matching ``add``

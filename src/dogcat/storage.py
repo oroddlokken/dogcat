@@ -782,6 +782,35 @@ class JSONLStorage(EventEmitterMixin):
         )
         return self.create(issue)
 
+    def _refuse_parent_loop(self, issue_id: str, parent_id: str) -> None:
+        """Raise if making ``parent_id`` the parent of ``issue_id`` closes a loop.
+
+        The new parent may not be the issue itself or any of its descendants,
+        so the walk goes up from ``parent_id`` and fails if it reaches
+        ``issue_id``. A loop already further up the chain (from a merge or a
+        hand edit) ends the walk rather than hanging it; ``dcat doctor``
+        reports that one.
+
+        Raises:
+            ValueError: If the new parent link would create a parent loop.
+        """
+        if parent_id == issue_id:
+            msg = f"Cannot set parent of {issue_id} to itself"
+            raise ValueError(msg)
+        seen: set[str] = set()
+        node: str | None = parent_id
+        while node and node not in seen:
+            if node == issue_id:
+                msg = (
+                    f"Cannot set parent of {issue_id} to {parent_id}: "
+                    f"{parent_id} is a descendant of {issue_id}, so this "
+                    "would create a parent loop"
+                )
+                raise ValueError(msg)
+            seen.add(node)
+            ancestor = self._issues.get(node)
+            node = ancestor.parent if ancestor else None
+
     def _cascade_id_rename(
         self, old_full_id: str, new_full_id: str
     ) -> list[dict[str, Any]]:
@@ -993,9 +1022,10 @@ class JSONLStorage(EventEmitterMixin):
             The updated issue
 
         Raises:
-            ValueError: If the issue doesn't exist, or if it is tombstoned
+            ValueError: If the issue doesn't exist, if it is tombstoned
                 and ``updates`` would change its status to anything other
-                than tombstone (tombstones are immutable).
+                than tombstone (tombstones are immutable), or if a new
+                ``parent`` is the issue itself or one of its descendants.
 
         Note:
             A plain-dict ``updates`` is not validated for field names here:
@@ -1030,6 +1060,11 @@ class JSONLStorage(EventEmitterMixin):
                     f"Tombstoned issues are immutable."
                 )
                 raise ValueError(msg)
+
+        if "parent" in updates:
+            new_parent = self._coerce_update_value("parent", updates["parent"])
+            if new_parent:
+                self._refuse_parent_loop(resolved_id, new_parent)
 
         # Track old parent for index maintenance
         old_parent = issue.parent
@@ -1367,6 +1402,11 @@ class JSONLStorage(EventEmitterMixin):
             issue.closed_reason = reason
         if closed_by:
             issue.closed_by = closed_by
+            # A close moves updated_at, so updated_by moves with it, as in
+            # reopen(). `dcat diff` rebuilds its events from the record and
+            # reads updated_by; left alone, it names whoever edited the
+            # issue before the close (dogcat-1rtw).
+            issue.updated_by = closed_by
 
         event_record = self._build_event_record(
             "closed",
@@ -1465,6 +1505,9 @@ class JSONLStorage(EventEmitterMixin):
         issue.original_type = issue.issue_type
         if deleted_by:
             issue.deleted_by = deleted_by
+            # As in close(): updated_by follows updated_at, so `dcat diff`
+            # names the deleter rather than the previous editor (dogcat-1rtw).
+            issue.updated_by = deleted_by
 
         # Collect deps/links to remove (for append-only removal records)
         removed_deps = [

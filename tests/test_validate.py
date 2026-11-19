@@ -284,6 +284,37 @@ class TestValidateReferences:
         errors = _errors(validate_references(records))
         assert any("Circular dependency" in e.message for e in errors)
 
+    @pytest.mark.timeout(10)
+    def test_parent_loop(self) -> None:
+        """Detect issues that are each other's parent."""
+        records = [
+            _issue(issue_id="a", parent="test-b"),
+            _issue(issue_id="b", parent="test-a"),
+        ]
+        errors = _errors(validate_references(records))
+        loops = [e for e in errors if "Parent loop" in e.message]
+        assert len(loops) == 1
+        assert "test-a" in loops[0].message
+        assert "test-b" in loops[0].message
+
+    @pytest.mark.timeout(10)
+    def test_self_parent(self) -> None:
+        """Detect an issue that is its own parent."""
+        records = [_issue(issue_id="a", parent="test-a")]
+        errors = _errors(validate_references(records))
+        assert any("Parent loop: test-a -> test-a" in e.message for e in errors)
+
+    @pytest.mark.timeout(10)
+    def test_parent_loop_uses_resolved_state(self) -> None:
+        """A loop that a later record undoes is not reported."""
+        records = [
+            _issue(issue_id="a", parent="test-b"),
+            _issue(issue_id="b", parent="test-a"),
+            _issue(issue_id="a"),
+        ]
+        errors = _errors(validate_references(records))
+        assert not any("Parent loop" in e.message for e in errors)
+
     def test_event_nonexistent_issue_is_warning(self) -> None:
         """Event referencing non-existent issue is a warning, not error."""
         records = [_event(issue_id="test-gone")]

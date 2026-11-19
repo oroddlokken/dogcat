@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from dogcat.issue_queries import parent_cycle_ids
 from dogcat.models import Dependency, Issue, Status
 
 if TYPE_CHECKING:
@@ -68,7 +69,9 @@ def get_ready_work(
     def _has_deferred_ancestor(issue: Issue) -> bool:
         chain: list[str] = []
         current_parent = issue.parent
-        while current_parent:
+        # A parent loop (hand edit, merge, older store) would otherwise spin
+        # forever; stop when the walk comes back to an id it has passed.
+        while current_parent and current_parent not in chain:
             if current_parent in deferred_memo:
                 result = deferred_memo[current_parent]
                 for cid in chain:
@@ -90,7 +93,15 @@ def get_ready_work(
             deferred_memo[cid] = False
         return False
 
-    work_issues = [i for i in work_issues if not _has_deferred_ancestor(i)]
+    # On a parent loop every issue is both above and below the others, so
+    # none of them counts as under a deferred one: an open issue sharing a
+    # loop with a deferred issue stays ready. `dcat list` applies the same
+    # rule in ``_collect_descendants``, so the two agree. An issue hanging
+    # off the loop is properly below it and is still held back.
+    looped = parent_cycle_ids(issues_by_id.values())
+    work_issues = [
+        i for i in work_issues if i.full_id in looped or not _has_deferred_ancestor(i)
+    ]
 
     if not include_snoozed:
         now = datetime.now().astimezone()
