@@ -5,6 +5,7 @@
 ### Added
 
 - **An optional `pre_write_hook` vets records before dcat writes them.** Set it with `dcat config set --global pre_write_hook '<command>'` and each issue or proposal mutation, including its accompanying events, first runs that command with the pending JSONL on stdin; a non-zero exit, a failure to start or a 30-second timeout refuses the write and rolls the in-memory store back. On rejection, the error includes up to 4 KiB of hook stderr, its stdout is discarded, and `DCAT_WRITE_TARGET` names the file about to be written. A multi-id command such as `dcat close A B C` is vetted as one batch and prints its success lines only after the write lands, so a refusal shows the error alone. The key is global-only: a store's own `config.toml` cannot set a command. `docs/write-hooks.md` covers the contract, a Gitleaks setup and what the hook does not cover, and `examples/hooks/require_acceptance.py` is a standalone policy that refuses `in_progress` issues without acceptance criteria.
+- **`dcat git merge-driver` and `dcat git rebase` warn when a merge joins two parent changes into a parent loop.** Two branches that each move one issue under the other merge cleanly, record by record, into a store where the two are each other's parent. The merge still keeps both changes and exits 0; it now names the loop with the `dcat update <id> --parent ""` that breaks it instead of leaving it for `dcat doctor` to find (closes dogcat-3v2f).
 
 ### Changed
 

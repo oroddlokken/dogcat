@@ -592,6 +592,98 @@ class TestGitRebaseThreeWayBase:
         assert "no common ancestor" in output
         assert not _has_conflict_markers(repo.storage_path)
 
+    def test_names_a_parent_loop_the_resolve_produced(
+        self,
+        git_repo: GitRepo,
+    ) -> None:
+        """Two valid parent changes resolve into a loop, and the file is named.
+
+        Each side moves one issue under the other. The resolve keeps both
+        changes, exits 0, and prints the update that breaks the loop.
+        (dogcat-3v2f)
+        """
+        repo = git_repo
+
+        def issue(issue_id: str, parent: str) -> bytes:
+            return orjson.dumps(
+                {
+                    "record_type": "issue",
+                    "id": issue_id,
+                    "namespace": "test",
+                    "title": issue_id.upper(),
+                    "parent": parent,
+                }
+            )
+
+        repo.storage_path.write_bytes(
+            b"<<<<<<< HEAD\n"
+            + issue("a", "test-b")
+            + b"\n=======\n"
+            + issue("b", "test-a")
+            + b"\n>>>>>>> branch\n",
+        )
+
+        old_cwd = _in_repo(repo)
+        try:
+            exit_code, output = _run_dcat_rebase()
+        finally:
+            os.chdir(old_cwd)
+
+        assert exit_code == 0, output
+        assert "Resolved issues.jsonl" in output
+        assert "parent loop test-a -> test-b -> test-a" in output
+        assert "dcat update test-a --parent" in output
+        assert not _has_conflict_markers(repo.storage_path)
+        records = [
+            orjson.loads(ln) for ln in repo.storage_path.read_bytes().splitlines() if ln
+        ]
+        assert {r["id"]: r["parent"] for r in records} == {
+            "a": "test-b",
+            "b": "test-a",
+        }
+
+    def test_does_not_name_a_parent_loop_one_side_already_held(
+        self,
+        git_repo: GitRepo,
+    ) -> None:
+        """A loop HEAD carried in is not this resolve's doing, so it is not named.
+
+        ``dcat doctor`` reports it; repeating it at every resolve until
+        someone breaks it would say the resolve made it. (dogcat-3v2f)
+        """
+        repo = git_repo
+
+        def issue(issue_id: str, parent: str | None) -> bytes:
+            return orjson.dumps(
+                {
+                    "record_type": "issue",
+                    "id": issue_id,
+                    "namespace": "test",
+                    "title": issue_id.upper(),
+                    "parent": parent,
+                }
+            )
+
+        repo.storage_path.write_bytes(
+            b"<<<<<<< HEAD\n"
+            + issue("a", "test-b")
+            + b"\n"
+            + issue("b", "test-a")
+            + b"\n=======\n"
+            + issue("c", None)
+            + b"\n>>>>>>> branch\n",
+        )
+
+        old_cwd = _in_repo(repo)
+        try:
+            exit_code, output = _run_dcat_rebase()
+        finally:
+            os.chdir(old_cwd)
+
+        assert exit_code == 0, output
+        assert "Resolved issues.jsonl" in output
+        assert "parent loop" not in output
+
     def test_unknown_record_kinds_survive_the_resolve(
         self,
         git_repo: GitRepo,

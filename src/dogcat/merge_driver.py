@@ -132,6 +132,19 @@ depend on argument order.
   dependency or link deleted on one branch comes back. That command
   reports the case per file rather than resolving it silently
   (dogcat-5cvm).
+- *A merge can close a parent loop.* The parent link is a field of the
+  issue record, and issue records merge one id at a time. Two branches
+  that each make a valid change — A under B on one, B under A on the
+  other — therefore merge into a store where A and B are each other's
+  parent, although ``dcat update`` would have refused either change on
+  the other's branch. The merger does not pick a side: both records
+  stay as the LWW rules leave them, since dropping one parent change
+  would discard an edit nobody asked to lose. Both callers name each
+  loop the merge itself produced — one neither side held before it —
+  together with the ``dcat update <id> --parent ""`` that breaks it
+  (``find_new_parent_loops``). A loop one side already carried is not
+  repeated at every merge: readers stop on a loop, and ``dcat doctor``
+  reports every one of them (dogcat-3v2f).
 - *Octopus merges are not supported.* Git's octopus strategy
   (``git merge a b c``) bypasses per-file merge drivers when any
   branch produces a content conflict and aborts with "Should not be
@@ -170,6 +183,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 from dogcat.constants import DEFAULT_NAMESPACE
+from dogcat.issue_queries import find_parent_cycles
 from dogcat.models import classify_record
 
 logger = logging.getLogger(__name__)
@@ -679,6 +693,78 @@ def _merge_three_way(
         elif in_theirs and not in_ours and not in_base:
             merged[key] = theirs[key]
     return merged
+
+
+def find_parent_loops(records: Iterable[dict[str, Any]]) -> list[list[str]]:
+    """Return each parent loop among the issue records in ``records``.
+
+    Works on a merged result and on one side of a merge alike. A side is an
+    append-only log that can hold several records for one id; the last one
+    in the list decides its parent, as file position does when the store
+    loads. Nothing here changes a record.
+
+    Total on purpose: it runs after a merge that already succeeded, so it
+    must not be the thing that fails it. A ``parent`` that is not a string
+    is treated as no parent, and a parent missing from ``records`` ends the
+    walk. Each loop comes back once, as full ids in walk order: every id's
+    parent is the id after it, and the last one's parent is the first.
+    """
+    parent_of: dict[str, str | None] = {}
+    for record in records:
+        # Records that name another kind are skipped before classify_record,
+        # which would log its unknown-kind warning a second time for them.
+        if record.get("record_type", "issue") != "issue":
+            continue
+        if classify_record(record) != "issue":
+            continue
+        parent = record.get("parent")
+        parent_of[_issue_full_id(record)] = parent if isinstance(parent, str) else None
+    return find_parent_cycles(parent_of)
+
+
+def _loop_edges(cycle: list[str]) -> frozenset[tuple[str, str]]:
+    """Identify a loop by its child -> parent links, whatever id it starts at."""
+    return frozenset(zip(cycle, [*cycle[1:], cycle[0]], strict=True))
+
+
+def find_new_parent_loops(
+    merged_records: Iterable[dict[str, Any]],
+    ours_records: Iterable[dict[str, Any]],
+    theirs_records: Iterable[dict[str, Any]],
+) -> list[list[str]]:
+    """Return the parent loops in the merged result that neither side held.
+
+    ``merge_jsonl`` resolves issues one id at a time, so it can join two
+    valid parent changes into a loop (see *A merge can close a parent loop*
+    in the module docstring). Those are the loops the callers warn about.
+    A loop that ours or theirs already carried was not made by this merge,
+    and saying so at every merge until someone breaks it would be both
+    wrong and noise; ``dcat doctor`` reports those.
+
+    The two sides are only read when the merged result holds a loop, so an
+    ordinary merge pays for one pass over the merged issues and no more.
+    """
+    loops = find_parent_loops(merged_records)
+    if not loops:
+        return []
+    already_there = {
+        _loop_edges(cycle)
+        for side in (ours_records, theirs_records)
+        for cycle in find_parent_loops(side)
+    }
+    return [cycle for cycle in loops if _loop_edges(cycle) not in already_there]
+
+
+def describe_parent_loop(cycle: list[str]) -> str:
+    """Render one loop from :func:`find_new_parent_loops` with the fix for it.
+
+    Shared by ``dcat git merge-driver`` and ``dcat git rebase`` so the two
+    callers say the same thing.
+    """
+    return (
+        f"parent loop {' -> '.join([*cycle, cycle[0]])}. "
+        f"Break it with 'dcat update {cycle[0]} --parent \"\"'."
+    )
 
 
 def merge_jsonl(
