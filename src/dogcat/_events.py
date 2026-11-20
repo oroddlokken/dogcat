@@ -38,7 +38,7 @@ class EventSubject(Protocol):
 
 
 class EventEmitterMixin:
-    """Best-effort event emission shared by ``JSONLStorage`` / ``InboxStorage``.
+    """Event emission shared by ``JSONLStorage`` / ``InboxStorage``.
 
     The subclass provides ``_event_log`` and ``_append``; both are declared here
     (type-check only) so the mixin can be type-checked in isolation without
@@ -49,23 +49,6 @@ class EventEmitterMixin:
         _event_log: _BaseEventLog
 
         def _append(self, records: list[dict[str, Any]]) -> None: ...
-
-    def _emit_event(
-        self,
-        event_type: str,
-        subject: EventSubject,
-        changes: dict[str, dict[str, Any]],
-        by: str | None = None,
-    ) -> None:
-        """Emit an event to the event log (best-effort)."""
-        self._event_log.try_emit(
-            event_type,
-            subject.full_id,
-            subject.updated_at.isoformat(),
-            subject.title,
-            changes,
-            by=by,
-        )
 
     def _build_event_record(
         self,

@@ -84,3 +84,7 @@ test runner in this project — `package.json` defines only lint scripts. A chan
 `src/dogcat/web/static/js/propose.js` is verified by `just lint` plus a server-side assertion over
 the rendered HTML, and `jsconfig.json`'s `checkJs` is editor-only, so a green `just lint` is not a
 type check.
+
+## Write hook example
+
+Run `uv run pytest tests/test_write_hook_example.py` to test the standalone example policy. It uses stdin and does not require a configured hook or scanner. See [write hooks](write-hooks.md) for the payload contract.

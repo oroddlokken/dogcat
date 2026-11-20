@@ -173,6 +173,7 @@ Read the matching file before working in that area, and update it in the same ch
 - `docs/merge-coverage.md` — the claim-to-test matrix for `src/dogcat/merge_driver.py`
 - `docs/sharing-a-database.md` — storage resolution, namespaces, environment overrides
 - `docs/id-collisions.md` — the math behind `ID_LENGTH_THRESHOLDS`, read before re-tuning one
+- `docs/write-hooks.md` — the `pre_write_hook` contract, its scope and the Gitleaks setup
 
 When a change makes a rule here wrong — a renamed `just` target, a moved path, a changed CLI flag —
 fix this file in the same commit.

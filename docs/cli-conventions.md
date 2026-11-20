@@ -15,8 +15,8 @@ split is deliberate:
   from the options list.
 - **Config keys** — three registries exist and already disagree: `_KNOWN_CONFIG_KEYS`
   (`config.py`, runtime), `_KNOWN_KEYS` (`cli/_cmd_config.py`, CLI help and completion), and
-  `GLOBAL_CONFIG_KEYS` (`global_config.py`, the two keys the global file accepts). Adding a key
-  means touching all three.
+  `GLOBAL_CONFIG_KEYS` (`global_config.py`, the keys the global file accepts). Add a key to the registries applicable to its supported scopes. `pre_write_hook` is global-only:
+  it belongs in the CLI and global registries, not the repo-local runtime registry.
 - **Labels** — no label constant exists. Labels are free-form and discovered from the store.
 - **Paths** — `constants.py` owns the names, and `config.py` re-declares `DOGCATS_DIR_NAME` and adds
   `CONFIG_FILENAME` / `LOCAL_CONFIG_FILENAME` of its own.

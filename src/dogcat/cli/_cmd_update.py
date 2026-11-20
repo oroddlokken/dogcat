@@ -30,7 +30,7 @@ from ._completions import (
 )
 from ._helpers import (
     _parse_priority_value,
-    apply_to_each,
+    apply_to_each_in_batch,
     get_default_operator,
     get_storage,
     parse_duration,
@@ -43,6 +43,8 @@ from ._list_options import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from dogcat.storage import JSONLStorage
 
 
@@ -401,7 +403,7 @@ def register(app: typer.Typer) -> None:
                 updated_by if updated_by is not None else get_default_operator()
             )
 
-            def _update(issue_id: str) -> None:
+            def _update(issue_id: str) -> Callable[[], None]:
                 issue_request = _apply_manual_metadata_update(
                     storage, issue_id, request, manual=manual
                 )
@@ -446,15 +448,19 @@ def register(app: typer.Typer) -> None:
                         direction="blocks",
                     )
 
-                if is_json():
-                    from dogcat.models import issue_to_dict
+                def _report() -> None:
+                    if is_json():
+                        from dogcat.models import issue_to_dict
 
-                    typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
-                else:
-                    typer.echo(f"✓ Updated {issue.full_id}: {issue.title}")
+                        typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
+                    else:
+                        typer.echo(f"✓ Updated {issue.full_id}: {issue.title}")
 
-            with storage.batch():
-                has_errors = apply_to_each(issue_ids, _update, verb="updating")
+                return _report
+
+            has_errors = apply_to_each_in_batch(
+                storage, issue_ids, _update, verb="updating"
+            )
             if has_errors:
                 raise typer.Exit(1)
 

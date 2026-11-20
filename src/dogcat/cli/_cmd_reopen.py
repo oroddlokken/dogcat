@@ -2,18 +2,28 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import orjson
 import typer
 
 from ._branch import with_branch
 from ._completions import complete_closed_issue_ids
-from ._helpers import apply_to_each, get_default_operator, get_storage, with_ns_shim
+from ._helpers import (
+    apply_to_each_in_batch,
+    get_default_operator,
+    get_storage,
+    with_ns_shim,
+)
 from ._json_state import is_json, set_json
 from ._list_options import (
     ByOpt,
     DogcatsDirOpt,
     JsonOpt,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def register(app: typer.Typer) -> None:
@@ -45,18 +55,23 @@ def register(app: typer.Typer) -> None:
             reopened_by if reopened_by is not None else get_default_operator()
         )
 
-        def _reopen(issue_id: str) -> None:
+        def _reopen(issue_id: str) -> Callable[[], None]:
             issue = storage.reopen(
                 issue_id, reason=reason, reopened_by=final_reopened_by
             )
-            if is_json():
-                from dogcat.models import issue_to_dict
 
-                typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
-            else:
-                typer.echo(f"✓ Reopened {issue.full_id}: {issue.title}")
+            def _report() -> None:
+                if is_json():
+                    from dogcat.models import issue_to_dict
 
-        with storage.batch():
-            has_errors = apply_to_each(issue_ids, _reopen, verb="reopening")
+                    typer.echo(orjson.dumps(issue_to_dict(issue)).decode())
+                else:
+                    typer.echo(f"✓ Reopened {issue.full_id}: {issue.title}")
+
+            return _report
+
+        has_errors = apply_to_each_in_batch(
+            storage, issue_ids, _reopen, verb="reopening"
+        )
         if has_errors:
             raise typer.Exit(1)
